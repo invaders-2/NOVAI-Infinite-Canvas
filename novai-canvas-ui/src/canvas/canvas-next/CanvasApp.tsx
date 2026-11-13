@@ -9,6 +9,7 @@ import { TextDocLayer } from "./ui/TextDoc";
 import { TableDocLayer } from "./ui/TableNode";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addFiles, DOC_ACCEPT, pasteFromSystem } from "./actions";
+import { repairAgentRefBoxes } from "./mediaBoxRepair";
 import { AgentPanel } from "../tapnow/AgentPanel";
 import type { CanvasBackend } from "./backend/types";
 import { CanvasStore } from "./store";
@@ -25,6 +26,7 @@ import "./ui/canvas-next.css";
 import { attachCollab } from "./collab";
 import { StackFocusHost } from "./ui/StackNode";
 import { runAgentQueued } from "./agent/autorun";
+import { buildDebugBatchRatio } from "./agent/debugBatchRatio";
 import type { AgentDraft } from "./homeSeed";
 import { probe, usePerf } from "./perf";
 
@@ -43,6 +45,8 @@ function Root({ children, inset }: { children: React.ReactNode; inset?: number }
       const el = ref.current; if (!el) return;
       el.style.setProperty("--cn-chrome-left", (Number(d.left) || 0) + "px");
       el.style.setProperty("--cn-chrome-right", (Number(d.right) || 0) + "px");
+      // .md-lb-x 这类挂在 body 上的浮层不在 .cn-root 里，变量也要写到 <html> 才继承得到
+      document.documentElement.style.setProperty("--cn-chrome-right", (Number(d.right) || 0) + "px");
       // mac 的红绿灯中心比 16px 更高：外壳给多少就用多少，没给按 16
       el.style.setProperty("--cn-chrome-top", (Number(d.top) || 16) + "px");
       // 收到这条消息说明画布在桌面外壳里：顶部渐变磨砂只在这个场景出现
@@ -90,7 +94,26 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
     const w = ctl.rect().width; if (w && w < 1240 && store.state.ui.agentOpen) store.setUI({ agentOpen: false });
     let hub: ReturnType<typeof attachCollab> | null = null; let dead = false;
     void store.load().then(() => {
-      if (!dead) { hub = attachCollab(store, { forceLocal: backend.kind !== "bridge" }); ctl.collab = hub; } const n = store.state.doc.nodes; if (n.length) ctl.fitTo(n, 70, 1, false); else { const r = ctl.rect(); store.setView({ x: r.width / 2, y: r.height / 2, k: 1 }); } readyRef.current?.(store); if (!dead) runAgentQueued(store); });
+      if (!dead) { hub = attachCollab(store, { forceLocal: backend.kind !== "bridge" }); ctl.collab = hub; } const n = store.state.doc.nodes; if (n.length) ctl.fitTo(n, 70, 1, false); else { const r = ctl.rect(); store.setView({ x: r.width / 2, y: r.height / 2, k: 1 }); } // 验收口：?debugBatchRatio=1 —— 画布文档载入完成后、用产品 API 建批量原图比例验证数据（不在助手 effect 里做，避免被文档载入覆盖）
+        if (!dead && new URLSearchParams(location.search).get("debugBatchRatio") === "1" && !store.state.doc.nodes.length) buildDebugBatchRatio(store);
+        readyRef.current?.(store);
+        // 老画布：助手以前建的参考图节点固定 240×240（外链参考图也量不到像素），会把图片裁掉一截；
+        // 量一次真实像素按原比例摆正并写回尺寸（幂等，替换过素材的节点不会被动）
+        if (!dead) void repairAgentRefBoxes(store);
+        if (!dead) {
+          // 兜底：加载完成后若文档里已经有 assistant 标记（agentRun / agentRunQueue / data.batch），立刻调度一次；
+          // 再补两次延迟调度，覆盖「文档刚载入、面板可能还没挂载」的时序。
+          const kick = () => { if (!dead) runAgentQueued(store); };
+          kick();
+          window.setTimeout(kick, 400);
+          window.setTimeout(kick, 1500);
+          try {
+            const w = window as unknown as { __autorunLog?: Array<Record<string, unknown>> };
+            const marks = store.state.doc.nodes.filter((n) => { const d = n.data && typeof n.data === "object" ? n.data as Record<string, unknown> : {}; return !!d.agentRun || (Array.isArray(d.agentRunQueue) && d.agentRunQueue.length > 0); }).map((n) => n.id);
+            w.__autorunLog = [...(w.__autorunLog || []), { stage: "canvas-load", at: Date.now(), nodes: store.state.doc.nodes.length, edges: store.state.doc.edges.length, marks }].slice(-200);
+          } catch { /* 忽略 */ }
+        }
+      });
     const flush = () => { void store.saveNow(); }; addEventListener("beforeunload", flush);
     return () => { dead = true; hub?.detach(); ctl.collab = null; off(); removeEventListener("beforeunload", flush); void store.dispose(); };
   }, [store, ctl]);

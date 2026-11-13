@@ -42,6 +42,261 @@ def get_app_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
+# ── 默认数据根：与 main.py default_data_root() / desktop/main.js 同口径 ──
+# 新装且安装目录可写 → 安装目录（程序装在哪，数据就在哪）；用户目录里已经有数据（老用户）、
+# 安装目录只读（Program Files / AppImage / deb 装到 /usr、/opt）、macOS 一律留在用户目录
+# （Windows %APPDATA%\NOVAI，其它 ~/NOVAI）。改规则要三处一起改。
+def user_data_root() -> str:
+    if os.name == "nt":
+        return os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "NOVAI")
+    return os.path.join(os.path.expanduser("~"), "NOVAI")
+
+
+def dir_writable(path: str) -> bool:
+    """探测目录是否可写（创建试探文件后立即删除）。"""
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".write_test")
+        with open(probe, "w", encoding="utf-8") as f:
+            f.write("ok")
+        os.remove(probe)
+        return True
+    except Exception:
+        return False
+
+
+def path_within(path_value: str, root: str) -> bool:
+    if not path_value or not root:
+        return False
+    try:
+        left = os.path.normcase(os.path.abspath(path_value))
+        right = os.path.normcase(os.path.abspath(root))
+        return os.path.commonpath([left, right]) == right
+    except Exception:
+        return False
+
+
+def install_dir_readonly(path_value: str) -> bool:
+    if not path_value or not os.path.isdir(path_value):
+        return True
+    if (os.environ.get("APPIMAGE") or "").strip():
+        return True
+    protected = []
+    if os.name == "nt":
+        for key in ("PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432"):
+            value = (os.environ.get(key) or "").strip()
+            if value:
+                protected.append(value)
+        drive = (os.environ.get("SystemDrive") or os.path.splitdrive(path_value)[0] or "C:").strip()
+        protected.append(drive + os.sep + "Program Files")
+    else:
+        protected.extend(["/usr", "/opt", "/snap"])
+    for system_dir in protected:
+        if path_within(path_value, system_dir):
+            return True
+    return not dir_writable(path_value)
+
+
+def user_root_has_data(root: str) -> bool:
+    if not root or not os.path.isdir(root):
+        return False
+    for relative in ("data/users.db", "data/settings.json", "history.json"):
+        if os.path.isfile(os.path.join(root, *relative.split("/"))):
+            return True
+    for relative in ("data/canvases", "assets", "output"):
+        try:
+            if os.listdir(os.path.join(root, *relative.split("/"))):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def default_data_root(install_dir: str) -> str:
+    """默认数据根（安装目录 / 用户目录），规则与 main.py default_data_root() 同口径。"""
+    user_root = user_data_root()
+    if sys.platform == "darwin":
+        return user_root
+    if install_dir_readonly(install_dir):
+        return user_root
+    if user_root_has_data(user_root):
+        return user_root
+    return os.path.abspath(install_dir)
+
+
+def data_root_origin(root: str, install_dir: str) -> str:
+    """本次判定的来源：install / user（写进稳定配置，方便排障时看清数据根是谁定的）。"""
+    if not root or not install_dir:
+        return "user"
+    left = os.path.normcase(os.path.abspath(root))
+    right = os.path.normcase(os.path.abspath(install_dir))
+    return "install" if left == right else "user"
+
+
+def persist_data_root(config_file: str, root: str, origin: str, log=None) -> None:
+    """首次判定写进稳定配置并记来源（已有 data_root 一律不覆盖）。老用户的数据根已经在用户
+    目录且有数据时不写：写了会被当成「用户自己选过位置」，挡掉首次启动的迁移提示。"""
+    if not config_file or not root:
+        return
+    if origin == "user" and user_root_has_data(root):
+        return
+    try:
+        import json as _json
+        config = {}
+        if os.path.isfile(config_file):
+            with open(config_file, "r", encoding="utf-8-sig") as f:
+                loaded = _json.load(f)
+            if isinstance(loaded, dict):
+                config = loaded
+        if str(config.get("data_root") or "").strip():
+            return
+        config["data_root"] = root
+        config["data_root_origin"] = origin
+        os.makedirs(os.path.dirname(config_file), exist_ok=True)
+        # 先写临时文件再替换：写一半崩掉会让下次启动读不到 data_root，数据根翻回用户目录
+        tmp_file = config_file + ".tmp"
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            _json.dump(config, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, config_file)
+        if log:
+            log(f"默认数据目录 {root}（来源 {origin}）已写入 {config_file}")
+    except Exception as exc:
+        if log:
+            log(f"记录默认数据目录失败（不影响启动）: {exc}")
+
+
+WINDOW_DEFAULT_SIZE = (1400, 900)
+WINDOW_MIN_SIZE = (1200, 800)
+WINDOW_SCREEN_MARGIN = 40
+
+
+def compute_window_geometry(work_area, dpi=96.0, default_size=WINDOW_DEFAULT_SIZE,
+                            min_size=WINDOW_MIN_SIZE, margin=WINDOW_SCREEN_MARGIN):
+    """按屏幕工作区收敛主窗口尺寸，单位逻辑像素。
+
+    work_area=(x, y, width, height)。Windows 下 SPI_GETWORKAREA 返回物理像素，dpi 传
+    GetDpiForSystem/GetDeviceCaps 的结果（96/120/144/168…），这里先换算成逻辑像素再算。
+    拿不到工作区（None / 全 0）时退回默认 1400x900。窗口宽高上限 1400x900，四周各留 margin，
+    并居中；min_size 同步收敛到 min(1200/800, 工作区)，避免 1366x768@125% 下最小尺寸比工作区还大。
+    """
+    try:
+        ax, ay, aw, ah = [float(v) for v in work_area]
+    except (TypeError, ValueError):
+        ax = ay = 0.0
+        aw = ah = 0.0
+    try:
+        dpi_value = float(dpi or 96.0)
+    except (TypeError, ValueError):
+        dpi_value = 96.0
+    scale = dpi_value / 96.0 if dpi_value > 0 else 1.0
+    if aw <= 0 or ah <= 0:
+        return {
+            "width": int(default_size[0]),
+            "height": int(default_size[1]),
+            "x": int(margin / 2),
+            "y": int(margin / 2),
+            "min_width": int(min_size[0]),
+            "min_height": int(min_size[1]),
+        }
+    logical_w = max(320.0, aw / scale)
+    logical_h = max(240.0, ah / scale)
+    width = int(round(min(default_size[0], max(320.0, logical_w - margin))))
+    height = int(round(min(default_size[1], max(240.0, logical_h - margin))))
+    return {
+        "width": width,
+        "height": height,
+        "x": int(round(ax / scale + max(0.0, (logical_w - width) / 2.0))),
+        "y": int(round(ay / scale + max(0.0, (logical_h - height) / 2.0))),
+        "min_width": int(round(min(min_size[0], logical_w))),
+        "min_height": int(round(min(min_size[1], logical_h))),
+    }
+
+
+def _windows_dpi():
+    """当前系统 DPI（96=100%，120=125%，144=150%）；失败按 96 处理。"""
+    try:
+        import ctypes
+        try:
+            return float(ctypes.windll.user32.GetDpiForSystem())
+        except Exception:
+            hdc = ctypes.windll.user32.GetDC(0)
+            try:
+                return float(ctypes.windll.gdi32.GetDeviceCaps(hdc, 88) or 96)
+            finally:
+                ctypes.windll.user32.ReleaseDC(0, hdc)
+    except Exception:
+        return 96.0
+
+
+def get_screen_work_area():
+    """返回 (work_area, dpi)。Windows 为物理像素 + 系统 DPI；macOS 为逻辑点 + 96。
+
+    Windows：SystemParametersInfoW(SPI_GETWORKAREA) 拿主屏工作区（已排除任务栏）。
+    macOS：NSScreen.visibleFrame（已排除菜单栏 / Dock），Cocoa 左下原点换算成顶部坐标。
+    其它平台 / 失败返回 (None, 96.0)，调用方退回默认尺寸。
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            class _RECT(ctypes.Structure):
+                _fields_ = [
+                    ("left", ctypes.c_long),
+                    ("top", ctypes.c_long),
+                    ("right", ctypes.c_long),
+                    ("bottom", ctypes.c_long),
+                ]
+
+            rect = _RECT()
+            if ctypes.windll.user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(rect), 0):
+                return (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top), _windows_dpi()
+        except Exception:
+            pass
+        return None, 96.0
+    if sys.platform == "darwin":
+        try:
+            from AppKit import NSScreen
+            screen = NSScreen.mainScreen()
+            frame = screen.frame()
+            visible = screen.visibleFrame()
+            x = float(visible.origin.x)
+            # Cocoa 原点在左下角，pywebview 的窗口 y 从屏幕顶部算
+            y = float(frame.size.height - (visible.origin.y + visible.size.height))
+            return (x, y, float(visible.size.width), float(visible.size.height)), 96.0
+        except Exception:
+            return None, 96.0
+    return None, 96.0
+
+
+def ensure_windows_dpi_awareness():
+    """Windows 高 DPI：尽量切到 Per-Monitor V2，避免 125%/150% 下窗口和内容错位。
+
+    manifest / pywebview 已经设置过 DPI 感知时不覆盖，返回 False；实际设置成功返回 True。
+    """
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        try:
+            awareness = ctypes.c_int()
+            if ctypes.windll.shcore.GetProcessDpiAwareness(None, ctypes.byref(awareness)) == 0 and awareness.value != 0:
+                return False
+        except Exception:
+            pass
+        try:
+            if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+                return True
+        except Exception:
+            pass
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+            return True
+        except Exception:
+            return False
+    except Exception:
+        return False
+
+
 def _paint_mac_titlebar(win, color):
     """同步 macOS 窗口顶部与主题色（须在主线程调用）。
 
@@ -112,7 +367,7 @@ _native_drag_state = {"monitors": []}
 # 与前端右上角 .stage-actions 按钮中心同一条水平线。
 # 该值非原生，applyTrafficLights_ 会算出 dx=0 / dy=12 并真正平移灯位；重复调用幂等，
 # 用于 FullSizeContentView/relayout 场景下 AppKit 把灯弹走后复位。
-_MAC_TL_LEFT_X = 7.0
+_MAC_TL_LEFT_X = 20.0
 _MAC_TL_CENTER_Y = 26.0
 
 
@@ -188,15 +443,55 @@ def main():
     log(f"Python: {sys.version}")
     log(f"sys.path[0:3]: {sys.path[:3]}")
 
+    # 高 DPI：尽量在创建窗口前切 Per-Monitor V2（已有 DPI 感知时不覆盖）
+    if os.name == "nt":
+        try:
+            if ensure_windows_dpi_awareness():
+                log("Windows DPI 感知：已设置 Per-Monitor V2")
+        except Exception as e:
+            log(f"DPI 感知设置失败: {e}")
+
     # 确保安装目录在 sys.path 最前面，优先加载外置 main.py
     if app_dir not in sys.path:
         sys.path.insert(0, app_dir)
 
     # 设置环境变量供 main.py 使用
-    data_dir = os.path.join(
-        os.environ.get("APPDATA", os.path.expanduser("~")),
-        "NOVAI"
-    )
+    # 数据根：显式 NOVAI_DATA_DIR（外部注入）> 稳定配置 data_root > 默认判定。
+    # 默认判定 = 新装且安装目录可写 → 安装目录（程序装在哪，数据就在哪）；老用户、
+    # 只读安装目录、macOS 一律留在用户目录。判定一次就写进稳定配置并记来源。
+    configured_root = ""
+    config_file = ""
+    # 「设置 → 通用 → 存储位置」把用户选的数据根目录写进稳定配置，路径规则必须和
+    # main.py 的 stable_config_dir() / Electron 的 stableConfigFile() 完全一致：
+    #   NOVAI_CONFIG_DIR（验收隔离）→ Windows %APPDATA%\NOVAI → 其它 ~/.NOVAI。
+    # 注意不能拿 data_dir 拼：Windows 上默认数据目录正好也是 %APPDATA%\NOVAI，
+    # 但 mac/Linux 默认数据目录是 ~/NOVAI，稳定配置却在 ~/.NOVAI，拼错就永远读不到设置。
+    try:
+        import json as _json
+        config_override = os.environ.get("NOVAI_CONFIG_DIR", "").strip()
+        if config_override:
+            config_dir = os.path.abspath(os.path.expanduser(config_override))
+        elif os.name == "nt":
+            config_dir = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "NOVAI")
+        else:
+            config_dir = os.path.expanduser("~/.NOVAI")
+        config_file = os.path.join(config_dir, "config.json")
+        if os.path.isfile(config_file):
+            with open(config_file, "r", encoding="utf-8-sig") as f:
+                configured = str((_json.load(f) or {}).get("data_root") or "").strip()
+            if configured:
+                configured = os.path.abspath(os.path.expanduser(configured))
+                if os.path.isdir(configured):
+                    configured_root = configured
+    except Exception:
+        pass
+    if configured_root:
+        data_dir = configured_root
+    else:
+        data_dir = default_data_root(app_dir)
+        persist_data_root(config_file, data_dir, data_root_origin(data_dir, app_dir), log)
+    log(f"数据根: {data_dir}（配置 {config_file or '无'}）")
+    os.environ.setdefault("NOVAI_INSTALL_DIR", app_dir)
     os.environ.setdefault("NOVAI_APP_DIR", app_dir)
     os.environ.setdefault("NOVAI_DATA_DIR", data_dir)
     os.makedirs(data_dir, exist_ok=True)
@@ -944,12 +1239,21 @@ def main():
             frameless = False  # macOS: 原生标题栏，带红绿灯
             easy_drag = False
 
+        # 窗口尺寸按屏幕工作区收敛：写死 1400x900/min 1200x800 在 1366x768@125% 下会超出工作区，
+        # 右侧窗口按钮和右上工具被切到屏幕外，看起来像“错位”。
+        work_area, work_dpi = get_screen_work_area()
+        geometry = compute_window_geometry(work_area, work_dpi)
+        log(f"工作区={work_area} dpi={work_dpi} -> 窗口 {geometry['width']}x{geometry['height']} "
+            f"@({geometry['x']},{geometry['y']}) min {geometry['min_width']}x{geometry['min_height']}")
+
         window = webview.create_window(
             title="",
             url=URL,
-            width=1400,
-            height=900,
-            min_size=(1200, 800),
+            width=geometry["width"],
+            height=geometry["height"],
+            x=geometry["x"],
+            y=geometry["y"],
+            min_size=(geometry["min_width"], geometry["min_height"]),
             resizable=True,
             fullscreen=False,
             frameless=frameless,

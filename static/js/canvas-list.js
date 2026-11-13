@@ -434,7 +434,7 @@ function buildCard(c){
     card.innerHTML = `
         ${coverHtml}
         <div class="ws-card-top">
-            <span class="ws-card-kind ${isSmart ? 'smart' : 'classic'}">${isSmart ? compactLabel('智能画布','智能','Smart') : compactLabel('智能画布BEAT','BEAT','BEAT')}</span>
+            <span class="ws-card-kind ${isSmart ? 'smart' : 'classic'}">${isSmart ? compactLabel('旧版智能画布','旧版','Legacy') : compactLabel('智能画布','智能画布','Smart Canvas')}</span>
             <button class="ws-card-menu" type="button" title="${L('更多','More')}" aria-label="${L('更多','More')}"><i data-lucide="more-horizontal" class="w-4 h-4"></i></button>
         </div>
         <div class="ws-card-title">${escapeHtml(c.title)}</div>
@@ -511,12 +511,10 @@ function openCanvas(c){
 
 /* ===== Card create flow ===== */
 let createCardEl = null;
-let createKind = 'classic';
 function closeCreateCard(){ createCardEl?.remove(); createCardEl = null; }
 function openCreateCard(worldPt){
     closeCreateCard();
     closeCardMenu();
-    createKind = 'classic';
     const el = document.createElement('div');
     el.className = 'ws-create-card';
     el.style.left = worldPt.x + 'px';
@@ -524,10 +522,6 @@ function openCreateCard(worldPt){
     el.innerHTML = `
         <div class="ws-create-title">${L('新建画布','New canvas')}</div>
         <input class="ws-create-input" type="text" maxlength="80" placeholder="${L('画布名称（可留空）','Canvas name (optional)')}">
-        <div class="ws-create-toggle">
-            <button class="ws-create-toggle-btn active" type="button" data-kind="classic">${L('智能画布BEAT','Classic')}</button>
-            <button class="ws-create-toggle-btn" type="button" data-kind="smart">${L('智能画布','Smart')}</button>
-        </div>
         <div class="ws-create-actions">
             <button class="ws-create-confirm" type="button">${L('创建','Create')}</button>
             <button class="ws-create-cancel" type="button">${L('取消','Cancel')}</button>
@@ -537,13 +531,7 @@ function openCreateCard(worldPt){
     el.addEventListener('mousedown', e => e.stopPropagation());
     const input = el.querySelector('.ws-create-input');
     input.focus();
-    el.querySelectorAll('.ws-create-toggle-btn').forEach(btn => {
-        btn.onclick = () => {
-            createKind = btn.dataset.kind;
-            el.querySelectorAll('.ws-create-toggle-btn').forEach(b => b.classList.toggle('active', b === btn));
-        };
-    });
-    const confirm = () => createCanvasOnBoard(input.value.trim(), createKind, worldPt);
+    const confirm = () => createCanvasOnBoard(input.value.trim(), 'classic', worldPt);
     el.querySelector('.ws-create-confirm').onclick = confirm;
     el.querySelector('.ws-create-cancel').onclick = closeCreateCard;
     input.onkeydown = e => {
@@ -555,7 +543,7 @@ function openCreateCard(worldPt){
 
 async function createCanvasOnBoard(title, kind, worldPt){
     const isSmart = kind === 'smart';
-    const base = isSmart ? L('智能画布','Smart canvas') : L('智能画布BEAT','Smart Canvas BEAT');
+    const base = isSmart ? L('旧版智能画布','Legacy smart canvas') : L('智能画布','Smart canvas');
     const name = title || `${base} ${new Date().toLocaleTimeString(langIsEn() ? 'en-US' : 'zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
     closeCreateCard();
     try {
@@ -979,7 +967,7 @@ function renderTrash(){
         card.innerHTML = `
             <div class="ws-card-top">
                 <span class="ws-card-icon">${renderCanvasIcon(isSmart && /[^\x00-\x7F]/.test(c.icon || '') ? 'sparkles' : c.icon, 17)}</span>
-                <span class="ws-card-kind ${isSmart ? 'smart' : 'classic'}">${isSmart ? L('智能','Smart') : L('BEAT','BEAT')}</span>
+                <span class="ws-card-kind ${isSmart ? 'smart' : 'classic'}">${isSmart ? L('旧版','Legacy') : L('智能画布','Smart Canvas')}</span>
             </div>
             <div class="ws-card-title">${escapeHtml(c.title)}</div>
             <div class="ws-card-meta"><span class="ws-card-nodes">${escapeHtml(projName)}</span><span class="ws-card-meta-dot"></span><span class="ws-card-time">${formatCanvasTime(c.deleted_at)}</span></div>

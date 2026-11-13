@@ -125,13 +125,13 @@ NOVAI 是一个把 AI 生成能力放进同一张无限画布的工作台。图�
 | 平台 | 安装包 | 特点 |
 |------|--------|------|
 | Windows | `NOVAI-Setup-<版本>.exe` | 传统安装版，体积小 |
-| Windows | `NOVAI-Electron-Setup-<版本>.exe` | Electron 版，自带 Chromium 与自动更新 |
+| Windows | `NOVAI-Electron-Setup-<版本>.exe` | Electron 版，安装时可改安装目录，自带 Chromium 与自动更新 |
 | macOS | `NOVAI-Setup-<版本>.dmg` | 传统安装版，拖入「应用程序」 |
 | macOS | `NOVAI-<版本>-arm64.dmg` | Electron 版，自带 Chromium 与自动更新 |
 
 **Windows**：双击安装包按引导完成 → 双击桌面「NOVAI」→ 浏览器自动打开 `http://127.0.0.1:3000/`。
 
-> **Windows Electron 版的安装方式已从「选目录安装」改为一键静默安装**（装在当前用户目录）。老用户如果之前改过安装目录，首次升级可能仍需手动运行一次新版安装包，之后才会自动静默增量更新；`%APPDATA%\NOVAI` 里的画布与配置不受影响。
+> **Windows Electron 版是「仅当前用户安装」，安装时可以自己选安装目录**：默认装在当前用户目录，向导里可以改到 D 盘等可写目录；安装程序不申请管理员提权，也不要以管理员身份运行去装「所有用户 / Program Files」——那样在线静默更新会写不进安装目录。之后的版本升级仍然静默覆盖到你选的那个目录，不会重新弹向导；`%APPDATA%\NOVAI` 里的画布与配置不受影响。
 
 **macOS**：打开 DMG，把 `NOVAI.app` 拖进「应用程序」→ 双击启动 → 浏览器自动打开 `http://127.0.0.1:3000/`。
 
@@ -143,6 +143,28 @@ NOVAI 是一个把 AI 生成能力放进同一张无限画布的工作台。图�
 > - 终端执行 `sudo xattr -rd com.apple.quarantine /Applications/NOVAI.app`。
 >
 > 想先确认下载完整：`shasum -a 256 NOVAI-<版本>-arm64.dmg`（对照 Release 页的 sha256）或 `hdiutil verify <dmg>`。清掉隔离后仍报「已损坏」，再补一步 `sudo codesign --force --deep --sign - /Applications/NOVAI.app`。
+
+### 数据目录与卸载
+
+**Windows Electron 版（`NOVAI-Electron-Setup-*.exe`）默认把用户数据放在安装目录**（安装时选的目录，默认在当前用户目录下）：
+
+| 位置（相对安装目录） | 内容 |
+|------|------|
+| `data\` | 画布、设置、账号、聊天记录、局域网好友 |
+| `assets\` | 素材库里的图片 / 视频 / 音频 |
+| `output\` | 生成结果、导出文件 |
+| `history.json` | 操作历史 |
+| `API\` | 模型密钥与接口配置（`API\.env` 等） |
+
+- **覆盖安装 / 在线静默更新不会动这些目录**：安装程序替换程序文件之前会先把它们挪到安装目录旁边的暂存目录，装完再放回；安装中途取消也会放回。万一个别情况下安装程序被强行结束，数据会在安装目录旁边的 `<安装目录>.novai-data-keep-*` 暂存目录里，手动把它移回安装目录即可。
+- **卸载会先问「保留数据（默认）/ 一并删除」**：选保留时卸载只删程序文件，数据留在原安装目录，卸载完成会弹窗说明路径（`data`、`assets`、`output`、`API`、`history.json` 都还在）；选一并删除会同时清掉安装目录里的这些数据和 `%APPDATA%\NOVAI`（稳定配置与老用户数据），但**不会**动 config 里 `data_root` 指向的外部自定义目录；选取消则退出，不卸载。静默卸载 / 安装包升级一律按保留处理，不弹窗。想继续用，重新装回原目录即可。
+- **彻底删除**：先退出 NOVAI，再把整个安装目录（含上述数据）删掉即可。
+- **传统 Windows 安装版（`NOVAI-Setup-*.exe`）**：数据同样在安装目录（`INSTALL_DIR\data` 等），覆盖安装不会清掉；卸载脚本也会弹「保留 / 一并删除」三选一，选保留就把数据留在安装目录。
+- 更早版本的数据可能在 `%APPDATA%\NOVAI`；确认新安装目录里的内容完整后，可以手动删掉旧目录。
+
+**macOS**：数据在 `~/NOVAI`，删掉 `NOVAI.app` 不影响数据；彻底删除时再执行 `rm -rf ~/NOVAI`。
+
+**Linux（AppImage / deb / snap）**：这几种是只读安装（AppImage 是自包含只读文件、运行时有 `APPIMAGE` 环境变量，deb 由包管理器装到 `/usr`，snap 装在只读挂载点），程序目录不可写，数据回落到 `~/NOVAI`；如果是解压后放到可写目录的便携用法，则和 Windows 一样「程序装在哪，数据就在哪」，数据默认跟安装目录走。只读安装卸载后数据仍在 `~/NOVAI`，彻底删除时执行 `rm -rf ~/NOVAI`；可写安装彻底删除时删掉整个安装目录即可。
 
 ### 源码运行
 
@@ -212,6 +234,60 @@ NOVAI_PORT=3001 python main.py
 
 Electron 桌面端的自动更新顺序是 GitHub Releases（主源）→ ModelScope 镜像（国内检查失败时自动切换）→ Gitee Release（人工下载兜底）。下载过程显示百分比，下载或替换失败自动回滚，应用保持原版本可用；macOS 从 2.0.03 起支持自替换更新。
 
+### 更新说明与素材（发版流程）
+
+更新弹窗里的内容来自仓库根的 `update-notes.json`，打包时同步成后端 `/api/changelog` 读的 `static/update-notes.json`：
+
+1. **写 notes**：`update-notes.json` 里 `versions[0]` 就是这一版（最新的写在最前面）。`changes` 每项可以是一句话，也可以带一段动态演示：
+
+   ```json
+   {
+     "text": "更新改为后台静默下载，下载完成后右下角提示",
+     "media": {
+       "type": "gif",
+       "src": "/static/updates/2.0.07/update-card.gif",
+       "caption": "下载完成后右下角提示，可立即重启或退出时安装"
+     }
+   }
+   ```
+
+   `media.type` 只能是 `image` / `gif` / `video`；`src` 必须以 `http://`、`https://`、`/static/`、`/assets/` 开头且不超过 300 字符；`caption` 不超过 100 字符。不合法时后端只丢掉这条的媒体、保留文字，同步脚本则直接报错，避免把坏素材发出去。
+2. **放素材**：演示文件放进 `static/updates/<版本号>/`，文件名用英文小写加连字符（例：`update-card.gif`），notes 里的 `src` 写成 `/static/updates/<版本号>/<文件>`。
+3. **跑同步**：`python3 tools/sync_update_notes.py`（CI 打包流程也会跑），把最新一版转成 `static/update-notes.json`；它只读 `versions[0]`，所以别把还没发布的版本排在前面。
+4. **上传三源**：GitHub Releases、ModelScope（`electron-release/`）、Gitee 三处的 `update-notes.json` 与素材一起更新。客户端按 GitHub → ModelScope → Gitee 取说明，某源拿不到就自动换下一个。
+
+素材规范：
+
+| 项 | 要求 |
+|------|------|
+| 格式与大小 | gif ≤ 8MB、mp4 ≤ 20MB；更大的演示改用外链视频 |
+| 播放行为 | 静音、自动播放、循环，不依赖点击播放 |
+| 画面比例 | 16:9 或 4:3，画面里不要带桌面窗口边框 |
+| 存放路径 | `/static/updates/<版本号>/<文件>` |
+
+示例素材 `static/updates/2.0.07/update-card.gif` 只是占位图（可用 `python3 tools/make_update_placeholder_gif.py 2.0.07` 重新生成），发版时替换成真实录屏。
+
+### 版本号怎么改
+
+版本真相源只有根目录的 `VERSION`（给人看的显示串，如 `2.0.07`）。一条命令改三处：
+
+```bash
+python3 tools/bump_version.py 2.0.08          # 只打印将要改什么（dry-run）
+python3 tools/bump_version.py 2.0.08 --write  # 真正落盘：VERSION / desktop/.version / desktop/package.json
+```
+
+打包时 `desktop/scripts/sync-version.js`（`npm run dist` 已自动调用）会把 `VERSION` 归一化成合法 semver 写进 `desktop/package.json`（`2.0.08` → `2.0.8`，electron-updater 只认 semver），同时把显示串原样写进 `desktop/.version`（打包成后端读的 `backend/VERSION`）。
+
+**发版三件套（顺序固定）**：
+
+1. `python3 tools/bump_version.py <新版本> --write` —— 改 VERSION / `.version` / package.json，并自动把 `static/*.html` 里的 `?v=` 缓存版本号刷成 `<VERSION>.<被引用文件 mtime>`（不刷新的话，发版后断言 `?v=旧版本` 的测试会集体变红；想跳过加 `--no-static`，也可单独跑 `tools/refresh_static_versions.py`，默认 dry-run、加 `--write` 落盘，只改 `?v=` 的值，重复跑幂等）。
+2. 在根 `update-notes.json` 顶部补一条同版本说明，再跑 `python3 tools/sync_update_notes.py`。
+3. `python3 tools/check_version_consistency.py` 必须输出 OK（更新说明与 `VERSION` 不一致时它只警告，不算失败）。
+
+### 用户看到的更新流程
+
+发现新版本后在后台静默下载，不打断当前操作；下载完成后右下角弹出提示，可以选「立即重启更新」或「退出时自动安装」；下次打开应用时已经装好，并展示这次的更新说明（带动态演示）。
+
 ---
 
 ## 桌面客户端（Electron）
@@ -261,6 +337,7 @@ NOVAI 的视频编辑基于火山引擎 Seedance 2.0。平台对**未经授权�
 | Windows | 端口 3000 被占用 | 关闭占用程序，或启动前设置 `NOVAI_PORT=3001`（旧脚本的 `DEPLOY_RUN_PORT` 是别名） |
 | Windows | 依赖安装失败 | 确认已安装 Python 3.10+ 并勾选「Add Python to PATH」 |
 | Windows | 杀毒软件误报 | 将 NOVAI 安装目录加入杀毒软件信任白名单 |
+| 全平台 | 界面字太小 / 想更大 | 设置 → 外观 → 界面缩放：**自动 = 100%**（按 1:1 显示，不再随窗口大小猜测）；需要更大可手动选 115% / 125% |
 | macOS | 「无法打开，因为它来自未识别的开发者」 | 未签名安装包的正常提示：右键 App →「打开」→「打开」；或 系统设置 → 隐私与安全性 →「仍要打开」 |
 | macOS | 「已损坏，无法打开」 | 先用 `shasum -a 256` / `hdiutil verify` 确认下载完整，再 `sudo xattr -rd com.apple.quarantine /Applications/NOVAI.app`；仍报错补 `sudo codesign --force --deep --sign - /Applications/NOVAI.app` |
 | macOS | 端口 3000 被占用 | `lsof -i :3000` 找到进程后 `kill <PID>`，或设置 `NOVAI_PORT=3001` |

@@ -104,16 +104,43 @@ contextBridge.exposeInMainWorld('pywebview', {
 // ---------- 桌面版更新 ----------
 // 网页端「一键更新」走后端自更新 + 后端自重启，Electron 会把这次退出当成崩溃弹「后端异常退出」；
 // 桌面版统一交给主进程的 electron-updater，前端只负责转交点击。
+const updateStageListeners = new Set();
+let lastUpdateStage = null;
+let appliedStageDelivered = false;
+ipcRenderer.on('novai:update-stage', (event, payload) => {
+  const data = payload || {};
+  lastUpdateStage = data;
+  if (data.stage === 'applied' && updateStageListeners.size > 0) appliedStageDelivered = true;
+  updateStageListeners.forEach((listener) => { try { listener(data); } catch (_) {} });
+});
+
 contextBridge.exposeInMainWorld('novaiUpdater', {
   checkNow: () => ipcRenderer.invoke('novai:update-check'),
   downloadAndInstall: () => ipcRenderer.invoke('novai:update-install'),
-  // macOS 自替换下载进度：主进程发 { stage, percent, transferred, total }，返回取消订阅函数
+  // 旧进度通道（macOS 自替换时代）：主进程发 { stage, percent, transferred, total }，返回取消订阅函数
   onProgress: (cb) => {
     if (typeof cb !== 'function') return () => {};
     const handler = (event, payload) => { try { cb(payload || {}); } catch (_) {} };
     ipcRenderer.on('novai:update-progress', handler);
     return () => { try { ipcRenderer.removeListener('novai:update-progress', handler); } catch (_) {} };
   },
+  // 更新阶段（IPC 契约 v1）：downloading / downloaded / installing / error / applied
+  // 页面 JS 执行前就可能收到 applied，这里缓存最后一次 payload，首次订阅时补发一次未被消费的 applied。
+  onStage: (cb) => {
+    if (typeof cb !== 'function') return () => {};
+    updateStageListeners.add(cb);
+    if (lastUpdateStage && lastUpdateStage.stage === 'applied' && !appliedStageDelivered) {
+      appliedStageDelivered = true;
+      try { cb(lastUpdateStage); } catch (_) {}
+    }
+    return () => {
+      try { updateStageListeners.delete(cb); } catch (_) {}
+    };
+  },
+  restartNow: () => ipcRenderer.invoke('novai:update-restart'),
+  installOnQuit: () => ipcRenderer.invoke('novai:update-later'),
+  markNotesSeen: (version) => ipcRenderer.invoke('novai:update-notes-seen', { version: version }),
+  retryInstall: () => ipcRenderer.invoke('novai:update-retry'),
 });
 
 // 低层桥：iframe 子页面注入脚本通过 window.parent.postMessage 转发到这里

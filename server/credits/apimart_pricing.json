@@ -9,14 +9,14 @@
   "note": "构建期解析产物，运行时不联网；价格单位 USD/计费单位，credits = usd / 0.1"
  },
  "coverage": {
-  "models_total": 339,
+  "models_total": 340,
   "by_category": {
-   "image": 49,
+   "image": 50,
    "video": 57,
    "audio": 43,
    "chat": 190
   },
-  "index_total": 296,
+  "index_total": 297,
   "detail_pages_used": 49,
   "models_with_detail_tiers": 95
  },
@@ -11477,6 +11477,128 @@
      "official": {
       "usd": 0.0365625,
       "credits": 0.365625
+     },
+     "source": "page:fixed_prices"
+    }
+   ],
+   "token_rates": {},
+   "specification": "image"
+  },
+  "seedream-5-5": {
+   "id": "seedream-5-5",
+   "name": "seedream-5-5",
+   "category": "image",
+   "billing": "per_image",
+   "spec_dimension": "resolution",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "default",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.02275,
+      "credits": 0.2275
+     },
+     "platinum": {
+      "usd": 0.0216125,
+      "credits": 0.216125
+     },
+     "diamond": {
+      "usd": 0.020475,
+      "credits": 0.20475
+     },
+     "official": {
+      "usd": 0.035,
+      "credits": 0.35
+     },
+     "source": "page:fixed_prices"
+    },
+    {
+     "spec": "1K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.013,
+      "credits": 0.13
+     },
+     "platinum": {
+      "usd": 0.01235,
+      "credits": 0.1235
+     },
+     "diamond": {
+      "usd": 0.0117,
+      "credits": 0.117
+     },
+     "official": {
+      "usd": 0.02,
+      "credits": 0.2
+     },
+     "source": "page:fixed_prices"
+    },
+    {
+     "spec": "1K-layer",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.013,
+      "credits": 0.13
+     },
+     "platinum": {
+      "usd": 0.01235,
+      "credits": 0.1235
+     },
+     "diamond": {
+      "usd": 0.0117,
+      "credits": 0.117
+     },
+     "official": {
+      "usd": 0.02,
+      "credits": 0.2
+     },
+     "source": "page:fixed_prices"
+    },
+    {
+     "spec": "2K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.02275,
+      "credits": 0.2275
+     },
+     "platinum": {
+      "usd": 0.0216125,
+      "credits": 0.216125
+     },
+     "diamond": {
+      "usd": 0.020475,
+      "credits": 0.20475
+     },
+     "official": {
+      "usd": 0.035,
+      "credits": 0.35
+     },
+     "source": "page:fixed_prices"
+    },
+    {
+     "spec": "2K-layer",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.02275,
+      "credits": 0.2275
+     },
+     "platinum": {
+      "usd": 0.0216125,
+      "credits": 0.216125
+     },
+     "diamond": {
+      "usd": 0.020475,
+      "credits": 0.20475
+     },
+     "official": {
+      "usd": 0.035,
+      "credits": 0.35
      },
      "source": "page:fixed_prices"
     }
@@ -40067,6 +40189,8 @@
   "seedream50lite": "seedream-5-0-lite",
   "seedream-5-0-pro": "seedream-5-0-pro",
   "seedream50pro": "seedream-5-0-pro",
+  "seedream-5-5": "seedream-5-5",
+  "seedream55": "seedream-5-5",
   "wan2.7-image": "wan2.7-image",
   "wan27image": "wan2.7-image",
   "wan2.7-image-pro": "wan2.7-image-pro",

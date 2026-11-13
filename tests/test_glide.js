@@ -201,41 +201,6 @@ const G = require('../static/js/shared/glide.js');
             '只压底色，不动字重/文字色（勾选图标与选中文字标识留给选项自己）');
     }
 
-    /* gpt-chat.html 里那批 `background: var(--nav-hover-bg) !important` 的权重体检：
-       压制选择器是 (0,3,0)，只要那边没有更高的、且 glide.css 排在其后，压制就成立。
-       以后有人往那页加一条更重的 !important 底色，这条断言会先炸。 */
-    const gpt = read('static/gpt-chat.html');
-    const spec = selector => {
-        const s = String(selector).trim();
-        if(!s || s[0] === '@') return null;
-        return {
-            ids: (s.match(/#[\w-]+/g) || []).length,
-            classes: (s.match(/\.[\w-]+/g) || []).length + (s.match(/\[[^\]]+\]/g) || []).length + (s.match(/:(?!:)[\w-]+/g) || []).length,
-            els: (s.match(/(^|[\s>+~,(])([a-zA-Z][\w-]*)/g) || []).length + (s.match(/::[\w-]+/g) || []).length
-        };
-    };
-    const heavy = [];
-    [...gpt.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].forEach(block => {
-        const body = block[1].replace(/\/\*[\s\S]*?\*\//g, ' ');
-        [...body.matchAll(/([^{}]+)\{([^{}]*)\}/g)].forEach(rule => {
-            const decls = rule[2];
-            if(!/!important/.test(decls) || !/(^|[;{\s])background(-color)?\s*:/.test(decls)) return;
-            if(!/--nav-hover-bg/.test(decls)) return;
-            rule[1].split(',').forEach(selector => {
-                const s = spec(selector);
-                if(s) heavy.push(Object.assign({selector: selector.trim()}, s));
-            });
-        });
-    });
-    ok(heavy.length >= 10, 'gpt-chat.html 里确实有一批 --nav-hover-bg !important 底色规则（' + heavy.length + ' 条）');
-    const over = heavy.filter(h => h.ids > 0 || h.classes > 3 || (h.classes === 3 && h.els > 0));
-    eq(over.map(h => h.selector), [], '没有一条权重超过压制的 (0,3,0)');
-    const tied = heavy.filter(h => h.classes === 3 && h.els === 0).map(h => h.selector);
-    ok(tied.indexOf('.upload-btn.attach-btn:hover') >= 0, '权重打平的 .upload-btn.attach-btn:hover 被认出来了（只能靠后引入取胜）');
-    ok(gpt.indexOf('/static/css/glide.css') >= 0
-        && gpt.indexOf('/static/css/glide.css') > gpt.lastIndexOf('--nav-hover-bg'),
-        'glide.css 排在那批 !important 之后引入（打平的那条才压得住）');
-
     ok(src.indexOf("window.NovaGlide = api") >= 0, 'glide.js 挂 window.NovaGlide');
     ok(src.indexOf('module.exports = api') >= 0, 'glide.js 双导出供 node 单测');
     ok(src.indexOf('localScale') >= 0 && src.indexOf('Math.hypot') >= 0, '画布缩放修正来自 initSmartNodeMenuMotion 的 localScale');
@@ -260,7 +225,7 @@ const G = require('../static/js/shared/glide.js');
     ok(!fs.existsSync(path.join(root, 'static/glide-verify.html')),
         'static/ 里没有开发用验证页（glide-verify.html 只允许待在 tests/artifacts/verify-scripts/）');
 
-    ['static/legacy-canvas.html', 'static/smart-canvas.html', 'static/gpt-chat.html'].forEach(page => {
+    ['static/legacy-canvas.html', 'static/smart-canvas.html'].forEach(page => {
         const html = read(page);
         const cssTag = /<link rel="stylesheet" href="\/static\/css\/glide\.css\?v=([0-9.]+)"/.exec(html);
         /* 允许 <script> 与 src 之间有属性（defer / async / crossorigin 等都要能用），
@@ -276,8 +241,7 @@ const G = require('../static/js/shared/glide.js');
            开发中改了文件但没重启服务时，页面里的串落后于 mtime 属于正常，不该在测试里假红。 */
         ok(!!cssTag && versionTagOk(cssTag[1]), page + ' glide.css 的 ?v= 是「VERSION.mtime」形式（main.py 按 mtime 重写，别去统一）');
         ok(!!jsTag && versionTagOk(jsTag[1]), page + ' glide.js 的 ?v= 是「VERSION.mtime」形式（与 css 不同属正常）');
-        /* glide.css 必须是本页最后一个样式表：gpt-chat 那批 !important 靠权重赢，
-           但同权重时靠的就是「后引入」，顺序写错会静默失效 */
+        /* glide.css 必须是本页最后一个样式表：同权重时靠的就是「后引入」，顺序写错会静默失效 */
         const links = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)"/g)];
         const last = links[links.length - 1][1];
         ok(last.indexOf('/static/css/glide.css') >= 0, page + ' glide.css 排在其它样式表之后（实际最后一个是 ' + last + '）');

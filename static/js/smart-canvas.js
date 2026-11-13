@@ -516,7 +516,7 @@ function resPixelLimitFor(model){
 //   volcengine_video_resolution / volcengine_video_duration / apimart_video_duration /
 //   apimart_veo31_duration / agnes_video_seconds 同口径；
 //   图片出处 /tmp/novai-ratio-audit + /tmp/novai-official-docs（Gemini 0.5K、火山 1.5K/3K、Agnes 3K），
-//   比例集合取自 web/src/pages/online/sizeData.js 的逐模型预设键。
+//   比例集合取自原在线生图页的逐模型预设键（该页 2026-11 已下线）。
 // 两套画布各持一份同内容表（两个页面互不加载对方脚本），tests/test_canvas_preset_matrix.js 断言两页一致。
 // 键名按匹配优先级排列，model name 包含键名即命中；未列出的模型返回 null（按支持全部处理）。
 // 更具体的型号必须排在族名之前（seedance-2-5 / kling-3.0-turbo / veo-3.1 都排在各自族名前）。
@@ -562,9 +562,13 @@ const MODEL_CAPABILITIES = [
     { match: 'pixverse', aspects: ['16:9', '9:16', '1:1'] },
     // ── 图片：官方分辨率档位 + 官方比例集合（含下划线/连字符两种真实模型名写法）──
     // preset 指向 MODEL_TIER_PIXELS 的键，用于 0.5K/1.5K/3K 这类 SIZE_MAP 没覆盖的官方档位像素。
+    // background 是原生透明背景能力（app 文档口径）：没标就是不支持，尺寸弹窗据此显隐「透明」。
     { match: 'midjourney', resLevels: ['1k'] },
-    { match: 'gpt-image-2.5-ext', resLevels: ['1k', '2k', '4k'], ratios: ['square', 'wide', 'story', 'landscape43', 'portrait43', 'landscape', 'portrait', 'landscape54', 'portrait45', 'ultrawide'] },
-    { match: 'gpt-image-1', resLevels: ['1k'], ratios: ['square', 'landscape', 'portrait'] },
+    { match: 'gpt-image-2.5-ext', resLevels: ['1k', '2k', '4k'], ratios: ['square', 'wide', 'story', 'landscape43', 'portrait43', 'landscape', 'portrait', 'landscape54', 'portrait45', 'ultrawide'], background: false },
+    { match: 'gpt-image-2.6-ext', background: false },
+    { match: 'gpt-image-2.6', background: true },
+    { match: 'gpt-image-2.5', background: true },
+    { match: 'gpt-image-1', resLevels: ['1k'], ratios: ['square', 'landscape', 'portrait'], background: true },
     { match: 'imagen-4.0', resLevels: ['1k'], ratios: ['square', 'landscape43', 'portrait43', 'wide', 'story'] },
     { match: 'qwen-image-2.0', resLevels: ['1k', '2k'], ratios: SEEDREAM_RATIO_KEYS },
     { match: 'qwen-image-3.0', resLevels: ['1k', '2k'], ratios: SEEDREAM_RATIO_KEYS },
@@ -590,6 +594,9 @@ const MODEL_CAPABILITIES = [
     { match: 'seedream-5.0-lite', resLevels: ['2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-lite' },
     { match: 'seedream-5-0-lite', resLevels: ['2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-lite' },
     { match: 'seedream_v5_lite', resLevels: ['2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-lite' },
+    { match: 'seedream-5.5', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro', background: true },
+    { match: 'seedream-5-5', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro', background: true },
+    { match: 'seedream_v5_5', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro', background: true },
     { match: 'seedream-5.0', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro' },
     { match: 'seedream-5-0', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro' },
     { match: 'seedream_v5', resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'seedream-5.0-pro' },
@@ -604,7 +611,7 @@ const MODEL_CAPABILITIES = [
     { match: 'agnes-image', resLevels: ['1k', '2k', '3k', '4k'], ratios: SEEDREAM_RATIO_KEYS, preset: 'agnes-image' }
 ];
 // 逐模型官方参考像素（只存 SIZE_MAP 没覆盖的档位：0.5K/1.5K/3K；1K/2K/4K 仍走 SIZE_MAP）。
-//   出处 web/src/pages/online/sizeData.js（Gemini 3.1 Flash Image 512px、Seedream 5.0 pro/lite 的
+//   出处为原在线生图页的逐模型预设（页面已下线；Gemini 3.1 Flash Image 512px、Seedream 5.0 pro/lite 的
 //   1.5K/3K）与 main.py AGNES_OUTPUT_PIXELS（Agnes 3K），tests/test_canvas_preset_matrix.js 逐格校验。
 const MODEL_TIER_PIXELS = {
     'gemini-3.1-flash-image': {
@@ -686,6 +693,15 @@ function imageRatiosFor(model){
 function imageRatioSupported(model, ratioKey){
     const ratios = imageRatiosFor(model);
     return !ratios || ratios.indexOf(ratioKey) >= 0;
+}
+// 透明背景是模型级能力：能力表没标 background:true 的模型（含火山/即梦/ModelScope）下发 transparent
+// 只会被上游忽略或转白，所以统一在这里判，UI 显隐和存量设置归一都用它。
+function imageBackgroundSupported(model){
+    return modelCapabilityFor(model, 'background') === true;
+}
+function imageBackgroundValueFor(model, value){
+    const current = ['auto','keep','transparent'].includes(value) ? value : 'auto';
+    return current === 'transparent' && !imageBackgroundSupported(model) ? 'auto' : current;
 }
 // 0.5K/1.5K/3K 的逐模型官方像素；SIZE_MAP 有该档位时优先走 SIZE_MAP（gpt-image-2 官方映射）。
 function modelTierPixelFor(model, ratioKey, level){
@@ -5225,7 +5241,8 @@ function renderDynamicParams(){
     const scrollState = dynamicParamsScrollSnapshot();
     settings.engine = ['api','volcengine','modelscope','comfy','runninghub'].includes(settings.engine) ? settings.engine : 'api';
     settings.apiKind = settings.apiKind === 'video' ? 'video' : 'image';
-    settings.background = ['auto','keep','transparent'].includes(settings.background) ? settings.background : 'auto';
+    // 切到不支持透明背景的模型（或历史存档留着 transparent）时选项不再显示，值也收回 auto，别偷偷下发。
+    settings.background = imageBackgroundValueFor(settings.model, settings.background);
     clearVolcengineSelectionOutsideVolcengine(settings);
     engineSelect.value = settings.engine;
     if(settings.engine === 'api'){
@@ -6155,7 +6172,13 @@ function renderSizePickerControl(prefix='', includeSource=false){
     const options = (!prefix && settings.engine === 'api') ? ['auto', ...modelResLevels] : modelResLevels;
     const currentRes = settings[resKey] || ((!prefix && settings.engine === 'api') ? defaultSmartApiResolution(settings.model) : '1k');
     const currentRatio = settings[ratioKey] || 'square';
-    const currentBackground = settings.background || 'auto';
+    // 模型在 renderApiParams 里可能刚被静默归一（换平台 / 历史存档），透明背景要按归一后的模型再收一次，
+    // 否则选项隐藏了、请求却还在下发 transparent。
+    const currentBackground = imageBackgroundValueFor(settings.model, settings.background || 'auto');
+    settings.background = currentBackground;
+    const backgroundOptions = [['auto', tr('smart.bgAuto')], ['keep', tr('smart.bgKeep')]];
+    // 透明背景只有原生支持的模型才给选项，避免选了却被上游静默转白。
+    if(imageBackgroundSupported(settings.model)) backgroundOptions.push(['transparent', tr('smart.bgTransparent')]);
     const currentCustomRatio = settings[customRatioKey] || (currentRatio === 'source' ? sourceImageRatioLabel(prefix) : '');
     const allowAuto = !prefix && settings.engine === 'api' && settings.apiKind !== 'video' && apiAllowsAuto(settings.model);
     /* 比例格子的小方框按比例现算像素（ratioGlyphSize），顺序固定成方图、竖横对、超宽超竖。 */
@@ -6205,7 +6228,7 @@ function renderSizePickerControl(prefix='', includeSource=false){
                 <div class="size-section">
                     <div class="size-section-title">${escapeHtml(tr('smart.background'))}</div>
                     <div class="size-bg-row">
-                        ${[['auto', tr('smart.bgAuto')], ['keep', tr('smart.bgKeep')], ['transparent', tr('smart.bgTransparent')]].map(([value, label]) => `<button type="button" class="${value === currentBackground ? 'active' : ''}" data-smart-param="background" data-smart-value="${value}">${escapeHtml(label)}</button>`).join('')}
+                        ${backgroundOptions.map(([value, label]) => `<button type="button" class="${value === currentBackground ? 'active' : ''}" data-smart-param="background" data-smart-value="${value}">${escapeHtml(label)}</button>`).join('')}
                     </div>
                 </div>
                 <div class="size-section">

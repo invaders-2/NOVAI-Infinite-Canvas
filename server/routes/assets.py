@@ -202,6 +202,8 @@ class PromptLibraryCategoryRequest(BaseModel):
 
 class StoragePathPayload(BaseModel):
     data_root: str = ""
+    path: str = ""
+    dry_run: bool = False
 
 
 class AssetRegisterRequest(BaseModel):
@@ -274,6 +276,8 @@ def _resolve_media_kind_ext(name_path, content_type, content):
 
 @router.post("/local-assets/upload")
 async def upload_local_assets(files: List[UploadFile] = File(...), folder: str = Form("")):
+    if deps.local_output_readonly_name(folder):
+        raise HTTPException(status_code=403, detail="「画布生成」是只读目录：生成物由画布产出，不能往里上传")
     uploaded = []
     folder_rel, folder_abs = deps._local_upload_safe_folder(folder)
     os.makedirs(folder_abs, exist_ok=True)
@@ -302,6 +306,8 @@ async def upload_local_assets(files: List[UploadFile] = File(...), folder: str =
 
 @router.post("/local-assets/import-urls")
 async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
+    if deps.local_output_readonly_name(payload.folder):
+        raise HTTPException(status_code=403, detail="「画布生成」是只读目录：生成物由画布产出，不能往里导入")
     uploaded = []
     results = []
     folder_rel, folder_abs = deps._local_upload_safe_folder(payload.folder)
@@ -375,7 +381,17 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
             except HTTPException as exc:
                 result["error"] = str(exc.detail or "导入失败")
             except Exception as exc:
-                result["error"] = str(exc) or "导入失败"
+                # 支持定位：httpx 的异常 str 常常是空的（超时 / 连接被重置），
+                # 只回「导入失败」用户与我们都看不出是防盗链 403 还是网络问题。
+                status = getattr(getattr(exc, "response", None), "status_code", 0) or 0
+                kind = type(exc).__name__
+                detail = str(exc).strip()
+                if status:
+                    result["error"] = f"下载失败：HTTP {status}"
+                elif detail:
+                    result["error"] = f"下载失败：{kind} {detail}"[:300]
+                else:
+                    result["error"] = f"下载失败：{kind}"
             results.append(result)
     return {"ok": True, "count": len(uploaded), "files": uploaded, "items": results}
 
@@ -384,7 +400,8 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
 async def list_local_assets(folder: str = "", q: str = "", limit: int = 0):
     tree, items = deps._local_upload_tree_and_items()
     items = [item for item in (items or []) if isinstance(item, dict)]
-    # folders 汇总（不改既有 items/tree 契约）：前端可直接拿它渲染文件夹列表，不用自己扫 tree
+    # folders 汇总（不改既有 items/tree 契约）：前端可直接拿它渲染文件夹列表，不用自己扫 tree。
+    # 汇总用全量（含「画布生成」），这样根视图不返回生成物时左栏的文件夹计数仍然准确。
     folder_counts = {}
     for item in items:
         path = str(item.get("folder") or "").replace("\\", "/").strip("/")
@@ -392,41 +409,71 @@ async def list_local_assets(folder: str = "", q: str = "", limit: int = 0):
     folders = [{"path": path, "name": path.rsplit("/", 1)[-1] if path else "全部上传", "count": count}
                for path, count in sorted(folder_counts.items())]
     folder_key = str(folder or "").replace("\\", "/").strip().strip("/")
+    # 根视图（不指定 folder / folder=__root__）不返回画布生成物：否则几百个只读生成物会把
+    # 「本地上传」列表淹没。它们只属于「画布生成」文件夹，明确选该 folder 时才返回。
+    root_scope = folder_key in ("", "__root__", "root")
+    generated_hidden = 0
+    if root_scope:
+        kept = []
+        for item in items:
+            if str(item.get("source") or "") == "output":
+                generated_hidden += 1
+                continue
+            kept.append(item)
+        items = kept
     query = str(q or "").strip().lower()
     try:
         limit_value = max(0, min(int(limit or 0), 2000))
     except (TypeError, ValueError):
         limit_value = 0
 
-    def _match(item):
+    def _in_folder_scope(item):
         item_folder = str(item.get("folder") or "").replace("\\", "/").strip("/")
         if folder_key and folder_key not in ("__root__", "root"):
-            if item_folder != folder_key and not item_folder.startswith(folder_key + "/"):
-                return False
-        elif folder_key:
-            if item_folder:
-                return False
-        if query:
-            haystack = " ".join(str(item.get(key) or "") for key in
-                                ("name", "caption", "file", "classification")).lower()
-            if query not in haystack:
-                return False
+            return item_folder == folder_key or item_folder.startswith(folder_key + "/")
+        if folder_key:
+            return not item_folder
         return True
 
-    filtered = [item for item in items if _match(item)]
+    def _matches_query(item):
+        if not query:
+            return True
+        haystack = " ".join(str(item.get(key) or "") for key in
+                            ("name", "caption", "file", "classification")).lower()
+        return query in haystack
+
+    scoped = [item for item in items if _in_folder_scope(item)]
+    filtered = [item for item in scoped if _matches_query(item)]
     limited = filtered[:limit_value] if limit_value else filtered
+    # 扫描上限的截断/跳过信息：tree["scan"] 由扫描函数写入（mock 出来的 tree 可能不是 dict，容错）
+    scan = tree.get("scan") if isinstance(tree, dict) else None
+    if not isinstance(scan, dict):
+        scan = {}
+    truncated = bool(scan.get("truncated"))
+    notice = ""
+    if truncated:
+        notice = "素材数量超过扫描上限（最多 %s 个媒体文件），已只列出一部分；可清理一些素材或按文件夹查看。" % (
+            scan.get("max_entries") or "20000")
+    # count / total 都按「当前作用域」算：根视图不含生成物，folder=画布生成 时才是它们的数量
     return {"items": limited, "tree": tree, "folders": folders,
-            "count": len(limited), "total": len(items)}
+            "count": len(limited), "total": len(scoped), "generated_hidden": generated_hidden,
+            "truncated": truncated,
+            "scan": scan,
+            "notice": notice}
 
 
 @router.post("/local-assets/folders")
 async def create_local_asset_folder(payload: LocalAssetFolderRequest, request: Request):
     deps.ensure_same_origin_request(request)
+    if deps.local_output_readonly_name(payload.parent):
+        raise HTTPException(status_code=403, detail="「画布生成」是只读目录，不能在里面新建文件夹")
     parent_rel, parent_abs = deps._local_upload_safe_folder(payload.parent)
     if not os.path.isdir(parent_abs):
         raise HTTPException(status_code=404, detail="父文件夹不存在")
     name = deps._local_upload_safe_folder_name(payload.name)
     rel = f"{parent_rel}/{name}".lstrip("/")
+    if deps.local_output_readonly_name(rel):
+        raise HTTPException(status_code=403, detail="「画布生成」是内置的只读目录，不能重建同名文件夹")
     _, abs_path = deps._local_upload_safe_folder(rel)
     if os.path.exists(abs_path):
         raise HTTPException(status_code=400, detail="同名文件夹已存在")
@@ -438,6 +485,8 @@ async def create_local_asset_folder(payload: LocalAssetFolderRequest, request: R
 @router.patch("/local-assets/folders")
 async def rename_local_asset_folder(payload: LocalAssetFolderRequest, request: Request):
     deps.ensure_same_origin_request(request)
+    if deps.local_output_readonly_name(payload.path):
+        raise HTTPException(status_code=403, detail="「画布生成」是只读目录，不能重命名")
     rel, abs_path = deps._local_upload_safe_folder(payload.path)
     if not rel:
         raise HTTPException(status_code=400, detail="根目录不能重命名")
@@ -446,6 +495,8 @@ async def rename_local_asset_folder(payload: LocalAssetFolderRequest, request: R
     name = deps._local_upload_safe_folder_name(payload.name)
     parent = os.path.dirname(rel).replace("\\", "/")
     new_rel = f"{parent}/{name}".lstrip("/")
+    if deps.local_output_readonly_name(new_rel):
+        raise HTTPException(status_code=403, detail="「画布生成」是内置的只读目录，不能重名占用")
     _, new_abs = deps._local_upload_safe_folder(new_rel)
     if os.path.exists(new_abs):
         raise HTTPException(status_code=400, detail="同名文件夹已存在")
@@ -457,6 +508,8 @@ async def rename_local_asset_folder(payload: LocalAssetFolderRequest, request: R
 @router.patch("/local-assets/items")
 async def rename_local_asset_item(payload: LocalAssetRenameRequest, request: Request):
     deps.ensure_same_origin_request(request)
+    if deps.local_output_readonly_name(payload.path):
+        raise HTTPException(status_code=403, detail="「画布生成」里的素材是画布生成物，只读：不能改名")
     rel, abs_path = deps._local_upload_safe_path(payload.path)
     if not os.path.isfile(abs_path):
         raise HTTPException(status_code=404, detail="本地素材不存在")
@@ -496,7 +549,11 @@ async def delete_local_assets(payload: dict, request: Request):
     if not isinstance(names, list):
         names = []
     deleted = []
+    blocked = []
     for name in names:
+        if deps.local_output_readonly_name(name):
+            blocked.append(str(name))
+            continue
         try:
             rel, path = deps._local_upload_safe_path(name)
         except HTTPException:
@@ -516,7 +573,9 @@ async def delete_local_assets(payload: dict, request: Request):
                 deleted.append(rel)
             except OSError:
                 pass
-    return {"deleted": deleted}
+    if blocked and not deleted:
+        raise HTTPException(status_code=403, detail="「画布生成」里的素材是画布生成物，只读：不能在这里删除（要删原文件请在画布里删节点或去 assets/output 处理）")
+    return {"deleted": deleted, "readonly": blocked}
 
 
 @router.post("/local-assets/move")
@@ -527,11 +586,18 @@ async def move_local_assets(payload: dict, request: Request):
     if not isinstance(names, list) or not names:
         raise HTTPException(status_code=400, detail="没有选择素材")
     folder_value = str(payload.get("folder") or "").strip() if isinstance(payload, dict) else ""
+    if deps.local_output_readonly_name(folder_value):
+        raise HTTPException(status_code=403, detail="「画布生成」是只读目录：不能把素材移动进去")
     target_rel, target_abs = deps._local_upload_safe_folder(folder_value)
     if target_rel and not os.path.isdir(target_abs):
         raise HTTPException(status_code=404, detail="目标文件夹不存在")
+    blocked = [str(name) for name in names if deps.local_output_readonly_name(name)]
+    if blocked and len(blocked) == len(names):
+        raise HTTPException(status_code=403, detail="「画布生成」里的素材是画布生成物，只读：不能移动到别的文件夹")
     moved = 0
     for name in names:
+        if deps.local_output_readonly_name(name):
+            continue
         try:
             rel, abs_path = deps._local_upload_safe_path(name)
         except HTTPException:
@@ -563,7 +629,7 @@ async def move_local_assets(payload: dict, request: Request):
         except OSError:
             continue
     tree, items = deps._local_upload_tree_and_items()
-    return {"ok": True, "moved": moved, "items": items, "tree": tree}
+    return {"ok": True, "moved": moved, "readonly": blocked, "items": items, "tree": tree}
 
 
 @router.post("/local-assets/caption")
@@ -574,6 +640,8 @@ async def caption_local_assets(payload: LocalAssetCaptionRequest):
     for name in (payload.names or [])[:100]:
         item = {"name": name, "ok": False, "caption": "", "caption_file": "", "error": ""}
         try:
+            if deps.local_output_readonly_name(name):
+                raise HTTPException(status_code=403, detail="「画布生成」里的素材是只读的生成物，不能反推提示词")
             filename, path = deps._local_upload_safe_path(name)
             if not os.path.isfile(path):
                 raise HTTPException(status_code=404, detail="文件不存在")
@@ -613,6 +681,8 @@ async def classify_local_assets(payload: LocalAssetClassifyRequest):
     for name in (payload.names or [])[:80]:
         item = {"name": name, "ok": False, "classification": None, "classification_file": "", "error": ""}
         try:
+            if deps.local_output_readonly_name(name):
+                raise HTTPException(status_code=403, detail="「画布生成」里的素材是只读的生成物，不能智能分类")
             filename, path = deps._local_upload_safe_path(name)
             if not os.path.isfile(path):
                 raise HTTPException(status_code=404, detail="文件不存在")
@@ -645,6 +715,8 @@ async def classify_local_assets(payload: LocalAssetClassifyRequest):
 
 @router.patch("/local-assets/caption")
 async def save_local_asset_caption(payload: LocalAssetCaptionSaveRequest):
+    if deps.local_output_readonly_name(payload.name):
+        raise HTTPException(status_code=403, detail="「画布生成」里的素材是只读的生成物，不能保存提示词")
     filename, path = deps._local_upload_safe_path(payload.name)
     if not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="文件不存在")
@@ -1983,44 +2055,27 @@ async def download_canvas_assets(payload: CanvasAssetDownloadRequest):
 
 
 # ===== storage 族 =====
+# 存储位置只有一套实现（main.storage_location_*）：数据库/画布/素材库/生成物一起跟随，
+# 配置写在稳定位置（Windows %APPDATA%\NOVAI，其它 ~/.NOVAI）而不是数据目录里。
+# 这里的两个接口是旧半成品的兼容入口，行为已与 /api/config/storage 完全一致。
 
 @router.get("/storage/settings")
 async def api_storage_settings():
-    """返回当前素材存储路径配置，供前端资产管理器显示路径信息和估算磁盘用量。"""
-    return {
-        "data_root": deps._DATA_ROOT,
-        "output_dir": deps.OUTPUT_DIR,
-        "assets_dir": deps.ASSETS_DIR,
-        "assets_input": deps.OUTPUT_INPUT_DIR(),
-        "assets_output": deps.OUTPUT_OUTPUT_DIR(),
-        "library_dir": deps.ASSET_LIBRARY_DIR,
-        "uploads_dir": deps.LOCAL_UPLOAD_DIR(),
-        "canvas_dir": deps.CANVAS_DIR,
-        "conversation_dir": deps.CONVERSATION_DIR,
-    }
+    """当前存储位置 + 将要跟随迁移的内容清单（设置页 / 素材库路径条共用）。"""
+    return await asyncio.to_thread(deps.storage_location_info)
 
 
 @router.put("/storage/settings")
 async def api_save_storage_settings(payload: StoragePathPayload):
-    """保存自定义素材存储根路径。空字符串表示恢复默认（项目目录）。"""
-    new_root = str(payload.data_root or "").strip()
-    if not new_root:
-        # 恢复默认
-        env_updates = {"NOVAI_DATA_DIR": ""}
-        deps.update_env_values(env_updates)
-        deps.reload_env_globals()
-        return {"data_root": deps.BASE_DIR, "message": "已恢复默认存储路径"}
-    # 验证路径有效
-    expanded = os.path.abspath(os.path.expanduser(new_root))
-    if not os.path.isdir(expanded):
-        try:
-            os.makedirs(expanded, exist_ok=True)
-        except OSError as exc:
-            raise HTTPException(status_code=400, detail=f"无法创建目录 {expanded}：{exc}") from exc
-    env_updates = {"NOVAI_DATA_DIR": expanded}
-    deps.update_env_values(env_updates)
-    deps.reload_env_globals()
-    return {"data_root": expanded, "message": "存储路径已更新"}
+    """设置新的存储位置并迁移（空路径 = 恢复默认）。body 兼容 {data_root} 与 {path}，支持 dry_run。"""
+    body = {"path": payload.path or payload.data_root or "", "dry_run": bool(payload.dry_run)}
+    return await asyncio.to_thread(deps.storage_location_move, body)
+
+
+@router.post("/storage/rollback")
+async def api_rollback_storage_settings():
+    """回滚到上一次迁移前的位置（旧数据一直保留，只是把配置指回去）。"""
+    return await asyncio.to_thread(deps.storage_location_rollback)
 
 
 @router.post("/storage/apply")

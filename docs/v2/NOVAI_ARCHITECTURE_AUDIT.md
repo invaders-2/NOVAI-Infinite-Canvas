@@ -10,7 +10,7 @@
 
 ```
 ┌────────────────────────────── 前端（原生 HTML/JS，无框架）──────────────────────────────┐
-│ index.html（外壳） ──iframe──▶ home / canvas / smart-canvas / online / gpt-chat /        │
+│ index.html（外壳） ──iframe──▶ home / canvas / smart-canvas /                          │
 │                                canvas-list / api-settings / asset-manager / ...          │
 │ 页面间通信：postMessage；UI 状态：localStorage（主题/排序/最近设置/提示词预设等）           │
 └──────────────┬───────────────────────────────────────────────────────────────────────────┘

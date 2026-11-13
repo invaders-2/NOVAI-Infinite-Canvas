@@ -1,0 +1,41 @@
+{
+  "baselineVersion": "2.0.07",
+  "note": "维护规则：只收录「别人的存量红」。清了某条就删掉它（runner 会提示基线过期）；出现新红先定位归属——别人的存量红才进基线，自己引入的必须修，不许把新红直接塞进基线。只按 file 匹配；reason/owner/category/since 只给人看，不参与判定。条目按 file 升序排列，避免无关 diff。",
+  "failures": [
+    {
+      "file": "test_beat_popup_thumbnails.js",
+      "reason": "novai-canvas-ui 的 AgentPanel 仍有直接 <img src> 展示位，未全部换成 ThumbImg；属并行画布源码改动，不是版本/构建问题",
+      "owner": "novai-canvas-ui（BEAT 画布源码）",
+      "category": "parallel-source",
+      "since": "2.0.06"
+    },
+    {
+      "file": "test_canvas_assistant_glass_addmenu.js",
+      "reason": "canvas-ui 构建产物 bridge 缓存版本未跟随 assistant-ui.js mtime（写死旧版本 1.0.137）；需重建 canvas-ui，非本任务 scope",
+      "owner": "canvas-ui（旧智能画布）构建",
+      "category": "build-stale",
+      "since": "2.0.06"
+    },
+    {
+      "file": "test_canvas_carousel_layout.js",
+      "reason": "web 构建产物 .cl-in 未恢复轮播改版要求的 padding: 40px 0 96px；web/ 源码与 static/v2 产物未同步，需重跑 web build",
+      "owner": "web/ 前端构建（画布列表）",
+      "category": "build-stale",
+      "since": "2.0.06"
+    },
+    {
+      "file": "test_novai_canvas_lightbox_compare.js",
+      "reason": "novai-canvas-ui 源码里找不到对比模式左上返回钮 .lb-back / data-lb=back；属并行画布改动，需画布 owner 确认是回归还是改名",
+      "owner": "novai-canvas-ui（BEAT 画布源码）",
+      "category": "parallel-source",
+      "since": "2.0.06"
+    },
+    {
+      "file": "test_shell_sidebar_gear_align.js",
+      "reason": "web 构建 CSS 缺 .sidebar:not(:hover):not(.is-pinned) .side-pill 收起态规则；构建产物未更新",
+      "owner": "web/ 前端构建（侧栏）",
+      "category": "build-stale",
+      "since": "2.0.06"
+    }
+  ]
+}

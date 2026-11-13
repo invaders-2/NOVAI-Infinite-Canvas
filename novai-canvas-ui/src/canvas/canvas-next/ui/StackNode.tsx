@@ -126,7 +126,7 @@ export function StackBody({ node }: { node: CanvasNode }) {
       </div>); })}
     <div className="stack-tools-wrap" ref={wrapRef}>
       <FloatMenuBar className="stack-tools" data={{ "data-act": "stack-tools" }} show={hover && !dragging} onPointerDown={stop} onDoubleClick={stop}>
-        <FloatMenuButton icon="layers" label="取消堆叠" data={{ "data-st": "unstack" }} onClick={(e) => { stop(e); unstack(store, node.id); }} />
+        <FloatMenuButton icon="split" label="取消堆叠" data={{ "data-st": "unstack" }} onClick={(e) => { stop(e); unstack(store, node.id); }} />
         <FloatMenuButton icon="msg" label="加入对话" data={{ "data-st": "agent" }} onClick={(e) => { stop(e); toAgent(ctl, items()); }} />
         <FloatMenuButton icon="libadd" label="存素材库" data={{ "data-st": "lib" }} onClick={(e) => { stop(e); void saveNodesToLibrary(ctl, items(), e.currentTarget); }} />
         <FloatMenuButton icon="download" label="全部下载" data={{ "data-st": "dl" }} onClick={(e) => { stop(e); void downloadMany(items(), store, store.state.name + "-堆叠"); }} />

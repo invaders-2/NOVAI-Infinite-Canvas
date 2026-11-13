@@ -116,8 +116,11 @@ const run = async () => {
     assert.match(chrome, /data-opt-opt=\{m\.id\}/, '每个文本模型选项要有 data-opt-opt');
     assert.match(chrome, /"data-opt-auto"/, '要有「自动」项 data-opt-auto');
     assert.doesNotMatch(chrome, /data-model-kind=/, '旧的只读格子要彻底拿掉');
+    // 优化任务本身的选模型 / 发请求搬到了 optimizeTasks.ts（面板卸载不再中断），契约跟着过去
+    const optTask = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/optimizeTasks.ts'), 'utf8');
+    assert.match(optTask, /store\.optimizeModel\(\)\?\.id \|\| store\.defaultModel\("text"\)\?\.id/, '优化任务要先读显式设置，再回落文本默认模型');
     const optBtn = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/OptimizeButton.tsx'), 'utf8');
-    assert.match(optBtn, /store\.optimizeModel\(\)\?\.id \|\| store\.defaultModel\("text"\)\?\.id/, 'OptimizeButton 要先读显式设置，再回落文本默认模型');
+    assert.match(optBtn, /startOptimize\(store, node\.id/, 'OptimizeButton 上的点击要交给模块级任务');
 };
 
 run().then(() => {

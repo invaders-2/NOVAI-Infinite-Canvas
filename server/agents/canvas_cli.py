@@ -65,13 +65,18 @@ def _description(available: Any) -> str:
     return "".join(parts)
 
 
+def _available_commands_text() -> str:
+    return "；可用命令：" + "、".join(sorted(cli_spec.COMMANDS))
+
+
 def _validate(args: Any) -> Dict[str, Any]:
     if not isinstance(args, dict):
         raise CanvasCliError("参数必须是对象", code="invalid_args")
     command = args.get("command")
     command = command.strip() if isinstance(command, str) else ""
     if command not in cli_spec.COMMANDS:
-        raise CanvasCliError("%s未知命令 %s" % (_ERROR_PREFIX, command or "<空>"),
+        raise CanvasCliError("%s未知命令 %s%s" % (_ERROR_PREFIX, command or "<空>",
+                                                 _available_commands_text()),
                              code="unknown_command")
     inner_args = args.get("args")
     if inner_args is None:
@@ -97,7 +102,8 @@ def _preview(args: Any, canvas: Any = None) -> str:
     command = command.strip() if isinstance(command, str) else ""
     spec = cli_spec.COMMANDS.get(command)
     if not spec:
-        return "canvas_cli：未知命令 %s（不会执行）" % (command or "<空>")
+        return "canvas_cli：未知命令 %s（不会执行）%s" % (command or "<空>",
+                                                       _available_commands_text())
     return "canvas_cli：%s（展开为 %s）— %s" % (
         command, spec.get("tool") or "", str(spec.get("summary") or "").strip())
 

@@ -6,18 +6,19 @@
  * 覆盖真实行为点：
  *   1. HomePage.vue 的四个入口（输入框发送 submit / 快速开始 quickStart / 模板 useTemplate / 最近项目 openProject）
  *      全部传 ctx:'beat'：建 kind:'classic' + icon:'🧩' 的画布、种子带 renderer:'beat'、打开 /static/canvas.html；
- *      老 kind:'smart' 的画布从最近项目点开也走 BEAT（不再出现 smart-canvas.html）；
+ *      老 kind:'smart' 的画布从最近项目点开仍按 kind 走 /static/smart-canvas.html（历史画布可打开）；
  *   2. 种子规格这一轮不变：templates.js 的 key/type/title/ratio/inputs/col 字段、submit 的 {v,nodes,agent,autoSend,renderer}、
  *      seedFromTemplate 的 {v,nodes,toast}（只有 opts.agent 才 autoSend，非 agent 模板不自动发送）；
  *   3. BEAT 侧 homeSeed.ts 把种子翻译成节点：image / text / label(便签) / gen(图+视频+比例) / table / group(空组降级图片槽位) /
  *      batch(不建节点只提示)、inputs 连边、按 col 分列、视口居中、seed.toast、空画布守卫、铺完先 saveNow；
  *   4. 构建产物：canvas.js 含 novai_canvas_seed / 比例映射表 / 批量降级文案；static/v2 产物里 ctx:"beat" 五处；
- *   5. static/canvas.html 的 canvas.js / canvas.css ?v= 形如 1.0.143.<unix 秒> 且两处一致、文件存在。
+ *   5. static/canvas.html 的 canvas.js / canvas.css ?v= 前缀=根 VERSION、后缀=10 位 mtime 秒，且无裸链接、多处一致。
  *
  * 跑法：node tests/test_home_send_opens_beat.js
  */
 const fs = require('fs');
 const path = require('path');
+const { checkStaticCacheVersions } = require('./static-cache-version');
 
 const root = path.join(__dirname, '..');
 const read = (rel) => fs.readFileSync(path.join(root, rel), 'utf8');
@@ -42,9 +43,9 @@ ok(/launch\(title,\s*seed,\s*\{\s*ctx:\s*'beat'\s*\}\)/.test(submitBody), "submi
 ok(/^\s*const sk = skill\.value;/m.test(submitBody) && submitBody.includes('seed.skillRef'), '带技能时种子仍写 skillRef（协议字段不丢）');
 
 const createBody = sliceBetween(home, 'async function createCanvas', 'async function launch');
-ok(/kind:\s*beat\s*\?\s*'classic'\s*:\s*'smart'/.test(createBody), "createCanvas 的 kind: beat ? 'classic' : 'smart'");
-ok(/icon:\s*beat\s*\?\s*'🧩'\s*:\s*'layers'/.test(createBody), "createCanvas 的 icon: beat ? '🧩' : 'layers'");
-ok(/const beat = opts\.ctx === 'beat'/.test(createBody), "createCanvas 以 opts.ctx === 'beat' 判定是否 BEAT");
+ok(/kind:\s*'classic'/.test(createBody), "createCanvas 一律 kind: 'classic'（旧智能画布不再新建）");
+ok(/icon:\s*'🧩'/.test(createBody), "createCanvas 一律 icon: '🧩'");
+ok(!/const beat = /.test(createBody), 'createCanvas 不再按 opts.ctx 分 smart / classic');
 
 const urlBody = sliceBetween(home, 'function canvasUrl', 'function timeTitle');
 ok(/beat\s*\?\s*'\/static\/canvas\.html'\s*:\s*'\/static\/smart-canvas\.html'/.test(urlBody),
@@ -63,7 +64,7 @@ ok(launchCalls.length >= 4, 'launch(...) 调用点至少 4 处（实际 ' + laun
 ok(launchCalls.length > 0 && launchCalls.every((s) => s.includes("ctx: 'beat'")),
     '每一个 launch( 调用点都传 ctx: \'beat\'（发送 / 快速开始 / 模板全走 BEAT）');
 const beatCtx = home.match(/ctx:\s*'beat'/g) || [];
-ok(beatCtx.length >= 5, "文件里 ctx: 'beat' 至少 5 处：4 个 launch 调用点 + openProject 的 canvasUrl（实际 " + beatCtx.length + ' 处）');
+ok(beatCtx.length >= 4, "文件里 ctx: 'beat' 至少 4 处：全部 launch 调用点（实际 " + beatCtx.length + ' 处）');
 
 const quickStartBody = sliceBetween(home, 'function quickStart', '/* ───────── 最新项目');
 ok(quickStartBody.includes("ctx: 'beat'"), "quickStart() 带 ctx: 'beat'");
@@ -78,9 +79,9 @@ const useTemplateBody = sliceBetween(home, 'function useTemplate', 'function sub
 ok(useTemplateBody.includes("ctx: 'beat'"), "useTemplate() 带 ctx: 'beat'（模板库全部进 BEAT）");
 ok(/launch\(timeTitle\(t\.title\), seedFromTemplate\(t, opts\), \{ ctx: 'beat' \}\)/.test(useTemplateBody), 'useTemplate 调 launch(..., { ctx: \'beat\' })');
 
-ok(/function openProject\(c\) \{ openCanvasUrl\(canvasUrl\(c, \{ ctx: 'beat' \}\)\); \}/.test(home),
-    "最近项目 openProject 强制 ctx:'beat'（老 smart 画布点开也进 BEAT）");
-ok(!/openCanvasUrl\(canvasUrl\(c\)\)/.test(home), '没有不带 ctx 的 openProject 旧写法残留');
+ok(/function openProject\(c\) \{ openCanvasUrl\(canvasUrl\(c\)\); \}/.test(home),
+    '最近项目 openProject 按画布 kind 路由（历史 smart 画布仍打开 smart-canvas.html）');
+ok(!/function openProject\(c\) \{ openCanvasUrl\(canvasUrl\(c, \{ ctx: 'beat' \}\)\)/.test(home), '不再强制把历史 smart 画布塞进 canvas.html');
 
 /* ───────── [2] 种子规格这一轮不变 ───────── */
 console.log('[2] 种子规格未改（templates.js 字段 + submit / seedFromTemplate 形状）');
@@ -197,7 +198,7 @@ const v2Assets = fs.existsSync(path.join(root, 'static/v2/assets'))
 ok(v2Assets.length > 0, 'static/v2/assets 下有构建出来的 js');
 const v2Js = v2Assets.map((n) => fs.readFileSync(path.join(root, 'static/v2/assets', n), 'utf8')).join('\n');
 ok(v2Js.includes('renderer:"beat"') || v2Js.includes("renderer:'beat'"), 'static/v2 构建产物含 renderer:"beat"');
-ok((v2Js.match(/ctx:"beat"/g) || []).length >= 5, 'static/v2 构建产物含 5 处 ctx:"beat"（四个入口都改成 BEAT）');
+ok((v2Js.match(/ctx:"beat"/g) || []).length >= 4, 'static/v2 构建产物含 4 处 ctx:"beat"（四个 launch 入口；openProject 已按 kind 路由）');
 ok(v2Js.includes("/static/canvas.html"), 'static/v2 构建产物含 /static/canvas.html');
 ok(v2Js.includes("/api/canvases"), 'static/v2 构建产物含 /api/canvases');
 
@@ -206,8 +207,9 @@ console.log('[6] static/canvas.html 的 canvas.js / canvas.css 版本号');
 const ch = read('static/canvas.html');
 const vers = [...ch.matchAll(/novai-canvas\/(?:canvas\.css|canvas\.js)\?v=([0-9.]+)/g)].map((m) => m[1]);
 ok(vers.length === 2, 'canvas.html 里 canvas.css / canvas.js 各一处 ?v=（实际 ' + vers.length + ' 处）');
-ok(vers[0] === vers[1], '两处 ?v= 一致（' + vers[0] + ' / ' + vers[1] + '）');
-ok(/^1\.0\.143\.\d{10}$/.test(vers[0] || ''), '?v= 形如 1.0.143.<unix 秒>：' + vers[0]);
+const cache = checkStaticCacheVersions({ root, page: 'static/canvas.html' });
+ok(cache.ok, 'canvas.html 的 ?v= 满足：VERSION 前缀 / 10 位 mtime / 无裸链接 / 多处一致' + (cache.problems.length ? '：' + cache.problems.join('；') : ''));
+ok(cache.refs.has('/static/novai-canvas/canvas.js') && cache.refs.has('/static/novai-canvas/canvas.css'), 'canvas.js / canvas.css 两处 ?v= 都在（' + vers.join(' / ') + '）');
 ok(exists('static/novai-canvas/canvas.js') && fs.statSync(path.join(root, 'static/novai-canvas/canvas.js')).size > 0,
     'canvas.js 对应的产物文件存在且非空');
 ok(exists('static/novai-canvas/canvas.css') && fs.statSync(path.join(root, 'static/novai-canvas/canvas.css')).size > 0,

@@ -12,13 +12,9 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 
-/* 版本号不写死：能读到项目版本（desktop/package.json，退回 VERSION）就比对当前版本，
-   读不到只守形状，保证「已按 main.py 规则重写过」这个意图不丢。 */
+/* 静态页 ?v= 的前缀与 refresh 脚本 / main.py 同口径，就是根 VERSION 原文（显示串，如 2.0.07），
+   不能读 desktop/package.json 的归一化 semver（2.0.7）。读不到只守形状。 */
 const projectVersion = (() => {
-    try {
-        const version = JSON.parse(fs.readFileSync(path.join(root, 'desktop/package.json'), 'utf8')).version;
-        if(version) return String(version);
-    } catch(e) {}
     try {
         return fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim().split('\n')[0].trim();
     } catch(e) {}
@@ -26,7 +22,7 @@ const projectVersion = (() => {
 })();
 
 /* 只守形状与项目版本：git 检出不保留 mtime，强求 ?v= 里的 mtime 等于当前文件 mtime 在 CI 上必然失败
-   （与 test_glide / test_gpt_chat_reasoning 的缓存串断言同一口径）。 */
+   （与 test_glide 的缓存串断言同一口径）。 */
 const versionTagOk = value => {
     const text = String(value || '');
     if(!/^\d+(\.\d+)+$/.test(text)) return false;

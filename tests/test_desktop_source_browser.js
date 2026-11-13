@@ -118,11 +118,12 @@ console.log('[4] 视图生命周期：保活 / 复用 / 定位 / 销毁');
 ok(/const sameSource = isSourceViewAlive\(\) && sourceViewSource === effectiveSourceKey && !!currentUrl/.test(openView), '同来源复用不重复加载');
 ok(/if \(sameSource\) \{[\s\S]{0,200}return \{ ok: true, open: true, source: sourceViewSource, url: currentUrl, bounds: lastSourceViewRect \}/.test(openView), '复用直接返回 ok + url/bounds');
 ok(/if \(isSourceViewAlive\(\) && sourceViewSource && sourceViewSource !== effectiveSourceKey\) destroySourceView\(\)/.test(openView), '切换来源站点时才销毁旧 view');
-ok(/if \(!sourceViewAttached\)/.test(openView) && /addChildView\(view\)/.test(openView), '重新打开时把保活的 view 挂回窗口');
+ok(/if \(!isSourceViewAttachedToWindow\(\)\)/.test(openView) && /addChildView\(view\)/.test(openView), '重新打开时把保活的 view 挂回窗口（以真实 children 为准）');
 ok(/sourceViewVisible = true/.test(openView), 'open 后标记可见');
 const hideView = topLevelFunction(main, 'hideSourceView');
 ok(!!hideView, 'hideSourceView 存在');
-ok(/removeChildView\(sourceView\)/.test(hideView), '关闭面板 removeChildView');
+ok(/contentViewRemoveView\(sourceView\)/.test(hideView), '关闭面板经 contentViewRemoveView 摘除（并回读 children 真实状态）');
+ok(/removeChildView\(view\)/.test(topLevelFunction(main, 'contentViewRemoveView')), 'contentViewRemoveView 内部调用 removeChildView');
 ok(!/webContents\.close\(\)/.test(hideView), '关闭面板不 close webContents（保活登录态）');
 ok(/flushSourceCookies\(\)/.test(hideView), '关闭面板时 flushStore 落盘 cookie');
 const destroyView = topLevelFunction(main, 'destroySourceView');
@@ -163,6 +164,18 @@ ok(/timer = setTimeout\(\(\) => \{[\s\S]{0,160}finish\(null\)/.test(loadFn), '�
 ok(/8000/.test(loadFn), '超时 8s');
 ok(/navigation\.catch\(\(\) => \{\}\)/.test(loadFn), 'loadURL rejection 交给事件判定');
 ok(/finish\(msg\)/.test(loadFn) && /加载失败/.test(loadFn), '明确的非 -3 主框架错误才回传 error');
+
+console.log('[4c] 关闭可靠性：Esc 兜底 / 状态回读 / 打开途中关闭 / 摘除兜底');
+ok(/attached: isSourceViewAttachedToWindow\(\)/.test(topLevelFunction(main, 'sourceViewState')), 'state 回读真实挂载状态（children 为准）');
+ok(/wc\.on\('before-input-event', handleSourceEscapeKey\)/.test(createView), '内嵌视图挂 Esc 关闭（页面焦点在视图里时画布收不到 keydown）');
+const escapeFn = topLevelFunction(main, 'handleSourceEscapeKey');
+ok(!!escapeFn && /hideSourceView\(\)/.test(escapeFn), 'Esc 处理走 hideSourceView');
+ok(!!escapeFn && /novai:source-view-closed', closedState/.test(escapeFn), 'Esc 关闭后通知画布收面板');
+ok(/if \(sourceView !== view\)/.test(openView) && /if \(!sourceViewVisible\)/.test(openView), '打开途中被关闭 / 切了站点：不再把状态翻回“可见”');
+ok(/if \(!sourceViewVisible\) \{[\s\S]{0,120}hideSourceView\(\)/.test(openView), '加载期间面板已关：补一次 hideSourceView');
+ok(/contentViewRemoveView\(sourceView\)/.test(hideView) && /destroySourceView\(\)/.test(hideView), '摘除失败兜底销毁，绝不留关不掉的页面');
+ok(/contentView\.children/.test(main) && /contentViewRemoveView/.test(main), '以 contentView.children 回读真实挂载状态');
+ok(/if \(!isSourceViewAttachedToWindow\(\)\) \{[\s\S]{0,600}else \{[\s\S]{0,200}sourceViewAttached = true/.test(openView), '视图其实挂着、flag 假 false 时重开会对齐状态（否则 bounds 全丢）');
 
 console.log('[5] preload.js 新旧方法');
 ok(/open_source_view: \(source, rect\) => \{[\s\S]{0,260}typeof source === 'object'/.test(preload), 'open_source_view（位置参数/对象参数）');
@@ -713,17 +726,42 @@ console.log('[12e] 图片候选最高清优先 + 花瓣原图 + CDN 去缩略参
 console.log('[14] 面板尺寸跟随 / 背景色 / 自定义来源');
 ok(/view\.setBackgroundColor\('#0f0f0f'\)/.test(main), 'WebContentsView 设置深色背景避免缩放闪白');
 ok(/rect \|\| lastSourceViewRect \|\| defaultSourceViewRect\(\)/.test(main), '重开面板复用上次尺寸（前端 rect 优先）');
-ok(/action === 'setBounds'/.test(handleFn) && /sourceView\.setBounds\(layoutBounds\)/.test(main), '连续拖动 setBounds 直接应用');
+ok(/action === 'setBounds'/.test(handleFn) && /sourceView\.setBounds\(bounds\)/.test(main), '连续拖动 setBounds 直接应用（夹到窗口内）');
 ok(/bounds ' \+ JSON\.stringify\(bounds\)/.test(main), 'bounds 日志用于核对跟随');
 const applyBoundsSrc = topLevelFunction(main, 'applySourceViewBounds');
 const normRectSrc = topLevelFunction(main, 'normalizeSourceViewRect');
 ok(!!applyBoundsSrc && !!normRectSrc, 'applySourceViewBounds / normalizeSourceViewRect 存在');
+const clampBoundsSrc = topLevelFunction(main, 'clampSourceViewRectToWindow');
+const hiddenRectSrc = topLevelFunction(main, 'isHiddenSourceRect');
+ok(!!clampBoundsSrc && !!hiddenRectSrc, 'clampSourceViewRectToWindow / isHiddenSourceRect 存在');
+let clampBoundsFn = null;
+let hiddenRectFn = null;
+try {
+    const hiddenSentinel = Number((main.match(/const SOURCE_VIEW_HIDDEN_SENTINEL = (-?\d+);/) || [])[1] || -10000);
+    const normForClamp = new Function('return (' + normRectSrc + ')')();
+    const factories = [hiddenSentinel, normForClamp];
+    clampBoundsFn = new Function('SOURCE_VIEW_HIDDEN_SENTINEL', 'normalizeSourceViewRect', 'return (' + clampBoundsSrc + ')').apply(null, factories);
+    hiddenRectFn = new Function('SOURCE_VIEW_HIDDEN_SENTINEL', 'normalizeSourceViewRect', 'return (' + hiddenRectSrc + ')').apply(null, factories);
+} catch (_) {}
+ok(typeof clampBoundsFn === 'function' && typeof hiddenRectFn === 'function', 'bounds 夹取逻辑可独立执行');
+if (typeof clampBoundsFn === 'function') {
+    const fullWindow = { width: 1000, height: 800 };
+    const oversized = clampBoundsFn({ x: -50, y: -20, width: 2000, height: 2000 }, fullWindow);
+    ok(oversized && oversized.x === 0 && oversized.y === 0 && oversized.width === 1000 && oversized.height === 800, '越界/负坐标 rect 夹回主窗口内容区（不铺满窗口外）');
+    const bottomRight = clampBoundsFn({ x: 900, y: 700, width: 400, height: 400 }, fullWindow);
+    ok(bottomRight && bottomRight.x === 900 && bottomRight.y === 700 && bottomRight.width === 100 && bottomRight.height === 100, '右下越界只收缩宽高，不把视图推出窗口');
+    const hidden = clampBoundsFn({ x: -20000, y: -20000, width: 8, height: 8 }, fullWindow);
+    ok(hidden && hidden.x === -20000 && hidden.y === -20000 && hidden.width === 80 && hidden.height === 80, '隐藏哨兵原样放行（宽高压到 80）');
+    ok(hiddenRectFn({ x: -20000, y: -20000, width: 8, height: 8 }) === true && hiddenRectFn({ x: 30, y: 160, width: 496, height: 551 }) === false, 'isHiddenSourceRect 只认哨兵坐标');
+    const noWindow = clampBoundsFn({ x: 30, y: 160, width: 496, height: 551 }, { width: 0, height: 0 });
+    ok(noWindow && noWindow.x === 30 && noWindow.width === 496, '拿不到窗口尺寸时保持原值（不误伤）');
+}
 const appliedBounds = [];
 const boundsLogs = [];
 let boundsHarness = null;
 try {
     boundsHarness = new Function(
-        'sourceView', 'isSourceViewOpen', 'normalizeSourceViewRect', 'clog', 'initialRect', 'initialLogAt', 'sourceControlsFallback', 'SOURCE_CONTROLS_FALLBACK_HEIGHT',
+        'sourceView', 'isSourceViewOpen', 'normalizeSourceViewRect', 'clampSourceViewRectToWindow', 'mainWindowContentSize', 'isHiddenSourceRect', 'clog', 'initialRect', 'initialLogAt',
         'let lastSourceViewRect = initialRect; let lastSourceBoundsLogAt = initialLogAt;' +
         'const apply = (' + applyBoundsSrc + ');' +
         'return { apply: apply, state: function () { return { rect: lastSourceViewRect, logAt: lastSourceBoundsLogAt }; } };'
@@ -731,8 +769,11 @@ try {
         { setBounds: function (rect) { appliedBounds.push(rect); } },
         function () { return true; },
         new Function('return (' + normRectSrc + ')')(),
+        clampBoundsFn,
+        function () { return { width: 1600, height: 1000 }; },
+        hiddenRectFn,
         function (area, msg) { boundsLogs.push(msg); },
-        null, 0, false, 56
+        null, 0
     );
 } catch (_) {}
 ok(!!boundsHarness, 'bounds 逻辑可独立执行');
@@ -744,6 +785,8 @@ if (boundsHarness) {
     ok(appliedBounds[29] && appliedBounds[29].width === 549 && appliedBounds[29].x === 116, '最后一次 bounds 与输入一致（跟随不滞后）');
     ok(boundsHarness.state().rect && boundsHarness.state().rect.width === 549, 'lastSourceViewRect 记录上次尺寸');
     ok(boundsLogs.length >= 1 && boundsLogs.length <= 3, 'bounds 日志有输出且按 150ms 限流');
+    boundsHarness.apply({ x: -20000, y: -20000, width: 8, height: 8 });
+    ok(boundsHarness.state().rect && boundsHarness.state().rect.width === 549, '隐藏哨兵不写进 lastSourceViewRect（重开不会开到窗口外）');
 }
 const normCustomSrc = topLevelFunction(main, 'normalizeCustomSourceUrl');
 ok(!!normCustomSrc, 'normalizeCustomSourceUrl 存在');

@@ -278,8 +278,10 @@ class AutoWaitGenerationTests(unittest.TestCase):
         events = drain(agent_request(0), replies, execute=execute, task_get_side_effect=task_get)
         done = done_of(events)
         self.assertEqual(done["status"], "ok")
+        # 步骤失败用户要知道（写进回复），同时运行明细里也有一份
         self.assertIn("失败记录", done["message"])
         self.assertIn("上游返回 400", done["message"])
+        self.assertTrue(any("上游返回 400" in str(item) for item in done["failures"]), done["failures"])
 
 
 class AutoWaitDedupTests(unittest.TestCase):

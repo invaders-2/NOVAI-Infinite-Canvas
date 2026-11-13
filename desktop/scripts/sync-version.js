@@ -41,7 +41,15 @@ function main() {
         throw new Error('package.json 里没找到 version 字段: ' + pkgFile);
     }
     if (next !== raw) fs.writeFileSync(pkgFile, next);
-    console.log('VERSION ' + display + ' → desktop/package.json version ' + version);
+
+    // .version 会被打包成后端读的 backend/VERSION，要的是显示串（2.0.07），不能归一化成 semver
+    const dotFile = path.join(DESKTOP, '.version');
+    const dotRaw = fs.existsSync(dotFile) ? fs.readFileSync(dotFile, 'utf8') : '';
+    const dotChanged = dotRaw !== display;
+    if (dotChanged) fs.writeFileSync(dotFile, display);
+
+    console.log('VERSION ' + display + ' → desktop/package.json version ' + version + (next !== raw ? '（已写入）' : '（已一致）'));
+    console.log('VERSION ' + display + ' → desktop/.version ' + display + (dotChanged ? '（已写入）' : '（已一致）'));
 }
 
 main();

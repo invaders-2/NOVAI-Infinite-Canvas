@@ -8,6 +8,7 @@
  * 失败一律带真实原因抛出来：不拿 thumb_url、不拿占位图兜底。
  */
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
+import { fitSourceBox } from "../mediaFit";
 import type { CanvasStore } from "../store";
 
 /** 契约里的 ImageItem（字段名不改） */
@@ -259,26 +260,24 @@ const IMAGE_GAP = 30;
 
 /**
  * 导入成功的本地图 → image 节点：整组落在视口中心、一次 addNodes（单步可撤销）、建完选中。
- * 尺寸跟 addFiles 一致（宽 240，高按真实比例夹在 100..520）。
+ * 尺寸跟 addFiles 一致：宽 240 起步，按真实比例定高（太扁就把宽度等比放大，不夹高度压比例）。
  */
 export function insertWebImages(store: CanvasStore, center: { x: number; y: number }, rows: InsertWebImage[]): string[] {
   const made: CanvasNode[] = [];
-  const total = rows.length * (IMAGE_W + IMAGE_GAP) - IMAGE_GAP;
+  const plan = rows.map((row) => ({ row, url: String(row.url || "").trim() })).filter((x) => x.url)
+    .map(({ row, url }) => ({ row, url, box: (row.width && row.height ? fitSourceBox(row.width, row.height, { baseW: IMAGE_W }) : null) || { w: IMAGE_W, h: IMAGE_W } }));
+  const total = plan.reduce((sum, x) => sum + x.box.w, 0) + IMAGE_GAP * Math.max(0, plan.length - 1);
   let cursor = center.x - total / 2;
-  for (const row of rows) {
-    const url = String(row.url || "").trim();
-    if (!url) continue;
-    const ratio = row.width && row.height ? row.height / row.width : 1;
-    const h = Math.round(Math.max(100, Math.min(520, IMAGE_W * ratio)));
-    const n = store.newNode("image", cursor, center.y - h / 2, {
+  for (const { row, url, box } of plan) {
+    const n = store.newNode("image", cursor, center.y - box.h / 2, {
       title: row.title || "参考图",
       uploaded: true,
       hist: [{ url, ...(row.width ? { w: row.width } : {}), ...(row.height ? { h: row.height } : {}) }],
-      w: IMAGE_W,
-      h,
+      w: box.w,
+      h: box.h,
     });
     made.push(n);
-    cursor += IMAGE_W + IMAGE_GAP;
+    cursor += box.w + IMAGE_GAP;
   }
   if (!made.length) return [];
   store.addNodes(made);

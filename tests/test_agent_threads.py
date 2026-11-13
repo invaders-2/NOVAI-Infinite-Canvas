@@ -673,5 +673,141 @@ class ThreadStepsPersistenceTests(unittest.TestCase):
         self.assertNotIn("changes", rows[1])
 
 
+class ThreadParallelAppendTests(unittest.TestCase):
+    """多对话并行：写入/读取都按 thread_id 精确落盘，被切走的线程也不会串线。"""
+
+    def setUp(self):
+        self.canvas_id = new_canvas("并行会话画布")
+        main.agent_thread_append(self.canvas_id, [{"role": "user", "text": "A 的第一句"}])
+        self.thread_a = self._rows()["threads"][0]["id"]
+        resp = CLIENT.post("/api/agent/threads/new", json={"canvas_id": self.canvas_id})
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.thread_b = resp.json()["active_id"]
+
+    def _rows(self):
+        return CLIENT.get("/api/agent/threads", params={"canvas_id": self.canvas_id}).json()
+
+    def _texts(self, thread_id):
+        return [msg["text"] for msg in main.agent_thread_load(self.canvas_id, thread_id)["messages"]]
+
+    def test_append_with_thread_id_lands_on_that_thread(self):
+        main.agent_thread_append(self.canvas_id, [{"role": "user", "text": "A 的第二句"}],
+                                 thread_id=self.thread_a)
+        self.assertEqual(self._texts(self.thread_a), ["A 的第一句", "A 的第二句"])
+        self.assertEqual(main.agent_thread_load(self.canvas_id, self.thread_b)["messages"], [])
+        self.assertEqual(self._rows()["active_id"], self.thread_b)
+
+    def test_load_with_thread_id_ignores_active(self):
+        self.assertEqual(self._rows()["active_id"], self.thread_b)
+        self.assertEqual(self._texts(self.thread_a), ["A 的第一句"])
+        self.assertEqual(main.agent_thread_load(self.canvas_id)["messages"], [])
+        self.assertEqual(main.agent_thread_load(self.canvas_id, self.thread_b)["messages"], [])
+
+    def test_interleaved_appends_keep_each_thread_complete(self):
+        main.agent_thread_append(self.canvas_id, [{"role": "user", "text": "A 的第二句"}],
+                                 thread_id=self.thread_a)
+        main.agent_thread_append(self.canvas_id, [{"role": "user", "text": "B 的第一句"}],
+                                 thread_id=self.thread_b)
+        main.agent_thread_append(self.canvas_id, [{"role": "assistant", "text": "A 的回复"}],
+                                 thread_id=self.thread_a)
+        main.agent_thread_append(self.canvas_id, [{"role": "assistant", "text": "B 的回复"}],
+                                 thread_id=self.thread_b)
+        self.assertEqual(self._texts(self.thread_a), ["A 的第一句", "A 的第二句", "A 的回复"])
+        self.assertEqual(self._texts(self.thread_b), ["B 的第一句", "B 的回复"])
+
+    def test_deleted_thread_drops_write_without_touching_others(self):
+        resp = CLIENT.post("/api/agent/threads/new", json={"canvas_id": self.canvas_id})
+        gone = resp.json()["active_id"]
+        main.agent_thread_append(self.canvas_id, [{"role": "user", "text": "C 的第一句"}],
+                                 thread_id=gone)
+        deleted = CLIENT.delete("/api/agent/threads/%s" % gone,
+                                params={"canvas_id": self.canvas_id})
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        active_after_delete = deleted.json()["active_id"]
+
+        main.agent_thread_append(self.canvas_id, [{"role": "user", "text": "孤儿消息"}],
+                                 thread_id=gone)
+        self.assertEqual(self._texts(self.thread_a), ["A 的第一句"])
+        self.assertEqual(main.agent_thread_load(self.canvas_id, self.thread_b)["messages"], [])
+        self.assertEqual(self._rows()["active_id"], active_after_delete)
+        self.assertEqual(main.agent_thread_load(self.canvas_id, gone)["messages"], [])
+
+    def test_run_context_writes_back_to_its_own_thread(self):
+        self.assertEqual(main._AgentRunContext("ctx").thread_id, "")
+        ctx = main._CanvasRunContext({"canvas_id": self.canvas_id, "thread_id": self.thread_a,
+                                      "use_thread": True, "instruction": "改一下"})
+        self.assertEqual(ctx.thread_id, self.thread_a)
+        self.assertEqual([msg["text"] for msg in ctx.thread_load()["messages"]], ["A 的第一句"])
+        ctx.thread_append([{"role": "assistant", "text": "A 的回复"}], [])
+        self.assertEqual(self._texts(self.thread_a), ["A 的第一句", "A 的回复"])
+        self.assertEqual(main.agent_thread_load(self.canvas_id, self.thread_b)["messages"], [])
+        self.assertEqual(self._rows()["active_id"], self.thread_b)
+
+
+class ThreadRoadmapPersistenceTests(unittest.TestCase):
+    """整体方案（roadmap）跨多次读盘 / 保存不能丢：以前的归一化漏了它，读盘一次就永久没了。"""
+
+    ROADMAP = [{"stage": "分镜拆解", "detail": "把每个镜头写进文本节点", "generations": 0},
+               {"stage": "成片输出", "detail": "每段口播一条视频，再剪成片", "generations": 5}]
+
+    def setUp(self):
+        self.canvas_id = new_canvas("方案画布")
+        seed_messages(self.canvas_id, 2)
+        self.thread_id = main.agent_thread_load(self.canvas_id)["id"]
+        self.req = {"canvas_id": self.canvas_id, "thread_id": self.thread_id}
+
+    def _raw_thread(self):
+        with open(thread_file(self.canvas_id), "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        return next(item for item in doc["threads"] if item["id"] == self.thread_id)
+
+    def test_roadmap_survives_load_save_cycles(self):
+        expected = main._agent_roadmap_clean(self.ROADMAP)
+        main._agent_thread_roadmap_set(self.req, self.ROADMAP)
+        self.assertEqual(main._agent_thread_roadmap_get(self.req), expected)
+
+        # 读盘 → 再存一次（以前这一步就把 roadmap 丢了）
+        main._agent_thread_doc_save(self.canvas_id, main._agent_thread_doc_load(self.canvas_id))
+        self.assertEqual(main._agent_thread_roadmap_get(self.req), expected)
+        self.assertEqual(self._raw_thread()["roadmap"], expected, "盘上的结构要原样，不被多包一层")
+
+        # 再追加消息（走读-改-写）也还在
+        main.agent_thread_append(self.canvas_id, [{"role": "user", "text": "接着做成片"}],
+                                 thread_id=self.thread_id)
+        self.assertEqual(main._agent_thread_roadmap_get(self.req), expected)
+        self.assertEqual(main.agent_thread_load(self.canvas_id, self.thread_id)["roadmap"], expected)
+
+    def test_legacy_thread_without_roadmap_reads_as_empty(self):
+        self.assertEqual(main._agent_thread_roadmap_get(self.req), [], "没有方案就是空方案")
+        self.assertNotIn("roadmap", main.agent_thread_load(self.canvas_id, self.thread_id))
+        # 旧文件（单线程格式、没有 roadmap）迁移后同样不报错、不凭空加空字段
+        legacy = {"canvas_id": self.canvas_id, "messages": [{"role": "user", "text": "旧消息"}],
+                  "recent": [], "updated_at": 123}
+        with open(thread_file(self.canvas_id), "w", encoding="utf-8") as fh:
+            json.dump(legacy, fh, ensure_ascii=False)
+        doc = main._agent_thread_doc_load(self.canvas_id)
+        self.assertEqual(len(doc["threads"]), 1)
+        self.assertNotIn("roadmap", doc["threads"][0])
+        main._agent_thread_doc_save(self.canvas_id, doc)
+        self.assertNotIn("roadmap", main._agent_thread_doc_load(self.canvas_id)["threads"][0])
+        self.assertEqual(main._agent_thread_roadmap_get(
+            {"canvas_id": self.canvas_id, "thread_id": doc["threads"][0]["id"]}), [])
+
+    def test_dirty_roadmap_is_cleaned_on_load(self):
+        main._agent_thread_roadmap_set(self.req, self.ROADMAP)
+        with open(thread_file(self.canvas_id), "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        next(item for item in doc["threads"] if item["id"] == self.thread_id)["roadmap"] = [
+            {"stage": " 有名字 "}, "只有名字", {"detail": "没名字"}, 3,
+            {"stage": "x" * 80, "generations": "5"}]
+        main._agent_thread_doc_save(self.canvas_id, doc)
+        cleaned = main._agent_thread_roadmap_get(self.req)
+        self.assertEqual([row["stage"] for row in cleaned], ["有名字", "只有名字", "x" * 60])
+        self.assertEqual(cleaned[-1]["generations"], 5)
+        self.assertEqual(len(main._agent_thread_doc_load(self.canvas_id)["threads"][0]["roadmap"]), 3,
+                         "读盘时也收敛，不会把怪结构留在文档里")
+
+
 if __name__ == "__main__":
     unittest.main()
+

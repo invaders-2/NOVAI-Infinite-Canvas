@@ -5,6 +5,7 @@
 import { useEffect } from "react";
 import { createMathPlugin } from "@streamdown/math";
 import { defaultRehypePlugins, Streamdown, type ControlsConfig, type StreamdownTranslations } from "streamdown";
+import { padCjkEmphasis } from "./markdownCjk";
 import "katex/dist/katex.min.css";
 
 type Align = "left" | "center" | "right" | null;
@@ -301,7 +302,8 @@ const displayMath = (src: string) => {
   }).join("\n");
 };
 
-const prepareMarkdown = (src: string) => padTables(escapeScriptTags(displayMath(unwrapWholeFence(String(src || "")))));
+/** 交给 streamdown 之前统一预处理：先拆整段围栏 → 补中文标点旁的加粗定界符 → 公式成块 → 保护 <script> → 补表格列 */
+const prepareMarkdown = (src: string) => padTables(escapeScriptTags(displayMath(padCjkEmphasis(unwrapWholeFence(String(src || ""))))));
 
 /** 单个 $ 也认（$E=mc^2$）；不打开时只有 $$…$$ 会进公式 */
 const MATH = createMathPlugin({ singleDollarTextMath: true });

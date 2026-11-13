@@ -3,7 +3,7 @@
    1) 源图尺寸 → 尺寸档长边等比 WxH；无源图返回空；
    2) 源图取节点自己的结果 / 上游图片结果；
    3) 图片、视频、方案卡的「原图比例」标签，视频写回 adaptive；
-   4) 无源图时图片面板有禁用/提示。 */
+   4) 无源图时图片面板禁用原图比例（不再挂灰字提示）。 */
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -64,9 +64,12 @@ const panel = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas
 const card = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/agent/TaskPlanCard.tsx'), 'utf8');
 const backend = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/novaiBackend.ts'), 'utf8');
 assert.ok(panel.includes('useSourceBox') && panel.includes('sourceSizeForTier') && panel.includes('ratioDisplayLabel'), '图片/视频面板用源图比例');
-assert.ok(panel.includes('原图比例需要有参考图') && panel.includes('disabled: disabled || needSource'), '没有源图时禁用并提示');
+assert.ok(panel.includes('disabled: disabled || needSource'), '没有源图时原图比例禁用');
+assert.strictEqual(panel.includes('原图比例需要有参考图'), false, '弹层不再显示「原图比例需要有参考图」灰字');
 assert.ok(panel.includes('videoRatioChoices') && panel.includes('ratio: videoRatioValue(ratio)'), '视频比例写回 adaptive');
-assert.ok(card.includes('ratioDisplayLabel(ratio)'), '方案卡下拉把自适应显示为原图比例');
+// 方案卡的比例选择已改成 #pop 格子（PlanRatioField，逻辑在 PlanParamPickers.tsx）
+const pickers = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/agent/PlanParamPickers.tsx'), 'utf8');
+assert.ok(pickers.includes('ratioDisplayLabel(value)') && card.includes('PlanRatioField'), '方案卡比例弹层把自适应显示为原图比例');
 assert.ok(backend.includes('params.sourceSize') && backend.includes('/auto|自适应|source/i.test(params.ratio)'), '生成请求使用原图显式 WxH，不再落 1:1');
 
 console.log('[PASS] 原图比例：尺寸换算 / 源图选择 / 图片视频标签 / 方案卡与请求（4 组）');

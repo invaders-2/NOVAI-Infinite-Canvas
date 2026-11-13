@@ -8,15 +8,19 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const { checkStaticCacheVersions } = require('./static-cache-version');
 const root = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+
 const ui = 'novai-canvas-ui/src/canvas/canvas-next/ui';
 
 /* ---------- 工具条入口 ---------- */
 const gen = read(ui + '/GenPanel.tsx');
 const imgRow = gen.split('\n').find((l) => l.includes('B("crop"') && l.includes('B("more"'));
 assert(imgRow, '找到图片节点工具条那一行');
-assert(imgRow.includes('B("lossless", "layers", "无损改图")'), '工具条有「无损改图」按钮（layers 线性图标）');
+assert(imgRow.includes('B("lossless", "edit", "无损改图")'), '工具条有「无损改图」按钮（edit / square-pen 线性图标）');
+assert(imgRow.includes('B("split", "layers", "拆分图层"'), '「拆分图层」仍是 layers（两个按钮不再同图）');
+assert(/edit:\s*"square-pen"/.test(read(ui + '/iconData.ts')), 'edit 图标别名指向 square-pen');
 assert(imgRow.indexOf('"relight"') < imgRow.indexOf('"lossless"'), '无损改图排在「重打光」之后');
 assert(imgRow.indexOf('"lossless"') < imgRow.indexOf('"more"'), '无损改图排在「更多」之前');
 
@@ -206,7 +210,8 @@ assert(builtCss.includes('.ie-dialog') && builtCss.includes('.ie-dialog.le') && 
 const html = read('static/canvas.html');
 const vers = [...html.matchAll(/novai-canvas\/(?:canvas\.css|canvas\.js)\?v=([0-9.]+)/g)].map((m) => m[1]);
 assert.strictEqual(vers.length, 2, 'canvas.html 里 css / js 各一处 ?v=');
-assert.strictEqual(vers[0], vers[1], 'css / js 的 ?v= 一致');
-assert(/^1\.0\.143\.\d{10}$/.test(vers[0]), '?v= 形如 1.0.143.<unix 秒>：' + vers[0]);
+const cache = checkStaticCacheVersions({ root, page: 'static/canvas.html' });
+assert.ok(cache.ok, 'canvas.html 的 ?v= 满足：VERSION 前缀 / 10 位 mtime / 无裸链接 / 多处一致' + (cache.problems.length ? '：' + cache.problems.join('；') : ''));
+assert.ok(cache.refs.has('/static/novai-canvas/canvas.css') && cache.refs.has('/static/novai-canvas/canvas.js'), 'css / js 两处 ?v= 都在：' + vers.join(' / '));
 
 console.log('[PASS] 图片节点「无损改图」：入口 / 居中对话框 / 协议 / 选择器 / 45MB 压缩 / 新节点连线 / 构建产物');

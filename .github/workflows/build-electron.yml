@@ -330,13 +330,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 国内用户拉不动 GitHub Releases：把更新产物同步到国内镜像。
-      # - ModelScope（bllack/NOVAI-releases 模型仓库）：客户端自动更新的国内源，
-      #   Electron 端 GitHub 检查失败时自动切换到这个 generic 更新地址：
-      #   https://modelscope.cn/models/bllack/NOVAI-releases/resolve/master/electron-release
+      # - ModelScope（bllack/NOVAI-releases 模型仓库）：客户端自动更新的国内源。
+      #   electron-release/ 给 Electron 端（Windows 上镜像优先），仓库根目录的
+      #   VERSION / static/update-notes.json 等给 Python 后端一键更新与更新说明兜底。
       # - Gitee（invaders/novai Release 附件）：人工下载镜像（网页下载有验证码，
       #   不适合做自动更新源，只兜底手动安装）。
-      # 需要在仓库 Settings → Secrets 配置：MODELSCOPE_TOKEN、GITEE_TOKEN（可选）。
-      # 该步骤失败不影响主构建（continue-on-error），产物仍可从 GitHub Release 获取。
+      # 需要在仓库 Settings → Secrets 配置：MODELSCOPE_TOKEN、GITEE_TOKEN。
+      #
+      # 失败可见：这两个步骤保留 continue-on-error（GitHub Release 已发出去就算成功，
+      # 镜像失败不回滚、也不拦后面的步骤），但脚本自己会以非 0 退出（step 在 Actions 里
+      # 显示红叉）、打 ::error:: 注解，并把「哪些文件没同步 + 影响哪一端用户」写进
+      # GITHUB_STEP_SUMMARY；最后由 mirror-gate job 兜总账。
       - name: Sync update artifacts to domestic mirrors (tag or manual release_tag)
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
         continue-on-error: true
@@ -349,6 +353,8 @@ jobs:
           RUNNER_OS: ${{ runner.os }}
         run: bash .github/scripts/sync-domestic-release.sh
 
+      # build-win / build-mac 与本 workflow 并行，安装包通常晚几分钟才进 Release；
+      # --wait-for-assets 让这一步等它们，避免过去「没找到安装包 → warning → exit 0」的静默跳过。
       - name: 同步安装包到 Gitee（自动分卷，tag or manual release_tag）
         if: (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')) && matrix.platform == 'ubuntu-latest'
         continue-on-error: true
@@ -357,4 +363,40 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: bash .github/scripts/sync-gitee-installers.sh "${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag) || github.ref_name }}"
+        run: bash .github/scripts/sync-gitee-installers.sh "${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag) || github.ref_name }}" --wait-for-assets 1800
+
+  # 镜像完整性兜底：同步脚本失败时 step 会标红 + summary 列缺失文件，这里再跑一次只读校验，
+  # 确认 GitHub Release 与 ModelScope / Gitee 真的齐全。
+  # · workflow_dispatch：整体结论判失败（用这个入口补传时必须看到红）；
+  # · tag push：只让 check step 标红 + summary 红字，整体保持成功（Release 已发布就算成功）。
+  mirror-gate:
+    name: 镜像完整性校验（失败只表示镜像不全，Release 已发布）
+    needs: build
+    if: always() && needs.build.result == 'success' && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != ''))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 校验 Release 资产与国内镜像
+        id: check
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+          TAG: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag) || github.ref_name }}
+        run: python3 tools/check_release_completeness.py "$TAG" --write-summary "$GITHUB_STEP_SUMMARY"
+
+      - name: 镜像不完整（workflow_dispatch → 整体判失败）
+        if: steps.check.outcome == 'failure' && github.event_name == 'workflow_dispatch'
+        run: |
+          echo "::error::国内镜像不完整（缺失文件见 job summary）。GitHub Release 已正常发布，不需要回滚；补传后再跑 sync-mirrors 与本次校验。"
+          exit 1
+
+      - name: 镜像不完整（tag push → 只提示，不判整体失败）
+        if: steps.check.outcome == 'failure' && github.event_name != 'workflow_dispatch'
+        run: |
+          echo "::warning::国内镜像不完整（缺失文件见 job summary）。Release 已发布，本次运行保持成功；请跑一次 sync-mirrors 补传。"

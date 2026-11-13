@@ -14,6 +14,7 @@ import 一次要拉起整套依赖；工具名与标记的一致性由 tests/tes
 """
 from __future__ import annotations
 
+import os
 from typing import Dict, Iterator, List, Optional, Tuple
 
 # 与 main.AGENT_TOOLS 的键一一对应（顺序也照抄，方便人工比对）
@@ -255,3 +256,84 @@ def is_write_command(name: str) -> bool:
     if not spec:
         return True
     return bool(spec.get("mutates"))
+
+
+# ---------------------------------------------------------------------------
+# 阶段一（NOVAI_AGENT_V2_READ_TOOLS=1）：按需读取命令
+#   默认不注册：命令表是 CLI 与测试逐条比对的唯一真相源，加命令就改变了工具总数；
+#   所以只在开关打开时追加，关掉时命令表与改造前完全一致。
+#   read_table 不新增命令：已有的 table.read 就是它（给了 node_id 读画布表格节点，
+#   否则读用户上传的 xlsx/csv，分流在 main._agent_v2_merged_read_table）。
+# ---------------------------------------------------------------------------
+V2_READ_COMMANDS: Dict[str, Dict] = {
+    "node.read": {
+        "tool": "read_node",
+        "mutates": False,
+        "mutates_canvas": False,
+        "summary": "读节点的全文 / 提示词 / 参数 / 上下游 / 结果地址（画布地图只有一行概要）",
+    },
+    "canvas.search": {
+        "tool": "search_canvas",
+        "mutates": False,
+        "mutates_canvas": False,
+        "summary": "按标题、提示词、正文、表格内容找节点，可按种类与状态过滤",
+    },
+    "canvas.diff": {
+        "tool": "canvas_diff",
+        "mutates": False,
+        "mutates_canvas": False,
+        "summary": "看自上次对话以来画布上新建 / 删除 / 改动了哪些节点与连线",
+    },
+    "canvas.view_image": {
+        "tool": "view_image",
+        "mutates": False,
+        "mutates_canvas": False,
+        "summary": "把某个图片节点的结果（视频看封面帧）在下一轮交给模型看",
+    },
+    "run.recall_step": {
+        "tool": "recall_step",
+        "mutates": False,
+        "mutates_canvas": False,
+        "summary": "取回本次运行里某个步骤的结果原文（执行记录里标着「已折叠」的）",
+    },
+}
+
+
+def _v2_read_tools_enabled() -> bool:
+    raw = os.environ.get("NOVAI_AGENT_V2_READ_TOOLS")
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in ("1", "true", "on", "yes")
+
+
+# ---------------------------------------------------------------------------
+# 阶段二·2（NOVAI_AGENT_V2_MEMORY=1）：记忆检索命令
+#   与读工具同样的规矩：默认不注册，开关打开才追加，关掉时命令表逐字不变。
+# ---------------------------------------------------------------------------
+V2_MEMORY_COMMANDS: Dict[str, Dict] = {
+    "run.recall": {
+        "tool": "recall",
+        "mutates": False,
+        "mutates_canvas": False,
+        "summary": "按关键词翻历史（对话 / 摘要 / 画布档案 / 长期记忆），返回片段与出处",
+    },
+}
+
+
+def _v2_memory_enabled() -> bool:
+    raw = os.environ.get("NOVAI_AGENT_V2_MEMORY")
+    if raw is None:
+        return False
+    return str(raw).strip().lower() in ("1", "true", "on", "yes")
+
+
+if _v2_read_tools_enabled():
+    COMMANDS.update(V2_READ_COMMANDS)
+    CANVAS_TOOL_NAMES = CANVAS_TOOL_NAMES + tuple(spec["tool"] for spec in V2_READ_COMMANDS.values())
+    TOOL_NAMES = CANVAS_TOOL_NAMES + FILE_TOOL_NAMES
+
+if _v2_memory_enabled():
+    COMMANDS.update(V2_MEMORY_COMMANDS)
+    CANVAS_TOOL_NAMES = CANVAS_TOOL_NAMES + tuple(spec["tool"] for spec in V2_MEMORY_COMMANDS.values())
+    TOOL_NAMES = CANVAS_TOOL_NAMES + FILE_TOOL_NAMES
+

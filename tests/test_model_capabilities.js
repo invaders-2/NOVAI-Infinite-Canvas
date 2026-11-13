@@ -5,11 +5,13 @@
 //   3) 视频宽高比逐项等于官方（Ark Seedance 2.0 / Kling / APIMart VEO3.1 / Google Veo），任何表都不含 9:21；
 //   4) 档位词表 / RES_LONG_SIDE / RES_PIXEL_LIMIT_FALLBACK 覆盖全部官方档位；
 //   5) 视频分辨率下拉 = Auto/480p/720p/1080p/4K（780P 已删）；
-//   6) 经典画布 keep_ratio 发请求前解析成具体比例，与智能画布同语义。
+//   6) 经典画布 keep_ratio 发请求前解析成具体比例，与智能画布同语义；
+//   7) 透明背景能力位 background（APIMart app 文档）与智能画布「透明」选项显隐 / 存量归一。
 //
 // 官方出处：
 //   视频 /tmp/novai-video-docs（Ark create-video-generation-task-api.md、APIMart VEO3.1、Kling、Gemini Veo）
 //   图片 /tmp/novai-ratio-audit + /tmp/novai-official-docs（gemini_image_generation / volcengine_ark_image_api / agnes_image_25_flash）
+//   透明背景 docs.apimart.ai（gpt-image 与 seedream 系列各自是否接受 background 参数）
 //
 // 差分证明（接改前备份应失败）：
 //   NOVAI_CAP_TEST_CLASSIC_SRC=/tmp/novai-canvas-official-evidence/backup/canvas.js \
@@ -61,10 +63,47 @@ const OFFICIAL_IMAGE_RES_LEVELS = {
     'nano-banana': ['1k', '2k', '4k'],
     'seedream-5.0-lite': ['2k', '3k', '4k'],
     'seedream-5.0': ['1k', '1.5k', '2k'],
+    'seedream-5-5': ['1k', '1.5k', '2k'],
     'seedream-4.5': ['2k', '4k'],
     'seedream-4.0': ['1k', '2k', '4k'],
     'agnes-image': ['1k', '2k', '3k', '4k']
 };
+const OFFICIAL_BACKGROUND_SUPPORTED = [
+    'gpt-image-1',
+    'gpt-image-1.5-official',
+    'gpt-image-2.5',
+    'gpt-image-2.5-flare',
+    'gpt-image-2.5-sunburst',
+    'gpt-image-2.6-flare',
+    'gpt-image-2.6-sunburst',
+    'seedream-5.5',
+    'seedream-5-5',
+    'seedream_v5_5'
+];
+const OFFICIAL_BACKGROUND_BLOCKED = [
+    'gpt-image-2.5-ext',
+    'gpt-image-2.6-ext',
+    'gpt-image-2',
+    'seedream-5.0',
+    'seedream-5-0',
+    'seedream-5.0-pro',
+    'seedream-5.0-lite',
+    'seedream_v5',
+    'gemini-2.5-flash-image',
+    'nano-banana',
+    'nano-banana-2',
+    'flux-2',
+    'flux-kontext',
+    'qwen-image-2.0',
+    'grok-imagine-image',
+    'wan2.7-image',
+    'midjourney',
+    'doubao-seedream-5-0-260128',
+    'doubao-seedream-4-5-250928',
+    'jimeng-3.0',
+    'Tongyi-MAI/Z-Image-Turbo',
+    'some-unknown-image-model'
+];
 const OFFICIAL_VIDEO_ASPECTS = {
     seedance: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'],
     kling: ['16:9', '9:16', '1:1'],
@@ -100,6 +139,8 @@ function extractCapabilities(src){
         if(levels) entry.resLevels = levels[1].split(',').map(part => part.trim().replace(/^'|'$/g, '')).filter(Boolean);
         const aspects = /aspects:\s*\[([^\]]*)\]/.exec(m[2]);
         if(aspects) entry.aspects = aspects[1].split(',').map(part => part.trim().replace(/^'|'$/g, '')).filter(Boolean);
+        const background = /background:\s*(true|false)/.exec(m[2]);
+        if(background) entry.background = background[1] === 'true';
         entries[m[1]] = entry;
     }
     return entries;
@@ -126,6 +167,7 @@ function buildSandbox(src, kind){
     }else{
         vm.runInContext('globalThis.settings = {};', sandbox);
         names.push('videoAspectOptions', 'videoResolutionOptions');
+        names.push('imageBackgroundSupported', 'imageBackgroundValueFor');
     }
     const body = consts.concat(names.map(name => topLevelFunction(src, name))).join('\n');
     vm.runInContext(body, sandbox, { filename: kind + '-cap-sandbox.js' });
@@ -147,6 +189,8 @@ async function main(){
         if(!smartCaps[key]) return;
         eq(smartCaps[key].resLevels || null, classicCaps[key].resLevels || null, '两页 ' + key + '.resLevels 一致');
         eq(smartCaps[key].aspects || null, classicCaps[key].aspects || null, '两页 ' + key + '.aspects 一致');
+        eq(smartCaps[key].background === undefined ? null : smartCaps[key].background,
+            classicCaps[key].background === undefined ? null : classicCaps[key].background, '两页 ' + key + '.background 一致');
     });
 
     // ── 2. 图片档位逐项等于官方 ─────────────────────────────────────────────
@@ -199,6 +243,7 @@ async function main(){
         ['seedream-5.0-pro', ['1k', '1.5k', '2k']],
         ['seedream-5.0-flash', ['1k', '1.5k', '2k']],
         ['seedream-5.0-lite', ['2k', '3k', '4k']],
+        ['seedream-5-5', ['1k', '1.5k', '2k']],
         ['seedream-4.5', ['2k', '4k']],
         ['seedream-4.0', ['1k', '2k', '4k']],
         ['agnes-image-25-flash', ['1k', '2k', '3k', '4k']],
@@ -216,6 +261,50 @@ async function main(){
         eq(classic.imageResLevelsFor(model), expected, '经典画布 imageResLevelsFor(' + model + ')');
         eq(smart.imageResLevelsFor(model), expected, '智能画布 imageResLevelsFor(' + model + ')');
     });
+
+    // ── 5b. 透明背景能力位：支持 / 不支持两组模型 × 两套画布 ─────────────────
+    OFFICIAL_BACKGROUND_SUPPORTED.forEach(model => {
+        const expr = 'modelCapabilityFor(' + JSON.stringify(model) + ", 'background')";
+        eq(readCtx(classic, expr), true, '经典画布 ' + model + ' 支持透明背景');
+        eq(readCtx(smart, expr), true, '智能画布 ' + model + ' 支持透明背景');
+    });
+    OFFICIAL_BACKGROUND_BLOCKED.forEach(model => {
+        const expr = 'modelCapabilityFor(' + JSON.stringify(model) + ", 'background')";
+        ok(readCtx(classic, expr) !== true, '经典画布 ' + model + ' 不支持透明背景');
+        ok(readCtx(smart, expr) !== true, '智能画布 ' + model + ' 不支持透明背景');
+    });
+    // 具体型号必须排在族名之前，否则 2.5-ext / 2.6-ext 会被通用 entry 判成支持
+    const capOrder = Object.keys(classicCaps);
+    ok(capOrder.indexOf('gpt-image-2.6-ext') >= 0 && capOrder.indexOf('gpt-image-2.6-ext') < capOrder.indexOf('gpt-image-2.6'),
+        'gpt-image-2.6-ext 排在 gpt-image-2.6 之前');
+    ok(capOrder.indexOf('gpt-image-2.5-ext') >= 0 && capOrder.indexOf('gpt-image-2.5-ext') < capOrder.indexOf('gpt-image-2.5'),
+        'gpt-image-2.5-ext 排在 gpt-image-2.5 之前');
+
+    // 存量 transparent 在切到不支持模型时收回 auto（智能画布纯函数行为）
+    const backgroundValue = (model, value) => readCtx(smart,
+        'imageBackgroundValueFor(' + JSON.stringify(model) + ', ' + JSON.stringify(value) + ')');
+    eq(backgroundValue('gpt-image-1', 'transparent'), 'transparent', '支持透明的模型保留 transparent');
+    eq(backgroundValue('seedream-5-5', 'transparent'), 'transparent', 'seedream-5-5 保留 transparent');
+    eq(backgroundValue('gpt-image-2', 'transparent'), 'auto', '历史存档：gpt-image-2 的 transparent 收回 auto');
+    eq(backgroundValue('gpt-image-2.5-ext', 'transparent'), 'auto', 'gpt-image-2.5-ext 的 transparent 收回 auto');
+    eq(backgroundValue('nano-banana', 'transparent'), 'auto', 'nano-banana 的 transparent 收回 auto');
+    eq(backgroundValue('doubao-seedream-5-0-260128', 'transparent'), 'auto', '火山 seedream 的 transparent 收回 auto');
+    eq(backgroundValue('gpt-image-1', 'keep'), 'keep', '「保持原背景」不受能力影响');
+    eq(backgroundValue('gpt-image-1', 'bogus'), 'auto', '非法背景值归一成 auto');
+
+    // 源码静态断言：选项按能力过滤 + 设置归一有收回
+    ok(/function imageBackgroundSupported\(model\)\{\s*return modelCapabilityFor\(model, 'background'\) === true;/.test(smartSrc),
+        '智能画布按 modelCapabilityFor(..., background) === true 判定');
+    const pickerFn = topLevelFunction(smartSrc, 'renderSizePickerControl');
+    ok(/if\(imageBackgroundSupported\(settings\.model\)\) backgroundOptions\.push\(\['transparent'/.test(pickerFn),
+        '尺寸弹窗只在支持模型上追加「透明」选项');
+    ok(/backgroundOptions\.map\(\(\[value, label\]\) =>/.test(pickerFn), '背景按钮由过滤后的 backgroundOptions 渲染');
+    const normalizeFn = topLevelFunction(smartSrc, 'imageBackgroundValueFor');
+    ok(/current === 'transparent' && !imageBackgroundSupported\(model\) \? 'auto' : current/.test(normalizeFn),
+        '归一逻辑：不支持透明时收回 auto');
+    ok(/settings\.background = imageBackgroundValueFor\(settings\.model, settings\.background\);/.test(smartSrc),
+        '渲染前按当前模型归一 settings.background（切模型即走到）');
+
     const videoCases = [
         ['doubao-seedance-2-0-260128', ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive']],
         ['kling-v3', ['16:9', '9:16', '1:1']],

@@ -55,4 +55,39 @@ assert(!engine.includes('clamp(n.w / want, 100, 520)') && !engine.includes('clam
 const registry = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/editors/registry.tsx'), 'utf8');
 assert(registry.includes('fitMediaBox('), '图片编辑结果也按真实比例摆正');
 
-console.log('[PASS] 生成结果 / 占位 / 批量图片节点按真实比例排版（9:16、16:9、21:9、1:1 与最大盒）');
+// 上传 / 联网搜图 / 助手参考素材：新建节点宽 240 起步，太扁就放大宽度，绝不靠夹高度压比例
+eq(fit.fitSourceBox(4, 3), { w: 240, h: 180 }, '4:3 上传图 240×180');
+eq(fit.fitSourceBox(9, 16), { w: 240, h: 427 }, '9:16 上传图按比例变高');
+const flat = fit.fitSourceBox(1676, 350);
+eq(flat, { w: 479, h: 100 }, '4.79:1 分镜长图：宽度放大到 479，而不是 240×100 被裁');
+assert(near(flat.w / flat.h, 1676 / 350), '4.79:1 摆正后比例不变');
+eq(fit.fitSourceBox(2048, 512), { w: 400, h: 100 }, '4:1 横图宽度放大');
+eq(fit.fitSourceBox(1, 5), { w: 128, h: 640 }, '5:1 超高图按高度收宽度');
+eq(fit.fitSourceBox(10000, 100), { w: 480, h: 5 }, '100:1 超宽长图收起宽度（高只剩取整误差）');
+eq(fit.fitSourceBox(0, 100), null, '源图宽 0 → 不处理');
+eq(fit.fitSourceBox(100, NaN), null, '源图高 NaN → 不处理');
+
+// 已有节点换源图（切版本 / 老节点纠偏）：宽度不动，只按源图比例改高度
+eq(fit.refitNodeBox({ w: 240, h: 240 }, 1676, 350), { w: 240, h: 50 }, '240×240 的老参考图节点改成 240×50');
+eq(fit.refitNodeBox({ w: 600, h: 600 }, 1, 1), { w: 600, h: 600 }, '方形图不动');
+eq(fit.refitNodeBox({ w: 240, h: 520 }, 480, 9724), { w: 32, h: 640 }, '1:20 超高图按现高收宽度');
+
+// 接线：所有「素材落成节点」的入口都用同一套等比盒子，不再有单边 clamp
+const sources = {
+    'actions.ts': fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/actions.ts'), 'utf8'),
+    'agent/webImages.ts': fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/agent/webImages.ts'), 'utf8'),
+    'ui/sourceDrop.ts': fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/sourceDrop.ts'), 'utf8'),
+    'homeSeed.ts': fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/homeSeed.ts'), 'utf8'),
+};
+for (const [name, code] of Object.entries(sources)) {
+    assert(code.includes('fitSourceBox('), name + ' 用 fitSourceBox 定新节点尺寸');
+    assert(!code.includes('Math.max(100, Math.min(520'), name + ' 不再用单边 clamp 压比例');
+}
+const menus = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/menus.tsx'), 'utf8');
+assert(menus.includes('refitNodeBox('), '切换版本按该版本真实比例摆正');
+const repair = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/mediaBoxRepair.ts'), 'utf8');
+assert(repair.includes('refitNodeBox(') && repair.includes('needsAgentRefFit'), '老画布助手参考图节点按真实像素纠偏');
+const app = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/CanvasApp.tsx'), 'utf8');
+assert(app.includes('repairAgentRefBoxes(store)'), '载入画布后执行一次纠偏');
+
+console.log('[PASS] 生成结果 / 上传 / 参考素材按真实比例排版（9:16、16:9、4.79:1、1:20 与最大盒）');

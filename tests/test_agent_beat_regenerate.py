@@ -239,13 +239,17 @@ class ProducerThreadRecordTests(unittest.TestCase):
 
         events = drain(req, [{"done": True, "message": "不该走到这"}], execute=execute,
                        extra_patches=[patch.object(main, "load_canvas", return_value=beat_canvas(done=True)),
-                                      patch.object(main, "_agent_beat_review", return_value=review),
+                                      patch.object(main, "_agent_beat_review",
+                                                   new=AsyncMock(return_value=review)),
                                       patch.object(main, "agent_thread_append",
-                                                   side_effect=lambda canvas_id, recs, touched=None: records.extend(recs))])
+                                                   side_effect=lambda canvas_id, recs, touched=None,
+                                                   thread_id="": records.extend(recs))])
         self.assertEqual(done_of(events)["status"], "ok")
         self.assertEqual(records[0]["role"], "user")
         self.assertEqual(records[0]["text"], "重新生成审查不合格的 1 个结果")
-        self.assertIn("要重新生成吗", done_of(events)["message"])
+        self.assertIn("审查在后台", done_of(events)["message"], "回复不等视觉审查")
+        reviews = [d for n, d in events if n == "review"]
+        self.assertEqual(reviews[0]["items"][0]["issues"], ["杯身太歪"])
 
 
 if __name__ == "__main__":

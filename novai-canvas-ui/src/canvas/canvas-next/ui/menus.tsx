@@ -7,6 +7,7 @@ import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { addFiles, alignSelection, connect, copySelection, deleteSelection, duplicate, extractCurrentVersion, hasClip, paste, spreadHistory, title } from "../actions";
 import { runChain, runNode } from "../engine";
 import { genOf, inputsOf, isGenKind, outOf, trimIsFull, trimLabel, TYPE_ICON, uid, type GenKind, NODE_DEFAULT_SIZE } from "../model";
+import { refitNodeBox } from "../mediaFit";
 import { emptyTable, withTable } from "../table";
 import type { Ctl } from "./ctx";
 import type { CanvasStore } from "../store";
@@ -99,7 +100,7 @@ export function nodeMenu(ctl: Ctl, at: { x: number; y: number }) {
     const act = (f: () => void) => () => { close(); f(); };
     return <>
       {/* 分组：资产 ┃ 版本 ┃ 运行 ┃ 编辑 ┃ 删除 ┃ 剪贴板（TapNow 的节点菜单也是按用途分组） */}
-      <button className="mi" data-k="lib" disabled={!(n.kind === "image" && out)} onClick={act(() => { store.patchGen(n.id, { fav: true }); store.toast(`「${title(n)}」已收藏`); })}><Icon name="star" size="s" />收藏</button>
+      <button className="mi" data-k="lib" disabled={!((n.kind === "image" || n.kind === "video") && out)} onClick={act(() => { store.patchGen(n.id, { fav: true }); store.toast(`「${title(n)}」已收藏（提示词编辑器里可以从「收藏」@ 引用）`); })}><Icon name="star" size="s" />收藏</button>
       <button className="mi" data-k="element" disabled={!elementRefsOf(ctl, sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x)).length} onClick={act(() => createElementFrom(ctl, sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x)))}><Icon name="user" size="s" />存为元素<span className="k">@ 引用</span></button>
       <button className="mi" data-k="assetlib" disabled={!gen || !(out?.url || out?.text)} onClick={act(() => void saveNodeToLibrary(ctl, n, at))}><Icon name="libadd" size="s" />存入资产库<span className="k">个人 / 团队</span></button>
       {multi || isStack(n) ? <button className="mi" data-k="dl" onClick={act(() => void downloadMany(sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x), store))}><Icon name="download" size="s" />全部下载<span className="k">zip</span></button>
@@ -209,7 +210,7 @@ export function onNodeAct(ctl: Ctl, n: CanvasNode, act: string, e: React.Synthet
     </>, "down");
     return;
   }
-  if (act === "vprev" || act === "vnext") { const g = genOf(n); const hi = (g.hi + (act === "vnext" ? 1 : -1) + g.hist.length) % g.hist.length; const o = g.hist[hi]; store.updateNode(n.id, (x) => { const y = { ...x }; if (o?.w && o.h && (x.kind === "image" || x.kind === "video")) y.h = Math.round(Math.max(100, Math.min(520, (x.w * o.h) / o.w))); return y; }); store.patchGen(n.id, { hi }); }
+  if (act === "vprev" || act === "vnext") { const g = genOf(n); const hi = (g.hi + (act === "vnext" ? 1 : -1) + g.hist.length) % g.hist.length; const o = g.hist[hi]; store.updateNode(n.id, (x) => { const box = o?.w && o.h ? refitNodeBox(x, o.w, o.h) : null; return box ? { ...x, w: box.w, h: box.h } : x; }); store.patchGen(n.id, { hi }); }
 }
 
 type ClipCommand = (payload: Record<string, unknown>) => Promise<Record<string, any> | null | undefined>;

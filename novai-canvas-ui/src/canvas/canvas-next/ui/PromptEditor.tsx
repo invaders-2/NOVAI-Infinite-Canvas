@@ -230,6 +230,16 @@ export function PromptEditor(props: PromptEditorProps) {
     if (refocus && m && ref.current) { ref.current.focus(); try { const r = document.createRange(); r.setStart(m.mark.text, Math.min(m.mark.at + 1, m.mark.text.length)); r.collapse(true); const s = getSelection()!; s.removeAllRanges(); s.addRange(r); } catch { caretToEnd(); } }
   };
   const placeAfter = (n: Node) => { const r = document.createRange(); r.setStartAfter(n); r.collapse(true); const s = getSelection()!; s.removeAllRanges(); s.addRange(r); };
+  /** 光标落到胶囊后面那个分隔空格之后：normalize 会把空格并进后面的文字节点（相邻文本节点合并），旧的文本节点引用会失效，
+   *  所以按 chip 现在的相邻节点现算，不能用插入时那个 sp */
+  const placeAfterChip = (chip: HTMLElement) => {
+    const s = getSelection(); if (!s) return;
+    const sep = chip.nextSibling;
+    const r = document.createRange();
+    if (sep && sep.nodeType === 3) r.setStart(sep, Math.min(1, (sep.nodeValue || "").length));
+    else r.setStartAfter(chip);
+    r.collapse(true); s.removeAllRanges(); s.addRange(r);
+  };
 
   /** 在 @ 的位置插入一个上游引用胶囊 */
   const insertChip = (id: string, section?: string) => {
@@ -245,16 +255,17 @@ export function PromptEditor(props: PromptEditorProps) {
     const sp = document.createTextNode("\u00a0");
     const after = document.createRange(); after.setStartAfter(chip); after.collapse(true);
     after.insertNode(sp);
-    el.normalize();
     fitChip(chip); requestAnimationFrame(remeasure);
-    placeAfter(sp);
+    el.normalize();
+    placeAfterChip(chip);
     emit({ mention: true });
     // 下一帧再确认一次：有的输入法/浏览器会在同一帧把光标挪回组字处；用户已经开始打字就不动
     requestAnimationFrame(() => {
-      if (!ref.current || document.activeElement !== ref.current || !sp.parentNode) return;
+      if (!ref.current || document.activeElement !== ref.current || !chip.parentNode) return;
       const s = getSelection(); if (!s || !s.rangeCount || !s.isCollapsed) return;
-      const a = s.anchorNode;
-      if (a === ref.current || a === sp) placeAfter(sp);
+      const a = s.anchorNode; const sep = chip.nextSibling;
+      if (a === sep && s.anchorOffset >= 1) return; // 已经在「胶囊 + 空格」之后（可能还打了一个字）：别覆盖
+      if (a === ref.current || a === sep || a === chip) placeAfterChip(chip);
     });
     setTimeout(() => el.querySelectorAll(".pm-in").forEach((c) => c.classList.remove("pm-in")), 260);
   };
@@ -478,12 +489,21 @@ function MentionMenu({ node, ins, value, x, y, onPick, onClose }: { node: Canvas
   // 自引用排最前面（和连接输入分开看），其余保持连接顺序
   const selfAt = linked.findIndex((x) => x.type === "node" && !x.section && x.node.id === node.id);
   if (selfAt > 0) linked.unshift(linked.splice(selfAt, 1)[0]);
+  /* 画布上的其它节点（图片 / 视频 / 音频 / 文本 / 分组）：没连线也能 @。
+     之前只列「已连接节点 + 收藏 + 素材库」，画布上没连线的视频既连不上也没法收藏就永远 @ 不到；
+     助手输入区的 @ 面板本来就会列全部画布节点，这里对齐。 */
+  const others: Item[] = doc.nodes
+    .filter((n) => n.id !== node.id && mentionable(n) && !genOf(n).fav && !ins.some((x) => x.node.id === n.id))
+    .filter((n) => hit(title(n), TYPE_LABEL[n.kind as GenKind] || n.kind))
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .slice(0, 24)
+    .map((n) => ({ type: "node", key: n.id, node: n, ord: 0, used: used.has(n.id + "#") }));
   const inFolder = (f: string): Item[] => f === "fav" ? favs.filter((n) => hit(title(n))).map((n) => ({ type: "fav", key: "fav:" + n.id, node: n }))
     : node.kind === "audio" ? [] : els.filter((e) => e.kind === f && hit(e.name, e.desc)).map((e) => ({ type: "element", key: "el:" + e.id, el: e }));
   const folders = FOLDERS.filter((f) => f.always || inFolder(f.id).length);
   // 搜索时直接列出素材库里匹配的条目（不用一层层点进去）
   const lib: Item[] = folder ? inFolder(folder) : kw ? folders.flatMap((f) => inFolder(f.id)) : [];
-  const flat: Item[] = folder ? lib : [...linked, ...lib];
+  const flat: Item[] = folder ? lib : [...linked, ...others, ...lib];
   useEffect(() => { setHi(0); }, [q, folder]);
   useEffect(() => { box.current?.querySelector(".pm-it.hi")?.scrollIntoView({ block: "nearest" }); }, [hi]);
 
@@ -505,7 +525,7 @@ function MentionMenu({ node, ins, value, x, y, onPick, onClose }: { node: Canvas
       onPointerDown: (ev: import("react").PointerEvent) => ev.preventDefault(), onClick: () => pickNow(it) };
     if (it.type === "node") {
       const self = it.node.id === node.id && !it.section;
-      return <button key={it.key} {...common} data-self={self ? "1" : undefined}><MenuThumb node={it.node} /><span className="pm-nm">{self ? <>本节点 · {it.node.kind === "video" ? "当前视频" : "当前图"}</> : it.section ? <>{title(it.node)}<i> › </i>{it.section}</> : title(it.node)}</span>{it.used ? <Icon name="check" size="xs" /> : null}{self ? null : <span className="pm-k">#{it.ord}</span>}<span className="pm-ty"><Icon name={kindIconName(it.node.kind)} size="s" /></span></button>;
+      return <button key={it.key} {...common} data-self={self ? "1" : undefined}><MenuThumb node={it.node} /><span className="pm-nm">{self ? <>本节点 · {it.node.kind === "video" ? "当前视频" : "当前图"}</> : it.section ? <>{title(it.node)}<i> › </i>{it.section}</> : title(it.node)}</span>{it.used ? <Icon name="check" size="xs" /> : null}{self || !it.ord ? null : <span className="pm-k">#{it.ord}</span>}<span className="pm-ty"><Icon name={kindIconName(it.node.kind)} size="s" /></span></button>;
     }
     if (it.type === "fav") return <button key={it.key} {...common}><MenuThumb node={it.node} /><span className="pm-nm">{title(it.node)}</span><span className="pm-ty"><Icon name={kindIconName(it.node.kind)} size="s" /></span></button>;
     return <button key={it.key} {...common}><ElThumb el={it.el} /><span className="pm-nm">{it.el.name}</span><span className="pm-k">元素</span></button>;
@@ -523,6 +543,10 @@ function MentionMenu({ node, ins, value, x, y, onPick, onClose }: { node: Canvas
       </> : <>
         <div className="pm-h"><span>已连接节点</span>{linked.length ? <span className="pm-tip">输入序号快选</span> : null}</div>
         {linked.length ? linked.map(row) : <div className="pm-empty">{ins.some((x) => mentionable(x.node)) ? "没有匹配的节点" : <>还没有连接上游节点<br /><span>把节点连到这里，或点 ⊕ 从画布选择</span></>}</div>}
+        {others.length ? <><div className="pm-sep" />
+          <div className="pm-h"><span>画布节点</span><span className="pm-tip">没连线的也能 @</span></div>
+          {others.map(row)}
+        </> : null}
         {node.kind !== "audio" || favs.length ? <><div className="pm-sep" />
           <div className="pm-h"><span>个人素材库</span></div>
           {kw ? (lib.length ? lib.map(row) : <div className="pm-empty">素材库里没有匹配的</div>)

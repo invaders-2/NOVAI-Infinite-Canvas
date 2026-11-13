@@ -86,7 +86,7 @@ NOVAI_PORT=3211 python main.py 3211
 这是本次"16 版本测试版"的收口改动：
 
 - `main.py`（+707）：模型协议自动推断、gpt-image-1/1.5 去掉顶层 `response_format`（新版官方图像接口已移除该参数，报 `unknown_parameter` 时自动去参重试一次）、生成图片下方标注真实像素尺寸、GPT 聊天模型选择器只显示"已启用 + 有 Key + 有模型列表"的平台、停用 ModelScope 内置默认聊天模型（并清理老用户已保存配置）、一键更新白名单补 `server/`。
-- `static/gpt-chat.html`（+262）、`static/js/api-settings.js`（+71）、`static/api-settings.html`、`static/css/api-settings.css`：聊天顶栏去边框/色块（背景同色 + 模糊）、流式输出只在贴底时跟随（用户上滚不再被抢回）、模型选择器收敛、API 设置页同步。
+- 已删除的对话页（+262）、`static/js/api-settings.js`（+71）、`static/api-settings.html`、`static/css/api-settings.css`：聊天顶栏去边框/色块（背景同色 + 模糊）、流式输出只在贴底时跟随（用户上滚不再被抢回）、模型选择器收敛、API 设置页同步。（该页 2026-11 已下线删除。）
 - `server/protocols/{manifest,model_protocols}.json`：Agnes 协议条目。
 - 打包与更新链路补 `server/`：`.github/workflows/build-electron.yml`（PyInstaller `--add-data "server;"`）、`installer.nsi`、`desktop/package.json`、`build*.py`。
 - `VERSION` 1.0.115 → 1.0.117、`static/update-notes.json`（22 条更新说明，**这是最完整的功能清单**）、`.gitignore` 加 `_novai_*.log`。

@@ -33,15 +33,15 @@
             } catch(e) {}
         })();
     </script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2.0.05.1789606971"></script>
-    <script src="/static/js/theme.js?v=2.0.05.1792474521"></script>
-    <script src="/static/js/shared/utils.js?v=2.0.05.1790560477"></script>
-    <script src="/static/js/shared/morph-button.js?v=2.0.05.1789845865"></script>
-    <script src="/static/js/i18n.js?v=2.0.05.1790130330"></script>
-    <script defer src="/static/js/credits.js?v=2.0.05.1792848048"></script>
-    <script src="/static/js/user-menu.js?v=2.0.05.1793785628" defer></script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=2.0.05.1789606971">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.05.1793785603">
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2.0.07.1789606971"></script>
+    <script src="/static/js/theme.js?v=2.0.07.1794279814"></script>
+    <script src="/static/js/shared/utils.js?v=2.0.07.1790560477"></script>
+    <script src="/static/js/shared/morph-button.js?v=2.0.07.1789845865"></script>
+    <script src="/static/js/i18n.js?v=2.0.07.1790130330"></script>
+    <script defer src="/static/js/credits.js?v=2.0.07.1792848048"></script>
+    <script src="/static/js/user-menu.js?v=2.0.07.1793785628" defer></script>
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=2.0.07.1789606971">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.07.1793785603">
     <style>
         /* 本地 Tailwind 工具类兜底：CDN 慢/未就绪时也能立刻给图标尺寸，避免首屏左侧栏空白 */
         .w-1\.5 { width: 0.375rem; }
@@ -2695,10 +2695,10 @@
 
         .homepage-features {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: 1fr;
             gap: 16px;
             margin-bottom: 56px;
-            max-width: 780px;
+            max-width: 260px;
             margin-left: auto;
             margin-right: auto;
         }
@@ -3146,25 +3146,6 @@
             <div class="homepage-features">
                 <div class="homepage-feature">
                     <div class="homepage-feature-icon">
-                        <svg data-icon="globe" class="nv-i nv-i-globe" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"/>
-                            <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-                        </svg>
-                    </div>
-                    <div class="homepage-feature-title">AI 在线生图</div>
-                    <div class="homepage-feature-desc">多模型切换，实时预览，支持 Stable Diffusion、DALL·E 等主流模型</div>
-                </div>
-                <div class="homepage-feature">
-                    <div class="homepage-feature-icon">
-                        <svg data-icon="message" class="nv-i nv-i-message" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                        </svg>
-                    </div>
-                    <div class="homepage-feature-title">GPT 对话</div>
-                    <div class="homepage-feature-desc">智能提示词辅助与创意激发，优化生成指令，提升创作效率</div>
-                </div>
-                <div class="homepage-feature">
-                    <div class="homepage-feature-icon">
                         <svg data-icon="grid" class="nv-i nv-i-grid" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="7" height="7"/>
                             <rect x="14" y="3" width="7" height="7"/>
@@ -3172,7 +3153,7 @@
                             <rect x="3" y="14" width="7" height="7"/>
                         </svg>
                     </div>
-                    <div class="homepage-feature-title">智能画布BEAT</div>
+                    <div class="homepage-feature-title">智能画布</div>
                     <div class="homepage-feature-desc">自由布局，批量创作，支持图层管理与多画板协同</div>
                 </div>
             </div>
@@ -3188,25 +3169,6 @@
             <div class="onboarding-features">
                 <div class="onboarding-feature">
                     <div class="onboarding-feature-icon">
-                        <svg data-icon="globe" class="nv-i nv-i-globe" width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"/>
-                            <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-                        </svg>
-                    </div>
-                    <div class="onboarding-feature-title">在线生图</div>
-                    <div class="onboarding-feature-desc">多模型切换，输入提示词即可生成高质量图像</div>
-                </div>
-                <div class="onboarding-feature">
-                    <div class="onboarding-feature-icon">
-                        <svg data-icon="message" class="nv-i nv-i-message" width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                        </svg>
-                    </div>
-                    <div class="onboarding-feature-title">GPT 对话</div>
-                    <div class="onboarding-feature-desc">智能提示词助手，帮你优化创作指令</div>
-                </div>
-                <div class="onboarding-feature">
-                    <div class="onboarding-feature-icon">
                         <svg data-icon="grid" class="nv-i nv-i-grid" width="24" height="24" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="7" height="7"/>
                             <rect x="14" y="3" width="7" height="7"/>
@@ -3214,7 +3176,7 @@
                             <rect x="3" y="14" width="7" height="7"/>
                         </svg>
                     </div>
-                    <div class="onboarding-feature-title">智能画布BEAT</div>
+                    <div class="onboarding-feature-title">智能画布</div>
                     <div class="onboarding-feature-desc">自由拖拽布局，支持批量生成与管理</div>
                 </div>
             </div>
@@ -3246,19 +3208,6 @@
                     <span class="nav-text">首页</span>
                 </div>
 
-                <div class="nav-item" onclick="switchUI(this, 'online')">
-                    <svg data-icon="globe" class="w-5 h-5 flex-shrink-0 nv-i nv-i-globe" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"></path>
-                        <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                    </svg>
-                    <span class="nav-text" data-i18n="nav.online">在线生图</span>
-                </div>
-                <div class="nav-item" onclick="switchUI(this, 'gpt-chat')">
-                    <svg data-icon="message" class="w-5 h-5 flex-shrink-0 nv-i nv-i-message" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                    </svg>
-                    <span class="nav-text" data-i18n="nav.gpt">GPT 对话</span>
-                </div>
                 <div class="nav-item" onclick="switchUI(this, 'canvas')">
                     <svg data-icon="grid" class="w-5 h-5 flex-shrink-0 nv-i nv-i-grid" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <rect x="3" y="3" width="7" height="7"></rect>
@@ -3266,7 +3215,7 @@
                         <rect x="14" y="14" width="7" height="7"></rect>
                         <rect x="3" y="14" width="7" height="7"></rect>
                     </svg>
-                    <span class="nav-text" data-i18n="nav.canvas">智能画布BEAT</span>
+                    <span class="nav-text" data-i18n="nav.canvas">智能画布</span>
                 </div>
                 <div class="nav-item" onclick="switchUI(this, 'asset-manager')">
                     <svg data-icon="book" class="w-5 h-5 flex-shrink-0 nv-i nv-i-book" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -3295,21 +3244,6 @@
                 <span class="version-text">v-</span>
             </div>
         </aside>
-        <script>
-            /* 在侧栏 DOM 解析完后立即把 active 类移到当前页对应的入口，避免首屏先在文生图上闪一下 */
-            (function(){
-                try {
-                    var pageId = localStorage.getItem('studio_active_page');
-                    if(pageId && pageId !== 'zimage') {
-                        document.querySelectorAll('.nav-item.active, .side-pill.active').forEach(function(n){
-                            n.classList.remove('active');
-                        });
-                        var target = document.querySelector('[onclick*="\'' + pageId + '\'"]');
-                        if(target) target.classList.add('active');
-                    }
-                } catch(e) {}
-            })();
-        </script>
 
         <main class="stage">
 
@@ -3337,14 +3271,12 @@
                     <div class="skeleton-card"></div>
                 </div>
             </div>
-            <iframe id="frame-home" src="/static/home.html?v=2.0.05.1794152637" class="active" scrolling="yes"></iframe>
-            <iframe id="frame-zimage" data-src="/static/zimage.html?v=2.0.05.1794194020" scrolling="yes"></iframe>
-            <iframe id="frame-online" data-src="/static/online.html?v=2.0.05.1794194020" scrolling="yes"></iframe>
-            <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2.0.05.1794194020" scrolling="yes"></iframe>
-            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2.0.05.1794194020" scrolling="yes"></iframe>
-            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2.0.05.1794194020" scrolling="yes"></iframe>
-            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=2.0.05.1794194020" scrolling="yes"></iframe>
-            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2.0.05.1794194020" scrolling="yes"></iframe>
+            <iframe id="frame-home" src="/static/home.html?v=2.0.07.1794475915" class="active" scrolling="yes"></iframe>
+            <iframe id="frame-zimage" data-src="/static/zimage.html?v=2.0.07.1794473830" scrolling="yes"></iframe>
+            <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2.0.07.1794296378" scrolling="yes"></iframe>
+            <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2.0.07.1794475828" scrolling="yes"></iframe>
+            <iframe id="frame-comfyui-settings" data-src="/static/comfyui-settings.html?v=2.0.07.1794296378" scrolling="yes"></iframe>
+            <iframe id="frame-canvas" data-src="/static/canvas-list.html?v=2.0.07.1794296378" scrolling="yes"></iframe>
 
         </main>
     </div>
@@ -4128,8 +4060,8 @@
         const ACTIVE_PAGE_KEY = 'studio_active_page';
         const SIDEBAR_SETTINGS_COLLAPSED_KEY = 'studio_sidebar_settings_collapsed';
         const SIDEBAR_PINNED_KEY = 'studio_sidebar_pinned';
-        const DEFAULT_PAGE_ID = 'zimage';
-        const PAGE_IDS = ['home','zimage','online','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings'];
+        const DEFAULT_PAGE_ID = 'home';
+        const PAGE_IDS = ['home','zimage','canvas','asset-manager','api-settings','comfyui-settings'];
         const PROJECT_URL = 'https://github.com/invaders-2/NOVAI-Infinite-Canvas';
         let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/invaders-2/NOVAI-Infinite-Canvas/main/VERSION' };
         let updateConnectivityResult = null;
@@ -4304,7 +4236,8 @@
         function restoreActivePage() {
             try {
                 restoreSidebarPinned();
-                const id = PAGE_IDS.includes(localStorage.getItem(ACTIVE_PAGE_KEY)) ? localStorage.getItem(ACTIVE_PAGE_KEY) : DEFAULT_PAGE_ID;
+                // 启动一律回首页：不按上次停留页面恢复（用户要求关掉重开后回首页）
+                const id = DEFAULT_PAGE_ID;
                 restoreSidebarSettings(id);
                 const trigger = document.querySelector(`[onclick*="'${id}'"],[onclick*='"${id}"']`);
                 switchUI(trigger, id, { skipRemember:true });

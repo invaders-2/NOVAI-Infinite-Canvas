@@ -17,6 +17,8 @@
  */
 import { hostRoot } from "../../../novaiBridgeRoot";
 import { isAssetRef } from "../../canvasAssetRefs";
+import { watchDelay } from "./watchCadence";
+import { lastSeqOf, parseSseFrames, projectRunEvent, type RunSnapshot } from "./agentStream";
 import { buildCanvasModelLabelIndex, canvasModelBaseName } from "../../canvasModelLabels";
 import { loadDoc as loadDocLegacy, saveDoc as saveDocLegacy, serverDocToDoc } from "../../react-canvas/persistence";
 import type { CanvasDoc } from "../../react-canvas/reactCanvasStore";
@@ -678,6 +680,33 @@ export function createBridgeBackend(): CanvasBackend {
     watchAgentTask(taskId, onSnapshot) {
       if (disposed) return () => {};
       const api = oa()?.task; let active = true; let reading = false; let queued = false;
+      /**
+       * C8：运行中订阅 SSE（GET /api/agent/runs/{run_id}/stream?after=N），增量直接投影进本地快照，
+       * 快照轮询只作断线兜底（WATCH_FALLBACK_MS，20s 内最多 20 次 /snapshot）。
+       * 断线用 after=lastSeq 续传；连不上就退回轮询并定期重连。stop/超时/收尾逻辑不变。
+       */
+      const TERMINAL = new Set(["SUCCEEDED", "COMPLETED", "FAILED", "CANCELLED", "STOPPED", "BLOCKED"]);
+      let settled = false;
+      let lastSeq = 0;
+      let streamLive = false;
+      let local: RunSnapshot | null = null;
+      let pollTimer: ReturnType<typeof setTimeout> | null = null;
+      let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+      let streamCtrl: AbortController | null = null;
+      const publish = () => { if (local) onSnapshot(local as unknown as Parameters<typeof onSnapshot>[0]); };
+      const normalize = (r: any): RunSnapshot => ({
+        taskId,
+        status: String(r?.task?.status || ""),
+        modelConfigId: typeof r?.task?.modelConfigId === "string" ? r.task.modelConfigId : null,
+        steps: Array.isArray(r?.steps) ? r.steps : [],
+        events: Array.isArray(r?.events) ? r.events : [],
+        calls: Array.isArray(r?.calls) ? r.calls : [],
+        artifacts: Array.isArray(r?.artifacts) ? r.artifacts : [],
+        verifications: Array.isArray(r?.verifications) ? r.verifications : [],
+        error: typeof r?.error === "string" ? r.error : undefined,
+      });
+      const clearPoll = () => { if (pollTimer !== null) { clearTimeout(pollTimer); pollTimer = null; } };
+      const clearReconnect = () => { if (reconnectTimer !== null) { clearTimeout(reconnectTimer); reconnectTimer = null; } };
       const refresh = async () => {
         if (disposed || !active || !api?.command) return;
         if (reading) { queued = true; return; }
@@ -685,18 +714,107 @@ export function createBridgeBackend(): CanvasBackend {
         try {
           const r = await api.command({ type: "task/get", payload: { taskId } });
           if (!active || !r || r.ok !== true || !r.task) return;
-          onSnapshot({ taskId, status: String(r.task.status || ""), modelConfigId: typeof r.task.modelConfigId === "string" ? r.task.modelConfigId : null, steps: Array.isArray(r.steps) ? r.steps : [], events: Array.isArray(r.events) ? r.events : [], calls: Array.isArray(r.calls) ? r.calls : [], artifacts: Array.isArray(r.artifacts) ? r.artifacts : [], verifications: Array.isArray(r.verifications) ? r.verifications : [], error: typeof r.error === "string" ? r.error : undefined });
+          local = normalize(r);
+          if (TERMINAL.has(local.status)) settled = true;
+          if (!lastSeq) lastSeq = lastSeqOf(local);
+          publish();
         } finally {
           reading = false;
           if (queued) { queued = false; void refresh(); }
         }
       };
-      const off = api?.onEvent?.((ev) => { if (ev && ev.taskId === taskId && (ev.type === "task/event" || ev.type === "task/result")) void refresh(); }) || null;
-      const timer = setInterval(() => void refresh(), 750);
-      void refresh();
-      const stop = () => { active = false; clearInterval(timer); off?.(); agentWatchStops.delete(stop); };
+      const schedulePoll = () => {
+        clearPoll();
+        if (!active || disposed) return;
+        const delay = watchDelay({ settled, hidden: typeof document !== "undefined" && document.hidden });
+        if (!delay) return;
+        pollTimer = setTimeout(() => { pollTimer = null; void pollTick(); }, delay);
+      };
+      const pollTick = async () => {
+        if (!active || disposed) return;
+        if (streamLive) return;                 // 流健康：不发快照请求
+        await refresh();
+        if (!settled) schedulePoll();
+      };
+      const scheduleReconnect = () => {
+        clearReconnect();
+        if (!active || disposed || settled) return;
+        reconnectTimer = setTimeout(() => { reconnectTimer = null; void connectStream(); }, 800);
+      };
+      const connectStream = async () => {
+        if (!active || disposed || settled || streamLive) return;
+        clearReconnect();
+        streamCtrl?.abort();
+        const ctrl = new AbortController();
+        streamCtrl = ctrl;
+        try {
+          const res = await fetch("/api/agent/runs/" + encodeURIComponent(taskId) + "/stream?after=" + Math.max(0, lastSeq), { signal: ctrl.signal, headers: { Accept: "text/event-stream" }, cache: "no-store" });
+          if (!res.ok || !res.body) throw new Error("STREAM_HTTP_" + res.status);
+          streamLive = true;
+          clearPoll();
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (active && !disposed) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            const parsed = parseSseFrames(buffer, decoder.decode(value, { stream: true }));
+            buffer = parsed.rest;
+            for (const frame of parsed.frames) {
+              if (!frame.id || frame.id <= lastSeq) continue;
+              lastSeq = frame.id;
+              if (local) { local = projectRunEvent(local, frame); publish(); }
+              if (frame.event === "done" || frame.event === "error") { streamLive = false; void finalize(); return; }
+            }
+            if (settled) return;
+          }
+          streamLive = false;
+          if (active && !settled) { scheduleReconnect(); schedulePoll(); }
+        } catch (error) {
+          streamLive = false;
+          if (!active || disposed || settled) return;
+          if ((error as Error)?.name === "AbortError") return;
+          scheduleReconnect();
+          schedulePoll();
+        }
+      };
+      const finalize = async () => {
+        // 流里收到 done/error：拉一次权威快照收尾（终态状态码、步骤、产物、待确认方案都以快照为准）
+        await refresh();
+        if (!settled) scheduleReconnect();
+      };
+      const off = api?.onEvent?.((ev) => { if (ev && ev.taskId === taskId && (ev.type === "task/event" || ev.type === "task/result") && !streamLive) void refresh(); }) || null;
+      const onVisibility = () => {
+        if (!active) return;
+        if (typeof document !== "undefined" && document.hidden) { schedulePoll(); return; }
+        if (!streamLive) void pollTick();
+      };
+      if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisibility);
+      void (async () => { await refresh(); if (!settled) { void connectStream(); schedulePoll(); } })();
+      const stop = () => {
+        active = false;
+        clearPoll();
+        clearReconnect();
+        streamCtrl?.abort();
+        if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
+        off?.(); agentWatchStops.delete(stop);
+      };
       agentWatchStops.add(stop);
       return stop;
+    },
+    async postAgentBudget(runId, budget) {
+      // 桌面宿主优先走 task/budget（若主进程实现了）；没有就退回后端 HTTP 路由
+      const cmd = oa()?.task?.command;
+      if (cmd) {
+        const res = await cmd({ type: "task/budget", payload: { taskId: runId, budget } }).catch(() => null);
+        if (res && res.ok !== false) return { ok: true };
+      }
+      try {
+        const response = await fetch("/api/agent/runs/" + encodeURIComponent(runId) + "/budget", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(budget) });
+        return response.ok ? { ok: true } : { ok: false, error: "HTTP " + response.status };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "预算提交失败" };
+      }
     },
     async cancelAgentTask(taskId) {
       const cmd = oa()?.task?.command;

@@ -3,10 +3,10 @@
 //
 // 覆盖：
 //   1) 两套画布（canvas.js / smart-canvas.js）的能力表逐项一致：MODEL_CAPABILITIES
-//      （resLevels / aspects / videoResolutions / durationMin / durationMax / ratios / preset）、
+//      （resLevels / aspects / videoResolutions / durationMin / durationMax / ratios / preset / background）、
 //      MODEL_TIER_PIXELS、GEMINI_RATIO_KEYS / SEEDREAM_RATIO_KEYS；
-//   2) 图片侧：逐模型比例集合 = web/src/pages/online/sizeData.js 预设键；档位集合 = 官方档位；
-//      0.5K/1.5K/3K 的像素逐格等于 web 预设（Agnes 等于 main.py AGNES_OUTPUT_PIXELS）；
+//   2) 图片侧：逐模型比例集合 / 档位集合 = 官方档位；
+//      0.5K/1.5K/3K 的像素逐格等于官方像素（Agnes 等于 main.py AGNES_OUTPUT_PIXELS）；
 //   3) 视频侧：逐模型宽高比 / 分辨率 / 时长官方区间（与 main.py 归一化函数同口径）；
 //   4) UI 接线：两页都真的按模型过滤选项、时长上下限进 UI；历史选中值保留可见（不静默改写）；
 //   5) 老数据守卫：9:21 / keep_ratio / 已存自定义尺寸在纯函数层不被改。
@@ -15,7 +15,7 @@
 //   视频 /tmp/novai-video-docs（Ark create-video-generation-task-api、APIMart Seedance 2.0 / Kling v3 /
 //        VEO3.1、Agnes Video 2.5）；main.py volcengine_video_duration / volcengine_video_resolution /
 //        apimart_video_duration / apimart_veo31_duration / agnes_video_seconds。
-//   图片 web/src/pages/online/sizeData.js + main.py AGNES_OUTPUT_PIXELS + /tmp/novai-official-docs。
+//   图片 main.py AGNES_OUTPUT_PIXELS + /tmp/novai-official-docs。
 //
 // 差分证明（接改前备份应失败）：
 //   NOVAI_PRESET_TEST_CLASSIC_SRC=/tmp/novai-preset-evidence/backup/canvas.js \
@@ -26,12 +26,10 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { pathToFileURL } = require('url');
 
 const ROOT = path.join(__dirname, '..');
 const CLASSIC_SRC = process.env.NOVAI_PRESET_TEST_CLASSIC_SRC || path.join(ROOT, 'static/js/canvas.js');
 const SMART_SRC = process.env.NOVAI_PRESET_TEST_SMART_SRC || path.join(ROOT, 'static/js/smart-canvas.js');
-const WEB_SRC = path.join(ROOT, 'web/src/pages/online/sizeData.js');
 const MAIN_SRC = path.join(ROOT, 'main.py');
 
 let pass = 0;
@@ -51,6 +49,7 @@ const OFFICIAL_IMAGE = {
     'seedream-5.0-pro': { resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_8, preset: 'seedream-5.0-pro' },
     'seedream-5.0-flash': { resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_8, preset: 'seedream-5.0-pro' },
     'seedream-5.0-lite': { resLevels: ['2k', '3k', '4k'], ratios: SEEDREAM_8, preset: 'seedream-5.0-lite' },
+    'seedream-5-5': { resLevels: ['1k', '1.5k', '2k'], ratios: SEEDREAM_8, preset: 'seedream-5.0-pro' },
     'seedream-4.5': { resLevels: ['2k', '4k'], ratios: SEEDREAM_8 },
     'seedream-4.0': { resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_8 },
     'agnes-image-25-flash': { resLevels: ['1k', '2k', '3k', '4k'], ratios: SEEDREAM_8, preset: 'agnes-image' },
@@ -74,7 +73,7 @@ const OFFICIAL_VIDEO = {
     'agnes-video-v2.0': { aspects: ['16:9', '9:16', '4:3', '1:1', '3:4', '21:9'], duration: [4, 12] },
     'some-unknown-video': { aspects: null, videoResolutions: null, duration: null }
 };
-// 0.5K/1.5K/3K 的官方像素（web sizeData.js / main.py AGNES_OUTPUT_PIXELS）
+// 0.5K/1.5K/3K 的官方像素（main.py AGNES_OUTPUT_PIXELS）
 const OFFICIAL_TIER_PIXELS = {
     'gemini-3.1-flash-image': {
         level: '0.5k', cells: {
@@ -140,20 +139,6 @@ function buildSandbox(src, kind){
     vm.runInContext(body, sandbox, { filename: kind + '-preset-sandbox.js' });
     return sandbox;
 }
-// web sizeData.js 真模块（真值锚点之一）
-async function loadWebData(){
-    const mod = await import(pathToFileURL(WEB_SRC).href);
-    return mod;
-}
-function webPresetTable(preset){
-    const table = {};
-    Object.keys(preset || {}).forEach(key => {
-        const tiers = {};
-        (preset[key] || []).forEach(([value, level]) => { tiers[String(level).toLowerCase()] = value; });
-        table[key] = tiers;
-    });
-    return table;
-}
 // main.py AGNES_OUTPUT_PIXELS：1:1→square 等
 function agnesOfficialPixels(){
     const src = fs.readFileSync(MAIN_SRC, 'utf8');
@@ -184,7 +169,6 @@ async function main(){
     const smartSrc = fs.readFileSync(SMART_SRC, 'utf8');
     const classic = buildSandbox(classicSrc, 'classic');
     const smart = buildSandbox(smartSrc, 'smart');
-    const web = await loadWebData();
     const agnes = agnesOfficialPixels();
     console.log('[preset-matrix] 经典画布 = ' + (process.env.NOVAI_PRESET_TEST_CLASSIC_SRC || 'static/js/canvas.js'));
     console.log('[preset-matrix] 智能画布 = ' + (process.env.NOVAI_PRESET_TEST_SMART_SRC || 'static/js/smart-canvas.js'));
@@ -218,7 +202,7 @@ async function main(){
         if(expected.preset) eq(classic.modelCapabilityFor(model, 'preset'), expected.preset, model + ' preset');
     });
 
-    // 2a. MODEL_TIER_PIXELS 逐格 = web sizeData.js（Agnes = main.py）
+    // 2a. MODEL_TIER_PIXELS 逐格 = 官方像素表（Agnes = main.py）
     Object.keys(OFFICIAL_TIER_PIXELS).forEach(preset => {
         const spec = OFFICIAL_TIER_PIXELS[preset];
         const table = vm.runInContext('MODEL_TIER_PIXELS[' + JSON.stringify(preset) + ']', smart);
@@ -230,17 +214,6 @@ async function main(){
         // 每个官方比例键都要有该档位的像素格，且没有多余档位
         eq(Object.keys(table).sort(), Object.keys(spec.cells).sort(), 'MODEL_TIER_PIXELS ' + preset + ' 比例键齐全');
         Object.keys(table).forEach(ratioKey => eq(Object.keys(table[ratioKey]), [spec.level], preset + ' ' + ratioKey + ' 只带官方档位'));
-    });
-    // 与 web 预设逐格对账（Gemini / Seedream）
-    [['gemini-3.1-flash-image', 'nano-banana-2', '0.5k'],
-     ['seedream-5.0-pro', 'seedream-5.0-pro', '1.5k'],
-     ['seedream-5.0-lite', 'seedream-5.0-lite', '3k']].forEach(([preset, webKey, level]) => {
-        const webTable = webPresetTable(web.MODEL_SIZE_PRESETS[webKey]);
-        const table = vm.runInContext('MODEL_TIER_PIXELS[' + JSON.stringify(preset) + ']', smart);
-        eq(Object.keys(table).sort(), Object.keys(webTable).sort(), preset + ' 比例键 = web ' + webKey + ' 预设键');
-        Object.keys(webTable).forEach(ratioKey => {
-            eq(table[ratioKey][level], webTable[ratioKey][level], preset + ' ' + ratioKey + '@' + level + ' = web');
-        });
     });
     // Agnes 3K 对 main.py
     Object.keys(OFFICIAL_TIER_PIXELS['agnes-image'].cells).forEach(ratioKey => {
@@ -256,6 +229,7 @@ async function main(){
      ['seedream-5.0-pro', 'wide', '1.5k', '2048x1152'],
      ['seedream-5.0-flash', 'wide', '1.5k', '2048x1152'],
      ['generate_image_seedream_v5_pro', 'square', '1.5k', '1536x1536'],
+     ['seedream-5-5', 'wide', '1.5k', '2048x1152'],
      ['seedream-5.0-lite', 'square', '3k', '3072x3072'],
      ['agnes-image-25-flash', 'wide', '3k', '3936x2208']].forEach(([model, ratio, level, expected]) => {
         eq(classic.apiImageSize(ratio, level, '', '', model), expected, '经典画布 apiImageSize ' + model + ' ' + ratio + '@' + level);

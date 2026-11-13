@@ -189,8 +189,8 @@ export const VIDEO_VENDOR_RULES = [
     ['OpenAI视频', /^veo/],
 ];
 export const MODEL_KINDS = [
-    { kind: 'image', key: 'image_models', titleKey: 'api.imageModels', title: '生图模型', hintKey: 'api.imageHint', hint: '在线生图和无限画布 API 生成使用' },
-    { kind: 'chat', key: 'chat_models', titleKey: 'api.chatModels', title: '聊天模型', hintKey: 'api.chatHint', hint: 'GPT 对话和 LLM 节点使用' },
+    { kind: 'image', key: 'image_models', titleKey: 'api.imageModels', title: '生图模型', hintKey: 'api.imageHint', hint: '无限画布 API 生成使用' },
+    { kind: 'chat', key: 'chat_models', titleKey: 'api.chatModels', title: '聊天模型', hintKey: 'api.chatHint', hint: 'LLM 节点使用' },
     { kind: 'video', key: 'video_models', titleKey: 'api.videoModels', title: '视频模型', hintKey: 'api.videoHint', hint: '无限画布视频生成节点使用' },
     { kind: 'audio', key: 'audio_models', titleKey: 'api.audioModels', title: '音频模型', hintKey: 'api.audioHint', hint: '画布音频节点使用（Suno / FlowMusic）' },
 ];

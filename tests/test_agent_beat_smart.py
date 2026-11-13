@@ -121,7 +121,8 @@ class BeatPromptTests(unittest.TestCase):
         self.assertIn("roadmap", text)
         self.assertIn("指代", text)
         self.assertNotIn("alias", text)
-        self.assertNotIn("batch_generate", text)
+        # BEAT 支持多维表格批量了：提示词要教模型用 batch_generate / review_table / run_batch
+        self.assertIn("batch_generate", text)
 
     def test_skill_and_apps_go_into_system_prompt(self):
         req = {"canvas_id": "c1", "instruction": "按技能做", "skill_prompt": "第一步：写卖点。", "skill_name": "卖点海报",

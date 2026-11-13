@@ -12,6 +12,12 @@
 .cn-root .chlib-job{display:inline-flex;align-items:center;height:24px;padding:0 9px;border-radius:8px;background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg2);font-size:var(--ch-fs-4);font-weight:400;align-self:center;white-space:nowrap}
 .cn-root .chlib-job:hover{background:var(--hover);color:var(--fg)}
 .cn-root .chlib-job.on{color:var(--fg);font-weight:500}
+.cn-root .chlib-jobs{display:flex;align-items:center;gap:6px;overflow-x:auto;max-width:46%;padding:2px 0;scrollbar-width:none;align-self:center}
+.cn-root .chlib-jobs::-webkit-scrollbar{display:none}
+.cn-root .chlib-jobs .chlib-job{flex:none;gap:4px;cursor:pointer}
+.cn-root .chlib-jobs .chlib-job .nm{max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-root .chlib-jobs .chlib-job .st{flex:none;color:var(--fg3)}
+.cn-root .chlib-jobs .chlib-job.on .st{color:inherit}
 .cn-root .chlib-head .sp{flex:1}
 .cn-root .chlib-x{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:var(--fg2);align-self:center}
 .cn-root .chlib-x:hover{background:var(--hover);color:var(--fg)}
@@ -51,6 +57,11 @@
 .cn-root .chcard .tx{display:flex;flex-direction:column;gap:3px;padding:8px 10px 10px}
 .cn-root .chcard .nm{font-size:var(--ch-fs-3);font-weight:500;line-height:var(--ch-lh-2);color:var(--fg);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .cn-root .chcard .meta{font-size:var(--ch-fs-4);font-weight:400;line-height:var(--ch-lh-2);color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-root .chfav{position:absolute;top:7px;right:7px;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:color-mix(in srgb,var(--panel) 82%,transparent);-webkit-backdrop-filter:blur(18px) saturate(180%);backdrop-filter:blur(18px) saturate(180%);box-shadow:0 6px 16px rgba(0,0,0,.34),0 2px 6px rgba(0,0,0,.2);color:var(--fg2);opacity:0;pointer-events:none;transition:opacity var(--d-quick) var(--e-std),background-color var(--d-feedback) var(--e-std),color var(--d-feedback) var(--e-std)}
+.cn-root .chcard:hover .chfav,.cn-root .chfav:focus-visible{opacity:1;pointer-events:auto}
+.cn-root .chfav.on{opacity:1;pointer-events:auto;color:var(--fg)}
+.cn-root .chfav.on svg.i{fill:currentColor}
+.cn-root .chfav:hover{background:color-mix(in srgb,var(--panel) 96%,transparent);color:var(--fg)}
 .cn-root .chlib-more{display:flex;justify-content:center;padding:16px 0 6px}
 .cn-root .chlib-empty{display:flex;flex-direction:column;align-items:center;gap:10px;padding:64px 16px;color:var(--fg3);font-size:var(--ch-fs-4);font-weight:400;line-height:var(--ch-lh-2);text-align:center}
 .cn-root .chlib-empty b{font-size:var(--ch-fs-2);font-weight:500;color:var(--fg2)}
@@ -59,7 +70,7 @@
 
 /* ---------- 角色详情弹层 ---------- */
 .cn-root .chdt-layer{position:absolute;inset:0;z-index:2;display:grid;place-items:center;padding:24px;background:rgba(0,0,0,.42);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
-.cn-root .chdt{display:flex;flex-direction:column;width:min(1026px,100%);height:min(726px,100%);border-radius:16px;background:color-mix(in srgb,var(--panel) 96%,transparent);box-shadow:0 30px 80px rgba(0,0,0,.45);overflow:hidden}
+.cn-root .chdt{position:relative;display:flex;flex-direction:column;width:min(1026px,100%);height:min(726px,100%);border-radius:16px;background:color-mix(in srgb,var(--panel) 96%,transparent);box-shadow:0 30px 80px rgba(0,0,0,.45);overflow:hidden}
 .cn-root .chdt-hd{display:flex;align-items:center;gap:10px;flex:none;height:62px;padding:0 18px 0 14px}
 .cn-root .chdt-back{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;flex:none;color:var(--fg2)}
 .cn-root .chdt-back:hover{background:var(--hover);color:var(--fg)}
@@ -68,6 +79,10 @@
 .cn-root .chdt-hd .sp{flex:1}
 .cn-root .chdt-ib{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;flex:none;color:var(--fg2)}
 .cn-root .chdt-ib:hover{background:var(--hover);color:var(--fg)}
+.cn-root .chdt-ib.danger:hover,.cn-root .chdt-ib.danger:focus-visible{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad)}
+/* 删除确认：和模板预览「删除模板」同构（覆盖层 + .folder-dialog），底色用 --card 加厚底 + 模糊，深色下才不会和遮罩糊成一片 */
+.cn-root .chdt-confirm{position:absolute;inset:0;z-index:3;display:grid;place-items:center;padding:24px;background:rgba(0,0,0,.42)}
+.cn-root .chdt-confirm .folder-dialog{width:min(380px,100%);border-radius:16px;background:color-mix(in srgb,var(--card) 96%,transparent);-webkit-backdrop-filter:blur(44px) saturate(190%);backdrop-filter:blur(44px) saturate(190%);box-shadow:0 24px 64px rgba(0,0,0,.42)}
 .cn-root .chdt-body{display:flex;flex:1;min-height:0;padding:0 18px 18px;gap:18px}
 .cn-root .chdt-pics{flex:0 0 65%;min-width:0;min-height:0;display:flex;flex-direction:column;gap:16px;overflow-y:auto;padding-right:4px}
 .cn-root .chdt-grid{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;gap:16px}
@@ -99,6 +114,7 @@
 .cn-root .ea-f{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--fg3);min-width:0}
 .cn-root .ea-f.wide{grid-column:1/-1}
 .cn-root .ea-f .rg-input{padding:6px 8px;font-size:12px}
+@media(hover:none){.cn-root .chfav{opacity:1;pointer-events:auto}}
 
 /* ---------- 窄屏：左栏收成顶部横排 ---------- */
 @media(max-width:900px){

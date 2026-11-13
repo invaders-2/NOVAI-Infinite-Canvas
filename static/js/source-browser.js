@@ -45,6 +45,7 @@
     let stageEl = null;
     let morphEl = null;
     let viewAnchorEl = null;
+    let headEl = null;
     let statusEl = null;
     let statusTextEl = null;
     let retryBtn = null;
@@ -83,6 +84,7 @@
     let morphBusy = false;
     let toastTimer = 0;
     let boundsFrame = 0;
+    let closeVerifyTimer = 0;
     let resizeObserver = null;
     let realignFrame = 0;
     let resizeSettleTimers = [];
@@ -209,8 +211,41 @@
         };
     }
 
-    /* 内容区在「父窗口坐标系」里的矩形：画布本身在 iframe 里，要叠上 frameElement 的偏移，
-       并且 iframe 被祖先 CSS 缩放过时，帧内 CSS px 不等于窗口 px，要乘 scale=fr.width/offsetWidth。 */
+    /* 元素在「主窗口内容区坐标系」里的矩形：画布本身在 iframe 里，要叠上 frameElement 的偏移；
+       iframe 被祖先 CSS 缩放过时，帧内 CSS px 不等于窗口 px，要乘 scale = fr.width / offsetWidth。 */
+    function windowRectOf(node){
+        if(!node || typeof node.getBoundingClientRect !== 'function') return null;
+        const r = node.getBoundingClientRect();
+        const frame = frameElement();
+        let scale = 1;
+        let left = r.left;
+        let top = r.top;
+        if(frame && typeof frame.getBoundingClientRect === 'function'){
+            const fr = frame.getBoundingClientRect();
+            const offsetWidth = Number(frame.offsetWidth) || 0;
+            if(offsetWidth > 0){
+                const computed = fr.width / offsetWidth;
+                if(Number.isFinite(computed) && computed > 0) scale = computed;
+            }
+            left = fr.left + r.left * scale;
+            top = fr.top + r.top * scale;
+        }
+        return { left: left, top: top, width: r.width * scale, height: r.height * scale };
+    }
+
+    /* 硬约束：原生视图绝不允许盖住面板头部（× 所在那一行）。正常 rect 来自内容区锚点，本来就在
+       头部下面；这条只在 rect 算错/滞后/被撑大时兜底，保证关闭入口永远点得到。 */
+    function keepCloseReachable(rect){
+        const head = windowRectOf(headEl);
+        if(!head) return rect;
+        const bottom = Math.ceil(head.top + head.height);
+        if(!Number.isFinite(bottom) || bottom <= 0) return rect;
+        if(rect.y >= bottom) return rect;
+        const height = Math.floor(rect.y + rect.height - bottom);
+        if(height < 24) return HIDDEN_RECT;
+        return { x: rect.x, y: bottom, width: rect.width, height: height };
+    }
+
     function viewRect(){
         if(FULLSCREEN_MODE){
             const hasFrame = Boolean(frameElement());
@@ -220,28 +255,15 @@
             return { x: 0, y: 0, width: Math.max(0, Math.round(width)), height: Math.max(0, Math.round(height)) };
         }
         if(!viewAnchorEl) return { x: 0, y: 0, width: 0, height: 0 };
-        const r = viewAnchorEl.getBoundingClientRect();
-        const frame = frameElement();
-        const hasFrame = Boolean(frame && typeof frame.getBoundingClientRect === 'function');
-        let scale = 1;
-        let x = r.left;
-        let y = r.top;
-        if(hasFrame){
-            const fr = frame.getBoundingClientRect();
-            const offsetWidth = Number(frame.offsetWidth) || 0;
-            if(offsetWidth > 0){
-                const computed = fr.width / offsetWidth;
-                if(Number.isFinite(computed) && computed > 0) scale = computed;
-            }
-            x = fr.left + r.left * scale;
-            y = fr.top + r.top * scale;
-        }
-        return clampViewRect({
-            x: Math.round(x),
-            y: Math.round(y),
-            width: Math.max(0, Math.round(r.width * scale)),
-            height: Math.max(0, Math.round(r.height * scale))
-        }, hasFrame);
+        const box = windowRectOf(viewAnchorEl);
+        if(!box) return { x: 0, y: 0, width: 0, height: 0 };
+        const hasFrame = Boolean(frameElement());
+        return keepCloseReachable(clampViewRect({
+            x: Math.round(box.left),
+            y: Math.round(box.top),
+            width: Math.max(0, Math.round(box.width)),
+            height: Math.max(0, Math.round(box.height))
+        }, hasFrame));
     }
 
     /* 外壳据此隐藏/恢复左侧导航；同时要一份父窗口可视区尺寸来夹 rect */
@@ -560,6 +582,27 @@
         setStage('loading');
         try {
             const result = await viewApi.open({ source: key, rect, url });
+            /* 这次打开已被关闭/切站取代：不要用它的结果覆盖当前状态 */
+            if(result && result.superseded) return;
+            if(result && result.open === false){
+                nativeOpen = false;
+                nativeSource = '';
+                if(!panelOpen){ setStage('placeholder'); return; }
+                if(result.error){
+                    const message = String(result.error);
+                    setStage('failed', message);
+                    toast(message);
+                } else {
+                    setStage('placeholder');
+                }
+                return;
+            }
+            if(!panelOpen){
+                /* 打开还没回来时用户已经关了面板：主进程可能刚把视图挂上，必须立刻收掉 */
+                closeNativeView();
+                setStage('placeholder');
+                return;
+            }
             if(result && result.open !== false){
                 nativeOpen = true;
                 nativeSource = String(result.source || key);
@@ -567,12 +610,6 @@
                 refreshNavState();
                 if(result.error) console.debug('[source-browser] 原生视图已打开，首屏加载告警：' + result.error);
                 syncBounds();   /* 形变结束再对一次，避免和打开过程错位 */
-            } else {
-                nativeOpen = false;
-                nativeSource = '';
-                const message = (result && result.error) || t('source.openFailed', FALLBACK_OPEN_FAILED);
-                setStage('failed', message);
-                toast(message);
             }
         } catch(error){
             nativeOpen = false;
@@ -585,15 +622,39 @@
         }
     }
 
+    /* 关原生视图：不再依赖 nativeOpen —— 打开请求还在路上、iframe 重载过、主进程先关了时，
+       前端记的 nativeOpen 都可能过期，但关闭命令必须照发（主进程 hideSourceView 是幂等的）。 */
     function closeNativeView(){
-        const wasOpen = nativeOpen;
         nativeOpen = false;
         nativeSource = '';
-        if(!wasOpen || !viewApi || !viewOverlay) return;
-        try {
-            const pending = viewApi.close();
-            if(pending && pending.catch) pending.catch(() => {});
-        } catch(_) {}
+        if(!viewApi || !viewOverlay) return Promise.resolve(null);
+        let pending = null;
+        try { pending = viewApi.close(); } catch(_) { pending = null; }
+        return Promise.resolve(pending).catch(() => null);
+    }
+
+    /* 关完回读主进程状态：面板已经关了但视图还挂在窗口上（还会盖住画布）就重发关闭，
+       最多补两次。这是“关不掉”的兜底，不靠用户再点一次碰运气。 */
+    function reconcileNativeView(attempt){
+        if(panelOpen || !viewApi || !viewOverlay) return;
+        let pending = null;
+        try { pending = viewApi.state(); } catch(_) { pending = null; }
+        Promise.resolve(pending).then(state => {
+            if(panelOpen || !state || state.ok === false) return;
+            if(state.open !== true && state.attached !== true) return;
+            console.debug('[source-browser] 面板已关闭但原生视图还在，第 ' + (attempt + 1) + ' 次兜底关闭');
+            closeNativeView();
+            if(attempt < 2) setTimeout(() => reconcileNativeView(attempt + 1), 360);
+        }).catch(() => {});
+    }
+
+    function scheduleNativeCloseCheck(delay){
+        if(!viewOverlay || !viewApi) return;
+        if(closeVerifyTimer) clearTimeout(closeVerifyTimer);
+        closeVerifyTimer = setTimeout(() => {
+            closeVerifyTimer = 0;
+            reconcileNativeView(0);
+        }, Math.max(120, Number(delay) || 360));
     }
 
     /* 老 preload 的退路：伴生窗口（task-7/task-8 那条链路） */
@@ -1002,13 +1063,19 @@
     }
 
     function closePanel(){
-        if(!panel || !panelOpen) return;
+        if(!panel) return;
+        const wasOpen = panelOpen;
+        panelOpen = false;
         stopNavPolling();
         if(pendingOpenTimer){ clearTimeout(pendingOpenTimer); pendingOpenTimer = 0; }
-        panelOpen = false;
         if(morphTimer){ clearTimeout(morphTimer); morphTimer = 0; }
         morphBusy = false;
+        /* 关闭命令无条件发（主进程幂等）：打开还没回来、iframe 重载过、主进程先隐藏了，
+           这些情况下前端记的 nativeOpen 都可能是 false，但视图可能正挂在窗口上。 */
         closeNativeView();
+        scheduleNativeCloseCheck(380);
+        /* UI 已经收过（重复 close）就不用再收一遍，但上面的原生视图关闭不能省 */
+        if(!wasOpen) return;
         if(document.body){
             document.body.classList.remove('source-browser-open');
             document.body.classList.remove('source-fullscreen');
@@ -1068,6 +1135,8 @@
         scheduleRealignTabs();
         scheduleSyncBounds();
         settleBrowserGeometry();
+        /* 面板关着却还有视图挂在窗口上（重载/异常留下的）时，任意一次尺寸变化都顺手收一次 */
+        if(!panelOpen) scheduleNativeCloseCheck(160);
     }
 
     function bindBoundsSync(){
@@ -1256,6 +1325,7 @@
         stageEl = document.getElementById('sourceBrowserStage');
         morphEl = document.getElementById('sourceBrowserMorph');
         viewAnchorEl = document.getElementById('sourceBrowserView');
+        headEl = panel.querySelector('.source-browser-head');
         statusEl = document.getElementById('sourceBrowserStatus');
         statusTextEl = document.getElementById('sourceBrowserStatusText');
         retryBtn = document.getElementById('sourceBrowserRetryBtn');
@@ -1375,6 +1445,13 @@
         window.addEventListener('studio-lang-change', () => setStage(stageState, stageDetail));
         bindBoundsSync();
         bindParentMessages();
+        /* 页面被卸载/切走（外壳换页、画布 iframe 重载）时把原生视图收掉：
+           新页面里没人知道还有个原生视图挂着，必须在这里发关闭命令。 */
+        window.addEventListener('pagehide', () => { closeNativeView(); });
+        window.addEventListener('beforeunload', () => { closeNativeView(); });
+        document.addEventListener('visibilitychange', () => {
+            if(document.visibilityState === 'visible' && !panelOpen) scheduleNativeCloseCheck(200);
+        });
         bindSourceViewClosedSubscription();
         if(!FULLSCREEN_MODE){
             loadPanelWidth();
@@ -1389,6 +1466,9 @@
         setActiveTab(selectedKey, { instant: true });
         syncEnvironment();
         syncHeaderActions();
+        /* 页面刚加载/重载：上一个页面实例可能没来得及关掉原生视图（卸载时 IPC 丢了），
+           启动后主动核对一次，避免画布上留一个“上一页的”内嵌浏览器。 */
+        if(viewOverlay && viewApi) scheduleNativeCloseCheck(900);
         /* 字体/品牌 logo 加载完 tab rect 才稳定：重新对齐一次滑块与形变起点 */
         if(document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function'){
             document.fonts.ready.then(() => { scheduleRealignTabs(); syncBounds(); }).catch(() => {});

@@ -21,7 +21,7 @@ export const TYPE_ICON = { image: "image", video: "video", text: "text", audio: 
 export type CameraParams = { on: boolean; body: number; lens: number; focal: number; aperture: number };
 /** Midjourney 专属参数（只在模型规格带 mj 时出现）：version 为空 = 交给上游默认；"niji 7" 这种带 niji 前缀 */
 export type MjParams = { version?: string; speed?: string; hd?: boolean; stylize?: number };
-export type ImageParams = { model: string; ratio: string; size: string; /** 「原图比例」选中的显式 WxH（不填则沿用尺寸档） */ sourceSize?: string; count: number; search: boolean; style: string; camera: CameraParams; mj?: MjParams; /** 质量档（后端 caps.qualities 里的一档）；不填 / auto = 不传 = 上游默认 */ quality?: string; /** 先思考（只有 caps.thinking_mode 的模型有）；undefined = 不传，交给模型决定 */ thinking?: boolean; /** 输出格式（后端 caps.output_formats）：gif / svg；不填 = 静态图（不发字段） */ outputFormat?: "gif" | "svg"; /** GIF 帧数（只有 outputFormat=gif 时下发）；不填 = caps 默认 9 */ frameCount?: number; /** GIF 每帧时长 ms（只有 outputFormat=gif 时下发）；不填 = 200 */ frameDuration?: number };
+export type ImageParams = { model: string; ratio: string; size: string; /** 尺寸档（1K/2K/4K，来自方案卡 settings；原图比例按它算显式 WxH） */ resolution?: string; /** 「原图比例」选中的显式 WxH（不填则沿用尺寸档） */ sourceSize?: string; count: number; search: boolean; style: string; camera: CameraParams; mj?: MjParams; /** 质量档（后端 caps.qualities 里的一档）；不填 / auto = 不传 = 上游默认 */ quality?: string; /** 先思考（只有 caps.thinking_mode 的模型有）；undefined = 不传，交给模型决定 */ thinking?: boolean; /** 输出格式（后端 caps.output_formats）：gif / svg；不填 = 静态图（不发字段） */ outputFormat?: "gif" | "svg"; /** GIF 帧数（只有 outputFormat=gif 时下发）；不填 = caps 默认 9 */ frameCount?: number; /** GIF 每帧时长 ms（只有 outputFormat=gif 时下发）；不填 = 200 */ frameDuration?: number; /** 透明背景（后端 caps.native_background）：不填 = 不传字段（跟随上游默认）；目前只认 transparent */ background?: "transparent" };
 export type VideoMode = "文生视频" | "首帧" | "首尾帧" | "参考生视频" | "视频编辑" | "视频延长" | "参考视频生视频" | "数字人";
 export type VideoParams = { model: string; mode: VideoMode; ratio: string; res: string; dur: number; sound: boolean; times: number; /** 多镜头（高级设置） */ multiShot?: boolean; /** 生成模式（4K / 标准 / 专业…，仅规格声明的模型可用） */ genMode?: string; /** 极速模式（仅规格声明的模型可用） */ turbo?: boolean; /** 草稿模式（TapNow Draft Mode）：先按最低清晰度出草稿，满意后再出成片 */ draft?: boolean };
 export type TextParams = { model: string; search: boolean; /** 输出：文本 / 多维表格 / 分镜表 */ output?: "text" | "table" | "storyboard"; /** 模型强度档位（后端 model_caps.think 里的一档）；不填 = 不传 = 模型默认 */ think?: string };
@@ -45,7 +45,7 @@ export type GenOutput = {
   draft?: boolean;
   /** 音频波形（0~1），后端不给时前端从音频解码或用占位 */
   bars?: number[];
-  meta?: { model?: string; ratio?: string; size?: string; at?: number; runId?: string; remote?: string; /** 上传文档的文件名 */ doc?: string; /** 后端返回的尺寸收敛说明（如 GIF 每帧尺寸被拼版上限缩小），写回后 toast 一次 */ notice?: string };
+  meta?: { model?: string; ratio?: string; size?: string; at?: number; runId?: string; remote?: string; /** 上传文档的文件名 */ doc?: string; /** 后端返回的尺寸收敛说明（如 GIF 每帧尺寸被拼版上限缩小），写回后 toast 一次 */ notice?: string; /** 生成这一版时「@ 本节点」实际发出去的自我参考图：string = 那张源图；null = 明确没发（没有可用源图 / 模型不收）。字段缺失 = 这次改动之前的旧数据，读取时走旧回退（见 mentions.selfSourceOf） */ selfSrc?: string | null };
 };
 
 export type GenData = {
@@ -68,6 +68,15 @@ export type GenData = {
   manual?: boolean;
   /** 图片节点：用户上传 */
   uploaded?: boolean;
+  /** 拆分图层：结果节点已建好，正在等全屏编辑器回传合成图（上一版；新入口用 split） */
+  splitPending?: boolean;
+  /** 拆分图层：结果节点里的内联编辑器配置（源图 / 模式 / 加载状态） */
+  split?: { sourceId: string; mode: "auto" | "custom"; status: "loading" | "ready" | "error" };
+  /**
+   * 后端还在跑的任务 id（持久化）：离开画布 / 切到别的画布时任务没写完，
+   * 回来按它接上轮询并写回（完成 / 失败后清掉）。
+   */
+  taskId?: string;
   /** 最近一次失败的说明（人话；持久化，刷新后仍能看到） */
   err?: string;
   /** 失败时的原始错误码（如 MODEL_TIMEOUT）：只在弹层里以 12px 灰字展示，便于排查 */
@@ -97,6 +106,8 @@ export type ModelSpec = {
   outputFormats?: string[];
   /** GIF 帧参数（后端 caps.gif_frames；缺失时用 GIF_FRAME_FALLBACK，面板照常给控件） */
   gifFrames?: GifFrameSpec;
+  /** 透明背景（后端 caps.native_background）；没有这个字段 = 不支持，面板不给入口 */
+  nativeBackground?: boolean;
   /** 只返回提示词、不产视频（后端 caps.prompt_only）：面板隐藏视频参数，结果按提示词说明 */
   promptOnly?: boolean;
   // video
@@ -467,7 +478,7 @@ const DEFAULTS: Record<GenKind, Partial<ModelSpec>> = {
 };
 /** 后端模型行 → 前端能力表。kind 由 capabilities 决定，能力细节按名字套预设。 */
 /** 服务商适配器给的面板规格（canvas/models 的 uiSpec）里，前端认的字段 */
-const UI_KEYS = ["ratios", "sizes", "batch", "batchUnknown", "maxRefs", "refNote", "i2i", "res", "durs", "modes", "audio", "times", "kinds", "adurs", "search", "style", "camera", "multiShot", "genModes", "turbo", "mj", "qualities", "thinkingMode", "promptOnly", "outputFormats", "gifFrames"] as const;
+const UI_KEYS = ["ratios", "sizes", "batch", "batchUnknown", "maxRefs", "refNote", "i2i", "res", "durs", "modes", "audio", "times", "kinds", "adurs", "search", "style", "camera", "multiShot", "genModes", "turbo", "mj", "qualities", "thinkingMode", "promptOnly", "outputFormats", "gifFrames", "nativeBackground"] as const;
 function fromProvider(kind: GenKind, ui?: Record<string, unknown> | null): Partial<ModelSpec> {
   if (!ui || typeof ui !== "object" || (ui.kind && ui.kind !== kind)) return {};
   const out: Record<string, unknown> = {};
@@ -606,6 +617,11 @@ export function clampParams(kind: GenKind, p: AnyParams, m: ModelSpec): AnyParam
       q.frameCount = gifFrameCountFor(q.frameCount, m);
       q.frameDuration = gifFrameDurationFor(q.frameDuration, m);
     } else { delete q.frameCount; delete q.frameDuration; }
+    // 透明背景只认后端 caps.native_background（没有 = 不支持，参数里也不留）；
+    // 透明只能出 PNG，和 GIF / SVG 的输出格式互斥，两边互斥时以透明为准（服务端同样会强制 png）
+    if (!m.nativeBackground) delete q.background;
+    else if (q.background === "transparent") { delete q.outputFormat; delete q.frameCount; delete q.frameDuration; }
+    else delete q.background;
     return q;
   }
   if (kind === "video") {
@@ -678,6 +694,15 @@ export function genOf(node: CanvasNode): GenData {
     ...(typeof raw.bg === "string" && NODE_BG.some((c) => c[0] === raw.bg) ? { bg: raw.bg } : {}),
     ...(typeof raw.tag === "string" && NODE_TAG.some((c) => c[0] === raw.tag) ? { tag: raw.tag } : raw.pinned ? { tag: "red" } : {}),
     ...(raw.manual ? { manual: true } : {}), ...(raw.uploaded ? { uploaded: true } : {}), ...(raw.err ? { err: String(raw.err) } : {}),
+    ...(raw.splitPending ? { splitPending: true } : {}),
+    ...(() => {
+      const s = raw.split as { sourceId?: unknown; mode?: unknown; status?: unknown } | undefined;
+      if (!s || typeof s !== "object" || typeof s.sourceId !== "string" || !s.sourceId) return {};
+      const mode = s.mode === "custom" ? "custom" as const : "auto" as const;
+      const status = s.status === "ready" || s.status === "error" ? s.status : "loading" as const;
+      return { split: { sourceId: s.sourceId, mode, status } };
+    })(),
+    ...(typeof raw.taskId === "string" && raw.taskId ? { taskId: raw.taskId } : {}),
     // 原始错误码（弹层里以「代码：…」展示；旧文档没有这个字段，读出来就是 undefined）
     ...(typeof raw.errCode === "string" && raw.errCode ? { errCode: raw.errCode } : {}),
     ...(raw.refMode === "mention" ? { refMode: "mention" as const } : {}),

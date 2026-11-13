@@ -1,16 +1,10 @@
 import { memo, useEffect, useRef } from "react";
-import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { afterInputsChanged, title } from "../actions";
+import { edgePathD, edgeSideOf, inPoint, outPoint } from "../edgeGeometry";
 import { inputsOf } from "../model";
 import { useCtl, useS } from "./ctx";
 import { stackOwners } from "../stack";
 import { usePerf } from "../perf";
-
-type Side = "left" | "right";
-const outSide = (e: { fromSide?: Side }): Side => (e.fromSide === "left" ? "left" : "right");
-const portPos = (n: CanvasNode, side: "in" | "out", from: Side = "right") => ({ x: side === "out" ? (from === "left" ? n.x : n.x + n.w) : n.x, y: n.y + 24 + n.h / 2 });
-/** 出线侧决定起手朝哪甩；进线一律落左侧，所以收尾控制点固定在目标左边 */
-function pathD(a: { x: number; y: number }, b: { x: number; y: number }, out: Side = "right") { const dx = Math.max(60, Math.abs(b.x - a.x) * .5); return `M${a.x},${a.y} C${a.x + (out === "left" ? -dx : dx)},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`; }
 
 /** 连线层：新连线画出动效；选中节点 / 连线时高亮并显示输入序号 */
 export const Edges = memo(function Edges() {
@@ -31,8 +25,9 @@ export const Edges = memo(function Edges() {
     const a = byId.get(owner.get(e.from) || e.from), b = byId.get(owner.get(e.to) || e.to); if (!a || !b || a === b) continue;
     const viaStack = owner.has(e.from) || owner.has(e.to);
     if (viaStack) { const pk = a.id + ">" + b.id; if (pairs.has(pk)) continue; pairs.add(pk); }
-    const side = outSide(e);
-    const p1 = portPos(a, "out", side), p2 = portPos(b, "in"); const d = pathD(p1, p2, side);
+    // 出线侧按当前几何重算：数据里的 fromSide 是排版当时的快照，节点拖走后会绕大圈
+    const side = edgeSideOf(a, b);
+    const p1 = outPoint(a, side), p2 = inPoint(b); const d = edgePathD(p1, p2, side);
     const sel = ui.edge === e.id || ui.sel.has(b.id) || ui.sel.has(a.id);
     const draw = isNew(e.id);
     const flow = live.has(b.id) && !live.has(a.id);
@@ -60,7 +55,7 @@ export const Edges = memo(function Edges() {
     const ins = inputsOf(doc, b.id); const ord = ins.findIndex((x) => x.edge.id === e.id);
     if (ins.length > 1 || sel) items.push(<g key={"b" + e.id} className={"badge" + (ui.edge === e.id || ui.sel.has(b.id) ? " sel" : "")} data-edge-badge={e.id} transform={`translate(${p2.x - 14},${p2.y})`}><circle r="8" /><text>{ord + 1}</text></g>);
   }
-  if (ui.conn) { const c = ui.conn; items.push(<path key="tmp" className="tmp" d={c.rev ? pathD(c.p, c.a) : pathD(c.a, c.p)} />); }
+  if (ui.conn) { const c = ui.conn; const from = c.rev ? c.p : c.a, to = c.rev ? c.a : c.p; items.push(<path key="tmp" className="tmp" d={edgePathD(from, to, to.x >= from.x ? "right" : "left")} />); }
   return <svg id="edges" className={ui.hideEdges ? "hidden" : ""}>{items}</svg>;
 });
 
@@ -71,7 +66,7 @@ export function EdgeBadge() {
   const e = doc.edges.find((x) => x.id === edgeId); if (!e) return null;
   const a = store.node(e.from), t = store.node(e.to); if (!a || !t) return null;
   const ins = inputsOf(doc, t.id); const i = ins.findIndex((x) => x.edge.id === e.id);
-  const p1 = portPos(a, "out", outSide(e)), p2 = portPos(t, "in"); const s = ctl.toScreen((p1.x + p2.x) / 2, (p1.y + p2.y) / 2); const r = ctl.rect();
+  const p1 = outPoint(a, edgeSideOf(a, t)), p2 = inPoint(t); const s = ctl.toScreen((p1.x + p2.x) / 2, (p1.y + p2.y) / 2); const r = ctl.rect();
   const move = (dir: -1 | 1) => { const ids = ins.map((x) => x.edge.id); const j = i + dir; if (j < 0 || j >= ids.length) return; [ids[i], ids[j]] = [ids[j], ids[i]]; store.reorderInputs(t.id, ids); afterInputsChanged(store, t.id); };
   return (
     <div id="ebadge" className="ebadge" style={{ left: s.x - r.left, top: s.y - r.top - 44, transform: "translateX(-50%)" }} onPointerDown={(ev) => ev.stopPropagation()}>

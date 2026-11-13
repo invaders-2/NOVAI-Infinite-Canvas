@@ -9,7 +9,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
@@ -74,19 +74,17 @@ class GenerationCardTests(unittest.TestCase):
         model_calls = []
         events = drain(req, [{"done": True, "message": "不该走到这"}], execute=execute, model_calls=model_calls,
                        extra_patches=[patch.object(main, "load_canvas", return_value=beat_canvas(done=True)),
-                                      patch.object(main, "_agent_beat_review", return_value=review)])
+                                      patch.object(main, "_agent_beat_review",
+                                                   new=AsyncMock(return_value=review))])
         self.assertEqual(calls, [("run_generation", False)])    # 用户批准的那批真跑
         self.assertEqual(model_calls, [])                        # 出结果后不再让模型接着做
         message = done_of(events)["message"]
-        self.assertIn("杯身变形", message)
-        self.assertIn("要重新生成吗", message)                     # 审查不合格：直接问要不要重做
-        block = json.loads(message.split("```novai-questions\n", 1)[1].split("\n```", 1)[0])
-        self.assertEqual(block["kind"], "confirm")                 # 结果确认卡
-        self.assertEqual(block["questions"][0]["options"], ["重新生成", "先不重做"])
-        regen = block["regenerate"]["items"]                       # 刷新后仍能一键重生成
-        self.assertEqual(regen[0]["node_id"], "n1")
-        self.assertEqual(regen[0]["prompt"], "杯身笔直")
-        self.assertEqual([d["summary"] for n, d in events if n == "review"], ["杯身有点变形"])
+        self.assertIn("审查在后台", message, "回复不等视觉审查")
+        reviews = [d for n, d in events if n == "review"]
+        self.assertEqual([d["summary"] for d in reviews], ["杯身有点变形"])
+        self.assertIn("杯身变形", reviews[0]["items"][0]["issues"])
+        names = [n for n, d in events]
+        self.assertLess(names.index("done"), names.index("review"), "done 必须先于 review（审查不挡回复）")
 
 
 class HelperTests(unittest.TestCase):

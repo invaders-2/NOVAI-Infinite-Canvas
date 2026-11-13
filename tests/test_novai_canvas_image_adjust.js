@@ -8,8 +8,10 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const { checkStaticCacheVersions } = require('./static-cache-version');
 const root = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+
 const ui = 'novai-canvas-ui/src/canvas/canvas-next/ui';
 
 /* ---------- 工具条入口：重打光 → 调色 → 无损改图 → 更多 ---------- */
@@ -197,7 +199,8 @@ assert(/\.ie-apply\{[^}]*right:16px/.test(builtCss) && /\.ie-apply\{[^}]*width:3
 const html = read('static/canvas.html');
 const vers = [...html.matchAll(/novai-canvas\/(?:canvas\.css|canvas\.js)\?v=([0-9.]+)/g)].map((m) => m[1]);
 assert.strictEqual(vers.length, 2, 'canvas.html 里 css / js 各一处 ?v=');
-assert.strictEqual(vers[0], vers[1], 'css / js 的 ?v= 一致');
-assert(/^1\.0\.143\.\d{10}$/.test(vers[0]), '?v= 形如 1.0.143.<unix 秒>：' + vers[0]);
+const cache = checkStaticCacheVersions({ root, page: 'static/canvas.html' });
+assert.ok(cache.ok, 'canvas.html 的 ?v= 满足：VERSION 前缀 / 10 位 mtime / 无裸链接 / 多处一致' + (cache.problems.length ? '：' + cache.problems.join('；') : ''));
+assert.ok(cache.refs.has('/static/novai-canvas/canvas.css') && cache.refs.has('/static/novai-canvas/canvas.js'), 'css / js 两处 ?v= 都在：' + vers.join(' / '));
 
 console.log('[PASS] 图片节点「调色」：入口 / 共用对话框 / 工具页 DOM 与协议 / init·apply / adjust 参数 / 45MB 压缩 / 构建产物');

@@ -5638,12 +5638,19 @@ class PersonaRequest(BaseModel):
 
 class MemoryRequest(BaseModel):
     """长期记忆库（memory）请求体。content 为记忆文本，enabled 为启用开关（None 表示不改动）。
-    scope 为作用域（global 全局 / conversation 仅某对话），conversation_id 仅在 conversation 作用域下有意义。"""
+    scope 为作用域（global 全局 / conversation 仅某对话），conversation_id 仅在 conversation 作用域下有意义。
+
+    L1：面板里说「记住：…」也走这个入口。canvas_id / thread_id 用于把这条记忆并进画布记忆
+    （索引 + 项目档案 prefs，去重口径同一处），user_text / reply_text 用于把这一轮对话写进线程。"""
     id: str = ""
     content: str = ""
     enabled: Optional[bool] = None
     scope: str = "global"
     conversation_id: str = ""
+    canvas_id: str = ""
+    thread_id: str = ""
+    user_text: str = ""
+    reply_text: str = ""
 
 
 # --- 负载均衡 ---
@@ -27279,7 +27286,12 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                         body["seed"] = payload.seed
                     if payload.return_last_frame:
                         body["return_last_frame"] = True
-                    if payload.generate_audio and (apimart_video_caps is None or apimart_video_caps.get("generate_audio")):
+                    if (apimart_video_caps is not None and apimart_video_caps.get("generate_audio")
+                            and "seedance" in str(apimart_seedance_model or "").lower()):
+                        # 能出声音的模型（Seedance 2.x 等）上游默认 generate_audio=true：关声音必须显式发 false，
+                        # 否则节点上「声音」关着、出来的片段照样带一段随机配乐，剪到一起音乐一段一段地跳
+                        body["generate_audio"] = bool(payload.generate_audio)
+                    elif payload.generate_audio and (apimart_video_caps is None or apimart_video_caps.get("generate_audio")):
                         body["generate_audio"] = True
                     # 水印：H3-Max 1080P 一律不发（连 false 都不能带）；其余模型按 caps.watermark 且用户显式开启才发
                     body.pop("aigc_watermark", None)
@@ -27313,6 +27325,8 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                         body["watermark"] = True
                     if payload.generate_audio:
                         body["generate_audio"] = True
+                    elif "seedance-2" in str(volc_model or "").lower():
+                        body["generate_audio"] = False   # Seedance 2.x 默认带声音：关声音要显式发 false
                     if payload.camerafixed:
                         body["camerafixed"] = True
                     image_like_urls = set()
@@ -29328,35 +29342,137 @@ async def get_memories():
     """列出全部长期记忆。"""
     return public_memory_library()
 
+def _memory_library_key(value):
+    """记忆库去重键：与 remember 工具同一套归一化（去掉「记住/记下/以后都」等指令词与标点）。"""
+    return _agent_memory_text_key(value)
+
+
+def _memory_library_find(data, content, scope, conversation_id=""):
+    """同一作用域、同一条内容（去掉指令词后相同）的库里条目；没有返回 None。"""
+    key = _memory_library_key(content)
+    if not key:
+        return None
+    for item in (data or {}).get("memories") or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("scope") or "global") != str(scope or "global"):
+            continue
+        if str(scope or "") == "conversation" and str(item.get("conversation_id") or "") != str(conversation_id or ""):
+            continue
+        if _memory_library_key(item.get("content")) == key:
+            return item
+    return None
+
+
+def _memory_library_canvas(item, canvas_id=""):
+    """这条库记忆对应哪张画布：优先请求里显式给的 canvas_id，其次 conversation_id。"""
+    return str(canvas_id or (item or {}).get("conversation_id") or "").strip()
+
+
+def _memory_library_agent_scope(item):
+    return "canvas" if str((item or {}).get("scope") or "") == "conversation" else "global"
+
+
+def _agent_memory_remove_by_text(canvas_id, scope, text):
+    """按归一化文本精确删画布记忆（不用子串匹配：删「海报」不会顺手删掉「海报图」）。"""
+    key = _memory_library_key(text)
+    if not key:
+        return []
+    gone = []
+    for item in agent_memory_load(canvas_id, scope):
+        if _memory_library_key(item.get("text")) != key:
+            continue
+        gone += agent_memory_remove(canvas_id, scope, item_id=str(item.get("id") or ""))
+    return gone
+
+
+def _agent_memory_mirror_library_item(item, canvas_id=""):
+    """L1：长期记忆库（/api/memories）写进去的东西，并进同一套画布记忆。
+
+    写进 agent_memory 后：索引（index.jsonl）由 agent_memory_add 一起写、档案 prefs 由
+    _agent_profile_refresh_memories 一起重建；去重也用同一处（记住：… 和 记住… 算同一条）。
+    返回真正新增的 agent 记忆条目。"""
+    if not isinstance(item, dict):
+        return []
+    text = str(item.get("content") or "").strip()
+    if not text:
+        return []
+    scope = _memory_library_agent_scope(item)
+    target = _memory_library_canvas(item, canvas_id)
+    if scope == "canvas" and not target:
+        scope = "global"
+    added = agent_memory_add(target if scope == "canvas" else "", scope, [text], source="memory_library")
+    if target:
+        # global 记忆也属于每张画布的长期偏好：档案 prefs 里要能看到（canvas 分支 agent_memory_add 已跑过，幂等）
+        _agent_profile_refresh_memories(target)
+    return added
+
+
+def _agent_memory_library_thread_turn(canvas_id, thread_id, user_text, reply_text):
+    """L1：面板里说「记住 …」这一轮也要写进线程（刷新 / 换设备回来还能看到）。"""
+    canvas_id = str(canvas_id or "").strip()
+    thread_id = str(thread_id or "").strip()
+    if not canvas_id or not thread_id:
+        return 0
+    records = []
+    if str(user_text or "").strip():
+        records.append({"role": "user", "text": str(user_text).strip()})
+    if str(reply_text or "").strip():
+        records.append({"role": "assistant", "text": str(reply_text).strip()})
+    if not records:
+        return 0
+    agent_thread_append(canvas_id, records, thread_id=thread_id)
+    return len(records)
+
+
 @app.post("/api/memories")
 async def create_memory(payload: MemoryRequest):
-    """新增一条长期记忆（默认启用）。"""
+    """新增一条长期记忆（默认启用）。
+
+    L1：面板里说「记住：…」走的就是这个接口。同一条内容只留一条（同一套归一化去重），
+    写库之后并进画布记忆（索引 + 项目档案 prefs），带 thread_id 时把这一轮对话写进线程。"""
     content = str(payload.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="记忆内容不能为空")
+    scope = payload.scope if payload.scope in ("global", "conversation") else "global"
     data = load_memory_library()
-    item = normalize_memory_item({
-        "id": f"memory_{uuid.uuid4().hex[:12]}",
-        "content": content,
-        "enabled": True,
-        "scope": payload.scope,
-        "conversation_id": payload.conversation_id,
-        "created_at": now_ms(),
-        "updated_at": now_ms(),
-    })
-    data.setdefault("memories", []).append(item)
-    data = save_memory_library(data)
+    existing = _memory_library_find(data, content, scope, payload.conversation_id)
+    deduplicated = existing is not None
+    if existing is not None:
+        item = existing
+    else:
+        item = normalize_memory_item({
+            "id": f"memory_{uuid.uuid4().hex[:12]}",
+            "content": content,
+            "enabled": True,
+            "scope": scope,
+            "conversation_id": payload.conversation_id,
+            "created_at": now_ms(),
+            "updated_at": now_ms(),
+        })
+        data.setdefault("memories", []).append(item)
+        data = save_memory_library(data)
+    _agent_memory_mirror_library_item(item, payload.canvas_id)
+    # 回复文案由服务端定：面板显示的、线程里存的必须是同一句
+    reply = str(payload.reply_text or "").strip() or (
+        "这条之前就记着了，不再重复存。" if deduplicated
+        else "记住了，之后的对话和生成都会参考这条。")
+    _agent_memory_library_thread_turn(payload.canvas_id or payload.conversation_id, payload.thread_id,
+                                      payload.user_text or ("记住：" + content), reply)
     result = public_memory_library(data)
     result["memory"] = item
+    result["deduplicated"] = deduplicated
+    result["reply"] = reply
     return result
 
 @app.patch("/api/memories/{memory_id}")
 async def update_memory(memory_id: str, payload: MemoryRequest):
-    """更新记忆（内容 / 启用开关）。"""
+    """更新记忆（内容 / 启用开关）。改了内容 / 作用域时，画布记忆与档案里的那条同步改掉。"""
     data = load_memory_library()
     item = find_memory(data, memory_id)
     if not item:
         raise HTTPException(status_code=404, detail="记忆不存在")
+    before = dict(item)
     next_content = str(payload.content or "").strip() or item.get("content")
     next_enabled = bool(item.get("enabled", True)) if payload.enabled is None else bool(payload.enabled)
     next_scope = payload.scope if payload.scope in ("global", "conversation") else item.get("scope", "global")
@@ -29377,13 +29493,22 @@ async def update_memory(memory_id: str, payload: MemoryRequest):
             break
     data["memories"] = memories
     data = save_memory_library(data)
+    # 画布记忆同步：内容 / 作用域变了就把旧的那条删掉、新的写进去（去重与索引 / 档案同一套）
+    if (str(before.get("content") or "") != str(next_item.get("content") or "")
+            or str(before.get("scope") or "") != str(next_item.get("scope") or "")
+            or str(before.get("conversation_id") or "") != str(next_item.get("conversation_id") or "")):
+        old_canvas = _memory_library_canvas(before, payload.canvas_id)
+        if old_canvas or _memory_library_agent_scope(before) == "global":
+            _agent_memory_remove_by_text(old_canvas, _memory_library_agent_scope(before),
+                                         before.get("content"))
+        _agent_memory_mirror_library_item(next_item, payload.canvas_id)
     result = public_memory_library(data)
     result["memory"] = next_item
     return result
 
 @app.delete("/api/memories/{memory_id}")
-async def delete_memory(memory_id: str):
-    """删除一条长期记忆。"""
+async def delete_memory(memory_id: str, canvas_id: str = ""):
+    """删除一条长期记忆（画布记忆与档案 prefs 同步删掉，recall 索引也一起清）。"""
     data = load_memory_library()
     item = find_memory(data, memory_id)
     if not item:
@@ -29392,6 +29517,9 @@ async def delete_memory(memory_id: str):
     kept = [m for m in memories if not (isinstance(m, dict) and m.get("id") == memory_id)]
     data["memories"] = kept
     data = save_memory_library(data)
+    target = _memory_library_canvas(item, canvas_id)
+    if target or _memory_library_agent_scope(item) == "global":
+        _agent_memory_remove_by_text(target, _memory_library_agent_scope(item), item.get("content"))
     result = public_memory_library(data)
     result["removed"] = 1
     return result
@@ -35114,6 +35242,7 @@ _AGENT_BEAT_KINDS = ("image", "video", "audio", "text", "table", "timeline", "gr
 _AGENT_BEAT_DOMAIN_TYPE = {"image": "smart-image", "video": "smart-video", "audio": "smart-audio",
                            "text": "smart-text", "group": "smart-group", "note": "smart-label"}
 _AGENT_BEAT_SIZE = {"image": (240, 240), "video": (320, 180), "audio": (320, 180), "text": (280, 200)}
+_AGENT_BEAT_MEDIA_BOX = {"base_w": 240, "min_h": 100, "max_w": 480, "max_h": 640}
 _AGENT_BEAT_RATIOS = ("1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "4:5", "5:4", "21:9", "9:21")
 _AGENT_BEAT_MENTION_RE = re.compile(r"@\{([A-Za-z0-9_\-]+)\}")
 
@@ -35493,10 +35622,54 @@ def _agent_beat_size_tier(size="", resolution=""):
     return "2K"
 
 
+def _agent_beat_source_size(url):
+    """本地图片的真实像素；外链 / data URL / 读不到都返回 (0, 0)。"""
+    path = _agent_local_image_path(url)
+    if not path:
+        return 0, 0
+    width, height = _agent_read_image_size(path)
+    return int(width or 0), int(height or 0)
+
+
+def _agent_beat_media_box(source_w, source_h, base_w=None):
+    """参考 / 上传素材节点的尺寸：与前端 mediaFit.fitSourceBox 同一套规则，严格保持源图比例。
+
+    以前图片节点一律 240×240，节点正文用 object-fit:cover：扁平长图（一个镜头一行、4.8:1 的
+    分镜长图最典型）在画布上只剩中间一条，看不到原比例。这里宽度从 240 起步、高不足 100 时
+    把宽度等比放大、太高再按 640 收宽度 —— 每一步只动一边，比例始终等于源图。
+    """
+    try:
+        src_w, src_h = int(source_w or 0), int(source_h or 0)
+    except (TypeError, ValueError):
+        return None
+    if src_w <= 0 or src_h <= 0:
+        return None
+    base = int(base_w or _AGENT_BEAT_MEDIA_BOX["base_w"])
+    min_h = _AGENT_BEAT_MEDIA_BOX["min_h"]
+    max_w = _AGENT_BEAT_MEDIA_BOX["max_w"]
+    max_h = _AGENT_BEAT_MEDIA_BOX["max_h"]
+    ratio = src_w / src_h
+    h = max(min_h, base / ratio)
+    w = h * ratio
+    if h > max_h:
+        h = max_h
+        w = h * ratio
+    if w > max_w:
+        w = max_w
+        h = w / ratio
+    return max(1, int(round(w))), max(1, int(round(h)))
+
+
 def _agent_beat_new_node(kind, x, y, title="", prompt="", params=None, url="", text="",
                          uploaded=False, manual=False, autorun=False):
     """按 canvas-next 的 newNode/withGen 口径造一个 BEAT 节点（服务端落盘格式）。"""
     w, h = _AGENT_BEAT_SIZE.get(kind, (280, 200))
+    src_w = src_h = 0
+    if kind == "image" and url:
+        src_w, src_h = _agent_beat_source_size(url)
+        box = _agent_beat_media_box(src_w, src_h)
+        if box:
+            w, h = box
     default_title = {"image": "图片", "video": "视频", "audio": "音频", "text": "文本"}.get(kind, "节点")
     if kind == "image":
         base = {"model": "", "ratio": "1:1", "size": "2K", "count": 1, "search": False, "style": "无",
@@ -35513,6 +35686,9 @@ def _agent_beat_new_node(kind, x, y, title="", prompt="", params=None, url="", t
         hist = [{"text": str(text)}]
     elif url:
         hist = [{"url": url, "meta": {"model": "", "at": now_ms()}}]
+        if kind == "image" and src_w > 0 and src_h > 0:
+            # 同时记下真实像素：之后的「切换版本」「替换」按已有尺寸走，不用再解码量一次
+            hist[0].update({"w": src_w, "h": src_h})
     gen = {"title": str(title or default_title)[:120], "prompt": str(prompt or ""), "params": base,
            "hist": hist, "hi": 0, "order": [], "agent": True}
     if uploaded:
@@ -35583,6 +35759,9 @@ def _agent_beat_ref_nodes(canvas, urls, kind, near_x, near_y):
             u = _agent_beat_url(n)
             if u and u not in by_url:
                 by_url[u] = n.get("id")
+    # 参考节点宽高按源图比例来（扁平长图可能是 480×100、竖图 240×427）：落位用节点自己的尺寸算，
+    # 不然固定 300 / 270 的偏移会让参考节点和目标节点重叠
+    cursor_y = float(near_y or 0)
     for i, url in enumerate(urls):
         url = str(url or "").strip()
         if not url:
@@ -35591,12 +35770,120 @@ def _agent_beat_ref_nodes(canvas, urls, kind, near_x, near_y):
             if by_url[url] not in ids:
                 ids.append(by_url[url])
             continue
-        node = _agent_beat_new_node(kind, near_x - 300, near_y + i * 270, title=("参考图" if kind == "image" else "参考视频") + f" {i + 1}",
+        node = _agent_beat_new_node(kind, 0, 0, title=("参考图" if kind == "image" else "参考视频") + f" {i + 1}",
                                     url=url, uploaded=True)
+        node["x"] = round(float(near_x or 0) - node["w"] - 60)
+        node["y"] = round(cursor_y)
+        cursor_y += node["h"] + 30
         made.append(node)
         by_url[url] = node["id"]
         ids.append(node["id"])
     return ids, made
+
+
+def _agent_beat_node_title(node):
+    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+    gen = data.get("gen") if isinstance(data.get("gen"), dict) else {}
+    return str(gen.get("title") or node.get("title") or "").strip()
+
+
+def _agent_beat_local_ref_missing(url):
+    """本地素材地址（/assets、/output、/uploads）在磁盘上不存在：模型常把节点标题拼成假地址。外链不判。"""
+    text = str(url or "").strip()
+    if not text.startswith(("/assets/", "/output/", "/uploads/")):
+        return False
+    return not _agent_local_image_path(text)
+
+
+_AGENT_GRID_URL_RE = re.compile(r"^(/output/agent_video_reader/[0-9a-f]+/[^/]+)/grid\.jpg$")
+
+
+def _agent_grid_to_frame(url):
+    """analyze_video 的关键帧网格是给助手「看」的拼图（多格 + 时间标注），拿去当参考图模型会照着画一张拼贴。
+    换成同一区间的单帧（取中间那格）；找不到单帧返回空串。"""
+    match = _AGENT_GRID_URL_RE.match(str(url or "").split("?", 1)[0])
+    if not match:
+        return ""
+    folder = output_file_from_url(match.group(1) + "/frames.json")
+    names = []
+    if folder:
+        try:
+            with open(folder, "r", encoding="utf-8") as fh:
+                names = [str(f.get("name") or "") for f in (json.load(fh).get("frames") or []) if f.get("name")]
+        except Exception:
+            names = []
+    for name in ([names[len(names) // 2]] if names else []) + ["frame_01.jpg"]:
+        candidate = "%s/%s" % (match.group(1), name)
+        if output_file_from_url(candidate):
+            return candidate
+    return ""
+
+
+def _agent_beat_repair_ref_urls(canvas, urls, kind, warnings):
+    """参考地址自检：不存在的本地地址按文件名对回画布上同类节点（标题或真实文件名一致）的真实地址；
+    对不上就丢掉并记一条提示，绝不拿假地址去建「已上传」节点（会变成一张裂图，生成时还报「文件不存在」）。"""
+    nodes = [n for n in (canvas.get("nodes") or []) if _agent_is_beat_node(n) and str(n.get("kind")) == kind]
+    on_canvas = {_agent_beat_url(n) for n in (canvas.get("nodes") or []) if _agent_is_beat_node(n)}
+    out = []
+    for raw in urls or []:
+        url = str(raw or "").strip()
+        if not url:
+            continue
+        if kind == "image" and _AGENT_GRID_URL_RE.match(url.split("?", 1)[0]):
+            frame = _agent_grid_to_frame(url)
+            if frame:
+                warnings.append("%s 是多格关键帧网格（只用来看），不能当参考图，已换成该区间的单帧 %s；"
+                                "以后参考图请用 analyze_video 返回的 frames[].url / first_frame_url" % (url, frame))
+                url = frame
+            else:
+                warnings.append("%s 是多格关键帧网格，不能当参考图，已忽略；请用 frames[].url" % url)
+                continue
+        if not _agent_beat_local_ref_missing(url):
+            out.append(url)
+            continue
+        stem = os.path.splitext(os.path.basename(urllib.parse.unquote(url.split("?", 1)[0])))[0].strip().lower()
+        fixed = ""
+        for node in nodes:
+            real = _agent_beat_url(node)
+            if not real or _agent_beat_local_ref_missing(real):
+                continue
+            title = _agent_beat_node_title(node).lower()
+            real_stem = os.path.splitext(os.path.basename(real.split("?", 1)[0]))[0].lower()
+            if stem and stem in (title, real_stem, os.path.splitext(title)[0]):
+                fixed = real
+                break
+        if fixed:
+            out.append(fixed)
+            warnings.append("参考地址 %s 不存在，已按名称换成画布上的真实素材 %s" % (url, fixed))
+        elif url in on_canvas:
+            # 和画布上某个节点的地址完全一致、又找不到同名真文件：就是那个节点，照常复用
+            out.append(url)
+        else:
+            warnings.append("参考地址 %s 不存在（画布上也找不到同名素材），已忽略；"
+                            "参考素材请用节点 id 写进 inputs，或用画布快照里节点的真实 url" % url)
+    return out
+
+
+def _agent_beat_inputs_cover_urls(canvas, input_ids):
+    """inputs 里已经连上的节点（含分组 / 堆叠里的成员）的地址：reference_urls 再给同一张就不重复连。"""
+    by_id = _agent_nodes_by_id(canvas)
+    covered = set()
+    for nid in input_ids or []:
+        node = by_id.get(nid)
+        if not node:
+            continue
+        url = _agent_beat_url(node)
+        if url:
+            covered.add(url)
+        try:
+            members = _agent_beat_group_members(node, by_id)
+        except Exception:
+            members = []
+        for cid in members or []:
+            child = by_id.get(cid)
+            if child and _agent_beat_url(child):
+                covered.add(_agent_beat_url(child))
+    return covered
 
 
 def _agent_beat_place(canvas, near_ids=(), w=240, h=240):
@@ -35614,6 +35901,34 @@ def _agent_beat_place(canvas, near_ids=(), w=240, h=240):
     right = max(b[0] + b[2] for b in boxes)
     top = min(b[1] for b in boxes)
     return _agent_free_position(canvas, right + gap, top, w, h)
+
+
+AGENT_REFERENCE_VIDEO_MAX_SECONDS = 15.5
+
+
+def _agent_local_video_seconds(url):
+    """本地参考视频时长（秒）；外链 / 读不到返回 None（不拦）。"""
+    path = _agent_local_image_path(url)
+    probe = ffprobe_binary()
+    if not path or not probe:
+        return None
+    try:
+        completed = subprocess.run([probe, "-v", "error", "-show_entries", "format=duration",
+                                    "-of", "default=nw=1:nk=1", path], capture_output=True, text=True, timeout=30)
+        return float((completed.stdout or "").strip() or 0) or None
+    except Exception:
+        return None
+
+
+def _agent_check_reference_video_length(urls):
+    """参考视频太长（常见：把整条原片当参考）：模型不知道该学哪一段，上游也普遍只收 2–15 秒。直接报错并给出做法。"""
+    for url in urls or []:
+        seconds = _agent_local_video_seconds(url)
+        if seconds and seconds > AGENT_REFERENCE_VIDEO_MAX_SECONDS:
+            raise AgentToolError(
+                "参考视频 %s 有 %.1f 秒，太长了：生视频的参考视频要截成这个镜头对应的那一段（2–15 秒）。"
+                "先用 analyze_video(node_id=原视频节点, start=开始秒, end=结束秒, clip=true) 截出片段，"
+                "再把返回的 clip_url 放进 reference_video。" % (url, seconds), code="reference_video_too_long")
 
 
 def _agent_beat_generate(args, kind):
@@ -35647,11 +35962,23 @@ def _agent_beat_generate(args, kind):
     if deferred:
         params["model"] = ""      # 不替用户定模型：助手写了也不用，模型只在待生成卡片里由用户选
 
+    if kind == "video":
+        _agent_check_reference_video_length(
+            [r["url"] for r in (args.get("reference_video") or []) if isinstance(r, dict) and r.get("url")])
+
     def _mutate(canvas):
-        img_urls = _agent_beat_expand_group_urls(
-            canvas, [r["url"] for r in (args.get("reference_urls") or []) if isinstance(r, dict) and r.get("url")])
-        vid_urls = [r["url"] for r in (args.get("reference_video") or []) if isinstance(r, dict) and r.get("url")]
+        ref_warnings = []
+        img_urls = _agent_beat_expand_group_urls(canvas, _agent_beat_repair_ref_urls(
+            canvas, [r["url"] for r in (args.get("reference_urls") or []) if isinstance(r, dict) and r.get("url")],
+            "image", ref_warnings))
+        vid_urls = _agent_beat_repair_ref_urls(
+            canvas, [r["url"] for r in (args.get("reference_video") or []) if isinstance(r, dict) and r.get("url")],
+            "video", ref_warnings)
         explicit_inputs = _agent_beat_normalize_inputs(canvas, args.get("inputs"))
+        covered = _agent_beat_inputs_cover_urls(canvas, explicit_inputs)
+        img_urls = [u for u in img_urls if u not in covered]
+        vid_urls = [u for u in vid_urls if u not in covered]
+        made["ref_warnings"] = ref_warnings
         w, h = _AGENT_BEAT_SIZE[kind]
         x, y = _agent_beat_place(canvas, explicit_inputs, w, h)
         ref_ids, ref_nodes = _agent_beat_ref_nodes(canvas, img_urls, "image", x, y)
@@ -35673,8 +36000,10 @@ def _agent_beat_generate(args, kind):
     node = made["node"]
     label = "视频" if kind == "video" else "图片"
     model_name = params.get("model", "").partition("::")[2] or params.get("model") or "画布默认模型"
+    ref_warnings = made.get("ref_warnings") or []
     if deferred:
         return {"node_id": node["id"], "title": node["data"]["gen"]["title"], "status": "ready_to_generate",
+                **({"warnings": ref_warnings} if ref_warnings else {}),
                 "kind": kind, "reference_node_ids": made["refs"], "reference_count": len(made["refs"]),
                 "generation_units": 0, "prompt": made["prompt"][:160] + ("…" if len(made["prompt"]) > 160 else ""),
                 "message": (f"已在画布上建好{label}节点「{node['data']['gen']['title']}」"
@@ -35690,6 +36019,8 @@ def _agent_beat_generate(args, kind):
                     + (f"并接入 {len(made['refs'])} 个参考素材" if made["refs"] else "")
                     + f"，画布会立刻用 {model_name} 开始生成（进度和结果直接显示在节点上）"),
     }
+    if ref_warnings:
+        result["warnings"] = ref_warnings
     for key in ("model_note", "caps_notes"):
         if args.get(key):
             result[key] = args[key]
@@ -35714,6 +36045,38 @@ def _agent_beat_tts_model(preferred_provider=""):
     return ""
 
 
+def _agent_beat_music_model(preferred_provider=""):
+    """挑一个能用的音乐模型：名字里带 suno / mureka / music 的音频模型（不写死模型名）。"""
+    providers = []
+    try:
+        providers = [p for p in load_api_providers() if (p or {}).get("enabled") is not False]
+    except Exception:
+        pass
+    providers.sort(key=lambda p: 0 if str(p.get("id") or "").lower() == str(preferred_provider or "").lower() else 1)
+    for p in providers:
+        pid = str(p.get("id") or "").lower()
+        if not provider_env_key_value(pid):
+            continue
+        for m in (p.get("audio_models") or []):
+            if re.search(r"suno|mureka|music", str(m), re.I):
+                return f"{pid}::{m}"
+    return ""
+
+
+def _agent_beat_audio_dur(seconds):
+    """音乐时长 → 画布音频节点的档位（自适应 / 15s / 30s / 60s）：取不短于成片的最小档。"""
+    try:
+        sec = float(seconds or 0)
+    except (TypeError, ValueError):
+        sec = 0
+    if sec <= 0:
+        return "自适应"
+    for tier in (15, 30, 60):
+        if sec <= tier:
+            return f"{tier}s"
+    return "60s"
+
+
 def _agent_beat_create_validate(args, canvas_id, node_type):
     canvas = load_canvas(canvas_id)
     by_id = _agent_nodes_by_id(canvas)
@@ -35726,13 +36089,23 @@ def _agent_beat_create_validate(args, canvas_id, node_type):
     settings = args.get("settings") if isinstance(args.get("settings"), dict) else {}
     if node_type == "audio":
         text = str(args.get("prompt") or args.get("text") or "").strip()
+        audio_kind = str(settings.get("kind") or args.get("audio_kind") or "配音").strip()
+        audio_kind = {"music": "音乐", "bgm": "音乐", "配乐": "音乐", "背景音乐": "音乐", "sfx": "音效",
+                      "voice": "配音", "tts": "配音"}.get(audio_kind.lower(), audio_kind)
+        if audio_kind not in ("配音", "音乐", "音效"):
+            audio_kind = "配音"
         if not text:
-            raise AgentToolError("配音节点要写 prompt（要念的口播原文）", code="invalid_args")
+            raise AgentToolError("配音节点要写 prompt（要念的口播原文）" if audio_kind == "配音"
+                                 else "音乐 / 音效节点要写 prompt（曲风、情绪、速度 BPM、乐器、段落起伏）", code="invalid_args")
         provider = str(settings.get("provider") or "").strip()
         model = str(settings.get("model") or "").strip()
-        norm["model"] = f"{provider}::{model}" if provider and model else (model if "::" in model else _agent_beat_tts_model(provider))
+        picker = _agent_beat_tts_model if audio_kind == "配音" else _agent_beat_music_model
+        norm["model"] = f"{provider}::{model}" if provider and model else (model if "::" in model else picker(provider))
         if not norm["model"]:
-            raise AgentToolError("没有可用的配音（TTS）模型：请在 API 设置里给平台添加 tts 类音频模型", code="invalid_args")
+            raise AgentToolError("没有可用的配音（TTS）模型：请在 API 设置里给平台添加 tts 类音频模型" if audio_kind == "配音"
+                                 else "没有可用的音乐模型：请在 API 设置里给平台添加 suno / mureka 这类音乐模型", code="invalid_args")
+        norm["audio_kind"] = audio_kind
+        norm["audio_dur"] = _agent_beat_audio_dur(settings.get("duration") or args.get("duration")) if audio_kind != "配音" else ""
         norm["prompt"] = text[:2000]
         # 配音节点同样按「堆叠当整体」连：模型传子节点 id 时换成堆叠节点，别把一组参考拆开
         norm["inputs"] = _agent_beat_normalize_inputs(canvas, _agent_parse_inputs(args.get("inputs")))
@@ -35745,6 +36118,16 @@ def _agent_beat_create_validate(args, canvas_id, node_type):
         return [str(i.get("node_id") if isinstance(i, dict) else i).strip() for i in raw if str(i.get("node_id") if isinstance(i, dict) else i).strip()]
     norm["video_nodes"] = ids("video_nodes") or _agent_parse_inputs(args.get("inputs"))
     norm["audio_nodes"] = ids("audio_nodes")
+    music = str(args.get("music") or args.get("music_node") or "").strip()
+    norm["music_node"] = music if music in by_id else ""
+    norm["music_url"] = "" if norm["music_node"] else (music if music.startswith(("/assets/", "/output/", "http://", "https://")) else "")
+    if music and not (norm["music_node"] or norm["music_url"]):
+        raise AgentToolError(f"music 要给画布上的音频节点 id，或工具结果里真实的音频地址：{music}", code="invalid_args")
+    if (norm["music_node"] or norm["music_url"]) and norm["audio_nodes"]:
+        raise AgentToolError("时间线只有一条音频轨：整段配乐（music）和逐镜头配音（audio_nodes）不能同时放。"
+                             "有口播就只放配音；纯音乐驱动的片子只放 music", code="invalid_args")
+    mute = args.get("mute_video_audio")
+    norm["mute_video_audio"] = bool(norm["music_node"] or norm["music_url"]) if mute is None else bool(mute)
     missing = [i for i in norm["video_nodes"] + norm["audio_nodes"] if i not in by_id]
     if missing:
         raise AgentToolError(f"节点不存在：{'、'.join(missing)}", code="node_not_found", status_code=404)
@@ -35766,8 +36149,13 @@ def _agent_beat_create_audio(args):
     def _mutate(canvas):
         w, h = _AGENT_BEAT_SIZE["audio"]
         x, y = (args["x"], args["y"]) if args.get("x") is not None and args.get("y") is not None else _agent_beat_place(canvas, args.get("inputs") or (), w, h)
-        node = _agent_beat_new_node("audio", x, y, title=args.get("title") or "口播", prompt=args["prompt"],
-                                    params={"model": args["model"], "kind": "配音"}, autorun=args.get("run", True))
+        audio_kind = args.get("audio_kind") or "配音"
+        params = {"model": args["model"], "kind": audio_kind}
+        if args.get("audio_dur"):
+            params["dur"] = args["audio_dur"]
+        default_title = {"配音": "口播", "音乐": "配乐", "音效": "音效"}.get(audio_kind, "口播")
+        node = _agent_beat_new_node("audio", x, y, title=args.get("title") or default_title, prompt=args["prompt"],
+                                    params=params, autorun=args.get("run", True))
         if args.get("_deferred"):
             node.setdefault("data", {})["agentPending"] = True
         canvas.setdefault("nodes", []).append(node)
@@ -35819,6 +36207,8 @@ def _agent_beat_create_timeline(args):
             out = _agent_beat_out(n)
             clip = {"id": f"clip_{uuid.uuid4().hex[:10]}", "sourceNodeId": nid, "url": url, "mediaKind": kind,
                     "inPoint": 0, "outPoint": round(dur, 3), "order": len(clips), "title": _agent_beat_title(n)}
+            if kind == "video" and args.get("mute_video_audio"):
+                clip["volume"] = 0          # 整段配乐时镜头自带的声音全部静音，避免每段一首不同的音乐
             if kind == "video":
                 clip["srcDur"] = round(dur, 3)
                 if out.get("frame"):
@@ -35844,6 +36234,22 @@ def _agent_beat_create_timeline(args):
                           "inPoint": 0, "outPoint": round(length, 3), "order": a_order, "pad": True,
                           "title": _agent_beat_title(n) or f"口播 {k + 1}"})
             a_order += 1
+        music_url = args.get("music_url") or ""
+        music_dur = 0.0
+        music_ref = None
+        if args.get("music_node"):
+            music_ref = by_id.get(args["music_node"])
+            music_url = _agent_beat_url(music_ref) if music_ref else ""
+            music_dur = _agent_beat_out_dur(music_ref) if music_ref else 0.0
+            if not music_url:
+                skipped.append(_agent_node_ref(music_ref) if music_ref else args["music_node"])
+        if music_url:
+            length = min(cursor, music_dur) if music_dur > 0 else cursor
+            clips.append({"id": f"clip_{uuid.uuid4().hex[:10]}", "sourceNodeId": args.get("music_node") or "",
+                          "url": music_url, "mediaKind": "audio", "inPoint": 0, "outPoint": round(length, 3),
+                          "order": 0, "fadeIn": 300, "fadeOut": 1500,
+                          "title": (_agent_beat_title(music_ref) if music_ref else "") or "配乐"})
+            state["music_short"] = bool(music_dur and music_dur + 0.05 < cursor)
         for k, text in enumerate(args["subtitles"]):
             if not text.strip() or k >= len(spans):
                 continue
@@ -35875,6 +36281,7 @@ def _agent_beat_create_timeline(args):
               "sub": sum(1 for c in cl if c.get("type") == "subtitle")}
     return {"node_id": node["id"], "title": node["text"], "status": "queued_on_canvas" if args["export"] else "created",
             "duration": round(state["total"], 2), "clips": counts, "skipped": state["skipped"],
+            **({"music_shorter_than_video": True} if state.get("music_short") else {}),
             "message": (f"已建好剪辑时间线（画面 {counts['video']} 段、配音 {counts['audio']} 段、字幕 {counts['sub']} 条，约 {state['total']:.1f} 秒）"
                         + (f"；没有结果、没放进去的：{'、'.join(state['skipped'])}" if state["skipped"] else "")
                         + ("，画布会自动导出成片 MP4 并放到画布上" if args["export"] else ""))}
@@ -41624,8 +42031,9 @@ def agent_memory_add(canvas_id, scope, texts, source="user", extra=None):
         if added:
             _agent_memory_save(canvas_id, scope, items)
             _agent_v2_memory_index_memory(canvas_id, scope, added)
-    if added and scope == "canvas":
-        # K1：记住的东西同时进项目档案（新对话开场 + 档案正文都能看到），不必等下一次摘要
+    if added and canvas_id:
+        # K1 / L1：记住的东西同时进项目档案（新对话开场 + 档案正文都能看到），不必等下一次摘要；
+        # 全局偏好也进这张画布的档案（面板里「记住：…」默认写全局）
         _agent_profile_refresh_memories(canvas_id)
     return added
 
@@ -41639,7 +42047,7 @@ def agent_memory_remove(canvas_id, scope, item_id="", text=""):
         if gone:
             _agent_memory_save(canvas_id, scope, [i for i in items if i not in gone])
             _agent_v2_memory_index_forget_items(canvas_id, scope, gone)
-    if gone and scope == "canvas":
+    if gone and canvas_id:
         _agent_profile_refresh_memories(canvas_id)
     return gone
 
@@ -41660,7 +42068,7 @@ def agent_memory_update(canvas_id, scope, item_id, text):
         _agent_v2_memory_index_forget_items(canvas_id, scope, [old])
         if text:
             _agent_v2_memory_index_memory(canvas_id, scope, [hit])
-    if scope == "canvas":
+    if canvas_id:
         _agent_profile_refresh_memories(canvas_id)
     return hit
 
@@ -42867,6 +43275,82 @@ def _agent_resume_ready_outcome(ctx, snapshot, wait_id):
     return None
 
 
+# 挂起等生成的看护任务：run_id -> asyncio.Task。前端目前不会调 /api/agent/events，
+# 只靠事件唤醒的话运行会永远挂着（面板一直转圈、停止也停不下来）；这里由服务端自己盯画布。
+_AGENT_RUN_WAIT_WATCHERS = {}
+AGENT_RUN_WATCH_POLL_SECONDS = 3.0
+AGENT_RUN_WATCH_UNPICKED_SECONDS = 90.0
+_AGENT_RUN_WATCH_KIND_LIMITS = {"image": 600, "video": 1800, "audio": 300, "text": 300, "timeline": 900}
+
+
+def _agent_run_watch_node_settled(node):
+    """BEAT 节点这次生成结束了没（与 wait_canvas_results 同口径：agentRun 清掉且有 agentDone）。"""
+    if not isinstance(node, dict):
+        return True                       # 节点被删了：也算结束，唤醒后如实告诉模型
+    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+    return data.get("agentRun") is None and isinstance(data.get("agentDone"), dict)
+
+
+async def _agent_run_watch_suspended(run_id):
+    started = time.monotonic()
+    picked = set()
+    try:
+        while True:
+            await asyncio.sleep(AGENT_RUN_WATCH_POLL_SECONDS)
+            state = _agent_run_state_read(run_id) if _agent_run_state is not None else None
+            if not state or str(state.get("status") or "") != _agent_run_state.STATUS_WAITING_GENERATION:
+                return                    # 已被唤醒 / 已停止 / 已结束
+            wait_ids = [str(i) for i in (state.get("waiting_on") or []) if i]
+            canvas_id = str(state.get("canvas_id") or "")
+            if not wait_ids or not canvas_id:
+                return
+            try:
+                canvas = load_canvas(canvas_id)
+            except Exception:
+                continue
+            by_id = _agent_nodes_by_id(canvas)
+            elapsed = time.monotonic() - started
+            settled, limit = True, 0
+            for nid in wait_ids:
+                node = by_id.get(nid)
+                data = (node or {}).get("data") if isinstance((node or {}).get("data"), dict) else {}
+                if node is not None and data.get("agentRun") is None:
+                    picked.add(nid)
+                limit = max(limit, _AGENT_RUN_WATCH_KIND_LIMITS.get(str((node or {}).get("kind") or ""), 600))
+                if not _agent_run_watch_node_settled(node):
+                    settled = False
+            unpicked = elapsed > AGENT_RUN_WATCH_UNPICKED_SECONDS and len(picked) < len(wait_ids)
+            # 都出结果 / 画布没打开没人接手 / 超过该类生成的等待上限：唤醒，让运行接着走（唤醒后会如实报告结果或原因）
+            if settled or unpicked or elapsed > limit:
+                await _agent_run_resume(run_id, {"node_ids": wait_ids, "type": "generation_done"})
+                return
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        print(f"[Agent] 挂起看护异常 {run_id}: {exc!r}", flush=True)
+    finally:
+        _AGENT_RUN_WAIT_WATCHERS.pop(run_id, None)
+
+
+def _agent_run_ensure_wait_watcher(run_id):
+    """给「等生成」挂起的运行挂上看护任务（幂等）；没有运行中的事件循环时什么都不做。"""
+    run_id = str(run_id or "").strip()
+    if not run_id or _agent_run_state is None:
+        return False
+    current = _AGENT_RUN_WAIT_WATCHERS.get(run_id)
+    if current is not None and not current.done():
+        return True
+    state = _agent_run_state_read(run_id)
+    if not state or str(state.get("status") or "") != _agent_run_state.STATUS_WAITING_GENERATION:
+        return False
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    _AGENT_RUN_WAIT_WATCHERS[run_id] = loop.create_task(_agent_run_watch_suspended(run_id))
+    return True
+
+
 async def _agent_run_resume(run_id, event=None):
     """4.3：生成事件到达后唤醒挂起的运行（进程内 / 重启后同一入口）。返回 {ok, status, ...}。"""
     if _agent_run_state is None:
@@ -43035,8 +43519,9 @@ AGENT_TOOLS = {
         "description": "在画布上新建节点。type：prompt=提示词节点（正文写 prompt）、image=图片生成节点、video=视频生成节点、text=纯文本节点、"
                        "table=多维表格（rows 可以是「一行一条提示词」的字符串数组、单元格数组，或「每行一个对象」的数组——对象键对应 columns，没给 columns 就按键名自动建列；智能画布和智能画布BEAT 都支持。上限 50 行 × 12 列、单元格 8000 字，超限会明确报错不会静默丢数据）、"
                        "batch=批量生成（inputs 必须包含一个多维表格节点，media=image|video，settings 同下；BEAT 上建的是表格下游的图片/视频节点）、"
-                       "audio=配音（仅 BEAT：prompt 写要念的口播原文，自动用平台的 TTS 模型生成）、"
-                       "timeline=剪辑时间线（仅 BEAT：video_nodes 按顺序放镜头，audio_nodes 对齐配音，subtitles 对齐字幕，export=true 自动导出成片）。"
+                       "audio=音频（仅 BEAT：默认配音，prompt 写要念的口播原文，自动用平台的 TTS 模型；settings.kind=音乐 时生成整段配乐，prompt 写曲风/情绪/BPM/乐器/起伏，settings.duration 写秒数，自动用平台的音乐模型）、"
+                       "timeline=剪辑时间线（仅 BEAT：video_nodes 按顺序放镜头，audio_nodes 对齐配音，subtitles 对齐字幕，export=true 自动导出成片；"
+                       "music=一条贯穿全片的配乐（音频节点 id 或真实音频地址），给了 music 会自动静音各镜头自带的声音，mute_video_audio 可单独控制；music 和 audio_nodes 不能同时给）。"
                        "inputs 填上游节点 ID 时会同时连好线（系统校验类型与方向），不用再单独 connect_nodes；"
                        "不填 x/y 时自动放在上游右侧、不和已有节点重叠。image/video 节点可带 settings（生成参数）；"
                        "BEAT 的 table/batch 可用 input_modes 给每条输入通道指定 sequence(逐行)/all(全部)/shared(沿用)。"
@@ -43046,6 +43531,8 @@ AGENT_TOOLS = {
             "video_nodes": {"type": "array", "items": {"type": "string"}, "description": "type=timeline（仅智能画布）：按播放顺序的视频 / 图片节点 id"},
             "audio_nodes": {"type": "array", "items": {"type": "string"}, "description": "type=timeline：配音节点 id，第 k 段对齐第 k 个镜头"},
             "subtitles": {"type": "array", "items": {"type": "string"}, "description": "type=timeline：每个镜头的字幕，第 k 条对齐第 k 个镜头"},
+            "music": {"type": "string", "description": "type=timeline：贯穿全片的配乐（音频节点 id，或 analyze_video 返回的 audio_url 这类真实地址）"},
+            "mute_video_audio": {"type": "boolean", "description": "type=timeline：静音各镜头自带的声音（给了 music 时默认 true）"},
             "export": {"type": "boolean", "description": "type=timeline：建好后自动导出成片 MP4（默认 true）"},
             "run": {"type": "boolean", "description": "type=audio：建好后立即生成配音（默认 true）；type=batch：建好后立即让画布逐行生成（默认 true，false=只建不跑）"},
             "rows": {"type": "array", "items": {}, "description": "type=table：行数组——字符串=一行一条提示词；数组=一行多个单元格；"
@@ -43420,6 +43907,204 @@ AGENT_TOOLS["review_table"] = {
     "validate": _agent_tool_review_table_validate,
     "run": _agent_tool_review_table_run,
     "preview": _agent_tool_review_table_preview,
+    "mutates_canvas": False,
+}
+
+
+# ---------------------------------------------------------------------------
+# analyze_video：读参考视频（关键帧网格 + 带时间戳口播），视频复刻类技能的第一步。
+# 只读、不改画布；挂在字面量之后（同 review_table），不进通用画布 CLI 命令表。
+# 实现在 server/agent_core/video_reader.py；这里只做「节点 / 地址 → 本地文件」与转写通道接线。
+# ---------------------------------------------------------------------------
+
+AGENT_VIDEO_READER_SUBDIR = "agent_video_reader"
+AGENT_VIDEO_READER_MAX_BYTES = 500 * 1024 * 1024
+_AGENT_VIDEO_EXTS = (".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi")
+
+
+def _agent_tool_analyze_video_validate(args):
+    args = dict(args or {})
+    node_id = str(args.get("node_id") or "").strip()
+    url = str(args.get("url") or "").strip()
+    if not node_id and not url:
+        raise AgentToolError("node_id 和 url 至少给一个（要读哪个视频）", code="invalid_args")
+    try:
+        frames = int(args.get("frames") or 12)
+    except (TypeError, ValueError):
+        frames = 12
+    try:
+        start = max(0.0, float(args.get("start") or 0))
+        end = max(0.0, float(args.get("end") or 0))
+    except (TypeError, ValueError):
+        raise AgentToolError("start / end 必须是秒数", code="invalid_args")
+    if end and end <= start:
+        raise AgentToolError("end 必须大于 start", code="invalid_args")
+    canvas_id = str(args.get("canvas_id") or "").strip() or str(_AGENT_RUN_CANVAS_ID.get() or "").strip()
+    return {"canvas_id": canvas_id, "node_id": node_id, "url": url,
+            "frames": max(4, min(24, frames)), "start": start, "end": end,
+            "transcript": args.get("transcript", True) is not False,
+            "clip": bool(args.get("clip")), "audio": bool(args.get("audio"))}
+
+
+def _agent_tool_analyze_video_preview(args, canvas=None):
+    target = args.get("node_id") or args.get("url") or "视频"
+    span = ""
+    if args.get("start") or args.get("end"):
+        span = "（%s–%s 秒）" % (args.get("start") or 0, args.get("end") or "结尾")
+    return "读取参考视频 %s%s：抽 %s 帧关键帧网格%s，只读不改画布。" % (
+        target, span, args.get("frames") or 12, "，并转写口播（带时间戳）" if args.get("transcript", True) else "")
+
+
+def _agent_video_node_url(canvas, node_id):
+    from server.agent_core.read_tools import CanvasAccess, resolve_node
+
+    access = CanvasAccess()
+    node = resolve_node(canvas, node_id, access)
+    if node is None:
+        raise AgentToolError("节点 %s 不存在" % node_id, code="node_not_found", status_code=404)
+    kind = access.kind(node)
+    if kind != "video":
+        raise AgentToolError("「%s」是 %s 节点，不是视频节点" % (access.title(node) or node_id, kind or "未知"),
+                             code="invalid_args")
+    url = access.url(node)
+    if not url:
+        raise AgentToolError("「%s」这个视频节点还没有视频（未上传 / 未生成）" % (access.title(node) or node_id),
+                             code="invalid_args")
+    return url, access.title(node) or str(node.get("id"))
+
+
+async def _agent_video_download(url, target):
+    """外链视频下载到本地（流式 + 体积上限，不跟随重定向到内网由 net_proxy / httpx 默认行为兜）。"""
+    from server import net_proxy
+
+    total = 0
+    async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=120.0,
+                                 follow_redirects=True,
+                                 **net_proxy.httpx_proxy(net_proxy.resolve_web_proxy())) as client:
+        async with client.stream("GET", url, headers={"User-Agent": "Mozilla/5.0 NOVAI"}) as response:
+            if response.status_code >= 400:
+                raise AgentToolError("下载视频失败：HTTP %s" % response.status_code, code="video_download_failed")
+            tmp = target + ".part"
+            with open(tmp, "wb") as fh:
+                async for chunk in response.aiter_bytes(1024 * 256):
+                    total += len(chunk)
+                    if total > AGENT_VIDEO_READER_MAX_BYTES:
+                        fh.close()
+                        os.remove(tmp)
+                        raise AgentToolError("视频超过 500MB，太大了，先剪短再读", code="video_too_large")
+                    fh.write(chunk)
+            os.replace(tmp, target)
+    return target
+
+
+async def _agent_video_transcribe(audio_path, prompt):
+    """复用语音输入那条转写通道（设置 → 通用 → 语音转写；没配借画布助手对话模型；本地命令优先）。"""
+    from server.integrations import asr as _asr
+    from server.integrations import video_sources as _video_sources
+
+    command = (os.environ.get("NOVAI_ASR_COMMAND") or "").strip()
+    if command:
+        return await asyncio.to_thread(_asr._run_local_command, command, audio_path)
+    settings = _asr.resolve_asr_settings()
+    if not (settings.get("provider") and settings.get("model")):
+        return {"ok": False, "text": "", "error": "未配置语音转写：请在「设置 → 通用 → 语音转写」选择平台和模型"
+                                                 "（需要支持音频输入的模型，例如 Gemini），配好后再读一次即可拿到口播"}
+    ok, message = _asr._resolve_provider(settings["provider"], settings["model"])
+    if not ok:
+        return {"ok": False, "text": "", "error": message}
+    return await _video_sources._provider_transcript(audio_path, settings["provider"], settings["model"],
+                                                     prompt=prompt)
+
+
+async def _agent_tool_analyze_video_run(args):
+    from server.agent_core import video_reader
+
+    url = args.get("url") or ""
+    label = "参考视频"
+    canvas = None
+    if args.get("canvas_id"):
+        try:
+            canvas = load_canvas(args["canvas_id"])
+        except HTTPException:
+            canvas = None
+    if args.get("node_id"):
+        if canvas is None:
+            raise AgentToolError("读不到当前画布，没法按 node_id 找视频", code="canvas_not_found", status_code=404)
+        url, label = _agent_video_node_url(canvas, args["node_id"])
+    url = str(url or "").strip()
+    key = hashlib.sha1(url.encode("utf-8", "ignore")).hexdigest()[:16]
+    out_dir = os.path.join(OUTPUT_DIR, AGENT_VIDEO_READER_SUBDIR, key)
+    os.makedirs(out_dir, exist_ok=True)
+    local_path = _agent_local_image_path(url)
+    if not local_path:
+        if url.startswith(("/assets/", "/output/", "/uploads/")):
+            raise AgentToolError("本地视频文件不存在或路径不合法", code="video_not_found", status_code=404)
+        if not url.startswith(("http://", "https://")):
+            raise AgentToolError("视频地址只能是画布上的视频节点、本地素材路径或 http(s) 直链", code="invalid_args")
+        # 外链只读画布里真实出现过的地址（防止被诱导去请求任意地址）
+        if canvas is None or url not in json.dumps(canvas, ensure_ascii=False):
+            raise AgentToolError("这个外链不在当前画布上：请先把视频上传 / 拖进画布，再用 node_id 读", code="invalid_args")
+        ext = os.path.splitext(urllib.parse.urlsplit(url).path)[1].lower()
+        local_path = os.path.join(out_dir, "source" + (ext if ext in _AGENT_VIDEO_EXTS else ".mp4"))
+        if not os.path.isfile(local_path):
+            await _agent_video_download(url, local_path)
+    if not os.path.isfile(local_path):
+        raise AgentToolError("视频文件不存在", code="video_not_found", status_code=404)
+    try:
+        result = await video_reader.read_video(
+            local_path, out_dir, "/output/%s/%s" % (AGENT_VIDEO_READER_SUBDIR, key),
+            ffmpeg=ffmpeg_binary() or "", ffprobe=ffprobe_binary() or "",
+            transcribe=_agent_video_transcribe, frames=args.get("frames") or 12,
+            start=args.get("start") or 0, end=args.get("end") or 0,
+            want_transcript=bool(args.get("transcript", True)), want_clip=bool(args.get("clip")),
+            want_audio=bool(args.get("audio")))
+    except video_reader.VideoReadError as exc:
+        raise AgentToolError(exc.message, code=exc.code)
+    result["video"] = label
+    result["source_url"] = url
+    if result.get("grid_url"):
+        result["view_images"] = [{"url": result["grid_url"], "label": "%s 关键帧网格" % label}]
+    transcript = result.get("transcript") or {}
+    notes = ["已抽 %d 帧（网格图会在下一轮给你看，每格左上角是 #序号 和时间）" % len(result.get("frames") or [])]
+    if transcript.get("ok"):
+        notes.append("口播已转写（[mm:ss] 是全片时间）")
+    elif not transcript.get("skipped"):
+        notes.append("口播没拿到：%s" % (transcript.get("error") or "未知原因"))
+    if result.get("cuts"):
+        notes.append("检测到 %d 个硬切点（cuts），分镜按真实切点划分" % len(result["cuts"]))
+    if result.get("last_frame_url"):
+        notes.append("first_frame_url / last_frame_url 是整条视频真正的首帧 / 尾帧：接下一个连续镜头时，用上一个镜头的 last_frame_url 当下一个镜头的首帧")
+    if result.get("audio_url"):
+        notes.append("已导出这段原声 audio_url（可作为时间线的 music；原片音乐有版权，确认用户有权使用才用）")
+    if result.get("clip_url"):
+        notes.append("已截出参考片段 clip_url，可直接当 generate_video 的 reference_video（复刻这段动作 / 运镜 / 特效）")
+    notes.append("grid_url 只是给你看的多格拼图，不要当参考图；"
+                 "frames[].url（单帧）可直接当 generate_image / generate_video 的 reference_urls（复刻构图、场景）；"
+                 "想细看某一段就用 start/end 缩小区间再读一次")
+    result["message"] = "；".join(notes)
+    return result
+
+
+AGENT_TOOLS["analyze_video"] = {
+    "description": "读懂一个参考视频（只读、不改画布）：在指定区间均匀抽 4–24 帧，拼成带「#序号 时间」标注的关键帧网格图并在下一轮交给你看；"
+                   "同时转写口播，按句带 [mm:ss] 时间戳（走设置里的语音转写，没配会明确说明）。"
+                   "返回时长、分辨率/画幅、硬切点 cuts、每帧地址（可直接当参考图）、整条视频真正的首帧 / 尾帧 first_frame_url / last_frame_url（接镜头用）和口播；"
+                   "clip=true 时把 start–end 这段（2–15 秒）截成 clip_url，可直接当 generate_video 的 reference_video。"
+                   "视频复刻 / 拆解爆款 / 分析节奏和分镜时先用它读全片，再用 start/end 缩小到某一段细看；"
+                   "不要只看封面帧就下结论。node_id 填画布上的视频节点（用户上传或生成的）。",
+    "schema": {"type": "object", "properties": {
+        "canvas_id": {"type": "string", "description": "不填就用当前画布"},
+        "node_id": {"type": "string", "description": "视频节点 id"},
+        "url": {"type": "string", "description": "没有节点时直接给视频地址（本地素材路径，或画布上真实出现过的直链）"},
+        "frames": {"type": "integer", "default": 12, "description": "抽几帧（4–24，默认 12）"},
+        "start": {"type": "number", "description": "区间开始秒数（默认 0）"},
+        "end": {"type": "number", "description": "区间结束秒数（默认到结尾）"},
+        "transcript": {"type": "boolean", "default": True, "description": "是否转写口播（默认 true；同一区间只转写一次，有缓存）"},
+        "clip": {"type": "boolean", "default": False, "description": "把 start–end 截成参考片段（2–15 秒）返回 clip_url，给 generate_video.reference_video 用"},
+        "audio": {"type": "boolean", "default": False, "description": "把 start–end 的原声导出成 audio_url（时间线 music 用；原片音乐有版权，用户确认有权使用才用）"}}},
+    "validate": _agent_tool_analyze_video_validate,
+    "run": _agent_tool_analyze_video_run,
+    "preview": _agent_tool_analyze_video_preview,
     "mutates_canvas": False,
 }
 
@@ -45168,7 +45853,7 @@ AGENT_RUN_MAX_ROUNDS = _agent_run_limit_from_env("NOVAI_AGENT_MAX_ROUNDS", 60)
 # 步数不限之后时长才是真刹车：跑满一小时还没结论就停，不让一个 run 无限挂着
 AGENT_RUN_MAX_SECONDS = _agent_run_limit_from_env("NOVAI_AGENT_MAX_SECONDS", 3600)
 # 这些工具只是「查一下 / 等结果」：成功也不占步数，否则 check_task 轮询会把长任务顶到步数上限
-AGENT_RUN_STEP_FREE_TOOLS = {"check_task", "get_canvas", "list_canvases", "list_templates", "use_asset", "review_table"}
+AGENT_RUN_STEP_FREE_TOOLS = {"check_task", "get_canvas", "list_canvases", "list_templates", "use_asset", "review_table", "analyze_video"}
 # 阶段一（NOVAI_AGENT_V2_READ_TOOLS）：按需读取工具只读、不花钱，成功也不占步数
 if _agent_v2_read_tools_enabled():
     AGENT_RUN_STEP_FREE_TOOLS |= set(_agent_read_tools.READ_TOOL_NAMES)
@@ -46246,6 +46931,48 @@ def _agent_self_check_node_ids(snapshot, history, results):
     return [node_id for node_id in ids if node_id in by_id]
 
 
+def _agent_run_touched_nodes(results, snapshot, limit=20):
+    """本轮工具**执行结果**里真正建 / 改过的节点 → [{"id","title"}]（M1）。
+
+    节点 id 只从工具结果取（create_node / update_node / generate_image 的 node_id），
+    标题以画布为准；绝不靠模型在摘要里自己写（它会写「无」「无节点 id」）。"""
+    by_id = _agent_nodes_by_id(snapshot if isinstance(snapshot, dict) else {})
+    ids = []
+
+    def walk(obj, depth=0):
+        if depth > 4:
+            return
+        if isinstance(obj, dict):
+            for key in ("node_id", "source_node_id"):
+                value = str(obj.get(key) or "").strip()
+                if value and value not in ids:
+                    ids.append(value)
+            for key in ("node", "result", "data", "value"):
+                if isinstance(obj.get(key), (dict, list, tuple)):
+                    walk(obj[key], depth + 1)
+        elif isinstance(obj, (list, tuple)):
+            for item in list(obj)[:50]:
+                walk(item, depth + 1)
+
+    for result in results or []:
+        if isinstance(result, dict) and result.get("ok") is not False:
+            walk(result)
+    out = []
+    for node_id in ids:
+        node = by_id.get(node_id)
+        if not isinstance(node, dict):
+            continue
+        title = ""
+        if _agent_is_beat_node(node):
+            title = str(_agent_beat_title(node) or "").strip()
+        if not title:
+            title = str(node.get("title") or "").strip()
+        out.append({"id": node_id, "title": (title or node_id)[:60]})
+        if len(out) >= max(1, int(limit or 20)):
+            break
+    return out
+
+
 def _agent_self_check_table_rows(node):
     """节点里的表格行数（兼容经典画布 node.table 与 BEAT data.table）。"""
     if not isinstance(node, dict):
@@ -46549,7 +47276,7 @@ _AGENT_STEP_LABELS = {
     "web_search": "联网搜索", "fetch_url": "读取网页", "search_images": "搜索参考图",
     "find_similar_images": "以图搜图", "lipsync_video": "对口型", "check_task": "查询任务",
     "activate_skill": "加载技能", "use_asset": "使用素材",
-    "batch_generate": "建多维表格并批量生成", "run_batch": "运行批量生成", "review_table": "检查表格",
+    "batch_generate": "建多维表格并批量生成", "run_batch": "运行批量生成", "review_table": "检查表格", "analyze_video": "读参考视频",
 }
 _AGENT_NODE_TYPE_LABELS = {"text": "文本", "prompt": "提示词", "image": "图片", "video": "视频",
                            "audio": "配音", "timeline": "时间线", "group": "分组",
@@ -47796,7 +48523,7 @@ def agent_thread_append(canvas_id, records, touched=None, thread_id=""):
                 if not isinstance(rec, dict) or not str(rec.get("text") or "").strip():
                     continue
                 item = {"role": rec.get("role") or "assistant", "text": str(rec["text"])[:4000], "at": now}
-                for key in ("run_id", "actions", "think", "self_check", "plan", "plan_status"):
+                for key in ("run_id", "actions", "think", "self_check", "plan", "plan_status", "nodes"):
                     if rec.get(key):
                         item[key] = rec[key]
                 if rec.get("took") is not None:
@@ -47865,7 +48592,7 @@ def _agent_thread_message_row(msg, text_field="text"):
     row = {"role": msg.get("role"), text_field: msg.get("text"), "at": msg.get("at")}
     for key in ("run_id", "actions", "steps", "changes", "truncated", "session_id", "rating",
                 "origin", "suggestions", "event", "canvas_id",
-                "think", "took", "self_check", "plan", "plan_status"):
+                "think", "took", "self_check", "plan", "plan_status", "nodes"):
         if key in msg and msg.get(key) is not None:
             row[key] = msg[key]
     return row
@@ -49017,6 +49744,28 @@ _AGENT_RUN_ROUND = contextvars.ContextVar("agent_run_round", default=0)
 _AGENT_RUN_EMIT = contextvars.ContextVar("agent_run_emit", default=None)
 # 这一轮是不是已经发过增量了：回退非流式时不要重复补发（避免前端看到两遍）
 _AGENT_RUN_STREAM_OUT = contextvars.ContextVar("agent_run_stream_out", default=False)
+# L2：本次运行里流式超时过 → 剩余轮次直接走非流式（下一次运行会重新先试流式）。
+# 用 run_id 集合而不是 contextvar：决策跑在心跳包出来的子任务里，子任务里 set 的 contextvar
+# 传不回父任务；run_id 是只读上下文，父子任务一致，按它记才真的能影响本运行后面的轮次。
+_AGENT_STREAM_OFF_RUNS = set()
+# L2：本次运行真正的开始时刻（心跳 / 「已 N 秒」按它算总耗时，不按单轮决策算，否则每轮都从 0 开始）
+_AGENT_RUN_STARTED_AT = contextvars.ContextVar("agent_run_started_at", default=0.0)
+
+
+def _agent_stream_run_key():
+    """当前运行的身份（没有 run 上下文时是空串，按「一次调用」处理）。"""
+    return str(_AGENT_RUN_ID.get() or "")
+
+
+def _agent_stream_run_disabled():
+    return _agent_stream_run_key() in _AGENT_STREAM_OFF_RUNS
+
+
+def _agent_stream_run_reset():
+    """一次新运行开始：清掉这个 run 的「流式已超时」标记，重新先试流式。"""
+    _AGENT_STREAM_OFF_RUNS.discard(_agent_stream_run_key())
+    if len(_AGENT_STREAM_OFF_RUNS) > 500:      # 防极端情况下无限增长
+        _AGENT_STREAM_OFF_RUNS.clear()
 
 
 def _agent_stream_round():
@@ -49264,6 +50013,16 @@ def _agent_timing_log(stage, run_id="", round_no=0, elapsed_ms=0.0, model=""):
           f"elapsed_ms={float(elapsed_ms):.0f} model={model or '-'}", flush=True)
 
 
+def _agent_model_call_failure_note(note):
+    """这条失败记录是不是「模型调用失败」（超时 / 上游报错 / 连续不可用）。
+
+    L3：这类内部原因只进运行明细（done.failures、运行状态），不拼进给用户的回复正文和线程摘要；
+    画布步骤失败、等待超时这些用户需要知道的记录不算内部原因，照旧写进回复。"""
+    text = str(note or "")
+    return ("模型调用失败" in text or "模型连续两轮不可用" in text
+            or "模型调用超时" in text or "上游模型接口错误" in text)
+
+
 
 
 # 决策等待心跳：每 5 秒一条（不写转录、不计步、不影响状态），只在等待期间发。
@@ -49272,7 +50031,8 @@ _AGENT_HEARTBEAT_SECONDS = float(os.getenv("NOVAI_AGENT_HEARTBEAT_SECONDS", "5")
 
 async def _agent_run_with_heartbeat(awaitable, emit, run_id, round_no, kind):
     task = asyncio.ensure_future(awaitable)
-    started = time.monotonic()
+    # L2：「已 N 秒」按本次运行的总耗时走（不按单轮重置），面板的计时才不会每轮跳回 0
+    started = float(_AGENT_RUN_STARTED_AT.get() or 0) or time.monotonic()
     while True:
         done, _ = await asyncio.wait({task}, timeout=float(_AGENT_HEARTBEAT_SECONDS))
         if done:
@@ -49400,8 +50160,11 @@ def _agent_stream_ttl_hit(chat):
 
 
 def _agent_stream_available(chat):
-    """这个模型这次能不能试流式（开关打开、模块可用、没被 TTL 拦）。"""
+    """这个模型这次能不能试流式（开关打开、模块可用、本次运行没超时过、没被 TTL 拦）。"""
     if not _agent_v2_stream_enabled() or not isinstance(chat, dict):
+        return False
+    if _agent_stream_run_disabled():
+        # L2：同一次运行里流式已经超时过一次，剩余轮次直接非流式；下一次运行会重新先试流式
         return False
     hit = _agent_stream_ttl_hit(chat)
     if hit:
@@ -49415,10 +50178,12 @@ def _agent_stream_note_denied(chat, exc):
     if code not in ("provider_http_error", "provider_error", "stream_unsupported", "empty_model_reply",
                     "stream_timeout"):
         return
-    if code == "stream_timeout" and _agent_chat_thinks(chat):
-        # 思考型模型首包慢是常态：不拉黑（原来一次超时整 10 分钟都走非流式），下一条继续先试流式
-        print(f"[Agent] {_agent_stream_key(chat)} 流式超时，思考型模型不拉黑、下条仍先试流式："
-              f"{str(getattr(exc, 'message', exc))[:120]}", flush=True)
+    if code == "stream_timeout":
+        # L2：超时只关掉「本次运行」剩下的流式，不写跨运行 TTL——下一次运行重新先试流式。
+        # 一直重试不会拖垮面板：非流式有 90s/120s 兜底，心跳照常发。
+        _AGENT_STREAM_OFF_RUNS.add(_agent_stream_run_key())
+        print(f"[Agent] {_agent_stream_key(chat)} 流式超时：本次运行剩余轮次直接走非流式"
+              f"（下一次运行重新先试流式）", flush=True)
         return
     key = _agent_stream_key(chat)
     _agent_stream_record_denied(key, str(getattr(exc, "message", exc)))
@@ -50587,6 +51352,12 @@ def _agent_estimate_tokens(text):
 # 目前只有一条：claude → 200000，Anthropic 官方公布的 Claude 3 / 4 / 5 全系上下文窗口（200K）。
 AGENT_CONTEXT_WINDOW_DEFAULTS = (
     ("claude", 200000),
+    # 厂商公开文档的上下文窗口（按前缀匹配）。没收录的模型仍回落到上下文引擎的 32K 保守预算；
+    # 32K 对带长技能手册（如 Hypit，一万多字）的运行太小：工具结果刚回来就被折叠，助手会反复 recall 自己的笔记。
+    ("gpt-5", 400000),
+    ("gpt-4.1", 1047576),
+    ("gemini-2.5", 1048576),
+    ("gemini-3", 1048576),
 )
 
 
@@ -51138,15 +51909,75 @@ def _agent_memory_store_summary_state(thread):
         return "", 0
 
 
-def _agent_v2_thread_progress(thread):
-    """一条线程的整体方案进度文字（没有方案返回空串）：按各阶段的生成预算扣掉真实生成次数推算。"""
-    if _agent_memory_store is None:
+def _agent_node_has_media(node):
+    """节点是不是已经有结果（BEAT 看 data.gen.hist / url，经典看 images 等）。"""
+    if not isinstance(node, dict):
+        return False
+    if _agent_is_beat_node(node):
+        gen = _agent_beat_gen(node) or {}
+        if [item for item in (gen.get("hist") or []) if isinstance(item, dict)]:
+            return True
+        return bool(_agent_beat_url(node))
+    return bool(_agent_media_items(node))
+
+
+def _agent_v2_canvas_pending_generations(canvas_id):
+    """画布上还等着用户点「执行生成」的节点（待生成卡片对应的节点，L4）。
+
+    只认带 agentPending / agentRun 标记、且还没有结果的图片 / 视频 / 配音节点；
+    这些节点存在时，档案进度不能写「都已完成」。"""
+    canvas_id = str(canvas_id or "").strip()
+    if not canvas_id:
+        return []
+    try:
+        canvas = load_canvas(canvas_id)
+    except Exception:
+        return []
+    out = []
+    for node in (canvas.get("nodes") or []):
+        if not isinstance(node, dict):
+            continue
+        kind = str(node.get("kind") or "") if _agent_is_beat_node(node) else _agent_node_kind(node)
+        if kind not in ("image", "video", "audio"):
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        if not (data.get("agentPending") or data.get("agentRun")):
+            continue
+        if _agent_node_has_media(node):
+            continue
+        out.append(node)
+    return out
+
+
+def _agent_v2_pending_progress_text(canvas_id, limit=6):
+    """待生成节点 → 进度里的一句人话（「待生成：海报（id）…」）；没有就空串。"""
+    nodes = _agent_v2_canvas_pending_generations(canvas_id)
+    if not nodes:
         return ""
-    roadmap = _agent_roadmap_clean((thread or {}).get("roadmap"))
-    if not roadmap:
-        return ""
-    used = _agent_memory_store.count_generations((thread or {}).get("messages") or [])
-    return str(_agent_memory_store.roadmap_progress(roadmap, used).get("text") or "")
+    names = []
+    for node in nodes[:max(1, int(limit or 6))]:
+        node_id = str(node.get("id") or "")
+        title = (_agent_beat_title(node) if _agent_is_beat_node(node)
+                 else str(node.get("title") or "")).strip() or "未命名节点"
+        names.append("「%s」（%s）" % (title, node_id))
+    more = "等 %d 个" % len(nodes) if len(nodes) > len(names) else ""
+    return "%s%s 还没开始生成（等你在待生成卡片里选好模型点执行）" % ("、".join(names), more)
+
+
+def _agent_v2_thread_progress(thread, canvas_id=""):
+    """一条线程的整体方案进度文字（没有方案返回空串）：按各阶段的生成预算扣掉真实生成次数推算。
+
+    L4：画布上还有待生成节点时，进度必须写明「待生成 …」；方案推算说「都已完成」也要被这句纠正。"""
+    text = ""
+    if _agent_memory_store is not None:
+        roadmap = _agent_roadmap_clean((thread or {}).get("roadmap"))
+        if roadmap:
+            used = _agent_memory_store.count_generations((thread or {}).get("messages") or [])
+            text = str(_agent_memory_store.roadmap_progress(roadmap, used).get("text") or "")
+    pending = _agent_v2_pending_progress_text(canvas_id) if canvas_id else ""
+    if pending:
+        return pending if (not text or "都已完成" in text) else (text + "；" + pending)
+    return text
 
 
 def _agent_v2_node_titles(canvas_id):
@@ -51154,7 +51985,8 @@ def _agent_v2_node_titles(canvas_id):
     try:
         canvas = load_canvas(str(canvas_id or ""))
     except Exception:
-        return {}
+        # 读不到画布 ≠ 画布上好节点全没了：返回 None，调用方别拿空表把档案清空
+        return None
     titles = {}
     for node in (canvas.get("nodes") or []):
         if not isinstance(node, dict):
@@ -51172,54 +52004,72 @@ def _agent_v2_node_titles(canvas_id):
     return titles
 
 
+def _agent_v2_thread_run_nodes(canvas_id, thread, limit=20):
+    """这条线程里真实碰过的节点 → [{"id","title"}]（按时间正序）。
+
+    优先读每轮助手消息上存的 nodes（M1：来自本轮工具执行结果的真实 id + 当时的标题）；
+    旧线程没有这个字段时退回落步骤参数里的 node_id，再用当前画布补标题。"""
+    titles = _agent_v2_node_titles(canvas_id) or {}
+    rows, seen = [], set()
+    messages = [item for item in (thread or {}).get("messages") or [] if isinstance(item, dict)]
+    for message in messages:
+        for node in message.get("nodes") or []:
+            if isinstance(node, str):
+                node = {"id": node}
+            if not isinstance(node, dict):
+                continue
+            node_id = str(node.get("id") or "").strip()
+            if not node_id or node_id in seen:
+                continue
+            seen.add(node_id)
+            title = titles.get(node_id) or " ".join(str(node.get("title") or "").split()) or node_id
+            rows.append({"id": node_id, "title": title[:60]})
+    if not rows:
+        ids = []
+
+        def add(value):
+            node_id = str(value or "").strip()
+            if node_id and node_id not in ids:
+                ids.append(node_id)
+
+        def walk(obj, depth=0):
+            if depth > 3:
+                return
+            if isinstance(obj, dict):
+                for key in ("node_id", "source_node_id"):
+                    add(obj.get(key))
+                for key in ("node_ids", "inputs"):
+                    value = obj.get(key)
+                    if isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, str):
+                                add(item)
+                            elif isinstance(item, dict):
+                                add(item.get("id") or item.get("node_id") or item.get("from"))
+                for key in ("node", "result", "data", "value", "args"):
+                    if isinstance(obj.get(key), (dict, list, tuple)):
+                        walk(obj[key], depth + 1)
+            elif isinstance(obj, (list, tuple)):
+                for item in list(obj)[:50]:
+                    walk(item, depth + 1)
+
+        for message in messages:
+            for step in message.get("steps") or []:
+                if isinstance(step, dict):
+                    walk(step.get("args") or {})
+                    walk(step.get("output") or {})
+        for node_id in ids:
+            title = titles.get(node_id)
+            if not title:
+                continue
+            rows.append({"id": node_id, "title": title})
+    return rows[-max(1, int(limit or 20)):]
+
+
 def _agent_v2_thread_node_hint(canvas_id, thread, limit=40):
-    """线程里真实碰过的节点 → 「- 标题（节点 id）」清单（K5：摘要【涉及节点】只许用真 id）。
-
-    节点 id 来自已落盘的步骤参数（write 工具的 node_id / inputs），标题来自当前画布；
-    两边都对得上的才写进去，模型拿不到就不编。"""
-    titles = _agent_v2_node_titles(canvas_id)
-    if not titles:
-        return ""
-    ids = []
-
-    def add(value):
-        node_id = str(value or "").strip()
-        if node_id and node_id not in ids:
-            ids.append(node_id)
-
-    def walk(obj, depth=0):
-        if depth > 3:
-            return
-        if isinstance(obj, dict):
-            for key in ("node_id", "source_node_id", "id"):
-                add(obj.get(key))
-            for key in ("node_ids", "inputs"):
-                value = obj.get(key)
-                if isinstance(value, list):
-                    for item in value:
-                        if isinstance(item, str):
-                            add(item)
-                        elif isinstance(item, dict):
-                            add(item.get("id") or item.get("node_id") or item.get("from"))
-            for key in ("node", "result", "data", "value", "args"):
-                if isinstance(obj.get(key), (dict, list)):
-                    walk(obj.get(key), depth + 1)
-        elif isinstance(obj, (list, tuple)):
-            for item in list(obj)[:50]:
-                walk(item, depth + 1)
-
-    for message in (thread or {}).get("messages") or []:
-        for step in (message.get("steps") or []) if isinstance(message, dict) else []:
-            if isinstance(step, dict):
-                walk(step.get("args") or {})
-                walk(step.get("output") or {})
-    lines = []
-    for node_id in ids:
-        title = titles.get(node_id)
-        if not title:
-            continue
-        lines.append("- %s（%s）" % (title, node_id))
-    return "\n".join(lines[-max(1, int(limit or 40)):])
+    """线程里真实碰过的节点 → 「- 标题（节点 id）」清单（K5：摘要【涉及节点】只许用真 id）。"""
+    nodes = _agent_v2_thread_run_nodes(canvas_id, thread, limit)
+    return "\n".join("- %s（%s）" % (node["title"], node["id"]) for node in nodes)
 
 
 def _agent_v2_memory_opening(ctx, thread, instruction, context_max=0):
@@ -51234,7 +52084,7 @@ def _agent_v2_memory_opening(ctx, thread, instruction, context_max=0):
     store = _agent_memory_store
     profile = store.load_profile(AGENT_MEMORY_DIR, canvas_id)
     summary, _upto = store.summary_state(thread or {})
-    progress = _agent_v2_thread_progress(thread or {})
+    progress = _agent_v2_thread_progress(thread or {}, canvas_id)
     if not progress:
         # 这张画布之前的别的对话定过整体方案：按最近更新的那条线程取进度
         try:
@@ -51243,7 +52093,7 @@ def _agent_v2_memory_opening(ctx, thread, instruction, context_max=0):
         except Exception:
             others = []
         for other in others:
-            progress = _agent_v2_thread_progress(other)
+            progress = _agent_v2_thread_progress(other, canvas_id)
             if progress:
                 break
     lines = None
@@ -51323,16 +52173,17 @@ def _agent_v2_memory_refresh_profile(canvas_id, threads=None):
             if not summary:
                 continue
             profile = store.merge_profile(profile, thread,
-                                          progress_text=_agent_v2_thread_progress(thread),
+                                          progress_text=_agent_v2_thread_progress(thread, canvas_id),
                                           node_titles=node_titles)
         for field in ("intro", "style", "progress"):
             value = str(old.get(field) or "").strip()
             if value and not profile.get(field) and value not in dropped_text:
                 profile[field] = value
         for token in old.get("key_nodes") or []:
-            token = str(token or "").strip()
-            if token and token not in dropped_text and token not in profile["key_nodes"]:
-                profile["key_nodes"].append(token)
+            # L4：旧档案里的条目重新过一遍「只收真实画布节点」的过滤，碎片 / 阶段名 / 已删节点都不留
+            entry = store.node_entry(token, node_titles)
+            if entry and entry not in profile["key_nodes"]:
+                profile["key_nodes"].append(entry)
         nodes_max = int(getattr(store, "PROFILE_NODES_MAX", 40) or 40)
         profile["key_nodes"] = profile["key_nodes"][-nodes_max:]
         profile = store.fit_profile(profile)
@@ -51465,6 +52316,11 @@ async def _agent_v2_memory_update(canvas_id, thread_id, chat, force_summary=Fals
         if not summary or not store.has_structure(summary):
             print(f"[Agent] 对话摘要不是固定结构，先不写回 {canvas_id}/{resolved}", flush=True)
             return
+        # M1：【涉及节点】用本轮工具执行结果里的真实节点覆盖，不信模型自己写的
+        # （它常写「无」「无节点 id」，档案 key_nodes 就会是空）。其它六段保持模型原文。
+        run_nodes = _agent_v2_thread_run_nodes(canvas_id, thread)
+        if run_nodes:
+            summary = store.set_summary_nodes(summary, run_nodes)
         with _AGENT_THREAD_LOCK:
             doc = _agent_thread_doc_load(canvas_id)
             target = _agent_thread_find(doc, resolved)
@@ -51736,7 +52592,10 @@ def _agent_profile_refresh_memories(canvas_id):
         return {}
     try:
         store = _agent_memory_store
-        texts = [str(item.get("text") or "") for item in agent_memory_load(canvas_id, "canvas")]
+        # 这张画布的 + 所有画布的长期偏好都进档案：面板里说「记住：…」默认写的是全局那条，
+        # 如果只收 canvas 作用域，用户会说「记住了但档案里没有」（L1 验收）。
+        texts = [str(item.get("text") or "") for item in
+                 (agent_memory_load(canvas_id, "canvas") + agent_memory_load(canvas_id, "global"))]
         profile = store.load_profile(AGENT_MEMORY_DIR, canvas_id)
         profile["prefs"] = []
         updated = store.add_profile_memory(profile, texts)
@@ -52017,8 +52876,10 @@ async def _agent_review_background(chat, instruction, roadmap, to_review, transc
 def _agent_schedule_review(chat, instruction, roadmap, to_review, transcript, emit,
                            run_id, round_no, review_counts, context_id, pending_reviews=None):
     """把审查丢到后台并发跑；返回 task（调用方可在收尾前 await 一下，保证结论落转录）。"""
+    run_started = float(_AGENT_RUN_STARTED_AT.get() or 0) or time.monotonic()
     emit("heartbeat", {"run_id": run_id, "round": round_no, "stage": "review",
-                       "elapsed_ms": 0, "kind": "review"})
+                       "elapsed_ms": int((time.monotonic() - run_started) * 1000.0),
+                       "kind": "review"})
     task = asyncio.create_task(_agent_review_background(
         chat, instruction, roadmap, to_review, transcript, emit, run_id, round_no,
         review_counts, context_id, pending_reviews))
@@ -52155,6 +53016,9 @@ async def _agent_run_producer(req, queue, bus=None):
     model_tools_map = _agent_slim_tools(tools_map)
     max_rounds = int(getattr(ctx, "max_rounds", AGENT_RUN_MAX_ROUNDS) or AGENT_RUN_MAX_ROUNDS)
     run_started_at = time.monotonic()
+    # L2：本次运行的起点与「流式是否已关」按运行隔离（contextvars 跟着这个任务走）
+    _AGENT_RUN_STARTED_AT.set(run_started_at)
+    _agent_stream_run_reset()
     run_deadline = run_started_at + AGENT_RUN_MAX_SECONDS
     # run 级「已经等过」的任务：同一个 task_id 一轮内或跨轮被反复返回时只等一次、只回灌一次
     waited_task_ids = set()
@@ -53031,6 +53895,7 @@ async def _agent_run_producer(req, queue, bus=None):
                     bus["suspended"] = True
                 emit("run_suspended", {"run_id": run_id, "reason": "generation",
                                        "waiting_on": list(canvas_waits)})
+                _agent_run_ensure_wait_watcher(run_id)
                 suspended = True
                 finished = True
                 break
@@ -53087,6 +53952,7 @@ async def _agent_run_producer(req, queue, bus=None):
                         bus["suspended"] = True
                     emit("run_suspended", {"run_id": run_id, "reason": "generation",
                                            "waiting_on": list(wait_ids)})
+                    _agent_run_ensure_wait_watcher(run_id)
                     suspended = True
                     finished = True
                     break
@@ -53236,8 +54102,12 @@ async def _agent_run_producer(req, queue, bus=None):
                 parts.append(limit_reason)
             if skipped_notes:
                 parts.append("已跳过：" + "；".join(skipped_notes[:6]))
-            if fail_notes:
-                parts.append("失败记录：" + "；".join(fail_notes[-4:]))
+            # L3：模型调用失败（超时 / 上游报错 / 连续不可用）只进运行明细（done.failures / 状态机），
+            # 不拼进给用户的回复正文，也不进线程摘要；步骤失败、等待超时这些画布层面的记录照旧写上。
+            step_fail_notes = [note for note in fail_notes
+                               if not _agent_model_call_failure_note(note)]
+            if step_fail_notes:
+                parts.append("失败记录：" + "；".join(step_fail_notes[-4:]))
             final_message = " ".join(p for p in parts if p).strip() or \
                 f"Agent 运行结束：执行 {steps_executed} 步，共 {rounds} 轮"
             if runstate_on:
@@ -53247,7 +54117,7 @@ async def _agent_run_producer(req, queue, bus=None):
                     else _agent_run_state.STATUS_FINISHED,
                     round=rounds, steps=steps_executed, history=history, results=results,
                     intent=intent, roadmap=roadmap, message=final_message[:2000],
-                    status_reason=status,
+                    status_reason=status, failures=[str(item) for item in fail_notes[-40:]],
                     last_event_seq=max(0, int((bus or {}).get("next_seq") or 1) - 1))
             if snapshot_token is not None:
                 ctx.end_run(snapshot_token)
@@ -53261,6 +54131,8 @@ async def _agent_run_producer(req, queue, bus=None):
             changes["artifacts"] = _agent_collect_artifacts(step_artifacts, ctx)
             done_payload = {"run_id": run_id, "status": status, "steps_executed": steps_executed,
                             "rounds": rounds, "message": final_message[:2000],
+                            # L3：失败明细只在这里（运行明细）给，回复正文与线程摘要都不带
+                            "failures": [str(item) for item in fail_notes],
                             "changes": changes}
             done_payload.update(ctx.done_extra(session, undo_log, plan_payload))
             if _agent_v2_suggestions_enabled():
@@ -53329,6 +54201,11 @@ async def _agent_run_producer(req, queue, bus=None):
                 if (isinstance(saved_plan, dict) and saved_plan.get("requires_confirmation") is True
                         and isinstance(saved_plan.get("steps"), list) and saved_plan["steps"]):
                     record["plan"] = saved_plan
+                # M1：本轮真正建 / 改过的节点（真实 id + 标题）跟着这条回复落线程，
+                # 线程摘要的【涉及节点】和项目档案直接用它们，不靠模型自己写
+                run_nodes = _agent_run_touched_nodes(results, after_snapshot_final)
+                if run_nodes:
+                    record["nodes"] = run_nodes
                 records.append(record)
                 ctx.thread_append(records, list(dict.fromkeys(touched_refs)))
             except Exception as exc:
@@ -53580,6 +54457,8 @@ async def agent_task_list(request: Request):
 async def agent_run_snapshot(run_id: str, request: Request):
     bus = _agent_run_bus_get(run_id)
     _agent_require_run_access(bus, request, "view")
+    if bus.get("suspended") and not bus.get("cancel_requested"):
+        _agent_run_ensure_wait_watcher(run_id)
     return _agent_run_task_snapshot(bus)
 
 
@@ -53593,7 +54472,21 @@ async def agent_run_cancel(run_id: str, request: Request):
     task = bus.get("task")
     if task is not None and not task.done():
         task.cancel()
-    return {"ok": True, "taskId": str(bus.get("run_id") or run_id), "status": "STOPPING"}
+        return {"ok": True, "taskId": str(bus.get("run_id") or run_id), "status": "STOPPING"}
+    # 挂起（等生成 / 等额度）中的运行：没有在跑的协程可以取消，直接在这里收尾，否则面板永远停在「停止中」
+    rid = str(bus.get("run_id") or run_id)
+    watcher = _AGENT_RUN_WAIT_WATCHERS.pop(rid, None)
+    if watcher is not None and not watcher.done():
+        watcher.cancel()
+    message = "已停止。已提交给画布的生成会继续在节点上完成。"
+    if _agent_run_state is not None:
+        _agent_run_state_update(rid, _agent_run_state.STATUS_FINISHED, waiting_on=[],
+                                message=message, status_reason="cancelled")
+    bus["suspended"] = False
+    _agent_run_bus_publish(bus, "done", {"run_id": rid, "status": "cancelled", "steps_executed": 0,
+                                         "rounds": 0, "message": message, "failures": [], "changes": {}})
+    _agent_run_bus_close(bus)
+    return {"ok": True, "taskId": rid, "status": "CANCELLED"}
 
 
 class AgentRunSteerRequest(BaseModel):

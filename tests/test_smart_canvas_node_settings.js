@@ -11,6 +11,7 @@ const path = require('path');
 const vm = require('vm');
 const { spawnSync } = require('child_process');
 const root = path.join(__dirname, '..');
+const { checkStaticCacheVersions } = require('./static-cache-version');
 const jsPath = path.join(root, 'static/js/smart-canvas.js');
 const js = fs.readFileSync(jsPath, 'utf8');
 const html = fs.readFileSync(path.join(root, 'static/smart-canvas.html'), 'utf8');
@@ -33,9 +34,9 @@ function topLevelFunction(src, name){
 // ---- 1. 语法 + 版本号 ----
 const check = spawnSync(process.execPath, ['--check', jsPath], { encoding: 'utf8' });
 ok(check.status === 0, 'node --check static/js/smart-canvas.js 通过' + (check.status ? '：' + check.stderr : ''));
-const versionMatch = html.match(/smart-canvas\.js\?v=([0-9.]+)/);
-const jsMtime = Math.floor(fs.statSync(jsPath).mtimeMs / 1000);
-ok(versionMatch && versionMatch[1] === '1.0.143.' + jsMtime, 'smart-canvas.html 的 ?v= 跟着 smart-canvas.js 的 mtime 走');
+const cache = checkStaticCacheVersions({ root, page: 'static/smart-canvas.html' });
+ok(cache.ok, 'smart-canvas.html 的 ?v= 满足：VERSION 前缀 / 10 位 mtime / 无裸链接 / 多处一致' + (cache.problems.length ? '：' + cache.problems.join('；') : ''));
+ok(cache.refs.has('/static/js/smart-canvas.js'), 'smart-canvas.js 带 ?v=（' + (cache.refs.get('/static/js/smart-canvas.js') || '无') + '）');
 
 // ---- 2. 静态接线 ----
 const forNode = topLevelFunction(js, 'smartSettingsForNode');

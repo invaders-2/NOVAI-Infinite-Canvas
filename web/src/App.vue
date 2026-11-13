@@ -13,6 +13,7 @@ import MePage from './pages/me/MePage.vue';
 import UpdateModal from './shell/UpdateModal.vue';
 import UpdateDone from './shell/UpdateDone.vue';
 import UpdateReminder from './shell/UpdateReminder.vue';
+import StorageMigrationPrompt from './shell/StorageMigrationPrompt.vue';
 import Welcome from './shell/Welcome.vue';
 import AuthDialog from './shell/AuthDialog.vue';
 import { auth, loadAuth, standaloneView } from './lib/auth.js';
@@ -32,9 +33,8 @@ const isFull = computed(() => !isCanvas.value && FULL.includes(state.active));
 // 离开画布时清掉素材面板标记，避免再次进入时残留状态
 watch(isCanvas, on => { if (!on) state.sourcePanelOpen = false; });
 
-// 只有首访且落在首页才出欢迎层；深链/记住的 native 页不能先被欢迎层盖住
-const intro = ref((() => { try { return localStorage.getItem('novai-visited') || state.active !== 'home' ? '' : 'welcome'; } catch (e) { return ''; } })());
-watch(() => state.active, id => { if (id !== 'home' && intro.value === 'welcome') intro.value = ''; });
+// 不再自动弹欢迎页；intro 只承载「设置 → 关于 → 快速上手」打开的弹窗
+const intro = ref('');
 // /login、/reset：只显示登录 / 找回密码界面（必须登录模式下没登录会被送到这里），不加载外壳
 const standalone = standaloneView();
 onMounted(() => {
@@ -67,7 +67,9 @@ onMounted(() => {
         <UpdateModal />
         <UpdateDone />
         <UpdateReminder />
-        <Welcome :mode="intro" @close="intro = ''" />
+        <!-- 老用户首次启动问一次「要不要把数据迁到安装目录」 -->
+        <StorageMigrationPrompt />
+        <Welcome v-if="intro" :mode="intro" @close="intro = ''" />
         <AuthDialog v-if="auth.dialog" />
         <ToastHost />
     </div>

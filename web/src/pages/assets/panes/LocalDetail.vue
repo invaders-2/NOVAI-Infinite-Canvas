@@ -23,6 +23,8 @@ const isImage = computed(() => kind.value === 'image');
 const gen = computed(() => props.item?.generation || null);
 const chips = computed(() => classChips(props.item, 28));
 const delKey = computed(() => 'one:' + (props.item?.id || ''));
+// 「画布生成」里的生成物只读：可以预览 / 下载 / 复制链接，不能改名、删除、反推
+const readonly = computed(() => U.isReadonlyAsset(props.item));
 function inlineSave() { if (props.item) run(U.saveName(props.item.id, name.value)); }
 function openNew() { if (props.item?.url) window.open(props.item.url, '_blank'); }
 async function copyLink() { setStatus((await copyText(props.item?.url || '')) ? '已复制链接' : '复制失败'); }
@@ -46,11 +48,11 @@ async function saveCaption() {
             <div class="am-ph">
                 <div class="pt"><b>素材预览</b><span>{{ assetKindLabel(item) }}</span></div>
                 <div class="pa">
-                    <button type="button" class="am-ib" title="重命名" @click="emit('rename', item.id)"><NvIcon name="pencil" /></button>
+                    <button type="button" class="am-ib" :disabled="readonly" :title="readonly ? '画布生成里的素材只读' : '重命名'" @click="emit('rename', item.id)"><NvIcon name="pencil" /></button>
                     <button type="button" class="am-ib" title="下载" @click="U.downloadOne(item.id)"><NvIcon name="download" /></button>
                     <button type="button" class="am-ib" title="新窗口打开" @click="openNew"><NvIcon name="ext" /></button>
                     <button type="button" class="am-ib" title="复制链接" @click="copyLink"><NvIcon name="link" /></button>
-                    <button type="button" class="am-ib dng" :class="{ cf: X.pendingDelete === delKey }" :title="X.pendingDelete === delKey ? '再次点击确认删除' : '删除'" @click="U.remove([item.id], delKey)"><NvIcon name="trash" /></button>
+                    <button type="button" class="am-ib dng" :disabled="readonly" :class="{ cf: X.pendingDelete === delKey }" :title="readonly ? '画布生成里的素材只读' : X.pendingDelete === delKey ? '再次点击确认删除' : '删除'" @click="U.remove([item.id], delKey)"><NvIcon name="trash" /></button>
                 </div>
             </div>
             <div class="am-dsc">
@@ -58,12 +60,12 @@ async function saveCaption() {
                     <MediaThumb :url="item.url" :kind="kind" :name="item.name" :w="640" plain />
                     <span v-if="kind === 'image' || kind === 'video'" class="zm"><NvIcon :name="kind === 'video' ? 'play' : 'expand'" /></span>
                 </button>
-                <input v-model="name" class="am-dn" type="text" title="直接修改名称" aria-label="素材名称" @change="inlineSave" @keydown.enter.prevent="$event.target.blur()">
+                <input v-model="name" class="am-dn" type="text" :disabled="readonly" :title="readonly ? '画布生成里的素材只读' : '直接修改名称'" aria-label="素材名称" @change="inlineSave" @keydown.enter.prevent="$event.target.blur()">
                 <div class="am-kv">
                     <div><span>类型</span><b>{{ assetKindLabel(item) }}</b></div>
                     <div><span>大小</span><b>{{ formatFileSize(item.size) }}</b></div>
                     <div><span>上传时间</span><b>{{ formatDate((item.created_at || 0) * 1000) }}</b></div>
-                    <div><span>来源</span><b>本地上传</b></div>
+                    <div><span>来源</span><b>{{ readonly ? '画布生成（只读）' : '本地上传' }}</b></div>
                 </div>
                 <GenInfo v-if="gen && (gen.prompt || gen.model)" :prompt="gen.prompt || ''" :model="gen.model || ''" :provider="gen.provider || ''" :ratio="gen.ratio || ''"
                          :size="gen.width && gen.height ? gen.width + '×' + gen.height : ''" :at="gen.at || 0" refs-title="生成自" ref-icon="locate"

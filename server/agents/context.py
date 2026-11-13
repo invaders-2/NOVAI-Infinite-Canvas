@@ -27,6 +27,7 @@ class AgentRunContext:
         self.context_id = str(context_id or "")
         self.run_id = ""
         self.use_thread = False
+        self.thread_id = ""
         self.recent_refs: List[str] = []
 
     # --- 载入 ---

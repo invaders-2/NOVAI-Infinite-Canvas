@@ -1,22 +1,33 @@
-# 国内镜像同步：把 GitHub Release 的安装包补到 Gitee（自动分卷）
+# 国内镜像同步（手动触发）：把某个已发布 tag 的产物补齐到 Gitee / ModelScope。
 #
-# 为什么单独做一条流水线：build-win / build-mac 的产物在 dist-desktop/，而 tag 构建时
-# 调用的 .github/scripts/sync-domestic-release.sh 只管 desktop/release/ 下的 electron 产物。
-# 安装包体积超过 Gitee 单附件 100MB 限制后，那边只会留下几十 KB 的 yml/blockmap，
-# 所以这里专门负责「下载安装包 → 分卷 → 传 Gitee」。
+# 为什么单独做一条流水线：
+#   · build-win / build-mac 的安装包在 dist-desktop/，不在 build-electron 的 desktop/release/；
+#   · 三个 workflow 是并行跑的，tag 推上去时谁先谁后不确定，所以「等 Release 资产齐全」
+#     这件事放在这里做（--wait-for-assets + wait_minutes），而不是靠人掐时间。
 #
-# 触发：手动（Actions → sync-mirrors → Run workflow，填 tag）。
-# 说明：没有挂 push:tags 触发，因为 tag 推上去时 build-win/build-mac 还要跑十几分钟，
-#       这时 Release 里还没有安装包；等两个构建完了再手动跑一次即可。
+# 行为（2026-11 起）：
+#   · Gitee：安装包 >95MB 自动分卷（.partNN），脚本可重复执行（已传过的卷跳过）；
+#   · ModelScope：electron-release/ 自动更新产物 + 仓库根目录的 VERSION / static/update-notes.json；
+#   · 同步失败不再静默：步骤标红、::error::、job summary 列「缺哪些文件 + 影响哪一端用户」；
+#   · 最后的 mirror-verify 会再跑一次只读校验，**不完整就让本次运行失败**（workflow_dispatch
+#     是补传入口，必须红）。
+#
+# 用法：Actions → sync-mirrors → Run workflow，填 tag（如 v2.0.06）。
+#       build-win / build-mac 还没传完安装包也没关系，wait_minutes 会等它们。
 name: sync-mirrors
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag（例如 v1.0.115）'
+        description: 'Release tag（例如 v2.0.06）'
         required: true
-        default: 'v1.0.123'
+        type: string
+      wait_minutes:
+        description: '等 Release 里出现安装包的最长分钟数（build-win / build-mac 可能还在跑）'
+        required: false
+        default: '30'
+        type: string
 
 permissions:
   contents: read
@@ -25,31 +36,38 @@ jobs:
   gitee-installers:
     name: Gitee 安装包分卷同步
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
-      - name: 同步安装包到 Gitee
+      - name: 下载安装包并分卷上传到 Gitee
+        continue-on-error: true
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: bash .github/scripts/sync-gitee-installers.sh "${{ github.event.inputs.tag }}"
+          WAIT_MINUTES: ${{ inputs.wait_minutes }}
+        run: bash .github/scripts/sync-gitee-installers.sh "${{ inputs.tag }}" --wait-for-assets $(( ${WAIT_MINUTES:-30} * 60 ))
 
   electron-mirrors:
     name: Electron 更新产物同步（ModelScope 自动更新源）
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - name: 下载该 tag 的 Electron 更新产物
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p desktop/release
-          gh release download "${{ github.event.inputs.tag }}" --dir desktop/release \
+          gh release download "${{ inputs.tag }}" --dir desktop/release \
             --pattern 'latest*.yml' --pattern '*.blockmap' \
             --pattern '*.AppImage' --pattern '*.deb' \
             --pattern 'NOVAI-*-arm64.dmg' --pattern 'NOVAI-*-arm64-mac.zip' \
@@ -62,6 +80,33 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
-          RELEASE_TAG: ${{ github.event.inputs.tag }}
+          RELEASE_TAG: ${{ inputs.tag }}
           SYNC_GITEE: '0'
         run: bash .github/scripts/sync-domestic-release.sh
+
+  mirror-verify:
+    name: 镜像完整性校验（不完整则本次运行失败）
+    needs: [gitee-installers, electron-mirrors]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: 校验 Release 资产与国内镜像
+        id: check
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: python3 tools/check_release_completeness.py "$TAG" --write-summary "$GITHUB_STEP_SUMMARY"
+
+      - name: 镜像不完整 → 本次运行判失败
+        if: steps.check.outcome == 'failure'
+        run: |
+          echo "::error::国内镜像仍不完整（缺失文件见 job summary）。GitHub Release 已发布，不需要回滚；按 docs/release-checklist.md 排查后重跑。"
+          exit 1

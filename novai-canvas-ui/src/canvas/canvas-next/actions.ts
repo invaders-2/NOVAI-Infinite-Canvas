@@ -1,6 +1,8 @@
 /** 画布上的编辑动作（连线、删除、复制粘贴、上传……），界面和 Agent 共用 */
 import type { CanvasEdge, CanvasNode } from "../react-canvas/reactCanvasStore";
-import { autoVideoMode, cloneParams, connectBlock, genOf, inputsOf, isGenKind, NODE_DEFAULT_SIZE, uid, withGen, type GenKind, type TextParams, type VideoParams } from "./model";
+import { autoVideoMode, cloneParams, connectBlock, genOf, inputsOf, isGenKind, NODE_DEFAULT_SIZE, outOf, uid, withGen, type GenKind, type TextParams, type VideoParams } from "./model";
+import { fitSourceBox, isAdaptiveRatio, refitNodeBox } from "./mediaFit";
+import { sourceBoxForNode, sourceSizeForTier } from "./originalRatio";
 import type { CanvasStore } from "./store";
 import { appendMention } from "./mentions";
 import { tableAutoSize, tableChannels, tableOf } from "./table";
@@ -9,6 +11,7 @@ import { keyHint } from "./ui/shortcuts";
 import { computeFlowLayout, computeGridLayout, type LayoutMode } from "./autoLayout";
 import { frameOf, isFrame, memberIdsDeep } from "./groupFit";
 import { withGroupColor } from "./groupStyle";
+import { convertImageToPng, planImageUpload } from "./imageUpload";
 
 /** 连线；成功后选中下游节点，并按输入自动切换视频生成方式 */
 export function connect(store: CanvasStore, from: string, to: string, opts: { quiet?: boolean; select?: boolean } = {}): CanvasEdge | null {
@@ -27,13 +30,31 @@ export function addMention(store: CanvasStore, id: string, ref: string, section?
 }
 export const title = (n: CanvasNode) => (isGenKind(n.kind) ? genOf(n).title : n.kind === "table" ? tableOf(n).title : n.text || n.kind);
 
-/** 输入变化后的联动：视频节点自动选生成方式；表格自动调尺寸 */
+/**
+ * 原图比例：连入 / 更换参考图后，按新源图比例把空节点摆正一次（拿不到源图尺寸就不动）。
+ * 只把量到的尺寸写回 params.sourceSize —— 图片是请求要发的显式 WxH（沿用尺寸档长边），
+ * 视频没有自己的尺寸档，只把它当「已按哪个源图比例摆正过」的备忘（不发请求）。
+ * 摆正本身由 store 的比例不变量完成：比例没变就不重摆，用户拖过的尺寸不会被弹回去。
+ */
+function syncSourceRatio(store: CanvasStore, n: CanvasNode) {
+  if (n.kind !== "image" && n.kind !== "video") return;
+  if (outOf(n)) return;                                                              // 有结果：真实比例优先
+  const p = genOf(n).params as { ratio?: string; size?: string; sourceSize?: string };
+  if (!isAdaptiveRatio(p.ratio)) return;
+  const tier = n.kind === "image" ? String(p.size || "") : "1K";
+  const size = sourceSizeForTier(sourceBoxForNode(store, n, n.kind as GenKind), tier);
+  if (!size || size === (p.sourceSize || "")) return;                                // 量不到尺寸 / 比例没变：不动
+  store.patchGen(n.id, (g) => ({ params: { ...g.params, sourceSize: size } }));
+}
+
+/** 输入变化后的联动：视频节点自动选生成方式；表格自动调尺寸；原图比例按新源图摆正 */
 export function afterInputsChanged(store: CanvasStore, id: string) {
   const n = store.node(id); if (!n) return;
   if (n.kind === "video") { const m = store.modelOf(n); if (m) { const mode = autoVideoMode(store.state.doc, id, m); if (mode && mode !== (genOf(n).params as VideoParams).mode) store.patchGen(id, (g) => ({ params: { ...(g.params as VideoParams), mode } })); } }
   // 文本节点连进分组：输出还是「文本」时切到「多维表格」，出表按提示词区分图片 / 视频任务
   if (n.kind === "text" && inputsOf(store.state.doc, id).some((x) => x.node.kind === "group")) { const tp = genOf(n).params as TextParams; if (!tp.output || tp.output === "text") { store.patchGen(id, (g) => ({ params: { ...(g.params as TextParams), output: "table" } })); store.toast("已把输出切到「多维表格」：出表时按提示词区分图片 / 视频任务，每个分组 / 堆叠各占一列「输入 N」"); } }
   if (n.kind === "table") { const s = tableAutoSize(tableOf(n), tableChannels(store.state.doc, id).length); if (s.w > n.w) store.updateNode(id, (x) => ({ ...x, w: s.w })); }
+  syncSourceRatio(store, n);
 }
 
 export function deleteSelection(store: CanvasStore) {
@@ -155,24 +176,38 @@ export async function addFiles(store: CanvasStore, files: File[], at: { x: numbe
     if (!kind && isDocument(f)) { const id = await addDocument(store, f, { x: at.x + dx, y: at.y }); if (id) { made.push(id); dx += 360; if (opts.linkTo && store.node(opts.linkTo)) connect(store, id, opts.linkTo, { quiet: true, select: false }); } continue; }
     if (!kind) { store.toast(/\.pdf$/i.test(f.name) ? `${f.name}：暂不能读取 PDF 正文，请另存为 docx 或文本后上传` : `不支持的文件：${f.name}`, 5000); continue; }
     if (f.size > MEDIA_UPLOAD_LIMIT) { store.toast(`${f.name} 超过 200MB，未添加`); continue; }
-    const dataUrl = await new Promise<string>((r, j) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result)); fr.onerror = () => j(fr.error); fr.readAsDataURL(f); }).catch(() => "");
+    // 图片先过一遍格式判定：直接传 / 浏览器转 PNG / 明确拒绝（三档规则见 imageUpload.ts）
+    const plan = kind === "image" ? planImageUpload(f) : null;
+    if (plan?.mode === "reject") { store.toast(`暂不支持 ${plan.format} 格式：${f.name}，请另存为 PNG/JPG 后上传`, 6000); continue; }
+    let dataUrl = "";
+    let uploadName = f.name;
+    if (plan?.mode === "convert") {
+      const png = await convertImageToPng(f);
+      if (!png) { store.toast(`${f.name} 转成 PNG 失败，请另存为 PNG/JPG 后上传`, 6000); continue; }
+      dataUrl = png.dataUrl; uploadName = plan.name;
+    } else {
+      dataUrl = await new Promise<string>((r, j) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result)); fr.onerror = () => j(fr.error); fr.readAsDataURL(f); }).catch(() => "");
+    }
     if (!dataUrl) { store.toast("读取失败：" + f.name); continue; }
     // 视频 / 音频读一下元数据：时长（使用区间、切镜要用）和视频宽高
     const meta = kind === "image" ? null : await mediaMeta(dataUrl, kind);
     const wh = kind === "image" ? await new Promise<[number, number]>((r) => { const im = new Image(); im.onload = () => r([im.naturalWidth, im.naturalHeight]); im.onerror = () => r([1, 1]); im.src = dataUrl; }) : meta?.w && meta.h ? [meta.w, meta.h] : [16, 9];
     const dur = meta?.dur ? Math.round(meta.dur * 100) / 100 : undefined;
-    const url = await store.backend.importAsset(store.state.canvasId, dataUrl, f.name);
+    const url = await store.backend.importAsset(store.state.canvasId, dataUrl, uploadName);
     // 桌面版存资源库失败时不把整段 data URL 写进画布文档（几十上百 MB 会拖垮保存与本机备份），只放行小图
     if (store.backend.kind === "bridge" && url.startsWith("data:") && url.length > INLINE_FALLBACK_MAX) { store.toast(`${f.name} 存入资源库失败，未添加（文件较大，不能内嵌进画布）`); continue; }
-    const name = f.name.replace(/\.[^.]+$/, "").slice(0, 24);
+    const name = uploadName.replace(/\.[^.]+$/, "").slice(0, 24);
     // 「替换」：只换当前版本，节点本身不动（位置/尺寸/连线/提示词保留）
     if (opts.replace && store.node(opts.replace)) { replaceNodeMedia(store, opts.replace, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }); continue; }
     if (opts.target && store.node(opts.target)) {
       const t = store.node(opts.target)!; const g = genOf(t);
-      store.updateNode(t.id, (n) => withGen({ ...n, h: kind === "image" ? Math.round(Math.max(100, Math.min(520, n.w * wh[1] / wh[0]))) : n.h }, { hist: [...g.hist, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], hi: g.hist.length, uploaded: true }), { history: true });
+      const box = kind === "image" ? refitNodeBox(t, wh[0], wh[1]) : null;
+      store.updateNode(t.id, (n) => withGen({ ...n, ...(box ? { w: box.w, h: box.h } : {}) }, { hist: [...g.hist, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], hi: g.hist.length, uploaded: true }), { history: true });
       made.push(t.id); opts = { ...opts, target: undefined }; continue;
     }
-    const w = kind === "image" ? 240 : 320; const h = kind === "image" ? Math.round(Math.max(100, Math.min(520, w * wh[1] / wh[0]))) : kind === "video" ? (meta?.w && meta.h ? Math.round(Math.max(100, Math.min(520, w * meta.h / meta.w))) : 180) : NODE_DEFAULT_SIZE.audio.h;
+    const box = kind === "image" ? fitSourceBox(wh[0], wh[1]) : kind === "video" && meta?.w && meta.h ? fitSourceBox(meta.w, meta.h, { baseW: 320 }) : null;
+    const w = box?.w || (kind === "image" ? 240 : 320);
+    const h = box?.h || (kind === "video" ? 180 : NODE_DEFAULT_SIZE.audio.h);
     const n = store.newNode(kind, at.x + dx - w / 2, at.y - h / 2, { title: name, uploaded: true, hist: [{ url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], w, h });
     store.addNodes([n]); made.push(n.id); dx += w + 30;
     if (opts.linkTo && store.node(opts.linkTo)) connect(store, n.id, opts.linkTo, { quiet: true, select: false });

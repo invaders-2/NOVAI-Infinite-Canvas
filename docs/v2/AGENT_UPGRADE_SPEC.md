@@ -8,7 +8,7 @@
 
 | 接口 | 状态 |
 | --- | --- |
-| `POST /api/agent/plan` | 行为与响应格式**完全不变**（`static/gpt-chat.html` 在用） |
+| `POST /api/agent/plan` | 行为与响应格式**完全不变**（原 GPT 对话页在用，该页 2026-11 已下线删除） |
 | `POST /api/agent/preview` | 完全不变 |
 | `POST /api/agent/apply` | 完全不变 |
 | `POST /api/agent/rollback` | 完全不变 |

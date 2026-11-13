@@ -30,6 +30,11 @@ export type GenRequest = {
   resolvedPrompt: string;
   params: AnyParams;
   inputs: GenInput[];
+  /**
+   * 「@ 本节点」这次实际发出去的自我参考图：string = 那张源图；null = 没发（节点当时没有结果 / 模型不收）。
+   * 写回时原样记到新版本的 meta.selfSrc；字段缺失 = 旧请求快照，按旧数据回退。
+   */
+  selfSrc?: string | null;
   /** 视频：TapNow modelType */
   videoMode?: { name: VideoMode; api: string };
 };
@@ -76,6 +81,24 @@ export type UpscaleRuntimeStatus = { installed: boolean; downloading: boolean; p
 export type UpscaleResult = GenOutput & { skipped?: boolean };
 export type EditRequest = { canvasId: string; nodeId: string; op: EditOp; model?: ModelSpec; sourceUrl: string; maskDataUrl?: string; prompt?: string; params?: Record<string, unknown> };
 
+/**
+ * 后端持久任务的精简视图（图片 / 视频任务化生成用）：
+ * 离开画布时前端只把 taskId 记在节点上，回来按它接上——不再新建任务，也不会丢结果。
+ */
+export type CanvasTask = {
+  taskId: string;
+  /** 发起任务的画布节点（没带 node_id 的老任务是空串） */
+  nodeId: string;
+  kind: "image" | "video";
+  /** legacy 口径：queued/running/succeeded/failed（cancelled 后端会归到 failed） */
+  status: "queued" | "running" | "succeeded" | "failed";
+  model?: string;
+  result?: Record<string, any> | null;
+  error?: string;
+  createdAt: number;
+  updatedAt?: number;
+};
+
 export type LoadedDoc = { doc: CanvasDoc; version: number | null; source: "bridge" | "local" | "mock"; error?: string; migrated?: boolean };
 export type SavedDoc = { ok: true; version: number | null } | { ok: false; conflict: boolean; error: string; remote?: CanvasDoc; remoteVersion?: number };
 
@@ -106,6 +129,8 @@ export type CanvasAgentContext = {
   apps?: Array<{ name: string; title: string; description: string }>;
   /** 模型强度档位键（后端 model_caps.think 里的一档）；空 = 不传 = 默认 */
   thinkLevel?: string;
+  /** 自治档位（阶段四）：协作（默认，写入逐次批准）/ 自动推进 / 托管（按预算自动推进） */
+  autonomy?: "collab" | "auto" | "managed";
 };
 /** 待用户确认的执行方案（服务端 plan 事件原样；没有方案时为 null） */
 export type AgentTaskPlan = {
@@ -120,7 +145,7 @@ export type AgentTaskPlan = {
   impact?: Record<string, any>;
   steps: Array<{ tool: string; args?: Record<string, any>; description?: string; index?: number }>;
   /** 整个任务的阶段路线图（steps 只是第一阶段）；批准 = 批准整套路线 */
-  roadmap?: Array<{ stage: string; detail?: string; generations?: number }>;
+  roadmap?: Array<{ stage: string; detail?: string; generations?: number; /** 这一阶段的验收标准（一句话，旧数据没有） */ acceptance?: string }>;
   /** generation = 待生成卡片（节点已建好，用户选模型后执行）；其余为普通执行方案 */
   kind?: string;
   nodes?: Array<{ node_id: string; title: string; kind: string; prompt?: string }>;
@@ -171,11 +196,19 @@ export interface CanvasBackend {
   renameCanvas?(canvasId: string, title: string): Promise<unknown>;
   /** 生成；signal 中止 = 用户点停止（后端也要停掉对应任务） */
   generate(req: GenRequest, onEvent: (e: GenEvent) => void, signal: AbortSignal): Promise<GenResult>;
+  /** 这张画布上最近的任务（离开画布回来续跑用）；老后端不实现 = 没有续跑能力 */
+  listCanvasTasks?(canvasId: string): Promise<CanvasTask[]>;
+  /** 接着已有任务等结果（不新建任务；已完成的直接返回结果） */
+  resumeTask?(task: CanvasTask, onEvent: (e: GenEvent) => void, signal: AbortSignal): Promise<GenOutput[]>;
+  /** 用户主动停止生成：真正取消后端任务（页面卸载 / 切画布不调，留给回来续跑） */
+  cancelTask?(taskId: string): Promise<void>;
   /** 图片编辑，返回新版本（原图保留在历史里） */
   editImage(req: EditRequest, onEvent: (e: GenEvent) => void, signal: AbortSignal): Promise<GenOutput>;
   /** Agent / 提示词润色用的对话（流式）；返回完整文本 */
   chat(req: { canvasId: string; configId?: string; effort?: "auto" | "low" | "high"; /** 模型强度档位键（low/mid/high/xhigh/max）；空 = 不传 = 模型默认 */ thinkLevel?: string; messages: ChatMessage[]; /** 附图（novai-asset / data / https），只发给能看图的模型 */ images?: string[] }, onDelta: (full: string) => void, signal: AbortSignal): Promise<string>;
   runAgentTask?(req: { goal: string; context: CanvasAgentContext }): Promise<{ ok: boolean; taskId?: string; status?: string; error?: string }>;
+  /** 托管授权：提交 / 补充预算（平台 + 模型 + 生成次数上限） */
+  postAgentBudget?(runId: string, budget: Record<string, unknown>): Promise<{ ok: boolean; error?: string }>;
   defaultChatModel?(): Promise<string | null>;
   /** 把画布助手的默认对话模型记到服务端（null = 清掉，回到列表第一个） */
   setDefaultChatModel?(id: string | null): Promise<void>;

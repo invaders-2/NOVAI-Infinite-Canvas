@@ -36,4 +36,26 @@ assert.ok(panel.includes('placePopover({ anchor: box(active.row)'), '二级 flyo
 assert.ok(css.includes('.cn-root #pop.model-pop{overflow:visible}'), '模型菜单 #pop 不裁剪二级 flyout');
 assert.ok(css.includes('.cn-root .model-providers{max-height:min(300px,calc(100vh - 320px));overflow-y:auto'), '供应商列表自己滚动（收紧到 300px，给模型强度滑块留位置）');
 
-console.log('[PASS] 任务卡移除 / 菜单滚动条隐藏 / 助手二级模型菜单可点可选（3 组）');
+// ---- 4. F2 完成前自检「待核对」中性样式 + E5 授权卡「预计需要」 ----
+const card = read('novai-canvas-ui/src/canvas/canvas-next/agent/AutonomyCard.tsx');
+const ap2css = read('novai-canvas-ui/src/canvas/tapnow/agent-panel-v2.css');
+assert.ok(task.includes('items: Array<{ text: string; ok: boolean;'), '自检条目类型仍保留 ok');
+assert.ok(task.includes('status?: string'), '自检条目类型补 status（pending = 待核对）');
+assert.ok(task.includes('ok: row?.ok === true') && task.includes('status: typeof row?.status === "string" ? row.status : undefined'), 'taskSelfCheck 把 status 原样透传且不丢 ok');
+const selfcheck = panel.slice(panel.indexOf('function SelfCheckLine'), panel.indexOf('const isReflect'));
+assert.ok(selfcheck.includes('item.status === "pending"'), 'SelfCheckLine 识别 pending 项');
+assert.ok(selfcheck.includes('!item.ok && item.status !== "pending"'), '未满足统计排除 pending');
+assert.ok(selfcheck.includes('" 项待核对"') && selfcheck.includes('待核对'), 'pending 文案是「待核对」');
+assert.ok(selfcheck.includes('tone === "failed" ? " is-fail" : " is-pending"') && selfcheck.includes('const tone = check.passed ? "passed" : unmet.length ? "failed" : "pending"'), 'pending 走中性 is-pending，is-fail 只给真正未满足项');
+assert.ok(!/const unmet = check\.items\.filter\(\(item\) => !item\.ok\);/.test(selfcheck), '不再把所有 !ok（含 pending）都算未满足');
+assert.ok(selfcheck.includes('tone === "pending" ? "history" : "alert"'), 'pending 用中性图标，不用告警图标');
+assert.ok(ap2css.includes('.ap2-selfcheck.is-pending') && ap2css.includes('.ap2-selfcheck-pending'), '中性样式覆盖待核对行与明细行');
+// E5：requested 只展示，不做上限 / 预填
+assert.ok(card.includes('requested?: Partial<Record<Kind, number>>'), 'AutonomyBudget 补 requested');
+assert.ok(card.includes('data-requested') && card.includes('预计需要：'), '授权卡展示「预计需要」只读文案');
+assert.ok(card.includes('initial?.requested?.[row.kind]') && card.includes('data-requested-kind={row.kind}'), '按模态展示预计次数');
+const maxesBlock = card.slice(card.indexOf('const [maxes, setMaxes]'), card.indexOf('const setMax ='));
+assert.ok(maxesBlock.length > 0 && !maxesBlock.includes('requested'), 'requested 不参与上限预填');
+assert.ok(card.includes('max: normalize(maxes.image)'), '提交仍走用户输入的上限 max');
+
+console.log('[PASS] 任务卡移除 / 菜单滚动条隐藏 / 助手二级模型菜单可点可选 / 自检待核对中性 / 授权卡预计需要（4 组）');

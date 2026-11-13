@@ -3,9 +3,9 @@
  * 新版设置页「能力覆盖」（provider.size_overrides）可视化编辑。
  *
  * 断言：
- *   1) 选项不重复定义：比例 / 档位词表来自在线生图页的官方集合（RATIOS / EXTRA_RATIOS / RES_LEVELS）；
+ *   1) 选项不重复定义：比例 / 档位词表来自 web/src/lib/sizeCatalog.js 的官方集合（RATIOS / EXTRA_RATIOS / RES_LEVELS）；
  *   2) 卡片在「API 设置 → 平台详情」里，交互逻辑（勾选 / 取消 / 顺序 / 未知值 / 模型下拉 / 数字上限）正确；
- *   3) 保存链路：payloadOf 带字段，size_overrides 变了才重拉尺寸策略（pages/online/sizePolicy 新增 reload）；
+ *   3) 保存链路：payloadOf 带字段，size_overrides 变了才重拉尺寸策略（lib/sizePolicy 新增 reload）；
  *   4) 设计约束：新样式不用 border / 发丝线 / inset 描边，图标走 AIcon 线性图标；
  *   5) i18n：卡片里的中文文案在 lib/i18n-en.json 里都有英文键；
  *   6) 构建产物 static/v2 带上这张卡片。
@@ -23,8 +23,8 @@ const VIEW = path.join(ROOT, 'web/src/shell/settings/api/parts/ProviderView.vue'
 const CORE = path.join(ROOT, 'web/src/shell/settings/api/core/sizeOverrides.js');
 const SYNC = path.join(ROOT, 'web/src/shell/settings/api/core/sizePolicySync.js');
 const STORE = path.join(ROOT, 'web/src/shell/settings/api/core/useApiStore.js');
-const WEB_POLICY = path.join(ROOT, 'web/src/pages/online/sizePolicy.js');
-const ONLINE_SIZES = path.join(ROOT, 'web/src/pages/online/onlineSizes.js');
+const WEB_POLICY = path.join(ROOT, 'web/src/lib/sizePolicy.js');
+const SIZE_CATALOG = path.join(ROOT, 'web/src/lib/sizeCatalog.js');
 const I18N = path.join(ROOT, 'web/src/lib/i18n-en.json');
 
 let pass = 0;
@@ -51,8 +51,8 @@ async function main() {
     /* ── 1. 接入位置 + 选项来源 ── */
     ok(/import SizeOverridesCard from '\.\/SizeOverridesCard\.vue'/.test(view), 'ProviderView 引入了能力覆盖卡片');
     ok(/<SizeOverridesCard \/>/.test(view), '平台详情渲染 <SizeOverridesCard />');
-    ok(/from '\.\.\/\.\.\/\.\.\/\.\.\/pages\/online\/onlineSizes\.js'/.test(core),
-        'core/sizeOverrides.js 的比例 / 档位来自在线生图页的官方集合');
+    ok(/from '\.\.\/\.\.\/\.\.\/\.\.\/lib\/sizeCatalog\.js'/.test(core),
+        'core/sizeOverrides.js 的比例 / 档位来自 lib/sizeCatalog.js 的官方集合');
     ok(/SIZE_RATIOS\s*=\s*\[\.\.\.RATIOS, \.\.\.EXTRA_RATIOS\]/.test(core), '比例 = RATIOS + EXTRA_RATIOS，没有另抄一份');
     ok(/SIZE_LEVELS\s*=\s*RES_LEVELS\.slice\(\)/.test(core), '档位 = RES_LEVELS');
     ok(/SIZE_RATIOS/.test(card) && /SIZE_LEVELS/.test(card), '卡片用这两份选项渲染多选');
@@ -62,7 +62,7 @@ async function main() {
 
     /* ── 2. 交互逻辑（真跑模块） ── */
     globalThis.fetch = async () => ({ ok: true, json: async () => ({ format: 'novai-size-policy/v1', default: {}, models: {} }) });
-    const sizes = await import(pathToFileURL(ONLINE_SIZES).href);
+    const sizes = await import(pathToFileURL(SIZE_CATALOG).href);
     const coreModule = await import(pathToFileURL(CORE).href);
     const { SIZE_RATIOS, SIZE_LEVELS } = coreModule;
     eq(SIZE_RATIOS.length, sizes.RATIOS.length + sizes.EXTRA_RATIOS.length, '比例选项数量 = 官方 15 + 4');
@@ -123,8 +123,9 @@ async function main() {
     ok(/const overridesChanged = !!overridesOnServer && overridesSnapshot\(S\.providers\) !== overridesOnServer/.test(store),
         '保存后跟后端那份基线比，只有 size_overrides 变了才重拉策略');
     ok(/syncOverridesBaseline\(S\.providers\)/.test(store), '载入 / 重新拉取 / 保存成功都会刷新基线');
-    ok(/NovaSizePolicy\.reload\(\)/.test(sync) && /loadPolicy/.test(sync), 'sizePolicySync 先清缓存再让在线生图页重算');
-    ok(/function reload\(\)/.test(read(WEB_POLICY)), 'pages/online/sizePolicy.js 提供 reload()');
+    ok(/from '\.\.\/\.\.\/\.\.\/\.\.\/lib\/sizePolicy\.js'/.test(sync), 'sizePolicySync 从 lib/sizePolicy.js 导入尺寸策略');
+    ok(/NovaSizePolicy\.reload\(\)/.test(sync), 'sizePolicySync 用 NovaSizePolicy.reload() 清缓存重拉');
+    ok(/function reload\(\)/.test(read(WEB_POLICY)), 'lib/sizePolicy.js 提供 reload()');
     ok(/pending = null;/.test(read(WEB_POLICY).slice(read(WEB_POLICY).indexOf('function reload'))), 'reload() 清掉首次加载的缓存');
 
     /* ── 4. 设计约束 ── */

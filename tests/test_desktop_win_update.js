@@ -29,6 +29,36 @@ function topLevelFunction(src, name) {
     return '';
 }
 
+/* 抽出 applyUpdateNow 真跑安装决策：验证停后端 → 发 installing → quitAndInstall 的顺序与失败分支。 */
+function loadApplyUpdateNow(options) {
+    const opts = options || {};
+    const order = [];
+    const sandbox = {
+        app: { isPackaged: true, getVersion: () => '2.0.6' },
+        process: { platform: opts.platform || 'win32' },
+        autoUpdater: {
+            quitAndInstall: (silent, force) => { order.push(['quitAndInstall', silent, force]); },
+        },
+        macPreparedUpdate: opts.macPreparedUpdate || null,
+        pendingUpdateInfo: { version: '2.0.7' },
+        pendingNotes: null,
+        stageVersion: '2.0.7',
+        updateStage: opts.updateStage || 'downloaded',
+        updatePersist: { pendingVersion: '2.0.7', installAttempts: 0, lastInstallError: '' },
+        quitInstallTriggered: false,
+        updateInstallBlockedDir: () => opts.blockedDir || '',
+        stopBackendForUpdate: async () => { order.push(['stopBackendForUpdate']); },
+        stopDownloadProgressTicker: () => { order.push(['stopDownloadProgressTicker']); },
+        saveUpdateState: (patch) => { order.push(['saveUpdateState', patch]); },
+        sendUpdateStage: (payload) => { order.push(['sendUpdateStage', payload]); },
+        startMacSelfUpdate: async () => { order.push(['startMacSelfUpdate']); return { ok: true, supported: true, phase: 'download' }; },
+        installMacPreparedUpdate: async () => { order.push(['installMacPreparedUpdate']); return { ok: true, supported: true, phase: 'install' }; },
+        clog: () => {},
+    };
+    const fn = vm.runInNewContext(topLevelFunction(main, 'applyUpdateNow') + '\napplyUpdateNow', sandbox);
+    return { run: fn, order, sandbox };
+}
+
 const main = read('desktop/main.js');
 const parseSrc = topLevelFunction(main, 'parseNetstatListenPids');
 ok(!!parseSrc, 'main.js 里有 parseNetstatListenPids');
@@ -176,26 +206,54 @@ function loadFreeBackendPort(options) {
     ok(reuseAt >= 0 && /backendPort = port;/.test(main.slice(reuseAt, reuseAt + 200)), '复用外部后端时也记录 backendPort');
 
     console.log('[5] 静默安装 / 下载进度 / 打包配置');
-    const promptFn = topLevelFunction(main, 'showUpdateInstallPrompt');
-    ok(/autoUpdater\.quitAndInstall\(true, true\)/.test(promptFn), 'Windows 静默安装 quitAndInstall(true, true)');
-    ok(/process\.platform === 'win32'/.test(promptFn), '只有 win32 走静默参数');
-    ok(/autoUpdater\.quitAndInstall\(\);/.test(promptFn), 'macOS/其他平台保持 quitAndInstall()');
+    const winApply = loadApplyUpdateNow({ platform: 'win32' });
+    const winResult = await winApply.run();
+    const stopAt = winApply.order.findIndex((item) => item[0] === 'stopBackendForUpdate');
+    const quitAt = winApply.order.findIndex((item) => item[0] === 'quitAndInstall');
+    ok(stopAt >= 0 && quitAt > stopAt, '安装前先 stopBackendForUpdate 再 quitAndInstall');
+    const quitCall = winApply.order[quitAt];
+    ok(quitCall && quitCall[1] === true && quitCall[2] === true, 'Windows 静默安装 quitAndInstall(true, true)');
+    ok(winResult && winResult.ok === true && winResult.phase === 'install', 'restartNow 安装受理返回 {ok:true, phase:"install"}');
+    const installStageAt = winApply.order.findIndex((item) => item[0] === 'sendUpdateStage' && item[1].stage === 'installing');
+    ok(installStageAt >= 0 && installStageAt < quitAt, '真正安装前先发 installing（前端 watchdog 不会空等）');
+
+    const macApply = loadApplyUpdateNow({ platform: 'darwin', macPreparedUpdate: { version: '2.0.7', zipPath: '/tmp/a.zip' } });
+    const macResult = await macApply.run();
+    ok(macApply.order.some((item) => item[0] === 'installMacPreparedUpdate'), 'macOS 走自替换安装链路');
+    ok(!macApply.order.some((item) => item[0] === 'quitAndInstall'), 'macOS 不走 electron-updater quitAndInstall');
+    ok(macResult && macResult.phase === 'install', 'mac 安装受理返回 phase install');
+
+    const blockedApply = loadApplyUpdateNow({ platform: 'win32', blockedDir: '/Program Files/NOVAI' });
+    const blockedResult = await blockedApply.run();
+    const blockedError = blockedApply.order.find((item) => item[0] === 'sendUpdateStage' && item[1].stage === 'error');
+    ok(blockedResult && blockedResult.ok === false, '安装目录不可写时返回 ok:false');
+    ok(blockedError && blockedError[1].phase === 'install' && /不可写/.test(blockedError[1].message), '安装目录不可写时发 error(phase:"install")');
+    ok(!blockedApply.order.some((item) => item[0] === 'quitAndInstall'), '安装目录不可写时不会退出应用');
+    ok(blockedApply.order.some((item) => item[0] === 'saveUpdateState' && item[1].lastInstallError), '安装目录不可写时记录 lastInstallError');
+
     const setupFn = topLevelFunction(main, 'setupAutoUpdate');
     const progressAt = setupFn.indexOf("autoUpdater.on('download-progress'");
     const downloadedAt = setupFn.indexOf("autoUpdater.on('update-downloaded'");
     const progressBlock = progressAt >= 0 && downloadedAt > progressAt ? setupFn.slice(progressAt, downloadedAt) : '';
-    ok(/sendUpdateProgress\(\{/.test(progressBlock), 'download-progress 向界面发进度');
-    ok(/percent: Math\.round\(info\.percent \|\| 0\)/.test(progressBlock), '转发 percent（四舍五入）');
-    ok(/transferred: info\.transferred \|\| 0/.test(progressBlock) && /total: info\.total \|\| 0/.test(progressBlock), '转发 transferred / total');
+    ok(/sendUpdateProgress\(\{ stage: 'downloading'/.test(progressBlock), 'download-progress 仍向旧 onProgress 通道发进度（老前端兼容）');
+    ok(/Math\.round\(info\.percent \|\| 0\)/.test(progressBlock), '原生进度百分比四舍五入');
+    ok(/transferred: transferred/.test(progressBlock) && /total: total/.test(progressBlock), '旧 onProgress 通道仍转发 transferred / total');
+    ok(/pushDownloadProgress\(/.test(progressBlock), '原生进度写入节拍器最新值，由节拍器统一发 downloading');
+    ok(/setInterval\(emitDownloadProgressStage, 400\)/.test(topLevelFunction(main, 'startDownloadProgressTicker')), '按 400ms 固定节拍发 downloading（≤500ms）');
     ok(/process\.platform === 'darwin'\) return;/.test(progressBlock), 'macOS 不重复发进度（自替换链路自己发）');
     const downloadedBlock = downloadedAt >= 0 ? setupFn.slice(downloadedAt, setupFn.indexOf("autoUpdater.on('error'", downloadedAt)) : '';
-    ok(/stage: 'installing', percent: 100/.test(downloadedBlock), '下载完成发 installing 100');
-    ok(/showUpdateInstallPrompt\(\)/.test(downloadedBlock), '非 macOS 仍弹安装确认');
+    ok(/onUpdatePackageReady\(version, info\)/.test(downloadedBlock), '下载完成转交 onUpdatePackageReady');
+    ok(!/showUpdateInstallPrompt|dialog\.showMessageBox/.test(downloadedBlock), '下载完成不再弹安装确认框');
+    const readyFn = topLevelFunction(main, 'onUpdatePackageReady');
+    ok(/stage: 'downloaded', version: ver/.test(readyFn) && /payload\.notes = pendingNotes/.test(readyFn), '推 downloaded 事件（version + notes）');
     const pkg = JSON.parse(read('desktop/package.json'));
-    ok(pkg.build.nsis.oneClick === true, 'NSIS 改成一键安装');
-    ok(pkg.build.nsis.perMachine === false, 'NSIS 装到当前用户');
-    ok(!('allowToChangeInstallationDirectory' in pkg.build.nsis), '去掉 allowToChangeInstallationDirectory');
+    ok(pkg.build.nsis.oneClick === false, 'NSIS 使用向导式安装（能选安装目录）');
+    ok(pkg.build.nsis.allowToChangeInstallationDirectory === true, '向导里允许改安装目录');
+    ok(pkg.build.nsis.perMachine === false, 'NSIS 仍装到当前用户（不要求管理员）');
+    ok(pkg.build.nsis.allowElevation === false, '安装程序不申请 UAC 提权（锁死当前用户安装）');
     ok(pkg.build.nsis.createDesktopShortcut === true && pkg.build.nsis.shortcutName === 'NOVAI', '保留桌面快捷方式与名称');
+    const nsi = read('installer.nsi');
+    ok(/!insertmacro MUI_PAGE_DIRECTORY/.test(nsi), '传统 installer.nsi 也有目录页（同样可选目录）');
     ok(String(pkg.build.win.artifactName).indexOf('NOVAI-Electron-Setup-') === 0, 'artifactName 不变');
 
     console.log('[6] Windows 更新源顺序：镜像 → GitHub，且只切一次');
@@ -229,7 +287,8 @@ function loadFreeBackendPort(options) {
     ok(/更新失败（源=/.test(setupSrc), '失败日志写明是哪个源');
     ok(/切换到 ' \+ next\.label \+ ' 重试一次/.test(setupSrc), '切换日志写明目标源');
     ok(/所有更新源均失败/.test(setupSrc), '两个源都失败时记录汇总日志');
-    ok(/resumeDownloadAfterFeedSwitch/.test(setupSrc), '下载阶段失败会续下而不是让用户再点一次');
+    const availableBlock = setupSrc.slice(setupSrc.indexOf("autoUpdater.on('update-available'"), setupSrc.indexOf("autoUpdater.on('download-progress'"));
+    ok(/startUpdateDownload\(info\)/.test(availableBlock), '切源后重新发现更新会自动续下（不再让用户点一次）');
 
     console.log('');
     if (fails.length) {

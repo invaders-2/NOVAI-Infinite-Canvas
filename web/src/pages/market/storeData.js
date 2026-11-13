@@ -456,7 +456,7 @@ export async function launchStoreItem(kind, name, body) {
     };
 }
 
-// 跳智能画布BEAT（/static/canvas.html）+ 预填画布助手输入；只有市场 brief 提交（options.autoSend === true）
+// 跳智能画布（/static/canvas.html）+ 预填画布助手输入；只有市场 brief 提交（options.autoSend === true）
 // 才自动发送一次，直接打开画布/刷新永远不会自动发。种子键与首页进 BEAT 的是同一个，画布侧读一次即删。
 export function openStoreCanvas(canvasId, prompt, project, options) {
     if (!canvasId) return false;

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOVAI</title>
+<style>
+    :root {
+        color-scheme: light dark;
+        --bg: #fafafa;
+        --ink: #0a0a0a;
+        --ink-3: #737373;
+        --ink-4: #a3a3a3;
+        --track: rgba(0, 0, 0, 0.07);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --bg: #0a0a0a;
+            --ink: #fafafa;
+            --ink-3: #8a8a8a;
+            --ink-4: #525252;
+            --track: rgba(255, 255, 255, 0.08);
+        }
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        background: var(--bg);
+        overflow: hidden;
+        -webkit-user-select: none;
+        user-select: none;
+        font-family: "Geist", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", -apple-system, system-ui, sans-serif;
+    }
+
+    .splash {
+        position: absolute;
+        inset: 6px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        border-radius: 24px;
+        background: var(--bg);
+        color: var(--ink);
+        overflow: hidden;
+    }
+
+    .lockup {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        margin-bottom: 26px;
+    }
+
+    .logo {
+        width: 48px;
+        height: 48px;
+        display: grid;
+        place-items: center;
+        color: var(--ink);
+        opacity: 0.85;
+        animation: breathe 2.4s ease-in-out infinite;
+    }
+
+    .logo svg {
+        display: block;
+        width: 48px;
+        height: 48px;
+    }
+
+    .wordmark {
+        font-size: 30px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        line-height: 1;
+        color: var(--ink);
+    }
+
+    .stage {
+        font-size: 12.5px;
+        color: var(--ink-3);
+        min-height: 18px;
+        letter-spacing: 0.02em;
+        transition: color 0.3s ease;
+    }
+
+    .progress {
+        width: 208px;
+        height: 4px;
+        margin-top: 12px;
+        border-radius: 999px;
+        background: var(--track);
+        overflow: hidden;
+    }
+
+    .progress > i {
+        display: block;
+        width: 6%;
+        height: 100%;
+        border-radius: 999px;
+        background: var(--ink);
+        transition: width 0.55s cubic-bezier(0.22, 0.61, 0.36, 1);
+    }
+
+    .hint {
+        margin-top: 16px;
+        font-size: 11px;
+        color: var(--ink-4);
+        letter-spacing: 0.02em;
+    }
+
+    @keyframes breathe {
+        0%, 100% { opacity: 0.85; }
+        50% { opacity: 1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .logo { animation: none; opacity: 1; }
+    }
+</style>
+</head>
+<body>
+<div class="splash">
+    <div class="lockup">
+        <div class="logo" aria-hidden="true">
+            <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+                <path fill="currentColor" d="M869.44,200.5L494.98,39.39c-98.45-42.36-208.12,29.86-208.12,137.03v14.48l82.33,35.42v-56.49c0-52.07,53.28-87.15,101.11-66.57l356.27,153.28c16.53,7.11,16.53,30.54,0,37.67l-48.96,21.05c-84.31,36.27-179.84,36.27-264.15,0l-267.88-115.26c-99.7-42.89-210.74,30.23-210.74,138.74v323.08c0,68.38,40.7,130.21,103.52,157.23l384.4,165.37c99.82,42.94,211.01-30.26,211.01-138.93v-2.62l-82.33-35.42v33.92c0,58.62-59.98,98.12-113.84,74.95l-345.18-148.51c-14.35-6.18-14.35-26.53,0-32.7l76.43-32.95c64.04-27.6,136.62-27.63,200.69-.07l278.94,120.01c113.84,48.98,240.66-34.51,240.66-158.45v-281.37c0-79.07-47.06-150.55-119.71-181.8ZM906.83,663.69c0,71.74-73.39,120.06-139.28,91.72l-33.77-14.53-82.33-35.42-155.17-66.76c-77.12-33.18-127.09-109.07-127.09-193.03v-91.04l-82.33-35.42v175.86c0,75.82-45.13,144.37-114.77,174.34l-24.08,10.36c-14.59,6.28-30.84-4.42-30.84-20.3v-326.53c0-53.75,54.99-89.95,104.37-68.7l298.17,128.27c79.94,34.39,131.73,113.06,131.73,200.08v85.91l82.33,35.42v-168.65c0-82.93,49.36-157.9,125.54-190.66l13.46-5.8c16.11-6.94,34.06,4.89,34.06,22.41v292.46Z"/>
+            </svg>
+        </div>
+        <div class="wordmark">NOVAI</div>
+    </div>
+    <div class="stage" id="stage">正在启动</div>
+    <div class="progress"><i id="bar"></i></div>
+    <div class="hint" id="hint">作品与设置都保存在本地</div>
+</div>
+<script>
+    (function () {
+        var stageEl = document.getElementById('stage');
+        var barEl = document.getElementById('bar');
+        var hintEl = document.getElementById('hint');
+        var current = 6;
+        var timer = null;
+
+        function setStage(text, percent) {
+            var label = String(text || '').trim();
+            if (label) stageEl.textContent = label;
+            var value = Number(percent);
+            if (!isFinite(value)) return;
+            value = Math.max(0, Math.min(100, value));
+            if (value < current) value = current;
+            current = value;
+            barEl.style.width = value + '%';
+        }
+
+        // 没收到真实进度时也慢慢往前爬，别让用户以为卡死。
+        function creep() {
+            if (current >= 92) return;
+            current = Math.min(92, current + 4);
+            barEl.style.width = current + '%';
+        }
+
+        window.__novaiSplash = {
+            setStage: setStage,
+            setHint: function (text) {
+                var label = String(text || '').trim();
+                if (label) hintEl.textContent = label;
+            }
+        };
+
+        timer = setInterval(creep, 900);
+        window.addEventListener('beforeunload', function () {
+            if (timer) clearInterval(timer);
+        });
+    })();
+</script>
+</body>
+</html>

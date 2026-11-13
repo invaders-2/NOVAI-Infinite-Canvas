@@ -22,9 +22,12 @@ import { ThumbImg } from "../canvas-next/ui/thumb";
 import { Markdown } from "../canvas-next/ui/markdown";
 import { ruleAnswer } from "../canvas-next/agent/planner";
 import { runAgentQueued } from "../canvas-next/agent/autorun";
+import { rememberCountQueue } from "../canvas-next/agent/countQueue";
+import { pickSendText } from "../canvas-next/agent/sendText";
 import { cancelReveal, nodeIdSet, revealAddedNodes } from "../canvas-next/agent/revealNodes";
 import type { CanvasStore } from "../canvas-next/store";
 import { startVoiceCapture, transcribeVoice, voiceErrorText, type VoiceCapture, type VoicePhase } from "../canvas-next/voiceInput";
+import { annotationsPrompt, type AnnotationPayload } from "../canvas-next/annotations";
 import type { AgentDraft } from "../canvas-next/homeSeed";
 
 /** 桌面壳（pywebview）标记：主进程把它拼进 userAgent（desktop/README.md）。画布常跑在 iframe 里，顶层 / 父窗口也要看 */
@@ -120,7 +123,7 @@ import { MentionPalette } from "../canvas-next/agent/MentionPalette";
 import { matchSkillRef } from "../canvas-next/agent/skillRef";
 import { QueryLocator } from "../canvas-next/agent/QueryLocator";
 import { AgentState, THINKING, useAgent, type AgentMsg, type Skill } from "../canvas-next/agent/state";
-import { QUEUE_MAX, enqueue as enqueueQueued, prependUrgent, removeQueued, takeFirst, type QueuedMsg } from "../canvas-next/agent/queue";
+import { QUEUE_MAX, enqueue as enqueueQueued, prependUrgent, removeQueued, snapshotForText, takeFirst, type QueuedMsg } from "../canvas-next/agent/queue";
 import { useFollowLatest } from "../canvas-next/agent/followLatest";
 import { WebImageCard } from "../canvas-next/agent/WebImageCard";
 import { ReviewCard } from "../canvas-next/agent/ReviewCard";
@@ -129,8 +132,16 @@ import { importWebImages, isWebAccessDisabled, reverseWebImages, webAccessEnable
 import { webSearchCards, type WebSearchCardData } from "../canvas-next/agent/webSearch";
 import { answerText, clarifyQuestions, newCard, parseQuestions, regenTargets, type QaCard } from "../canvas-next/agent/qa";
 import { QaCardView } from "../canvas-next/agent/QaCard";
-import { subscribeAgentTask, TASK_UI_SETTLED, taskAnswer, taskPendingPlan, taskReviews, taskThoughts, taskToolSteps, type RefreshOutcome } from "../canvas-next/agent/task";
+import { contextCompactionsOf, contextUsageOf, latestContextUsage } from "../canvas-next/agent/contextUsage";
+import { ContextMeter, CompactNotice } from "../canvas-next/agent/ContextMeter";
+import { openRecallSearch } from "../canvas-next/agent/RecallPanel";
+import { MemoryCandidateCard } from "../canvas-next/agent/MemoryCandidateCard";
+import { CanvasProfilePanel, MemorySettingsPanel } from "../canvas-next/agent/MemoryPanels";
+import { MemoryCandidatesError, confirmMemoryCandidates, dismissMemoryCandidates, fetchMemoryCandidates, type MemoryCandidate } from "../canvas-next/agent/memoryCandidates";
+import { looksLikeDecisionJson, subscribeAgentTask, TASK_UI_SETTLED, taskAnswer, taskBudgetRequired, taskHeartbeat, taskMessageStream, taskPendingPlan, taskReasoning, taskReviews, taskSelfCheck, taskSuggestions, taskThoughtRows, taskThoughts, taskToolSteps, type BudgetRequired, type SelfCheckResult, type RefreshOutcome } from "../canvas-next/agent/task";
 import { TaskPlanCard } from "../canvas-next/agent/TaskPlanCard";
+import { AutonomyCard, type AutonomyBudget } from "../canvas-next/agent/AutonomyCard";
+import { countGroupQueue } from "../canvas-next/agent/planParams";
 import { GenerationCard } from "../canvas-next/agent/GenerationCard";
 import type { AgentRegenerateItem, AgentTaskPlan } from "../canvas-next/backend/types";
 import { skillInstallIntent } from "../canvas-next/agent/skillInstallIntent";
@@ -164,7 +175,6 @@ const SUGS: Array<[Parameters<typeof Icon>[0]["name"], string, string, string]> 
   ["video", "把两张图做成短片", "用首尾帧生成 10 秒视频", "把选中的两张图做成一条 10 秒短片"],
   ["search", "这张画布现在什么状态", "列出还没生成和缺输入的节点", "检查一下这张画布还缺什么"],
 ];
-const CTX_MAX = 200000;
 /** 空状态建议卡自动轮播间隔（Boss：5 秒换一批） */
 const SUG_ROTATE_MS = 5000;
 const mid = () => "m_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -230,15 +240,25 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     return () => window.clearInterval(timer);
   }, [ui.agentOpen, a.msgs.length, sugPaused]);
   const [webPlugin, setWebPlugin] = useState(false);
-  /** 「立即发送」时助手还在忙：这条不留在队列里，等繁忙结束最先发（比 FIFO 更优先） */
-  const [pendingUrgent, setPendingUrgent] = useState<QueuedMsg | null>(null);
-  /** 自动发送正在跑：避免 260ms 定时器在 send 真正置 busy 之前重复触发 */
-  const queueFlushing = useRef(false);
+  /** 全屏查看器里「添加到对话」带过来的图片标注：随下一条消息一起发给助手 */
+  const [annChat, setAnnChat] = useState<AnnotationPayload[]>([]);
+  const sendLatest = useRef<(() => void) | null>(null);
+  /** 建议芯片 / 快捷动作的直传文本：调用 send 前同步放进来，send 开头取走（不依赖 draft 状态 / React flush） */
+  const directSendText = useRef<string | null>(null);
+  /* 「立即发送」还在忙时先记在 AgentState.pendingUrgent 上：它随线程走，切对话 / 新建对话会和队列一起清空 */
+  /** 自动发送正在跑的对话：按线程标记，两个对话同时 flush 互不阻塞 */
+  const queueFlushing = useRef(new Set<string>());
+  /** 每个对话各自的「空闲后 260ms 自动发送」定时器（后台会话结束也要能自己发） */
+  const flushTimers = useRef(new Map<string, number>());
   const [webOn, setWebOn] = useState(true); const seen = useRef(0);
   const [defaultModelId, setDefaultModelId] = useState<string | null>(null);
   /** 默认对话模型解析完没：解析前 activeModelId 只是列表第一个，别拿它收敛用户的档位选择 */
   const [defaultModelReady, setDefaultModelReady] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(() => { try { return localStorage.getItem("canvas-next:agent:model"); } catch { return null; } });
+  /** 托管授权卡（阶段四）：开始托管 / 收到 budget_required 时弹；handledBudget 防止同一条事件反复弹 */
+  const [authCard, setAuthCard] = useState<{ runId: string; reason: "start" | "budget_required"; initial?: AutonomyBudget; key: string } | null>(null);
+  const handledBudget = useRef<Set<string>>(new Set());
+  const [authBusy, setAuthBusy] = useState(false);
   /** 模型强度（发给模型的上游推理档位，键名与 /api/config 的 model_caps.think 一致）；和下面的「思考强度」是两件事 */
   const [thinkLevel, setThinkLevelState] = useState<string>(() => { try { return localStorage.getItem("canvas-next:agent:think") || ""; } catch { return ""; } });
   const setThinkLevel = (level: string) => {
@@ -259,15 +279,52 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       // 验收口：?debugWebsearch=1 注入「搜索中」+「已完成 6 条来源」两条模拟消息（只在前端内存，不发请求）
       if (new URLSearchParams(location.search).get("debugWebsearch") === "1") a.msgs = [...a.msgs, ...debugWebSearchMessages()];
       if (new URLSearchParams(location.search).get("debugPlan") === "1") a.msgs = [...a.msgs, debugPlanMessage()];
+      // 验收口：?debugHeartbeat=1 前端内存模拟心跳（思考 → 工具 → 审查 → 结束消失），不请求后端
+      if (new URLSearchParams(location.search).get("debugHeartbeat") === "1") {
+        const hbMsg: AgentMsg = { id: mid(), role: "a", at: Date.now(), text: "", heartbeat: { stage: "decide", elapsedMs: 0 } };
+        a.msgs = [...a.msgs, hbMsg];
+        const beat = (stage: "decide" | "tools" | "review", elapsedMs: number) => a.patchMessage(hbMsg, { heartbeat: { stage, elapsedMs } });
+        window.setTimeout(() => beat("decide", 5000), 1500);
+        window.setTimeout(() => beat("tools", 9000), 5000);
+        window.setTimeout(() => beat("review", 8000), 6500);
+        window.setTimeout(() => beat("review", 13000), 9000);
+        window.setTimeout(() => a.patchMessage(hbMsg, { heartbeat: undefined, text: "调试：任务已完成（心跳已清掉）。" }), 11500);
+      }
+      // 验收口：?debugSuggestions=1 注入带建议芯片的助手消息；?debugProactive=1 注入 origin=agent 的主动消息
+      const debugSuggestions = new URLSearchParams(location.search).get("debugSuggestions");
+      if (debugSuggestions) a.msgs = [...a.msgs, { id: mid(), role: "a", at: Date.now(), took: 3.1, text: "三张封面已经改好，标题都压到 18 字以内。", suggestions: ["再出一版暖光对比", "把标题换成第二版文案", "导出 3:4 竖版"] }];
+      const debugProactive = new URLSearchParams(location.search).get("debugProactive");
+      if (debugProactive) a.msgs = [...a.msgs, { id: mid(), role: "a", at: Date.now(), took: 2.2, origin: "agent", text: "三张封面已按昨晚的设定生成完，等你回来确认是否保留。", suggestions: ["保留这一版", "再换一版冷光"] }];
+      // 验收口：?debugAutonomy=start|budget 注入托管授权卡（只在前端内存，不发请求）
+      // 验收口：?debugProactiveToast=1 模拟「面板收起时收到主动消息」：收起面板 + 现有 Toast（可点开面板）
+      if (new URLSearchParams(location.search).get("debugProactiveToast")) {
+        setTimeout(() => { store.setUI({ agentOpen: false }); store.toast("助手主动发来一条消息：三张封面已生成完，等你确认", 6000, () => store.setUI({ agentOpen: true })); }, 900);
+      }
+      const debugAutonomy = new URLSearchParams(location.search).get("debugAutonomy");
+      if (debugAutonomy) setAuthCard({ runId: "debug-run", reason: debugAutonomy === "budget" ? "budget_required" : "start", initial: debugAutonomy === "budget" ? {
+        used: { image: 8, video: 0, audio: 0 }, budget: { image: 10, video: 6, audio: 4 }, needs: { image: 2, video: 6, audio: 4 }, modality: "image",
+      } : { image: { max: 10 }, video: { max: 6 }, audio: { max: 4 } }, key: "debug:" + debugAutonomy });
+      // 验收口：?debugSelfCheck=pass|fail 注入一条带「完成前自检」+「反思」的助手消息
+      const debugSelf = new URLSearchParams(location.search).get("debugSelfCheck");
+      if (debugSelf) a.msgs = [...a.msgs, debugSelfCheckMessage(debugSelf === "fail")];
       // 验收口：?debugGen=1 注入待生成卡片 + 结果审查卡 + 结果确认卡（只在前端内存，不写服务端）
       if (new URLSearchParams(location.search).get("debugGen") === "1") a.msgs = [...a.msgs, ...debugGenMessages()];
       if (new URLSearchParams(location.search).get("debugQa") === "1") a.msgs = [...a.msgs, debugQaMessage()];
       if (new URLSearchParams(location.search).get("debugSkill") === "1") a.msgs = [...a.msgs, ...debugSkillMessages()];
+      // 验收口：?debugStream=hold|done 模拟阶段三流式（推理逐字 / 工具准备行 / 回复逐字），只在前端内存
+      const debugStream = new URLSearchParams(location.search).get("debugStream");
+      if (debugStream && debugStream !== "0") debugStreamScript(a, debugStream === "done" ? "done" : debugStream === "json" ? "json" : debugStream === "json-raw" ? "json-raw" : "hold");
+      // 验收口：?debugCjk=1 注入一段中文加粗样例（含代码块 / 行内 code / 未配对对照，只在前端内存）
+      if (new URLSearchParams(location.search).get("debugCjk") === "1") a.msgs = [...a.msgs, debugCjkMessage()];
+      // 验收口：?debugContext=1（模型窗口已知，带百分比）/ =unknown（窗口未知，只显示绝对值），
+      // ?debugCompact=1 再带一条「已整理上下文」；都只在前端内存，不发请求、不写服务端
+      const debugCtx = new URLSearchParams(location.search).get("debugContext");
+      if (debugCtx && debugCtx !== "0") a.msgs = [...a.msgs, ...debugContextMessages(debugCtx === "unknown" ? "unknown" : "known", new URLSearchParams(location.search).get("debugCompact") === "1")];
       // 验收口：?debugQueue=1 注入 2 条待发送队列消息（只在前端内存，不发请求、不写服务端）
       if (new URLSearchParams(location.search).get("debugQueue") === "1") a.queue = debugQueueItems();
       // 验收口：?debugBusy=<毫秒>（默认 1500）模拟助手忙碌，只在前端内存，绝不请求后端
       const busyMs = debugBusyMs();
-      if (busyMs > 0) { a.busy = true; window.setTimeout(() => { a.busy = false; a.emit(); }, busyMs); }
+      if (busyMs > 0) { const tid = a.activeThreadId || "__new__"; a.setThreadBusy(tid, true); window.setTimeout(() => { a.setThreadBusy(tid, false); a.emit(); scheduleFlush(tid); }, busyMs); }
       seen.current = a.msgs.length;
       a.emit();
     })();
@@ -288,6 +345,9 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   const selectedModel = chatModels.find((m) => m.id === selectedModelId);
   // 不默认：只用用户自己选过的模型（面板里选的 / 服务端记住的那次选择），不拿列表第一个兜底
   const activeModelId = selectedModel?.id || (chatModels.some((m) => m.id === defaultModelId) ? defaultModelId : null);
+  /** 验收口：?debugGenBatch=N 给待生成卡片注入一个「一次最多 N 张」的调试模型（只在前端内存） */
+  const debugBatch = Math.max(0, Math.min(8, Math.round(Number(new URLSearchParams(location.search).get("debugGenBatch")) || 0)));
+  const cardModels = useMemo(() => debugBatch > 0 ? [...models, { id: "debug::批量调试模型", name: "批量调试模型", vendor: "调试", kind: "image" as const, tags: [], secs: 5, batch: Array.from({ length: debugBatch }, (_, i) => i + 1) }] : models, [models, debugBatch]);
   const modelLabel = selectedModel?.name || (frozenModelId ? chatModels.find((m) => m.id === frozenModelId)?.name || "任务冻结模型" : chatModels.find((m) => m.id === activeModelId)?.name || (chatModels.length ? "选择对话模型" : "未配置对话模型"));
   const modelHint = "画布助手模型：" + modelLabel + "，点击切换";
   /* 模型强度：档位真值源是后端 /api/config 的 provider.model_caps[模型].think，没下发 = 不支持 = 不给入口。
@@ -332,9 +392,22 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   // 画布上点选加入上下文
   useEffect(() => { const on = (e: Event) => { const id = (e as CustomEvent).detail as string; if (!a.pinned.includes(id)) a.pinned.push(id); a.emit(); }; addEventListener("cn:agent-pick", on); return () => removeEventListener("cn:agent-pick", on); }, [a]);
 
+  /** 本地估算的分层占用：只有拿不到后端 context_usage 时（开关关闭 / 老后端）才用它，内容与改动前一致 */
   const ctxBreak = (): Array<[string, number]> => [["系统与工具", 3200], ["技能", a.skill ? 900 : 0], ["记忆", a.memory().length * 60], ["画布与已选节点", ctxNodes().length * 600 + doc.nodes.length * 80], ["对话历史", a.msgs.reduce((s, m) => s + m.text.length * 2 + (m.tools ? m.tools.length * 180 : 0), 0)]];
-  const used = ctxBreak().reduce((s, x) => s + x[1], 0);
-  const setDraft = (t: string) => { stopVoiceTyping(); a.draft = t; a.emit(); setTimeout(() => edRef.current?.focus(), 0); };
+  /** 最近一次后端真实占用；没有就是 null（ContextMeter 退回上面的本地估算，面板与改动前一样） */
+  const liveUsage = latestContextUsage(a.msgs);
+  /** 「要记住这些吗」候选：只显示当前对话、还没处理过的；msgId 是触发那次回复的助手消息（卡片挂它下面） */
+  const [memCand, setMemCand] = useState<{ threadId: string; msgId: string; items: MemoryCandidate[] } | null>(null);
+  const [memBusy, setMemBusy] = useState(false);
+  const memHandled = useRef(new Set<string>());
+  /** 退避轮询的定时器与令牌：切对话 / 面板收起 / 拿到候选 都要能立刻停掉 */
+  const memTimers = useRef<number[]>([]);
+  const memPollKey = useRef(0);
+  const memOneShotKey = useRef("");
+  /** 定时器里要读「此刻」的面板开合状态（闭包里的 ui 是启动那次渲染的快照） */
+  const memOpenRef = useRef(true);
+  memOpenRef.current = ui.agentOpen;
+  const setDraft = (t: string) => { stopVoiceTyping(); a.draft = t; a.emit(); setTimeout(() => edRef.current?.focus({ caret: "end" }), 0); };
   /* 语音输入：#aMic 走本机录音 + 后端转写（Web Speech API 在 Electron / 国内不可用） */
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const [voiceSecs, setVoiceSecs] = useState(0);
@@ -383,7 +456,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       if (i >= text.length) {
         if (voiceTyping.current !== null) { window.clearInterval(voiceTyping.current); voiceTyping.current = null; }
         // 只在整段结束后 focus 一次，逐帧 focus 会把光标抢得没法输入
-        setTimeout(() => edRef.current?.focus(), 0);
+        setTimeout(() => edRef.current?.focus({ caret: "end" }), 0);
       }
     }, 28);
   };
@@ -480,16 +553,16 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     pendingSkillRef.current = null;
     if (!a.skill) { a.skill = name; a.emit(); }
   }, [a.skills, a]);
-  const patch = (m: AgentMsg, p: Partial<AgentMsg>) => { Object.assign(m, p); a.msgs = [...a.msgs]; a.emit(); };
+  // 按消息归属的线程刷新：后台任务回来也不会改到当前对话
+  const patch = (m: AgentMsg, p: Partial<AgentMsg>) => a.patchMessage(m, p);
   const stream = async (m: AgentMsg, full: string) => { patch(m, { streaming: true, text: "" }); const step = Math.max(2, Math.round(full.length / 40)); for (let k = 0; k < full.length; k += step) { if (a.stop) break; patch(m, { text: full.slice(0, k) }); await sleep(24); } patch(m, { text: full, streaming: false }); };
 
   /** 回复里带 ```novai-questions 时变成问答卡（旧会话里的 ```openarc-questions 也认），代码块不显示 */
   function withQuestions(m: AgentMsg, text: string) {
     const parsed = parseQuestions(text); if (!parsed) return text;
-    if (!m.qa) m.qa = newCard(goalOf(m), parsed.questions, parsed.kind, parsed.regen);
+    if (!m.qa) m.qa = newCard(a.goalBefore(m), parsed.questions, parsed.kind, parsed.regen);
     return parsed.rest || "开始之前想先确认几件事：";
   }
-  const goalOf = (m: AgentMsg) => { const i = a.msgs.indexOf(m); return [...a.msgs.slice(0, i < 0 ? a.msgs.length : i)].reverse().find((x) => x.role === "u")?.text || ""; };
   const answerQa = (m: AgentMsg, card: QaCard, skip: boolean) => {
     if (a.busy) return;
     const hasRegen = card.kind === "confirm" && !!card.regen?.items.length;
@@ -517,6 +590,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   /** 审查不合格 → 让后端改提示词并立刻重跑（跑完自动复审再问）；旧后端不支持时退回成一段指令发给 Agent */
   async function regenerate(m: AgentMsg, items: AgentRegenerateItem[], description: string) {
     if (a.busy) return;
+    const threadId = a.activeThreadId || "__new__";
     const list = items.filter((it) => !!it.node_id);
     if (!list.length) return;
     const desc = description.trim();
@@ -524,34 +598,34 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     if (!store.backend.regenerateAgentResults) { regenerateFallback(m, desc, names); return; }
     const ask: AgentMsg = { id: mid(), role: "u", text: desc ? "按我的描述重新生成：" + desc : "重新生成审查不合格的 " + list.length + " 个结果：" + names, at: Date.now() };
     const m2: AgentMsg = { id: mid(), role: "a", text: "", at: Date.now(), think: { live: true, open: false, secs: "0", lines: ["按审查意见改提示词，重新生成 " + list.length + " 个结果"] } };
-    a.msgs = [...a.msgs, ask, m2];
+    a.appendMessages([ask, m2], threadId);
     // 这条消息上还开着的问答卡：已经用「重新生成」处理过了，标成已回答
     if (m.qa && m.qa.status === "open") m.qa = { ...m.qa, status: "answered" };
-    a.busy = true; a.stop = false; a.emit();
+    a.setThreadBusy(threadId, true); a.setThreadStop(threadId, false); a.emit();
     const t0 = performance.now();
     try {
       // 后端要改画布节点参数：先把本地没存完的改动存掉 / 对齐（否则改完 refreshAuthoritative 会撞版本或冲掉用户的拖动）
       await syncBeforeAgentWrite(store);
-      const res = await store.backend.regenerateAgentResults({ canvasId: store.state.canvasId, threadId: a.activeThreadId || undefined, description: desc || undefined, items: list });
+      const res = await store.backend.regenerateAgentResults({ canvasId: store.state.canvasId, threadId: threadId || undefined, description: desc || undefined, items: list });
       if (!res.ok || !res.taskId) throw new Error(res.error || "重新生成失败");
       patch(m2, { task: { taskId: res.taskId, status: res.status || "RUNNING" }, text: "" });
-      watchTask(m2, res.taskId, t0);
+      watchTask(m2, res.taskId, t0, threadId);
     } catch (error) {
       const reason = error instanceof Error ? error.message : "重新生成失败";
       // 后端没有这个接口：撤掉刚才这两条，退回「输入框 + 发指令」，不留下重复的对话
       if (/TASK_UNAVAILABLE|HTTP (404|405|501)/.test(reason)) {
-        a.msgs = a.msgs.filter((msg) => msg.id !== ask.id && msg.id !== m2.id);
-        a.busy = false;
+        a.setThreadMessages(a.threadMessages(threadId).filter((msg) => msg.id !== ask.id && msg.id !== m2.id), threadId);
+        a.setThreadBusy(threadId, false);
         regenerateFallback(m, desc, names);
         return;
       }
       if (!m2.took) m2.took = (performance.now() - t0) / 1000;
       patch(m2, { think: m2.think ? { ...m2.think, live: false } : undefined, error: reason });
-      a.busy = false; a.emit();
+      a.setThreadBusy(threadId, false); a.emit();
     }
   }
 
-  function watchTask(m: AgentMsg, taskId: string, t0: number) {
+  function watchTask(m: AgentMsg, taskId: string, t0: number, threadId: string) {
     let refreshed = ""; let refreshOutcome: RefreshOutcome = "not_required";
     const watcher = subscribeAgentTask(store.backend, taskId, (snapshot) => {
       const settled = TASK_UI_SETTLED.has(snapshot.status);
@@ -569,13 +643,47 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       const searchCalls = new Set(searches.map((card) => card.key));
       const steps = taskToolSteps(snapshot).filter((step) => !(step.callId && searchCalls.has(step.callId)));
       // 思考过程：后端每轮的 thought 事件（整体方案 + 每轮判断），运行中实时更新
-      const thoughts = taskThoughts(snapshot);
-      const think = { live: !settled, open: false, secs: ((performance.now() - t0) / 1000).toFixed(1), lines: thoughts.length ? thoughts : (m.think?.lines || []) };
+      const thoughtRows = taskThoughtRows(snapshot);
+      const thoughts = thoughtRows.length ? thoughtRows.map((row) => row.text) : (m.think?.lines || []);
+      const kinds = thoughtRows.length ? thoughtRows.map((row) => row.kind) : m.think?.kinds;
+      const think = { live: !settled, open: false, secs: ((performance.now() - t0) / 1000).toFixed(1), lines: thoughts, kinds };
+      // 阶段三·3：完成前自检（self_check 事件，在最终 message 之前）；没有事件就保持原值 = 不渲染
+      const selfCheck = taskSelfCheck(snapshot);
+      // 阶段四：托管额度用完 / 将尽 → 弹授权卡（补额度或结束）；同一条事件只弹一次
+      const budgetRequired = taskBudgetRequired(snapshot);
+      // 阶段四：下一步建议芯片（done / 结论 message 里才带；没有就保持原值 = 不渲染）
+      const suggestions = taskSuggestions(snapshot);
+      // 长任务心跳：运行中一行轻状态；settled 后清掉
+      const heartbeat = taskHeartbeat(snapshot);
+      if (budgetRequired) {
+        const runId = m.task?.taskId || taskId;
+        const key = "budget:" + runId + ":" + String(budgetRequired.round ?? budgetRequired.used ?? snapshot.events.length);
+        if (!handledBudget.current.has(key)) {
+          handledBudget.current.add(key);
+          setAuthCard({ runId, reason: "budget_required", initial: budgetRequired, key });
+        }
+      }
       const reviews = taskReviews(snapshot);
-      patch(m, { task: { taskId, status: snapshot.status, modelConfigId: snapshot.modelConfigId, stopRequested: m.task?.stopRequested, plan }, reviews: reviews.length ? reviews : m.reviews, tools: steps, webImages: images.length ? images : m.webImages, webSearch: searches.length ? searches : m.webSearch, text: answer || m.text, streaming: false, think, took: settled ? (performance.now() - t0) / 1000 : m.took });
-      a.busy = !settled; a.stop = false; a.emit();
+      // 阶段三流式：原生推理逐字（reasoning_delta）+ 回复逐字（message_delta）；开关关闭时两者都是空串，行为与之前一致
+      const reasoning = taskReasoning(snapshot);
+      const streamed = taskMessageStream(snapshot);
+      // 上下文事件（NOVAI_AGENT_V2_CONTEXT 开启才有）：真实分层占用 + 「已整理上下文」提示；没有就保持 null / 原样
+      const usage = contextUsageOf(snapshot.events);
+      const compactions = contextCompactionsOf(snapshot.events);
+      // 收尾：有流式正文就用它（平台一次性给整段时也是同一条路径，不会「闪一下再重画」）；方案卡 / 兜底文案仍走 answer
+      const nextText = settled ? (plan || !streamed ? (answer || m.text) : streamed) : (streamed || m.text);
+      patch(m, { heartbeat: settled ? undefined : (heartbeat || m.heartbeat), suggestions: suggestions.length ? suggestions : m.suggestions, task: { taskId, status: snapshot.status, modelConfigId: snapshot.modelConfigId, stopRequested: m.task?.stopRequested, plan }, reviews: reviews.length ? reviews : m.reviews, tools: steps, webImages: images.length ? images : m.webImages, webSearch: searches.length ? searches : m.webSearch, usage: usage || m.usage, compactions: compactions.length ? compactions : m.compactions, reasoning: reasoning || m.reasoning, selfCheck: selfCheck || m.selfCheck, text: nextText, streaming: !settled && !!streamed, think, took: settled ? (performance.now() - t0) / 1000 : m.took });
+      a.setThreadBusy(threadId, !settled); a.setThreadStop(threadId, false); a.emit();
+      // L5：结束后这一轮没有可见回复（快照里既没有流式正文也没有 done 文案）→ 直接读一次线程。
+      // 后端在收尾时已经把回复落盘，读回来就能显示，不用让用户刷新页面。
+      if (settled && !nextText && threadId && threadId !== "__new__") {
+        void a.loadThreadMessages(threadId).then((ok) => { if (ok) a.emit(); });
+      }
       // 这一轮结束时后端已经把问答追加进线程：刷新列表里的条数 / 时间
-      if (settled) void a.loadThreads();
+      // 该对话还有排队消息就在它自己的线程里 260ms 后自动发下一条（当前看的是别的对话也照发）
+      if (settled) { void a.loadThreads(); scheduleFlush(threadId); }
+      // 回复结束后按 5s/15s/40s/90s/180s 的退避节奏找记忆候选（后台摘要可能要几分钟）；卡片挂在这条回复下面
+      if (settled && threadId === (a.activeThreadId || "__new__") && ui.agentOpen) startMemoryPoll(threadId === "__new__" ? "" : threadId, m.id);
       if (effect && effect !== refreshed) {
         refreshed = effect;
         // 助手建的节点只在 refreshAuthoritative 换掉文档之后才出现：先记下刷新前的 id，刷新落地再对比补焦点
@@ -591,15 +699,144 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     if (!watcher.settled()) taskWatchers.current.set(taskId, watcher.stop);
   }
 
+  /** 退避轮询的时间点（相对回复结束）：5s / 15s / 40s / 90s / 180s —— 后台摘要可能要几分钟才写回候选 */
+  const MEM_POLL_AT = [5000, 15000, 40000, 90000, 180000];
+  /** 停掉所有候选轮询；令牌推进让正在飞的那次回来也不再生效 */
+  function stopMemoryPoll() {
+    memPollKey.current += 1;
+    memTimers.current.forEach((timer) => window.clearTimeout(timer));
+    memTimers.current = [];
+  }
+  /** 拉一次候选：找到就挂卡片；没有就等下一个时间点；接口 400（开关关闭）就彻底别问了。全程不弹提示。 */
+  async function fetchMemoryCandidatesOnce(threadId: string, msgId: string): Promise<"found" | "empty" | "stop"> {
+    const canvasId = store.state.canvasId;
+    if (!canvasId) return "stop";
+    let result;
+    try { result = await fetchMemoryCandidates({ canvasId, threadId }); }
+    catch (error) {
+      return error instanceof MemoryCandidatesError && error.status === 400 ? "stop" : "empty";
+    }
+    const handled = memHandled.current;
+    const items = result.items.filter((item) => !handled.has(item.id) && !result.confirmed_ids.includes(item.id));
+    if (!items.length) return "empty";
+    setMemCand({ threadId, msgId, items });
+    return "found";
+  }
+  /** 回复结束后按退避节奏找候选；拿到卡 / 400 / 切对话 / 面板收起 都会把剩下的定时器清掉 */
+  function startMemoryPoll(threadId: string, msgId: string) {
+    stopMemoryPoll();
+    const key = memPollKey.current;
+    const debug = new URLSearchParams(location.search).has("debugMemoryCandidates");
+    // 验收口：debug 下第一次提前到 1.5s（真实链路仍是 5s 起），截图不用干等
+    const schedule = debug ? [1500, 5000, 15000, 40000, 90000, 180000] : MEM_POLL_AT;
+    schedule.forEach((delay) => {
+      const timer = window.setTimeout(async () => {
+        if (key !== memPollKey.current) return;
+        if ((a.activeThreadId || "") !== threadId || !memOpenRef.current) return;   // 切走对话 / 面板收起：不再问
+        const outcome = await fetchMemoryCandidatesOnce(threadId, msgId);
+        if (key !== memPollKey.current) return;
+        if (outcome === "found" || outcome === "stop") stopMemoryPoll();
+      }, delay);
+      memTimers.current.push(timer);
+    });
+  }
+  /** 只把勾选的写进长期记忆；成功后卡片收起并提示 */
+  async function confirmMemory(ids: string[]) {
+    if (!memCand || !ids.length) return;
+    const threadId = memCand.threadId;
+    setMemBusy(true);
+    try {
+      const result = await confirmMemoryCandidates({ canvasId: store.state.canvasId, threadId, ids });
+      ids.forEach((id) => memHandled.current.add(id));
+      setMemCand(null);
+      store.toast("已记住 " + (result.saved || ids.length) + " 条");
+    } catch (error) {
+      store.toast("没记住：" + (error instanceof Error ? error.message : "未知错误"));
+    } finally { setMemBusy(false); }
+  }
+  /** 用户明确说不用：先收起卡片，再尽力通知后端标记忽略（失败也不反复问） */
+  async function dismissMemory() {
+    if (!memCand) return;
+    const threadId = memCand.threadId;
+    const ids = memCand.items.map((item) => item.id);
+    ids.forEach((id) => memHandled.current.add(id));
+    setMemCand(null);
+    setMemBusy(true);
+    try { await dismissMemoryCandidates({ canvasId: store.state.canvasId, threadId, ids }); }
+    catch (error) { store.toast("已收起，但同步给服务端失败：" + (error instanceof Error ? error.message : "未知错误")); }
+    finally { setMemBusy(false); }
+  }
+  /** 换对话 / 收起面板：停掉轮询并收起上一张卡（再回来时会重新拉一次） */
+  useEffect(() => {
+    stopMemoryPoll();
+    memOneShotKey.current = "";
+    setMemCand(null);
+    return () => stopMemoryPoll();
+  }, [a.activeThreadId, ui.agentOpen]);
+
+  /** 阶段四：面板收起时，定时看一眼前端线程里有没有新的「助手主动消息」（origin=agent）；有就用现有 Toast 提示，点开面板 */
+  const agentSeen = useRef<string>("");
+  useEffect(() => {
+    if (ui.agentOpen || !a.activeThreadId) return;
+    let active = true;
+    const check = async () => {
+      if (!active || a.busy) return;
+      const threadId = a.activeThreadId; if (!threadId) return;
+      await a.loadThreadMessages(threadId);
+      if (!active) return;
+      const agentMsgs = a.threadMessages(threadId).filter((msg) => msg.role === "a" && msg.origin === "agent");
+      const last = agentMsgs[agentMsgs.length - 1];
+      if (!last) return;
+      if (!agentSeen.current) { agentSeen.current = last.id; return; }   // 首次只记基线，不打扰
+      if (last.id !== agentSeen.current) {
+        agentSeen.current = last.id;
+        store.toast((last.text || "助手发来一条消息").replace(/\s+/g, " ").slice(0, 48), 4200, () => store.setUI({ agentOpen: true }));
+      }
+    };
+    const timer = setInterval(() => void check(), 20000);
+    void check();
+    return () => { active = false; clearInterval(timer); };
+  }, [ui.agentOpen, a.activeThreadId]);
+  /** 打开某条对话 / 历史刚载完：立即拉一次；挂到「当时最后一条助手消息」下面 */
+  useEffect(() => {
+    if (a.busy || !ui.agentOpen || !a.msgs.length) return;
+    const threadId = a.activeThreadId || "";
+    const debug = new URLSearchParams(location.search).has("debugMemoryCandidates");
+    if (!threadId && !debug) return;
+    const lastAssistant = [...a.msgs].reverse().find((msg) => msg.role === "a");
+    if (!lastAssistant) return;
+    const key = threadId + ":" + lastAssistant.id;
+    if (key === memOneShotKey.current) return;
+    memOneShotKey.current = key;
+    if (debug) {
+      // 验收口：debug 下没有真实 run，用同一个轮询入口模拟「回复结束」的节奏
+      if (!memTimers.current.length) startMemoryPoll(threadId, lastAssistant.id);
+      return;
+    }
+    void fetchMemoryCandidatesOnce(threadId, lastAssistant.id);
+  }, [a.activeThreadId, ui.agentOpen, a.msgs.length]);
+
   /** 方案卡「执行」：把批准的步骤交回后端跑一次真的执行（写操作闸门只认 approved_steps） */
   async function approvePlan(m: AgentMsg, approved?: AgentTaskPlan["steps"]) {
     const task = m.task; const steps = approved && approved.length ? approved : task?.plan?.steps || [];
     if (!task || !steps.length || a.busy) return;
     if (!store.backend.approveAgentTask) { patch(m, { error: "当前后端不支持执行方案" }); return; }
-    a.busy = true; a.stop = false;
+    const threadId = a.activeThreadId || "__new__";
+    a.setThreadBusy(threadId, true); a.setThreadStop(threadId, false);
     const isGen = task.plan?.kind === "generation";
     patch(m, { task: { ...task, status: "RUNNING", plan: null }, error: undefined, text: isGen ? "已按你选的模型和参数开始生成…" : "已批准这份方案，正在画布上执行 " + steps.length + " 步…" });
     try {
+      // 同节点多组（countGroup 标记）：先把按序队列写进本地画布 → syncBeforeAgentWrite 会一起存到服务端，
+      // 这样画布在 agent 运行后刷新权威文档也不会丢队列（服务端 agentRun 标记只留最后一个，不能靠它去重）。
+      const groups = countGroupQueue(steps);
+      if (groups.size) {
+        for (const [nodeId, items] of groups) {
+          if (!store.node(nodeId)) continue;
+          const rows = items.map((item) => ({ index: item.index, settings: item.settings }));
+          rememberCountQueue(store.state.canvasId, nodeId, rows);   // 内存队列（不依赖画布文档持久化）
+          store.updateNode(nodeId, (x) => ({ ...x, data: { ...((x.data as Record<string, unknown>) || {}), agentRunQueue: rows } }), { history: false });
+        }
+      }
       if (isGen) await syncBeforeAgentWrite(store);
       const res = await store.backend.approveAgentTask(task.taskId, steps);
       if (!res.ok || !res.taskId) {
@@ -607,9 +844,9 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
         return;
       }
       patch(m, { task: { taskId: res.taskId, status: res.status || "RUNNING" } });
-      watchTask(m, res.taskId, performance.now());
+      watchTask(m, res.taskId, performance.now(), threadId);
     } finally {
-      if (!m.task || TASK_UI_SETTLED.has(m.task.status)) a.busy = false;
+      if (!m.task || TASK_UI_SETTLED.has(m.task.status)) a.setThreadBusy(threadId, false);
       a.emit();
     }
   }
@@ -626,7 +863,8 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   async function confirmRepositoryInstall(m: AgentMsg) {
     const current = m.skillInstall;
     if (!current?.preview || !["ready", "error"].includes(current.status) || a.busy) return;
-    a.busy = true;
+    const threadId = a.activeThreadId || "__new__";
+    a.setThreadBusy(threadId, true);
     patch(m, { skillInstall: { ...current, status: "installing", error: undefined } });
     try {
       const installed = await installSkillPreview(current.preview.previewId);
@@ -635,7 +873,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     } catch (error) {
       patch(m, { skillInstall: { ...current, status: "error", error: error instanceof Error ? error.message : "导入失败" } });
     } finally {
-      a.busy = false; a.emit();
+      a.setThreadBusy(threadId, false); a.emit();
     }
   }
 
@@ -646,24 +884,49 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
 
   /** 发一条消息。outgoing = 队列里的上下文快照（文本 / 技能 / 引用 / 固定与选中节点 / 联网），
    *  此时不发完清空草稿——用户可能正在输入下一条。 */
-  async function send(fromQa = false, outgoing?: QueuedMsg["snap"]) {
-    stopVoiceTyping();
+  async function send(fromQa = false, outgoing?: QueuedMsg["snap"], targetThreadId?: string) {
+    // 发起时就捕获线程：正常发送用当前对话，后台队列自动发送用目标对话；
+    // 消息 / busy / 任务归属都记在这条对话上，之后切走也不会串。
+    const target = targetThreadId || "";
+    let threadId = target || a.activeThreadId;
+    // 后台队列自动发送不打断用户正在做的语音输入
+    if (!target) stopVoiceTyping();
     const refs = outgoing ? outgoing.refs : a.refs;
-    const rawText = outgoing ? outgoing.text : a.draft;
+    // 建议芯片 / 快捷动作的直传文本：取一次就清掉（同步读取，不依赖 draft 状态 / React flush）
+    const direct = directSendText.current ?? undefined;
+    directSendText.current = null;
+    const rawText = pickSendText(direct, outgoing, a.draft);
     const skillName = outgoing ? outgoing.skill : a.skill;
     let text = plainMentionText(rawText, (kind, id) => chipFor(refs, kind, id));
     const skill = skillName ? a.skills.find((s) => s.name === skillName) || null : null;
-    if ((!text && !skill) || a.busy) return; if (!text) text = skill!.desc;
+    // 同一对话内仍串行：当前对话看 a.busy，后台队列发送看目标对话自己的忙闲
+    if ((!text && !skill) || (target ? a.isThreadBusy(target) : a.busy)) return; if (!text) text = skill!.desc;
+    // 图片标注属于当前对话的输入区：后台队列自动发送不能把当前对话的标注塞进别人的消息
+    const annBlock = !target && annChat.length ? annotationsPrompt(annChat) : "";
     // 验收口：?debugBusy / ?debugQueue 只在前端内存里模拟一轮执行，不建线程、不请求后端
     const simMs = debugSimMs();
-    if (simMs > 0) { debugSimulateSend(a, text, skillName, simMs); return; }
-    if (!activeModelId && store.backend.runAgentTask) {
-      // 没选对话模型：不发送，直接把模型菜单打开让用户选（选完再按发送）
-      const anchor = document.getElementById("aModel"); if (anchor) modelMenu(anchor);
-      store.toast(chatModels.length ? "先选一个对话模型，再发送" : "还没有配置对话模型，先到 API 设置里添加"); return;
+    if (simMs > 0) { const tId = threadId || "__new__"; debugSimulateSend(a, text, skillName, simMs, tId, () => scheduleFlush(tId)); return; }
+    let sendModelId = activeModelId;
+    if (!sendModelId && store.backend.runAgentTask) {
+      // L5：刚打开画布 2–3 秒内发的第一条消息，模型清单可能还在加载——先等它一会儿再判断，
+      // 不能因为「这会儿还没拿到模型」就把用户的第一条消息吞掉（表现就是发了没反应）。
+      for (let i = 0; i < 24 && !store.state.models.length; i += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 125));
+      }
+      const chatNow = store.state.models.filter((m) => m.kind === "text");
+      const fallbackModel = selectedModelId
+        || (chatNow.some((m) => m.id === defaultModelId) ? defaultModelId : null)
+        || chatNow[0]?.id || null;
+      if (!fallbackModel) {
+        // 确实没有可用对话模型：不发送，直接把模型菜单打开让用户选（选完再按发送）
+        const anchor = document.getElementById("aModel"); if (anchor) modelMenu(anchor);
+        store.toast(chatNow.length ? "先选一个对话模型，再发送" : "还没有配置对话模型，先到 API 设置里添加"); return;
+      }
+      sendModelId = fallbackModel;
     }
     // 第一次在这张画布上说话：先让后端建一条线程，这样本轮问答会写进历史
-    if (a.threadsSupported() && !a.activeThreadId) await a.ensureThread();
+    if (a.threadsSupported() && !threadId && !target) threadId = (await a.ensureThread()) || "";
+    const tId = threadId || "__new__";
     const installSource = skillInstallIntent(text);
     const ctx = ctxNodes(outgoing ? { pinned: outgoing.pinned, selected: outgoing.selected } : undefined).map((x) => x.n);
     const web = outgoing ? outgoing.webPlugin : webPlugin;
@@ -679,10 +942,10 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       ...ctx.map((n) => ({ id: n.id, title: title(n), kind: n.kind, src: isGenKind(n.kind) ? srcOf(n) : undefined })),
       ...refs.map((r) => ({ id: r.id, title: r.title, kind: r.kind, src: r.kind === "asset" ? r.ref : undefined })),
     ].filter((x, i, arr) => arr.findIndex((y) => y.id === x.id) === i);
-    a.msgs = [...a.msgs, { id: mid(), role: "u", text, at: Date.now(), skill: skillName || undefined, ctx: msgCtx }];
-    if (!outgoing) { a.draft = ""; a.pinned = []; a.refs = []; a.skill = null; setWebPlugin(false); }
-    a.stop = false; a.busy = true;
-    const m: AgentMsg = { id: mid(), role: "a", text: "", at: Date.now(), think: { live: true, open: false, secs: "0", lines: [] }, ...(installSource ? { skillInstall: { status: "inspecting" as const, source: installSource } } : {}) }; a.msgs = [...a.msgs, m]; a.emit();
+    a.appendMessage({ id: mid(), role: "u", text, at: Date.now(), skill: skillName || undefined, ctx: msgCtx }, tId);
+    if (!outgoing) { a.draft = ""; a.pinned = []; a.refs = []; a.skill = null; setWebPlugin(false); if (annChat.length) setAnnChat([]); }
+    a.setThreadStop(tId, false); a.setThreadBusy(tId, true);
+    const m: AgentMsg = { id: mid(), role: "a", text: "", at: Date.now(), think: { live: true, open: false, secs: "0", lines: [] }, ...(installSource ? { skillInstall: { status: "inspecting" as const, source: installSource } } : {}) }; a.appendMessage(m, tId); a.emit();
     const t0 = performance.now();
     const imageNodeForModel = ctx.find((n) => n.kind === "image") || null;
     const imageSpec = (imageNodeForModel ? store.modelOf(imageNodeForModel) : undefined) || store.defaultModel("image");
@@ -700,18 +963,22 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       if (installSource) { await inspectRepository(m, installSource); return; }
       if (/^(请)?(记住|记一下|以后都|下次)/.test(text)) {
         const fact = text.replace(/^(请)?(记住|记一下)[，,：: ]*/, ""); const scope = /这张画布|本画布|这个项目|产品/.test(text) ? "canvas" : "user";
-        await a.addMemory(scope, fact);
+        // L1：走 /api/memories 这一个入口 → 后端同时写记忆库、画布记忆（索引 + 档案 prefs，同一处去重），
+        // 并把这一轮对话写进线程；回复文案由服务端给，面板显示的和线程里存的是同一句。
+        const saved = await a.addMemory(scope, fact, { threadId: tId, userText: text });
         patch(m, { think: { live: false, open: false, secs: ((performance.now() - t0) / 1000).toFixed(1), lines: [] }, tools: [{ label: `写入${scope === "user" ? "用户" : "画布"}记忆`, state: "done", secs: "0.1" }], memSaved: { scope: scope === "user" ? "用户" : "画布", text: fact } });
-        await stream(m, a.memOn ? "记住了，之后的对话和生成都会参考这条。" : "记住了。注意：记忆目前是关闭的，打开后才会在对话里使用。"); return;
+        await stream(m, saved.reply || (a.memOn ? "记住了，之后的对话和生成都会参考这条。" : "记住了。注意：记忆目前是关闭的，打开后才会在对话里使用。")); return;
       }
       if (store.backend.runAgentTask) {
         // 技能正文走 context.skillPrompt（后端放进系统提示），goal 里只留一句点名，避免长技能被截断
-        const goal = (text + (refDigest ? "\n\n本轮引用（按顺序，图N/视频N/文本N 对应画布节点）：" + refDigest : "") + (web ? "\n\n本轮请联网搜索公开网页并读取正文，作为参考后再回答。" : "") + (skill ? "\n\n本轮按技能「" + skill.name + "」来做。" : "")).slice(0, 3900);
+        const goal = (text + annBlock + (refDigest ? "\n\n本轮引用（按顺序，图N/视频N/文本N 对应画布节点）：" + refDigest : "") + (web ? "\n\n本轮请联网搜索公开网页并读取正文，作为参考后再回答。" : "") + (skill ? "\n\n本轮按技能「" + skill.name + "」来做。" : "")).slice(0, 3900);
         const resourceRefs = [...ctx.map((n) => isGenKind(n.kind) ? srcOf(n) : ""), ...refs.filter((r) => r.kind === "asset").map((r) => r.ref)].filter((ref) => /^(novai-asset:|openarc-asset:|resource:\/\/)/.test(ref)).slice(0, 32);
-        const submitted = await store.backend.runAgentTask({ goal, context: { schemaVersion: 1, canvasId: store.state.canvasId, threadId: a.activeThreadId || undefined, selectedNodeIds: ctx.map((n) => n.id).slice(0, 32), resourceRefs, completionConditions: ["完成用户目标；画布写入必须经受控工具批准并读回验证"], modelConfigId: activeModelId || undefined, thinkLevel: thinkLevel || undefined, imageProvider, imageModel, skillName: skill?.name || undefined, skillPrompt: skill ? (skill.md || skill.desc) : undefined, apps: apps.length ? apps : undefined, thinking: fromQa && a.thinking !== "off" ? "light" : a.thinking, mode: a.mode === "auto" ? "run" : "plan" } });
+        const submitted = await store.backend.runAgentTask({ goal, context: { schemaVersion: 1, canvasId: store.state.canvasId, threadId: threadId || undefined, selectedNodeIds: ctx.map((n) => n.id).slice(0, 32), resourceRefs, completionConditions: ["完成用户目标；画布写入必须经受控工具批准并读回验证"], modelConfigId: sendModelId || undefined, thinkLevel: thinkLevel || undefined, imageProvider, imageModel, skillName: skill?.name || undefined, skillPrompt: skill ? (skill.md || skill.desc) : undefined, apps: apps.length ? apps : undefined, thinking: fromQa && a.thinking !== "off" ? "light" : a.thinking, autonomy: a.mode === "auto" ? "auto" : a.mode === "managed" ? "managed" : "collab", mode: a.mode === "manual" ? "plan" : "run" } });
         if (!submitted.ok || !submitted.taskId) throw new Error(submitted.error || "任务提交失败");
         patch(m, { task: { taskId: submitted.taskId, status: submitted.status || "PENDING" }, think: { live: true, open: false, secs: "0", lines: [] }, text: "" });
-        watchTask(m, submitted.taskId, t0); return;
+        // 托管：开跑前先弹授权卡（预算 + 平台/模型），确认后再让后端按预算推进
+        if (a.mode === "managed") setAuthCard({ runId: submitted.taskId, reason: "start", key: "start:" + submitted.taskId });
+        watchTask(m, submitted.taskId, t0, tId); return;
       }
       // 没有任务运行时：模糊的出图 / 出视频需求先用问答卡问清楚（思考强度关闭 / 轻度时不问）
       const qs = fromQa ? null : clarifyQuestions(text, ctx.length + refs.length, a.thinking);
@@ -723,7 +990,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       const reason = err instanceof Error ? err.message : "Agent 调用失败";
       if (!m.task && /TASK_UNAVAILABLE|HTTP (404|405|501)/.test(reason)) {
         try {
-          const answer = await store.backend.chat({ canvasId: store.state.canvasId, configId: activeModelId || undefined, thinkLevel: thinkLevel || undefined, messages: [{ role: "user", content: text + (refDigest ? "\n\n本轮引用：" + refDigest : "") }] }, () => undefined, new AbortController().signal);
+          const answer = await store.backend.chat({ canvasId: store.state.canvasId, configId: sendModelId || undefined, thinkLevel: thinkLevel || undefined, messages: [{ role: "user", content: text + annBlock + (refDigest ? "\n\n本轮引用：" + refDigest : "") }] }, () => undefined, new AbortController().signal);
           patch(m, { error: undefined, think: m.think ? { ...m.think, live: false } : undefined, text: withQuestions(m, answer) });
           return;
         } catch { /* 保留原始任务错误，避免覆盖更具体的原因 */ }
@@ -731,10 +998,56 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       patch(m, { streaming: false, think: m.think ? { ...m.think, live: false } : undefined, error: reason, text: m.text || "" });
     } finally {
       if (!m.took) m.took = (performance.now() - t0) / 1000;
-      if (!m.task || TASK_UI_SETTLED.has(m.task.status)) a.busy = false;
+      if (!m.task || TASK_UI_SETTLED.has(m.task.status)) a.setThreadBusy(tId, false);
       a.emit();
     }
   }
+
+  sendLatest.current = () => { void send(); };
+
+  /** 托管授权确认：把平台 / 模型 / 次数上限提交给后端（POST /api/agent/runs/{run_id}/budget） */
+  const confirmBudget = async (draft: AutonomyBudget) => {
+    if (!authCard) return;
+    const body = { image: draft.image, video: draft.video, audio: draft.audio, limit: draft.limit };
+    setAuthBusy(true);
+    try {
+      const backend = store.backend;
+      const result = backend.postAgentBudget ? await backend.postAgentBudget(authCard.runId, body) : { ok: false, error: "当前环境不支持托管预算" };
+      if (!result.ok) { store.toast(result.error || "预算提交失败"); return; }
+      handledBudget.current.add(authCard.key);
+      setAuthCard(null);
+      store.toast(authCard.reason === "budget_required" ? "额度已补充，继续托管" : "已开始托管");
+    } finally { setAuthBusy(false); }
+  };
+  /** 结束托管 / 取消授权：直接停掉这次运行，保持原有收尾逻辑 */
+  const endAutonomy = async () => {
+    if (!authCard) return;
+    const runId = authCard.runId;
+    setAuthCard(null);
+    if (!runId.startsWith("debug")) await store.backend.cancelAgentTask?.(runId);
+    store.toast(authCard.reason === "budget_required" ? "已结束托管任务" : "已取消托管");
+  };
+
+  /** 全屏查看器「添加到对话 / 发送」：把标注挂到输入区，发送模式再自动发一条 */
+  useEffect(() => {
+    const on = (event: Event) => {
+      const detail = (event as CustomEvent).detail as AnnotationPayload | undefined;
+      if (!detail || !Array.isArray(detail.annotations) || !detail.annotations.length) return;
+      setAnnChat((prev) => [...prev.filter((x) => x.nodeId !== detail.nodeId), { ...detail }]);
+      const n = store.node(detail.nodeId);
+      if (n) {
+        if (!a.pinned.includes(n.id)) a.pinned.push(n.id);
+        a.muted.delete(n.id);
+        a.emit();
+      }
+      if (detail.mode === "send") {
+        if (!a.draft.trim()) { a.draft = "按这些标注改一下"; a.emit(); }
+        window.setTimeout(() => sendLatest.current?.(), 160);
+      }
+    };
+    window.addEventListener("cn:annotations-to-chat", on);
+    return () => window.removeEventListener("cn:annotations-to-chat", on);
+  }, [store, a]);
 
   /** 往上翻加载更早的消息：插到最前面后把滚动位置补回来，眼前的内容不跳 */
   const loadEarlier = async () => {
@@ -789,7 +1102,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     a.refs = item.snap.refs.map((r) => ({ ...r })); setWebPlugin(item.snap.webPlugin);
     a.emit();
     store.toast("已放回输入框，改完再发");
-    setTimeout(() => edRef.current?.focus(), 0);
+    setTimeout(() => edRef.current?.focus({ caret: "end" }), 0);
   };
   const deleteQueued = (item: QueuedMsg) => { a.queue = removeQueued(a.queue, item.id); a.emit(); };
   /** 立即发送：空闲直接发；忙就先停掉当前任务，把这条记成优先，等空闲后最先发。
@@ -798,43 +1111,55 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   const sendQueuedNow = (item: QueuedMsg) => {
     a.queue = removeQueued(a.queue, item.id); a.emit();
     if (!a.busy) { void send(false, item.snap); return; }
-    if (pendingUrgent) {
+    if (a.pendingUrgent) {
       a.queue = prependUrgent(a.queue, item); a.emit();
       store.toast("已排到优先队首，当前任务结束后马上发这条");
       return;
     }
-    setPendingUrgent(item);
+    a.pendingUrgent = item;
     void stopTask();
     store.toast("已停止当前任务，马上发送这条");
   };
-  /** 自动发送：先取走再发（避免重复），取「立即优先」那条，否则 FIFO 队首 */
-  const flushQueue = async () => {
-    if (queueFlushing.current || a.busy) return;
+  /** 给某条对话安排一次「空闲后 260ms 自动发送」：后台对话结束 / 切回有待发队列的对话都走这里 */
+  function scheduleFlush(threadId: string) {
+    const tId = threadId || "__new__";
+    if (flushTimers.current.has(tId)) return;
+    const timer = window.setTimeout(() => { flushTimers.current.delete(tId); void flushThreadQueue(tId); }, 260);
+    flushTimers.current.set(tId, timer);
+  }
+  /** 自动发送：先取走再发（避免重复），取「立即优先」那条，否则 FIFO 队首；只动目标对话自己的队列 */
+  async function flushThreadQueue(threadId: string) {
+    const tId = threadId || "__new__";
+    if (queueFlushing.current.has(tId) || a.isThreadBusy(tId)) return;
     if (!debugSimMs() && !activeModelId && store.backend.runAgentTask) return;
-    let item = pendingUrgent;
-    if (item) setPendingUrgent(null);
+    let item = a.threadPendingUrgent(tId);
+    if (item) a.setThreadPendingUrgent(tId, null);
     else {
-      const taken = takeFirst(a.queue);
+      const taken = takeFirst(a.threadQueue(tId));
       item = taken.first;
       if (!item) return;
-      a.queue = taken.rest; a.emit();
+      a.setThreadQueue(tId, taken.rest); a.emit();
     }
-    queueFlushing.current = true;
-    try { await send(false, item.snap); } finally { queueFlushing.current = false; }
-  };
-  // 助手刚由忙转闲、且还有排队消息：260ms 后自动发下一条。
+    queueFlushing.current.add(tId);
+    try { await send(false, item.snap, tId); } finally { queueFlushing.current.delete(tId); }
+  }
+  // 当前对话刚由忙转闲、且还有排队消息：兜底自动发下一条。
   // 只认「忙变闲」这一下（不是「当前空闲」）：debug 注入的队列不会一进页面就被抽空，真实入队也只在任务结束后才发。
-  // 定时器放 ref：用户在这 260ms 里改队列 / 换模型不会把已经排好的自动发送取消掉。
+  // 切到某条空闲且有待发队列的对话时也安排一次（切回来队列接着跑）。
+  // 定时器按对话放 ref：用户在这 260ms 里改队列 / 换模型不会把已经排好的自动发送取消掉。
   const wasBusy = useRef(a.busy);
-  const flushTimer = useRef(0);
+  const lastThread = useRef(a.activeThreadId);
   useEffect(() => {
     const becameIdle = wasBusy.current && !a.busy;
+    // 首次加载不算「切对话」：debug 注入的队列不会一进页面就被抽空
+    const switched = !!lastThread.current && lastThread.current !== a.activeThreadId;
     wasBusy.current = a.busy;
-    if (!a.queue.length && !pendingUrgent) { if (flushTimer.current) { window.clearTimeout(flushTimer.current); flushTimer.current = 0; } return; }
-    if (!becameIdle || flushTimer.current) return;
-    flushTimer.current = window.setTimeout(() => { flushTimer.current = 0; void flushQueue(); }, 260);
-  }, [a.busy, a.queue, pendingUrgent, activeModelId]);
-  useEffect(() => () => { if (flushTimer.current) window.clearTimeout(flushTimer.current); }, []);
+    lastThread.current = a.activeThreadId;
+    if (!a.queue.length && !a.pendingUrgent) return;
+    if (!becameIdle && !(switched && !a.busy)) return;
+    scheduleFlush(a.activeThreadId);
+  }, [a.busy, a.queue, a.pendingUrgent, a.activeThreadId, activeModelId]);
+  useEffect(() => () => { flushTimers.current.forEach((timer) => window.clearTimeout(timer)); flushTimers.current.clear(); }, []);
 
   /** 输入框里的记号（@{节点} / @ref{} / @app{} / @skill{}）变化 */
   const onDraftInput = (v: string) => { stopVoiceTyping(); a.draft = v; a.emit(); };
@@ -901,7 +1226,8 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
         if (chip) { edRef.current?.insertMention(chip); added += 1; }
       }
       a.emit();
-      if (added) { edRef.current?.focus(); store.toast("已引用 " + added + " 个节点到本次对话"); }
+      // 每个胶囊插完光标都停在自己后面：这里只聚焦，不再把光标送回全文末尾
+      if (added) { edRef.current?.focus({ caret: "keep" }); store.toast("已引用 " + added + " 个节点到本次对话"); }
     };
     window.addEventListener("cn:agent-drop-nodes", on);
     return () => window.removeEventListener("cn:agent-drop-nodes", on);
@@ -961,9 +1287,12 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
             ? <MessageScrollerItem animated={false} className="ap2-item" key={row.key}><Marker className="ap2-day" sticky variant="separator"><MarkerContent><MarkerTime date={row.at} locale="zh-CN" /></MarkerContent></Marker></MessageScrollerItem>
             : (() => { const m = row.m; const i = row.i; return (
               <MessageScrollerItem className="ap2-item" data-msg-id={m.id} key={row.key} messageId={m.id}>
-                <Msg m={m} i={i} isNew={i >= seen.current} a={a} ctl={ctl} onRetry={() => { const u = a.msgs.slice(0, i).reverse().find((x) => x.role === "u"); if (u) { a.draft = u.text; void send(); } }} onBranch={() => branch(i)} onQ={setDraft} onSkillInstallConfirm={() => void confirmRepositoryInstall(m)} onSkillInstallCancel={() => cancelRepositoryInstall(m)} onQa={(card, skip) => answerQa(m, card, skip)} models={models} onApprovePlan={(steps) => void approvePlan(m, steps)} onRegenerate={(items) => void regenerate(m, items, "")} />
+                <Msg m={m} i={i} isNew={i >= seen.current} a={a} ctl={ctl} onRetry={() => { const u = a.msgs.slice(0, i).reverse().find((x) => x.role === "u"); if (u) { a.draft = u.text; void send(); } }} onBranch={() => branch(i)} onQ={setDraft} onSkillInstallConfirm={() => void confirmRepositoryInstall(m)} onSkillInstallCancel={() => cancelRepositoryInstall(m)} onQa={(card, skip) => answerQa(m, card, skip)} models={cardModels} onApprovePlan={(steps) => void approvePlan(m, steps)} onRegenerate={(items) => void regenerate(m, items, "")} />
+                {memCand && memCand.threadId === (a.activeThreadId || "") && memCand.msgId === m.id
+                  ? <MemoryCandidateCard busy={memBusy} items={memCand.items} onConfirm={(ids) => void confirmMemory(ids)} onDismiss={() => void dismissMemory()} /> : null}
               </MessageScrollerItem>
-            ); })())}</>}
+            ); })())}
+            </>}
         <SeenMark onSeen={() => (seen.current = a.msgs.length)} />
             </MessageScrollerContent>
           </MessageScrollerViewport>
@@ -990,6 +1319,13 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
             </div>)}
           </div>
         </div> : null}
+        {annChat.length ? <div className="ap2-annrow" id="aAnn">
+          {annChat.map((g) => <span className="ap2-ann" key={g.nodeId} title={g.nodeTitle + " · " + g.annotations.length + " 条标注"}>
+            <span className="ap2-ann-n">{g.annotations.length}</span>
+            <span className="ap2-ann-t">{g.nodeTitle} · 标注</span>
+            <button className="pm-x" type="button" aria-label="移除标注" onClick={() => setAnnChat((v) => v.filter((x) => x.nodeId !== g.nodeId))}><Icon name="x" size="xs" /></button>
+          </span>)}
+        </div> : null}
         <div className="ctxrow ap2-ctxrow" id="aCtx">
           {ctxChips.map(({ n, pinned, index }) => <CtxTile index={index} key={n.id} n={n} onRemove={() => removeCtxNode(n)} pinned={pinned}
             onHover={(rect) => hoverChip({ kind: "node", id: n.id }, rect)} onLeave={leaveChip} />)}
@@ -1014,6 +1350,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
           {ctxItems.some(({ n }) => n.kind === "image" && srcOf(n)) ? <button className="linkbtn" id="aReverse" title="用这张（或这几张里的第一张）找相似参考图" onClick={() => void reverseSearch(ctl, a)}><Icon name="search" size="xs" />以图搜图</button> : null}
           {ui.agentPick ? <span className="cchip">点画布上的节点加入上下文 · Esc 结束</span> : null}
         </div>
+        {authCard ? <AutonomyCard busy={authBusy} initial={authCard.initial} models={models} reason={authCard.reason} onCancel={endAutonomy} onConfirm={confirmBudget} /> : null}
         <InputGroup className="ap2-input"><MentionInput id="aiInput" ref={edRef} value={a.draft}
           placeholder={a.busy ? (full ? "助手执行中 · 按 Enter 加入队列" : "Enter 加入队列") : voicePhase === "recording" ? "正在聆听…" : voicePhase === "transcribing" ? "正在转写…" : (full ? "描述创意或需求，/ 使用技能，@ 引用参考或使用应用" : "随心输入")}
           onChange={onDraftInput} onEnter={() => { if (a.busy) enqueueDraft(); else void send(); }} onTrigger={onMentionTrigger} onTriggerGone={onTriggerGone}
@@ -1024,10 +1361,10 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
           <button className="ib ap2-btn" id="aPlus" aria-label="添加" onClick={(e) => plusMenu(ctl, a, e.currentTarget, () => slashPalette())}><Icon name="plus" size="s" /></button>
           <FolderButton ctl={ctl} a={a} />
           <CaptureButton ctl={ctl} a={a} />
-          <button className="pill ghost ap2-pill" id="aMode" onClick={(e) => openPop(e.currentTarget, (close) => <>{([["manual", "cursor", "手动确认", "Agent 自动规划与只读执行，写入由你逐次批准"], ["auto", "bolt", "自动规划", "Agent 自动规划与只读执行，写入仍需你的可信批准"]] as const).map(([k, ic, t, d]) => <button key={k} className={"mi" + (a.mode === k ? " on" : "")} data-m={k} onClick={() => { close(); a.setMode(k); }}><span className="ic"><Icon name={ic} size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.mode === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name={a.mode === "auto" ? "bolt" : "cursor"} size="s" />{a.mode === "auto" ? (full ? "自动规划" : "自动") : (full ? "手动确认" : "手动")}<Icon name="down" size="xs" /></button>
+          <button className="pill ghost ap2-pill" id="aMode" data-autonomy={a.mode} onClick={(e) => openPop(e.currentTarget, (close) => <>{AUTONOMY_MODES.map(([k, ic, t, d]) => <button key={k} className={"mi" + (a.mode === k ? " on" : "")} data-m={k} onClick={() => { close(); a.setMode(k); }}><span className="ic"><Icon name={ic} size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.mode === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name={AUTONOMY_MODES.find(([k]) => k === a.mode)?.[1] || "cursor"} size="s" />{a.mode === "auto" ? (full ? "自动推进" : "自动") : a.mode === "managed" ? (full ? "托管" : "托管") : (full ? "协作" : "协作")}<Icon name="down" size="xs" /></button>
           <button className={"pill ghost tipT ap2-pill" + (full ? "" : " icon")} id="aThink" data-thinking={a.thinking} aria-label={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} data-tip={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} onClick={(e) => openPop(e.currentTarget, (close) => <><div className="mh">思考强度</div>{THINKING.map(([k, t, d]) => <button key={k} className={"mi" + (a.thinking === k ? " on" : "")} data-t={k} onClick={() => { close(); a.setThinking(k); }}><span className="ic"><Icon name="brain" size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.thinking === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name="brain" size="s" />{full ? THINKING.find(([k]) => k === a.thinking)?.[1] : null}{a.thinking === "off" ? null : <i className={"thk l" + THINKING.findIndex(([k]) => k === a.thinking)} />}</button>
           <span className="sp" />
-          <button className="ib ap2-btn" id="aRing" aria-label="上下文占用" onClick={(e) => ctxPopover(ctl, a, e.currentTarget, ctxBreak())}><Ring p={Math.min(1, used / CTX_MAX)} /></button>
+          <ContextMeter model={a.model} usage={liveUsage} estimate={ctxBreak()} memOn={a.memOn} onCompact={() => compact(ctl, a)} onMemory={() => memoryModal(a)} />
           {/* 模型强度 pill：窄面板只显示档位、全屏带「模型强度」；弹层由下面的 EffortSlider 接管 */}
           {thinkLevels.length > 1 ? <button className={"pill ghost tipT ap2-pill" + (!full && !thinkLabel ? " icon" : "")} id="aThinkLevel" data-think-level={thinkLevel || "default"}
             aria-label={"模型强度：" + (thinkLabel || "默认") + "，点击选择"} data-tip={"模型强度：" + (thinkLabel || "默认")}
@@ -1160,7 +1497,6 @@ function AgentModelMenu({ models, defaultModelId, selectedModelId, thinkLevels, 
 }
 
 function SeenMark({ onSeen }: { onSeen: () => void }) { useEffect(() => { onSeen(); }); return null; }
-function Ring({ p }: { p: number }) { const c = 2 * Math.PI * 7; return <svg width="18" height="18" viewBox="0 0 18 18"><circle cx="9" cy="9" r="7" fill="none" stroke="currentColor" strokeOpacity=".2" strokeWidth="2" /><circle cx="9" cy="9" r="7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray={`${(c * p).toFixed(1)} ${c.toFixed(1)}`} transform="rotate(-90 9 9)" /></svg>; }
 
 function CtxTile({ n, pinned, onRemove, index, onHover, onLeave }: { n: CanvasNode; pinned: boolean; onRemove: () => void; index: number; onHover?: (rect: DOMRect) => void; onLeave?: () => void }) {
   const icon = <Icon name={n.kind === "table" ? "grid" : TYPE_ICON[n.kind as GenKind] || "layers"} size="xs" />;
@@ -1181,6 +1517,13 @@ function MentionRow({ n, onClick }: { n: CanvasNode; onClick: () => void }) {
   return <button className="mi" onClick={onClick}>{src ? <ThumbImg src={src} width={24} style={{ width: 24, height: 24, borderRadius: 6, objectFit: "cover" }} fallback={fallback} /> : fallback}<span>{title(n)}<span className="d">{n.kind === "table" ? "多维表格" : { text: "文本", image: "图片", video: "视频", audio: "音频" }[n.kind as GenKind]}</span></span></button>;
 }
 
+/** 阶段四：自治三档（协作默认 = 现状；两档旧行为不变） */
+const AUTONOMY_MODES = [
+    ["manual", "cursor", "协作（默认）", "Agent 先规划、写入逐次批准；只读步骤自动执行"],
+    ["auto", "bolt", "自动推进", "只读步骤自动跑，写入和生成仍要你批准"],
+    ["managed", "shield", "托管", "先定平台 / 模型与生成次数上限，按预算自动推进"],
+] as const;
+
 const toolIcon = (label: string): Parameters<typeof Icon>[0]["name"] => /读取|检查|计算/.test(label) ? "eye" : /连线|连入|连到/.test(label) ? "link" : /新建|创建/.test(label) ? "plus" : /生成|运行/.test(label) ? "sparkle" : /排布|整理/.test(label) ? "grid" : /记忆/.test(label) ? "brain" : "bolt";
 function Msg({ m, i, isNew, a, ctl, models, onRetry, onBranch, onQ, onSkillInstallConfirm, onSkillInstallCancel, onQa, onApprovePlan, onRegenerate }: { m: AgentMsg; i: number; isNew: boolean; a: AgentState; ctl: Ctl; models: ModelSpec[]; onRetry: () => void; onBranch: () => void; onQ: (q: string) => void; onSkillInstallConfirm: () => void; onSkillInstallCancel: () => void; onQa: (card: QaCard, skip: boolean) => void; onApprovePlan: (steps: AgentTaskPlan["steps"]) => void; onRegenerate: (items: AgentRegenerateItem[]) => void }) {
   const nw = isNew ? " new" : "";
@@ -1192,13 +1535,22 @@ function Msg({ m, i, isNew, a, ctl, models, onRetry, onBranch, onQ, onSkillInsta
       {ctx.length || m.skill ? <div className="ctxs">{m.skill ? <span className="skchip"><Icon name="sparkle" size="xs" />{m.skill}</span> : null}{ctx.map((c) => <CtxThumb key={c.id} c={c} />)}</div> : null}
       <Bubble className="ap2-bub-u" variant="secondary"><BubbleContent className="ap2-bub-body">{m.text}</BubbleContent></Bubble><MessageTime at={m.at} /><div className="mact"><button title="复制" onClick={copy}><Icon name="copy" size="xs" /></button></div></div>;
   }
-  const patch = (p: Partial<AgentMsg>) => { Object.assign(m, p); a.msgs = [...a.msgs]; a.emit(); };
+  const patch = (p: Partial<AgentMsg>) => a.patchMessage(m, p);
   return <div className={"msg a" + nw} data-i={i} data-msg-id={m.id}>
     <Proc m={m} patch={patch} />
     {m.webSearch?.length ? <div className="websearch-cards">{m.webSearch.map((card) => <WebSearchCard card={card} key={card.key} />)}</div> : null}
     {m.memSaved ? <div className="memrow"><Icon name="check" size="xs" />已写入{m.memSaved.scope}记忆：{m.memSaved.text}<button className="linkbtn" onClick={() => memoryModal(a)}>管理</button></div> : null}
+    {m.compactions?.length ? <CompactNotice key={m.compactions[m.compactions.length - 1].id} notice={m.compactions[m.compactions.length - 1]} times={m.compactions.length} /> : null}
+    {m.heartbeat && !m.streaming ? <HeartbeatLine hb={m.heartbeat} /> : null}
+    {m.origin === "agent" ? <div className="ap2-proactive" data-origin="agent"><Icon name="sparkle" size="xs" /><span>助手主动发来</span></div> : null}
+    {m.selfCheck ? <SelfCheckLine check={m.selfCheck} /> : null}
     {m.streaming && !m.text ? <div aria-hidden="true" className="ap2-skeleton"><Skeleton className="ap2-skeleton-line" /><Skeleton className="ap2-skeleton-line is-short" /><Skeleton className="ap2-skeleton-line" /></div> : null}
     {m.text ? <Message align="start" className="ap2-msg-a"><MessageContent className="ap2-mc"><div className="md-chat ap2-bub-a"><Markdown streaming={m.streaming} text={m.text} /></div></MessageContent></Message> : null}
+    {/* 下一步建议：只当文字给，不做成按钮（用户 2026-11 明确）；要采纳直接照着说一句即可 */}
+    {m.suggestions?.length ? <div className="ap2-sugs ap2-sugs-text" data-suggestions>
+      <span className="ap2-sugs-hd">下一步建议</span>
+      {m.suggestions.map((text, index) => <p className="ap2-sug-text" key={index}>{text}</p>)}
+    </div> : null}
     {m.error ? <Alert className="ap2-alert"><Icon name="alert" size="s" /><AlertTitle>{m.error}</AlertTitle><AlertClose aria-label="关闭错误提示" onClick={() => patch({ error: undefined })} /></Alert> : null}
     <div className="ap2-cards">
       {m.webImages?.length ? <div className="webimgs">{m.webImages.map((card) => <WebImageCard key={card.key} card={card} ctl={ctl} />)}</div> : null}
@@ -1228,21 +1580,58 @@ function MessageTime({ at }: { at?: number }) {
   return <time className="mtime" dateTime={d.toISOString()}>{d.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" })} {d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}</time>;
 }
 /** 处理过程：运行中一行「正在思考」+ 动效；结束后一行轻文字 + chevron，展开是纯文字步骤（无卡面） */
+/** 长任务心跳：一行很轻的状态（正在思考 / 审查中 · 已 N 秒），本地每秒走一格 */
+function HeartbeatLine({ hb }: { hb: NonNullable<AgentMsg["heartbeat"]> }) {
+  const [elapsed, setElapsed] = useState(hb.elapsedMs);
+  useEffect(() => {
+    setElapsed(hb.elapsedMs);
+    const timer = window.setInterval(() => setElapsed((value) => value + 1000), 1000);
+    return () => window.clearInterval(timer);
+  }, [hb.elapsedMs, hb.stage]);
+  const label = hb.stage === "review" ? "审查中" : hb.stage === "tools" ? "执行工具中" : "正在思考";
+  return <div className="ap2-hb-line" data-heartbeat={hb.stage}><i className="dot" /><span>{label + " · 已 " + Math.max(0, Math.floor(elapsed / 1000)) + " 秒"}</span></div>;
+}
+
+/** 回复前的一行「完成前自检」：通过就一行字；未通过可以展开看逐条未满足项；pending 项只标「待核对」，不算未通过 */
+function SelfCheckLine({ check }: { check: SelfCheckResult }) {
+  const [open, setOpen] = useState(false);
+  const pending = check.items.filter((item) => item.status === "pending");
+  const unmet = check.items.filter((item) => !item.ok && item.status !== "pending");
+  const tone = check.passed ? "passed" : unmet.length ? "failed" : "pending";
+  const expandable = !check.passed && (unmet.length > 0 || pending.length > 0);
+  return <div className={"ap2-selfcheck" + (tone === "passed" ? " is-pass" : tone === "failed" ? " is-fail" : " is-pending")} data-self-check={tone}>
+    <Icon name={tone === "passed" ? "check" : tone === "pending" ? "history" : "alert"} size="xs" />
+    <span>{tone === "passed" ? "完成前自检通过" : tone === "failed" ? "完成前自检未通过 · " + unmet.length + " 项未满足" : "完成前自检 · " + pending.length + " 项待核对"}{tone === "failed" && pending.length ? " · " + pending.length + " 项待核对" : ""}</span>
+    {expandable ? <button className="linkbtn" data-self-check-detail onClick={() => setOpen((value) => !value)}>{open ? "收起" : "看明细"}</button> : null}
+    {expandable && open ? <ul className="ap2-selfcheck-list">
+      {unmet.map((item, index) => <li key={"unmet" + index}>{item.text}</li>)}
+      {pending.map((item, index) => <li className="pending" key={"pending" + index}>{item.text}<span className="ap2-selfcheck-pending">待核对</span></li>)}
+    </ul> : null}
+  </div>;
+}
+
+/** 这一条思考是不是「反思」：后端 thought 事件的 kind=reflect（老数据没有 kinds 就一律不标） */
+const isReflect = (th: AgentMsg["think"], index: number) => String(th?.kinds?.[index] || "") === "reflect";
+
 function Proc({ m, patch }: { m: AgentMsg; patch: (p: Partial<AgentMsg>) => void }) {
   const tools = m.tools || []; const th = m.think;
-  if (!th && !tools.length) return null;
+  const reasoning = m.reasoning || "";
+  if (!th && !tools.length && !reasoning) return null;
   const live = !!th?.live || tools.some((t) => t.state === "run") || !!m.streaming && !m.took;
   const done = tools.filter((t) => t.state === "done").length;
   const fmt = (s: number) => (s >= 60 ? Math.floor(s / 60) + "m " + Math.round(s % 60) + "s" : (s < 10 ? s.toFixed(1) : Math.round(s)) + "s");
-  const open = live || m.procOpen === true;
+  /** 用户手动收过（procOpen === false）就不再被 live 抢开；没动过就跟着 run 自动展开 */
+  const open = m.procOpen === true || (live && m.procOpen !== false);
   const thinking = !!th && !th.live && !!m.procOpen && !!th.lines.length;
   return (
     <Collapsible className={"ap2-proc" + (live ? " is-live" : "")} onOpenChange={(v) => patch({ procOpen: v })} open={open}>
       {live ? (
-        <div aria-live="polite" className="ap2-proc-live">
+        /* 运行中这一行本身也是「展开 / 收起」的开关：用户手动收起后，后续 delta 不会再把它抢开 */
+        <CollapsibleTrigger aria-live="polite" className="ap2-proc-live">
           <Spinner className="ap2-spin" size="sm" />
-          <span className="ap2-proc-live-text">正在思考<i aria-hidden="true" className="ap2-dots"><b /><b /><b /></i></span>
-        </div>
+          <span className="ap2-proc-live-text ap2-shimmer">正在思考<i aria-hidden="true" className="ap2-dots"><b /><b /><b /></i></span>
+          <span className="ap2-proc-caret"><Icon name="right" size="xs" /></span>
+        </CollapsibleTrigger>
       ) : (
         <CollapsibleTrigger className="ap2-proc-hd">
           <span>思考了 {fmt(m.took || Number(th?.secs) || 0)}</span>
@@ -1251,11 +1640,13 @@ function Proc({ m, patch }: { m: AgentMsg; patch: (p: Partial<AgentMsg>) => void
         </CollapsibleTrigger>
       )}
       {live && th?.lines.length ? (
-        <div className="ap2-think-text is-live">{th.lines.slice(-2).map((l, k) => <p key={k}>{l}</p>)}</div>
+        <div className="ap2-think-text is-live">{th.lines.slice(-2).map((l, k) => <p key={k}>{isReflect(th, th.lines.length - Math.min(2, th.lines.length) + k) ? <span className="ap2-reflect">反思</span> : null}{l}</p>)}</div>
       ) : null}
       <CollapsibleContent className="ap2-proc-body">
+        {/* 阶段三：原生推理（reasoning_delta）逐字追加；运行中带一层很轻的 shimmer，结束后就是普通正文 */}
+        {reasoning ? <div className={"ap2-think-reason" + (th?.live ? " is-live" : "")} data-think-reason aria-live={th?.live ? "polite" : undefined}>{reasoning}</div> : null}
         {th && !th.live && th.lines[0] && !thinking ? <div className="ap2-think-sum"><Icon name="brain" size="xs" /><span>{th.lines[0]}</span></div> : null}
-        {thinking ? <div className="ap2-think-text">{th!.lines.map((l, k) => <p key={k}>{l}</p>)}</div> : null}
+        {thinking ? <div className="ap2-think-text">{th!.lines.map((l, k) => <p key={k}>{isReflect(th, k) ? <span className="ap2-reflect">反思</span> : null}{l}</p>)}</div> : null}
         {tools.length ? <div className="ap2-steps">{tools.map((t, k) => (
           <Item className={"ap2-step " + t.state} key={k}>
             <ItemMedia className="ap2-step-chip">
@@ -1464,7 +1855,7 @@ function relTime(at: number) {
 
 /** 新建对话：后端建一条空线程并切过去，旧线程留在列表里（不删） */
 async function startNewThread(store: Ctl["store"], a: AgentState) {
-  if (!a.threadsSupported()) { a.msgs = []; a.queue = []; a.emit(); store.toast("已开始新对话"); return; }
+  if (!a.threadsSupported()) { a.msgs = []; a.queue = []; a.pendingUrgent = null; a.draft = ""; a.emit(); store.toast("已开始新对话"); return; }
   const ok = await a.newThread();
   store.toast(ok ? "已新建对话，上一段还在对话列表里" : a.businessError || "新建对话失败");
 }
@@ -1484,6 +1875,8 @@ function convMenu(store: Ctl["store"], a: AgentState, anchor: Element) {
 }
 function moreMenu(ctl: Ctl, a: AgentState, anchor: Element) {
   openPop(anchor, (close) => <>
+    {/* 搜索历史放这里，不新增底栏按钮：底栏的上下文入口只有一个（#aRing） */}
+    <button className="mi" data-recall-entry onClick={() => { close(); openRecallSearch(ctl.store.state.canvasId, a.activeThreadId); }}><Icon name="search" size="s" />搜索历史<span className="k">跨对话 · 本机</span></button>
     <button className="mi" onClick={() => { close(); usageModal(ctl, a); }}><Icon name="bolt" size="s" />用量统计</button>
     <button className="mi" onClick={() => { close(); memoryModal(a); }}><Icon name="brain" size="s" />记忆<span className="k">{a.memOn ? a.memory().length + " 条" : "已关闭"}</span></button>
     <button className="mi" onClick={() => { close(); skillsModal(a); }}><Icon name="sparkle" size="s" />管理技能<span className="k">{a.skillsOn().length} 个启用</span></button>
@@ -1500,18 +1893,6 @@ function usageModal(ctl: Ctl, a: AgentState) {
     {([["对话轮数", asks + " 轮"], ["执行步骤", steps + " 步"], ["新建节点", made + " 个"], ["Agent 处理耗时", secs >= 60 ? Math.floor(secs / 60) + "m " + Math.round(secs % 60) + "s" : secs.toFixed(1) + "s"], ["对话文字（估算 tokens）", "约 " + Math.round(chars * 1.6).toLocaleString()], ["模型", a.lockedModel || a.model]] as Array<[string, string]>).map(([k, v]) => <div key={k} className="row"><span>{k}</span><b className="tnum">{v}</b></div>)}
     <p style={{ color: "var(--fg3)", fontSize: 12, marginTop: 10 }}>生成类花费以各节点实际调用为准；这里统计的是 Agent 本次对话本身。{ctl.store.state.canvasId ? "" : ""}</p>
   </div></>);
-}
-function ctxPopover(ctl: Ctl, a: AgentState, anchor: Element, b: Array<[string, number]>) {
-  const tot = b.reduce((s, x) => s + x[1], 0);
-  openPop(anchor, (close) => <>
-    <div className="mh">上下文 · {a.model}</div>
-    <div className="row"><span>已用</span><b className="tnum">{tot.toLocaleString()} / {CTX_MAX / 1000}K</b></div>
-    <div className="ctxbar">{b.filter((x) => x[1]).map(([k, v], i) => <i key={k} style={{ width: Math.max(1.5, (v / CTX_MAX) * 100 * 6).toFixed(1) + "%", opacity: 1 - i * .16 }} title={k} />)}</div>
-    {b.map(([k, v], i) => <div key={k} className="row ctxk"><span><i style={{ opacity: 1 - i * .16 }} />{k}</span><b className="tnum">{v.toLocaleString()}</b></div>)}
-    <div className="msep" />
-    <button className="mi" onClick={() => { close(); compact(ctl, a); }}><Icon name="layers" size="s" />压缩对话<span className="k">早期消息合成摘要</span></button>
-    <button className="mi" onClick={() => { close(); memoryModal(a); }}><Icon name="brain" size="s" />记忆<span className="k">{a.memOn ? "开" : "关"}</span></button>
-  </>, "up", "right");
 }
 function compact(ctl: Ctl, a: AgentState) {
   if (a.msgs.length < 4) return ctl.store.toast("对话还很短，不需要压缩");
@@ -1531,6 +1912,8 @@ function MemoryView({ a }: { a: AgentState }) {
   const add = () => { const t = v.trim(); if (!t) return; setV(""); void a.addMemory(tab, t).catch((error) => { a.businessError = error instanceof Error ? error.message : "记忆保存失败"; a.emit(); }); };
   return <><ModalHead title="记忆" icon="brain" /><div className="mbd">
     <div className="row" style={{ padding: "0 0 10px" }}><span>在对话里使用记忆<small style={{ display: "block", color: "var(--fg3)", fontSize: 12 }}>关闭后 Agent 不读取也不引用下面的内容；说「记住…」仍会写入</small></span><button className={"sw" + (a.memOn ? " on" : "")} id="memOn" onClick={() => { a.memOn = !a.memOn; a.saveMem(); }} /></div>
+    <MemorySettingsPanel a={a} />
+    <CanvasProfilePanel a={a} />
     <div className="seg" style={{ padding: "0 0 8px" }}><button className={tab === "user" ? "on" : ""} onClick={() => setTab("user")}>用户记忆 · {a.memUser.length}</button><button className={tab === "canvas" ? "on" : ""} onClick={() => setTab("canvas")}>本画布 · {a.memCanvas.length}</button></div>
     <div className="memlist">{list.map((t) => <div key={t.resourceRef} className="memitem"><span>{t.text}</span><button className="ib" aria-label="删除" onClick={() => { void a.deleteMemory(t).catch((error) => { a.businessError = error instanceof Error ? error.message : "记忆删除失败"; a.emit(); }); }}><Icon name="trash" size="xs" /></button></div>)}{!list.length ? <div className="row" style={{ color: "var(--fg3)" }}><span>暂无</span></div> : null}</div>
     <div className="memadd"><input id="memIn" value={v} placeholder={tab === "user" ? "跨画布生效的偏好，例如：海报都用 3:4" : "只对这张画布有效的事实，例如：主色曜石黑"} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") add(); }} /><button className="btn solid" id="memAdd" onClick={add}>添加</button></div>
@@ -1670,16 +2053,18 @@ function debugBusyMs(): number {
 }
 /** 验收口：?debugQueue / ?debugBusy 下的发送只在前端内存里模拟，不请求后端 */
 const debugSimMs = () => debugBusyMs() || (new URLSearchParams(location.search).get("debugQueue") === "1" ? 900 : 0);
-function debugSimulateSend(a: AgentState, text: string, skillName: string | null, ms: number) {
+function debugSimulateSend(a: AgentState, text: string, skillName: string | null, ms: number, threadId?: string, onDone?: () => void) {
+  // 后台对话的队列自动发送也走这里：结果只写回目标对话，不落到当前正在看的对话
+  const tId = threadId || a.activeThreadId || "__new__";
   const ask: AgentMsg = { id: mid(), role: "u", text, at: Date.now(), skill: skillName || undefined };
   const reply: AgentMsg = { id: mid(), role: "a", text: "", at: Date.now(), think: { live: true, open: false, secs: "0", lines: [] } };
-  a.msgs = [...a.msgs, ask, reply];
-  a.busy = true; a.stop = false; a.emit();
+  a.appendMessages([ask, reply], tId);
+  a.setThreadBusy(tId, true); a.setThreadStop(tId, false); a.emit();
   window.setTimeout(() => {
-    reply.think = { live: false, open: false, secs: (ms / 1000).toFixed(1), lines: [] };
-    reply.text = "（调试模拟）这轮执行结束，队列里的下一条会接着发。";
-    a.msgs = [...a.msgs];
-    a.busy = false; a.stop = false; a.emit();
+    a.patchMessage(reply, { think: { live: false, open: false, secs: (ms / 1000).toFixed(1), lines: [] }, text: "（调试模拟）这轮执行结束，队列里的下一条会接着发。" });
+    a.setThreadBusy(tId, false); a.setThreadStop(tId, false); a.emit();
+    // 调试模拟结束也按「该对话空闲了」继续跑它自己的队列，方便验收后台自动发送
+    onDone?.();
   }, ms);
 }
 /** 验收口：?debugQueue=1 的两条队列消息（其中一条够长，用来验证单行省略） */
@@ -1694,6 +2079,8 @@ function debugQueueItems(): QueuedMsg[] {
 /** 验收口：卡片类消息的纯前端注入（只进内存，不发请求、不写服务端/localStorage）。
  *  ?debugPlan=1 / ?debugQa=1 / ?debugSkill=1 三个口与 ?debugWebimg=1 / ?debugThinking=1 同款写法。 */
 function debugGenMessages(): AgentMsg[] {
+  /** 验收口：?debugGenCount=4 把待生成卡片的张数设成 4（只在前端内存，不跑生成） */
+  const debugCount = Math.max(1, Math.min(8, Math.round(Number(new URLSearchParams(location.search).get("debugGenCount")) || 0)));
   const plan: AgentTaskPlan = {
     kind: "generation", requires_confirmation: true, intent: "做 2 张小红书封面 + 1 段产品短视频",
     summary: "节点、连线和提示词已经放到画布上了：「封面 01｜早八宿舍书桌 · 热水还在」、「封面 02｜自习室窗边 · 一杯热水一下午」、「镜头 1｜开盖冒热气」。还没有开始生成——在下面的待生成卡片里选好模型、尺寸 / 分辨率，点「执行生成」再生成。",
@@ -1703,8 +2090,8 @@ function debugGenMessages(): AgentMsg[] {
       { node_id: "dbg3", title: "镜头 1｜开盖冒热气", kind: "video", prompt: "特写，手拧开保温杯密封旋盖，热气缓缓升起，清晨窗边逆光，5 秒，镜头缓慢推进。" },
     ],
     steps: [
-      { tool: "run_generation", args: { node_id: "dbg1", type: "image", settings: { ratio: "3:4", resolution: "2k" } }, description: "生成「封面 01」" },
-      { tool: "run_generation", args: { node_id: "dbg2", type: "image", settings: { ratio: "3:4", resolution: "2k" } }, description: "生成「封面 02」" },
+      { tool: "run_generation", args: { node_id: "dbg1", type: "image", settings: { ratio: "3:4", resolution: "2k", ...(debugCount ? { count: debugCount } : {}) } }, description: "生成「封面 01」" },
+      { tool: "run_generation", args: { node_id: "dbg2", type: "image", settings: { ratio: "3:4", resolution: "2k", ...(debugCount ? { count: debugCount } : {}) } }, description: "生成「封面 02」" },
       { tool: "run_generation", args: { node_id: "dbg3", type: "video", settings: { ratio: "9:16", duration: 5 } }, description: "生成「镜头 1」" },
     ],
   };
@@ -1728,6 +2115,20 @@ function debugGenMessages(): AgentMsg[] {
       qa: confirm },
   ];
 }
+function debugSelfCheckMessage(fail: boolean): AgentMsg {
+  return {
+    id: mid(), role: "a", at: Date.now(), took: 6.2, procOpen: true,
+    text: "三张封面已经按方案改好，标题都压到 18 字以内。",
+    think: { live: false, open: true, secs: "6.2", kinds: ["roadmap", "reflect"], lines: ["整体方案：沿用冷白光与左上留白，改三张封面的标题与尺寸", "反思：第 1 轮漏了尺寸校验，这轮先核对比例再改标题"] },
+    selfCheck: fail
+      ? { round: 3, passed: false, items: [
+          { text: "5 个镜头都生成成功", ok: true },
+          { text: "标题都在 18 字以内", ok: false },
+          { text: "尺寸统一 3:4", ok: false },
+        ] }
+      : { round: 3, passed: true, items: [{ text: "封面 3 张都已生成", ok: true }, { text: "标题 ≤18 字", ok: true }] },
+  };
+}
 function debugPlanMessage(): AgentMsg {
   const plan: AgentTaskPlan = {
     intent: "用选中的红色杯子做主图，出一张电商首图",
@@ -1736,6 +2137,10 @@ function debugPlanMessage(): AgentMsg {
     assumptions: ["产品主体就是画布上选中的那张图", "这次只出 1 张，用来先定风格"],
     requires_confirmation: true,
     impact: { generations: 1, writes: 2, nodes: 2 },
+    roadmap: [
+      { stage: "阶段一：定风格", detail: "先出 1 张主图定冷白光与留白", generations: 1, acceptance: "主图 1:1、冷白光、标题左上有留白" },
+      { stage: "阶段二：出封面", detail: "按同一设定补 2 张竖版封面", generations: 2, acceptance: "3 张封面都生成成功，标题 ≤18 字" },
+    ],
     steps: [
       { tool: "create_node", index: 0, description: "新建提示词节点：红色杯子，白色背景，电商主图，柔和棚拍光", args: { node_type: "prompt" } },
       { tool: "connect_nodes", index: 1, description: "把提示词节点连到图片节点", args: { from_index: 0, to_index: 2 } },
@@ -1785,6 +2190,104 @@ function debugSkillMessages(): AgentMsg[] {
     { id: mid(), role: "a", at: Date.now(), took: 0.8, text: "", think, skillInstall: { status: "ready", source, preview } },
     { id: mid(), role: "a", at: Date.now(), took: 0.5, text: "", think: { ...think, lines: ["已导入 2 个 Skill，默认不启用"] }, skillInstall: { status: "installed", source, preview, packId: "debug-pack", skillCount: 2 } },
   ];
+}
+/** 验收口：?debugContext=1 / =unknown 注入一条带真实分层的助手消息。
+ *  事件先按后端形状造出来，再走同一个解析函数，验收时看到的就是真实链路的渲染结果。
+ *  known = 模型窗口已知（有百分比）；unknown = 窗口未知（只显示绝对值，不显示猜的百分比）。 */
+function debugContextMessages(kind: "known" | "unknown", compact: boolean): AgentMsg[] {
+    const layers = { system: 13557, memory: 640, history: 1240, canvas: 4769, transcript: 2680, instruction: 214 };
+    const used = Object.values(layers).reduce((sum, tokens) => sum + tokens, 0);
+    const known = kind !== "unknown";
+    const events: Array<Record<string, any>> = [{
+        eventType: "context_usage",
+        safePayload: { used_tokens: used, max_tokens: known ? 200000 : 0, percentage: known ? Math.round(used * 1000 / 200000) / 10 : null, source: "estimate", round: 3, layers },
+    }];
+    if (compact) events.push(
+        { eventType: "context_compacted", safePayload: { id: "debug-cc:fold", level: "fold", before_tokens: 31800, after_tokens: 24100, round: 2 } },
+        { eventType: "context_compacted", safePayload: { id: "debug-cc:summary", level: "summary", before_tokens: 24100, after_tokens: 16800, round: 3 } },
+    );
+    return [{
+        id: mid(), role: "a", at: Date.now(), took: 6.4,
+        text: "（调试注入）这一轮用的是后端真实的上下文占用，点右下角的占用按钮可以看各层明细。",
+        think: { live: false, open: false, secs: "6.4", lines: [] },
+        tools: [{ label: "读取画布与选中节点", state: "done", secs: "0.5" }],
+        usage: contextUsageOf(events) || undefined,
+        compactions: contextCompactionsOf(events),
+    }];
+}
+/** 验收口：?debugStream=hold|done 模拟阶段三流式：
+ *  推理逐字（reasoning_delta 语义）→ 工具「正在准备」占位行 → 原地转正 → 回复逐字（message_delta 语义）。
+ *  hold = 一直保持流式中途（截图用）；done = 跑完收尾。只在前端内存，不发请求。 */
+function debugStreamScript(a: AgentState, mode: "hold" | "done" | "json" | "json-raw") {
+    const threadId = a.activeThreadId || "__new__";
+    const reasonChunks = ["先看画布上已有的封面节点和尺寸，", "确认这轮要改的是「阶段二」那三张封面；", "冷白光和左上留白的设定沿用，", "标题文案压到 18 字以内，", "尺寸保持 3:4 竖版。", ""];
+    const replyChunks = ["这三张封面按上一轮的设定改：", "保留冷白光和左上留白，", "标题压到 18 字以内，", "尺寸仍是 3:4 竖版；", "改完把节点参数回写画布。", ""];
+    const m: AgentMsg = { id: mid(), role: "a", at: Date.now(), text: "", streaming: true, reasoning: "", tools: [], think: { live: true, open: false, secs: "0", lines: [] } };
+    a.appendMessage(m, threadId);
+    a.setThreadBusy(threadId, true);
+    a.emit();
+    const jsonChunks = ['{"thought":"先看画布', '上已有的封面，', '再把标题压到 18 字",', '"steps":[{"tool":"read_node",', '"description":"读取画布与选中节点"}],', '"roadmap":[]}'];
+    let reasoning = ""; let text = ""; let ri = 0; let ti = 0; let prepareTicks = 0; let jsonIndex = 0; let rawJson = "";
+    let phase: "reason" | "json" | "prepare" | "step" | "reply" | "end" = "reason";
+    const timer = window.setInterval(() => {
+        if (phase === "reason") {
+            if (ri < reasonChunks.length) { reasoning += reasonChunks[ri]; ri += 1; a.patchMessage(m, { reasoning }); return; }
+            phase = jsonIndex < jsonChunks.length ? "json" : "prepare"; return;
+        }
+        if (phase === "json") {
+            // JSON 模式：第 1 轮正文是决策 JSON（真实后端 message_delta 就是这么发的）。
+            // json = 修好之后：同一段 JSON 用生产规则过滤（looksLikeDecisionJson），气泡保持空白；
+            // json-raw = 模拟修复前：原样塞进气泡，用来出「前后对比」的对比图。
+            if (jsonIndex < jsonChunks.length) {
+                rawJson += jsonChunks[jsonIndex]; jsonIndex += 1;
+                a.patchMessage(m, { text: mode === "json-raw" ? rawJson : (looksLikeDecisionJson(rawJson) ? "" : rawJson), streaming: true });
+                return;
+            }
+            phase = "prepare"; return;
+        }
+        if (phase === "prepare") {
+            // 占位行停留一段时间（真实后端准备工具也可能几十毫秒到几百毫秒）
+            if (!m.tools?.length) { a.patchMessage(m, { tools: [{ label: "正在准备：读取画布与选中节点", state: "run", callId: "delta:1", tool: "read_node", provisional: true }] }); return; }
+            prepareTicks += 1;
+            if (prepareTicks < 4) return;
+            phase = "step"; return;
+        }
+        if (phase === "step") {
+            a.patchMessage(m, { tools: [{ label: "读取画布与选中节点", state: "run", callId: "step:0", tool: "read_node" }] });
+            phase = "reply"; return;
+        }
+        if (phase === "reply") {
+            if (ti < replyChunks.length) { text += replyChunks[ti]; ti += 1; a.patchMessage(m, { text, streaming: true }); return; }
+            phase = "end"; return;
+        }
+        window.clearInterval(timer);
+        if (mode === "done" || mode === "json" || mode === "json-raw") {
+            a.patchMessage(m, {
+                text, streaming: false, took: 3.2, reasoning,
+                think: { live: false, open: false, secs: "3.2", lines: ["整体方案：沿用冷白光与左上留白，改三张封面的标题与尺寸"] },
+                tools: [{ label: "读取画布与选中节点", state: "done", secs: "0.4", callId: "step:0", tool: "read_node" }],
+            });
+            a.setThreadBusy(threadId, false);
+            a.emit();
+        }
+    }, 180);
+}
+
+/** 验收口：?debugCjk=1 注入中文加粗样例：第 1、2 行是修好的情况，第 3 行是「本来就正常」的对照，
+ *  4/5/6 行验证行内 code、围栏代码块、未配对星号都没被动过（只在前端内存，不发请求）。 */
+function debugCjkMessage(): AgentMsg {
+    const text = [
+        "1. 这一轮**完成了「阶段二」**的画面生成（闭合 ** 前是 」，后紧跟汉字）",
+        "2. 他说**「阶段二」**就开工（开场后是标点、闭合前也是标点）",
+        "3. 对照：**加粗**后面的汉字 / **加粗**，后面是标点 / **加粗** 后面是空格 / 行尾**加粗」**",
+        "4. 行内 code 里的星号不动：`**原样」**后文`",
+        "5. 围栏代码块里的星号也不动：",
+        "```md",
+        "**代码块里的星号」**后文",
+        "```",
+        "6. 没配对的星号不动：这里是 **未配对 收工。",
+    ].join("\n");
+    return { id: mid(), role: "a", at: Date.now(), took: 0.6, text, think: { live: false, open: false, secs: "0.6", lines: [] } };
 }
 /** 验收口：?debugThinking=1 注入一条「正在思考 + 一步执行中」的消息（只在前端内存，不发请求、不写服务端） */
 function debugThinkingMessage(): AgentMsg {

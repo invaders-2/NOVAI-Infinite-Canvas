@@ -1,0 +1,26 @@
+{
+  "data": {
+    "items": [
+      {
+        "kind": "skill",
+        "name": "fixture-long-skill",
+        "activation_skill": "fixture-long-activation"
+      },
+      {
+        "kind": "skill",
+        "name": "fixture-short-skill",
+        "activation_skill": "fixture-short-activation"
+      },
+      {
+        "kind": "skill",
+        "name": "fixture-alias-skill",
+        "activation_skill": "fixture-alias-activation"
+      },
+      {
+        "kind": "skill",
+        "name": "fixture-generated-skill",
+        "activation_skill": "fixture-generated-activation"
+      }
+    ]
+  }
+}

@@ -53,8 +53,15 @@ export const stackOf = (doc: CanvasDoc, id: string) => doc.nodes.find((n) => isS
 const stackable = (n: CanvasNode | undefined): n is CanvasNode => !!n && n.kind !== "group";
 
 /** 选中的节点收成一叠，叠放在第一个节点的位置 */
-/** 分组 / 堆叠的显示名 */
-export const groupLabel = (n: CanvasNode) => (isStack(n) ? "堆叠" : n.text && n.text !== "分组" ? n.text : "分组");
+/**
+ * 分组 / 堆叠的显示名：堆叠也尊重双击重命名（node.text），没改名时才叫「堆叠」；
+ * 普通分组沿用原口径（自定义名，否则「分组」）。groupInputs / tableChannels / groupNote 都用它统一取名字。
+ */
+export const groupLabel = (n: CanvasNode) => {
+  const text = n.text || "";
+  if (isStack(n)) return text && text !== "堆叠" ? text : "堆叠";
+  return text && text !== "分组" ? text : "分组";
+};
 
 export function stackSelection(store: CanvasStore): CanvasNode | null {
   const doc = store.state.doc;

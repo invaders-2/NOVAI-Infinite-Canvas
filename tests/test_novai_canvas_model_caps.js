@@ -82,15 +82,18 @@ assert.strictEqual(unknownSpec.batchUnknown, true);
 assert.deepStrictEqual(unknownSpec.batch, [1], '缺失上限时只保留 1 张');
 assert.deepStrictEqual(plan.countOptions(unknownSpec), [1], '方案卡张数只给 1 张');
 const unknownStep = { tool: 'generate_image', args: { canvas_id: 'c', provider: 'agnes-ai', model: 'agnes-image-2.5-flash', ratio: '1:1', size: '1024x1024', count: 4 } };
-assert.strictEqual(plan.readPlanParams(unknownStep, 'image', [unknownSpec]).count, 1, '显示值也收回 1');
+// task-25 起：不再静默降级到 1 —— 显示/批准保留用户要的 4，执行层按 countPlan 拆成 4 次（每次 1 张）
+assert.strictEqual(plan.readPlanParams(unknownStep, 'image', [unknownSpec]).count, 4, '批量未知：保留请求张数（拆分执行时提示按 1 张处理）');
 const knownSpec = model.specFor({ configId: 'apimart::gemini-3-pro-image-preview', label: 'gemini-3-pro-image-preview', kind: 'image', ui: imageUi, specSource: 'spec' });
 assert.strictEqual(knownSpec.batchUnknown, undefined, '有 n_max=10 不标未知');
 // 明确 n_max=1 的模型：计划里写了 4 张，也要显示/批准成 1 张
 const oneSpec = model.specFor({ configId: 'apimart::gpt-image-2.5-ext', label: 'gpt-image-2.5-ext', kind: 'image', ui: caps.modelCapsUi('image', { provider: 'apimart', model: 'gpt-image-2.5-ext', kind: 'image', ratios: ['1:1'], resolutions: ['2K'], n_max: 1 }), specSource: 'spec' });
 const fourStep = { tool: 'generate_image', args: { canvas_id: 'c', provider: 'apimart', model: 'gpt-image-2.5-ext', ratio: '1:1', size: '2048x2048', count: 4 } };
-assert.strictEqual(plan.readPlanParams(fourStep, 'image', [oneSpec]).count, 1, 'n_max=1 时显示也收回 1');
+// task-25 起：n_max=1 的模型也保留请求张数 4，由 countPlan/expandGenerationSteps 拆成 4 次执行
+assert.strictEqual(plan.readPlanParams(fourStep, 'image', [oneSpec]).count, 4, 'n_max=1：保留请求张数（分 4 次执行）');
 assert.deepStrictEqual(plan.countOptions(oneSpec), [1]);
-assert.strictEqual(plan.patchPlanStep(fourStep, 'image', [oneSpec], {}).args.count, 1, '批准前归一到 1 张');
+// task-25 起：批准前不再把张数夹回 1；由 expandGenerationSteps 按模型档位拆成多次执行
+assert.strictEqual(plan.patchPlanStep(fourStep, 'image', [oneSpec], {}).args.count, 4, '批准保留请求张数（执行时拆组）');
 
 // ---- 3a. 参考图能力：caps 不含 maxRefs/i2i 时沿用官方/预设，不能被权威参数误关 ----
 const noRefUi = { ratios: imageUi.ratios, sizes: imageUi.sizes, batch: imageUi.batch };
@@ -148,7 +151,8 @@ const strictSpec = model.specFor({ configId: 'apimart::strict-image', label: 'st
 const strictFixed = plan.patchPlanStep(imageStep, 'image', [strictSpec], { modelConfigId: strictSpec.id });
 assert.strictEqual(strictFixed.args.ratio, '1:1', '没有 auto 的模型纠正到第一个合法比例');
 assert.strictEqual(strictFixed.args.size, '1024x1024', '分辨率落到新模型的 1K');
-assert.strictEqual(strictFixed.args.count, 1, '张数落到新模型 batch 首个');
+// task-25 起：切模型也不许把请求张数改小；batch=[1,2] 时保留 4 张，执行层拆成 2 次每次 2
+assert.strictEqual(strictFixed.args.count, 4, '切模型保留请求张数（执行层按新模型档位拆组）');
 assert.deepStrictEqual(plan.imageRatioOptions(imageSpec), ['自适应', '1:1', '3:4'], '卡片比例来自 ModelSpec');
 assert.deepStrictEqual(plan.imageResolutionOptions(imageSpec), ['1K', '2K'], '卡片分辨率来自 ModelSpec');
 assert.deepStrictEqual(plan.countOptions(imageSpec), [1, 2, 3, 4, 5, 6, 7, 8], '卡片张数来自 ModelSpec.batch');
@@ -192,6 +196,39 @@ assert.strictEqual('outputFormat' in noGifParams, false, '换到不支持 gif �
 const dirtyParams = model.clampParams('image', { model: formatSpec.id, ratio: '1:1', size: '2K', count: 1, search: false, style: '无', camera: { ...model.DEFAULT_CAMERA }, outputFormat: '' }, formatSpec);
 assert.strictEqual('outputFormat' in dirtyParams, false, '空串不落参数');
 
+// ---- 5c. 透明背景：caps.native_background → 能力位 / 参数互斥 / 请求字段 ----
+const bgCaps = caps.modelCapsUi('image', { provider: 'apimart', model: 'gpt-image-1.5-official', kind: 'image', ratios: ['1:1'], resolutions: ['1K'], n_max: 1, native_background: true });
+assert.strictEqual(bgCaps.nativeBackground, true, 'native_background:true → ui.nativeBackground');
+const noBgCaps = caps.modelCapsUi('image', { provider: 'apimart', model: 'gpt-image-2.5-ext', kind: 'image', ratios: ['1:1'], resolutions: ['1K'], n_max: 1 });
+assert.strictEqual('nativeBackground' in noBgCaps, false, '缺省不落 nativeBackground 键');
+const looseBgCaps = caps.modelCapsUi('image', { provider: 'apimart', model: 'loose', kind: 'image', ratios: ['1:1'], native_background: 'true' });
+assert.strictEqual('nativeBackground' in looseBgCaps, false, '只有明确 true 才算支持');
+const bgSpec = model.specFor({ configId: 'apimart::gpt-image-1.5-official', label: 'gpt-image-1.5-official', vendor: 'APIMART', kind: 'image', ui: bgCaps, specSource: 'spec' });
+assert.strictEqual(bgSpec.nativeBackground, true, 'specFor 保留 nativeBackground');
+const noBgSpec = model.specFor({ configId: 'apimart::gpt-image-2.5-ext', label: 'gpt-image-2.5-ext', vendor: 'APIMART', kind: 'image', ui: noBgCaps, specSource: 'spec' });
+assert.strictEqual(noBgSpec.nativeBackground, undefined, '不支持透明背景的模型没有能力位');
+
+const baseImageParams = { model: bgSpec.id, ratio: '1:1', size: '1K', count: 1, search: false, style: '无', camera: { ...model.DEFAULT_CAMERA } };
+assert.strictEqual('background' in model.defaultParams('image', bgSpec), false, 'defaultParams 不预置 background');
+const keptBg = model.clampParams('image', { ...baseImageParams, background: 'transparent' }, bgSpec);
+assert.strictEqual(keptBg.background, 'transparent', '支持的模型保留 background');
+const droppedBg = model.clampParams('image', { ...baseImageParams, background: 'transparent' }, noBgSpec);
+assert.strictEqual('background' in droppedBg, false, '不支持透明背景的模型清掉 background');
+
+// 透明背景只能出 PNG：和 GIF / SVG 的输出格式互斥
+const bgFormatSpec = model.specFor({ configId: 'apimart::bg-format', label: 'bg-format', vendor: 'APIMART', kind: 'image', ui: { ...formatUi, nativeBackground: true }, specSource: 'spec' });
+const pngOnly = model.clampParams('image', { ...baseImageParams, model: bgFormatSpec.id, background: 'transparent', outputFormat: 'gif', frameCount: 6, frameDuration: 300 }, bgFormatSpec);
+assert.strictEqual(pngOnly.background, 'transparent', '透明背景保留');
+assert.strictEqual('outputFormat' in pngOnly, false, '透明背景清掉 outputFormat');
+assert.strictEqual('frameCount' in pngOnly, false, '透明背景清掉 frameCount');
+assert.strictEqual('frameDuration' in pngOnly, false, '透明背景清掉 frameDuration');
+const dirtyBg = model.clampParams('image', { ...baseImageParams, model: bgFormatSpec.id, background: 'keep', outputFormat: 'gif' }, bgFormatSpec);
+assert.strictEqual('background' in dirtyBg, false, '非 transparent 的背景值不落参数');
+assert.strictEqual(dirtyBg.outputFormat, 'gif', '有输出格式时背景被清掉，格式保留');
+const bgToGif = model.clampParams('image', { ...baseImageParams, model: formatSpec.id, background: 'transparent', outputFormat: 'gif' }, formatSpec);
+assert.strictEqual('background' in bgToGif, false, '换到不支持透明的模型清掉 background');
+assert.strictEqual(bgToGif.outputFormat, 'gif', '输出格式按新模型能力保留');
+
 // ---- 6. 后端接线静态断言 ----
 const backend = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/novaiBackend.ts'), 'utf8');
 const card = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/agent/TaskPlanCard.tsx'), 'utf8');
@@ -204,9 +241,14 @@ assert.ok(backend.includes('let capsUi =') && backend.includes('const ui = capsU
 assert.ok(card.includes('该模型未提供规格，比例/分辨率为推断'), '未验证模型在方案卡上有提示');
 assert.ok(card.includes('上限未知，以实际为准'), 'n_max 缺失时方案卡提示上限未知');
 assert.ok(card.includes('生成方式：自动选择'), '视频步骤在方案卡上说明自动选择方式');
-assert.ok(genPanel.includes('mm.batchUnknown ? [1] : [4, 2, 1]') && genPanel.includes('上限未知，以实际为准'), '图片面板 n_max 缺失只给 1 张并提示');
-assert.ok(card.includes('spec?.specSource !== "spec"'), '提示按 ModelSpec.specSource 判定');
+assert.ok(genPanel.includes('mm.batchUnknown ? [1] : [4, 2, 1]') && !genPanel.includes('上限未知，以实际为准'), '图片面板 n_max 缺失只给 1 张，参数弹层不再显示灰字上限提示');
+assert.ok(card.includes('explicitSpec.specSource !== "spec"'), '提示按 ModelSpec.specSource 判定（只对步骤显式选的模型提示，不暗示默认模型）');
 assert.ok(backend.includes('outputFormatForRequest') && backend.includes('output_format: outputFormat'), '生成请求只对 gif / svg 下发 output_format');
 assert.ok(genPanel.includes('data-p="output-format"') && genPanel.includes('输出格式'), '图片参数弹层有「输出格式」段');
+assert.strictEqual(genPanel.includes('data-seg="background"'), false, '底栏不再有独立的「背景」段');
+assert.ok(genPanel.includes('{m.nativeBackground ? <>') && genPanel.includes('data-p="background"') && genPanel.includes('data-background="default"') && genPanel.includes('data-background="transparent"'), '透明背景入口在「比例 · 尺寸」弹层里，只由 caps.nativeBackground 控制');
+assert.ok(genPanel.includes('set({ background: "transparent", outputFormat: undefined })'), '开透明背景时连带清掉输出格式');
+assert.ok(genPanel.includes('" · 透明"'), '比例摘要显示「 · 透明」状态');
+assert.ok(backend.includes('params.background === "transparent"') && backend.includes('background: "transparent"'), '生成请求按透明背景下发 background 字段');
 
 console.log('[PASS] model-caps 映射 / 未验证回落 / 方案卡选项与纠正 / 图片输出格式 / 后端接线（7 组）');

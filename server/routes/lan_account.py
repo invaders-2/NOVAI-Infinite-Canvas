@@ -32,11 +32,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
 import secrets
 import socket
+import struct
+import sys
 import tempfile
 import threading
 import time
@@ -44,6 +47,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
+
+try:  # Windows 没有 fcntl：查不到真实掩码，退回候选前缀
+    import fcntl
+except ImportError:  # pragma: no cover - 取决于平台
+    fcntl = None  # type: ignore[assignment]
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -87,6 +95,12 @@ DISCOVERY_TICK = 0.5              # 收包超时，决定广播的实际间隔�
 DISCOVERY_TTL_MS = 30 * 1000
 DISCOVERY_PACKET_BYTES = 8192
 DISCOVERY_AVATAR_BYTES = 512      # UDP 单包上限 64KB，超大头像会把整个广播撑爆
+# 定向广播：/23、/22 这类网段上写死 /24 会把包打到一个没人占用的普通主机地址，
+# 对端永远收不到。拿不到真实掩码时按这几档前缀逐个试，/24 和旧行为一致。
+BROADCAST_PREFIXES = (24, 23, 22, 20, 16)
+IFACE_CACHE_TTL = 30.0             # 网卡地址 / 掩码缓存：换 WiFi 后能自己跟上
+SIOCGIFADDR = 0xC0206921 if sys.platform == "darwin" else 0x8915
+SIOCGIFNETMASK = 0xC0206925 if sys.platform == "darwin" else 0x891B
 
 _LOCK = threading.Lock()
 _ONLINE_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -95,6 +109,8 @@ _PEERS: Dict[str, Dict[str, Any]] = {}
 _PEERS_LOCK = threading.Lock()
 _DISCOVERY_LOCK = threading.Lock()
 _DISCOVERY_STARTED = False
+_IFACE_CACHE: Optional[Tuple[float, Dict[str, str]]] = None
+_IFACE_LOCK = threading.Lock()
 
 
 class MeUpdateRequest(BaseModel):
@@ -181,6 +197,58 @@ def _port() -> str:
     return os.environ.get("NOVAI_PORT", "").strip() or "3000"
 
 
+def _ifreq_ipv4(sock: socket.socket, name: str, request: int) -> str:
+    """ioctl(SIOCGIFADDR / SIOCGIFNETMASK) 读一张网卡的 IPv4 地址 / 掩码，失败返回空串。
+
+    ifreq 里 sockaddr 的 IPv4 地址在偏移 20（macOS 与 Linux 都是这个布局）。"""
+    if fcntl is None:
+        return ""
+    try:
+        result = fcntl.ioctl(sock.fileno(), request,
+                             struct.pack("256s", name.encode("utf-8")[:15]))
+    except (OSError, ValueError):
+        return ""
+    try:
+        return socket.inet_ntoa(result[20:24])
+    except OSError:
+        return ""
+
+
+def _iface_netmasks() -> Dict[str, str]:
+    """本机各 IPv4 网卡的真实掩码 {ip: netmask}，缓存 30s。
+
+    getaddrinfo(gethostname()) 在多网卡机器上经常只给一张网卡，这里直接枚举网卡
+    （POSIX）；Windows 没有 fcntl，返回空，调用方退回候选前缀。"""
+    global _IFACE_CACHE
+    if fcntl is None:
+        return {}
+    now = time.monotonic()
+    with _IFACE_LOCK:
+        if _IFACE_CACHE is not None and now - _IFACE_CACHE[0] < IFACE_CACHE_TTL:
+            return dict(_IFACE_CACHE[1])
+    found: Dict[str, str] = {}
+    try:
+        names = [name for _, name in socket.if_nameindex()]
+    except (AttributeError, OSError):
+        names = []
+    sock: Optional[socket.socket] = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        for name in names:
+            address = _ifreq_ipv4(sock, name, SIOCGIFADDR)
+            netmask = _ifreq_ipv4(sock, name, SIOCGIFNETMASK)
+            if address and netmask and not address.startswith("127."):
+                found[address] = netmask
+    except OSError:
+        pass
+    finally:
+        if sock is not None:
+            sock.close()
+    with _IFACE_LOCK:
+        _IFACE_CACHE = (now, dict(found))
+    return found
+
+
 def _local_ipv4s() -> List[str]:
     found: List[str] = []
 
@@ -201,6 +269,11 @@ def _local_ipv4s() -> List[str]:
     except Exception:
         pass
     try:
+        for ip in _iface_netmasks():
+            add(ip)
+    except Exception:
+        pass
+    try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
             try:
                 add(info[4][0])
@@ -208,16 +281,69 @@ def _local_ipv4s() -> List[str]:
                 pass
     except Exception:
         pass
+    try:  # Windows 上 fcntl 不可用，gethostbyname_ex 常能多给一张网卡
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            add(ip)
+    except Exception:
+        pass
     return found
 
 
+def _mask_prefix(netmask: Any) -> Optional[int]:
+    """点分掩码 -> 前缀长度；不是左侧连续的 1 就返回 None。"""
+    try:
+        parts = [int(part) for part in str(netmask or "").split(".")]
+    except (TypeError, ValueError):
+        return None
+    if len(parts) != 4 or any(part < 0 or part > 255 for part in parts):
+        return None
+    bits = "".join(format(part, "08b") for part in parts)
+    if "01" in bits:
+        return None
+    prefix = bits.count("1")
+    return prefix or None
+
+
+def _broadcast_for_prefix(ip: str, prefix: int) -> Optional[str]:
+    """/31、/32 没有定向广播地址，其余按子网算。"""
+    if prefix < 8 or prefix > 30:
+        return None
+    try:
+        return str(ipaddress.ip_network("%s/%d" % (ip, prefix), strict=False).broadcast_address)
+    except ValueError:
+        return None
+
+
+def _directed_broadcasts(ip: str, netmask: Optional[str] = None) -> List[str]:
+    """一个本机 IPv4 候选的定向广播（去重、保序）。
+
+    有真实掩码就按它算准的那一条；没有就按 BROADCAST_PREFIXES 逐档猜。
+    真实掩码比 /24 粗时（/23、/16…）额外补 /24 那条，和旧版本行为兼容；
+    比 /24 细时（/25 以上）不再猜 /24，免得往不在本子网里的地址发。"""
+    prefix = _mask_prefix(netmask) if netmask else None
+    if prefix is None:
+        candidates = list(BROADCAST_PREFIXES)
+    elif prefix > 24:
+        candidates = [prefix]
+    else:
+        candidates = [prefix, 24]
+    targets: List[str] = []
+    for item in candidates:
+        target = _broadcast_for_prefix(ip, item)
+        if target and target not in targets:
+            targets.append(target)
+    return targets
+
+
 def broadcast_targets() -> List[str]:
-    """VPN / 多网卡 / 部分路由下 255.255.255.255 直接不可达，按 /24 再加一份定向广播。"""
+    """VPN / 多网卡 / 非 /24 网段下 255.255.255.255 可能不可达：
+    每个本机 IPv4 再补一份定向广播（有真实掩码按掩码算，拿不到按常见前缀猜）。"""
+    netmasks = _iface_netmasks()
     targets: List[str] = []
     for ip in _local_ipv4s():
-        target = ".".join(ip.split(".")[:3] + ["255"])
-        if target not in targets:
-            targets.append(target)
+        for target in _directed_broadcasts(ip, netmasks.get(ip)):
+            if target not in targets:
+                targets.append(target)
     if DISCOVERY_BROADCAST not in targets:
         targets.append(DISCOVERY_BROADCAST)
     return targets

@@ -386,7 +386,6 @@
 .cn-root .gif-row input[type=number]{width:64px;padding:5px 6px;border-radius:8px;background:var(--sunken);border:0;color:var(--fg);font-size:12px;text-align:center}
 .cn-root .gif-row input[type=number]:disabled{opacity:.5}
 .cn-root .gif-row .unit{font-size:11px;color:var(--fg3);white-space:nowrap}
-.cn-root .gif-tip{padding:4px 10px 8px;font-size:11px;color:var(--fg3);line-height:1.5}
 .cn-root .sw{width:36px;height:20px;border-radius:10px;background:var(--s4);position:relative;flex:none}
 .cn-root .sw:after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:var(--hi);transition:transform .2s var(--ease)}
 .cn-root .sw.on{background:var(--solid)}
@@ -429,15 +428,15 @@
 .cn-root .mbd{padding:8px 18px 18px}
 .cn-root .sinput{display:flex;align-items:center;gap:10px;padding:16px 18px 10px}
 .cn-root .sinput input{flex:1;font-size:15px;min-width:0}
-.cn-root .modal-bg:has(>.modal.tpl-panel){background:transparent;position:absolute;padding:0;pointer-events:none}
+.cn-root .modal-bg:has(>.modal.tpl-panel){background:transparent;padding:0;pointer-events:none}
 .cn-root[data-theme=light] .modal-bg:has(>.modal.tpl-panel){background:transparent}
 .cn-root .modal.tpl-panel{width:auto;max-height:none;overflow:visible;border-radius:0;background:none;box-shadow:none;padding:0;pointer-events:none}
 .cn-root .modal-bg.closing .modal.tpl-panel{animation:none}
-.cn-root .tpl-wrap{position:absolute;width:500px;height:500px;pointer-events:none}
-.cn-root .tpl{position:absolute;inset:0;width:500px;height:500px;overflow:hidden;border:0;border-radius:12px;background:var(--card);color:var(--fg);box-shadow:0 4px 16px #00000029,inset 0 .5px rgba(var(--ink),.16);transform-origin:50% 50%;pointer-events:auto;animation:tplIn .15s ease both}
+.cn-root .tpl-wrap{position:fixed;width:500px;height:500px;pointer-events:none}
+.cn-root .tpl{position:absolute;inset:0;width:500px;overflow:hidden;border:0;border-radius:12px;background:var(--card);color:var(--fg);box-shadow:0 4px 16px #00000029,inset 0 .5px rgba(var(--ink),.16);transform-origin:50% 50%;pointer-events:auto;animation:tplIn .15s ease both}
 .cn-root[data-theme=light] .tpl{box-shadow:0 4px 16px #0000001f,inset 0 .5px rgba(var(--ink),.1)}
 .cn-root .modal-bg.closing .tpl{animation:tplOut .15s ease both}
-.cn-root .tpl-tip{position:absolute;left:1px;bottom:510px;width:498px;min-height:150px;display:flex;align-items:stretch;gap:12px;padding:12px;border:0;border-radius:12px;background:var(--card-hi);color:var(--fg);pointer-events:auto;box-shadow:0 4px 16px #00000029}
+.cn-root .tpl-tip{position:absolute;left:1px;bottom:100%;margin-bottom:10px;width:498px;min-height:150px;display:flex;align-items:stretch;gap:12px;padding:12px;border:0;border-radius:12px;background:var(--card-hi);color:var(--fg);pointer-events:auto;box-shadow:0 4px 16px #00000029}
 .cn-root .tpl-tip-shot{flex:none;width:236px;height:133px;overflow:hidden;background:var(--s0)}
 .cn-root .tpl-anim{display:block;width:100%;height:100%}
 .cn-root .tpl-anim .ta-node{opacity:0;transform:translateY(3px);animation:7s var(--ease) infinite both}
@@ -639,6 +638,7 @@
 .cn-root .lightbox .txt{width:min(720px,46vw);max-height:calc(100vh - 244px);overflow:auto;white-space:pre-wrap;background:#1a1a1c;padding:20px;border-radius:14px;line-height:1.7}
 .cn-root .lightbox .lb-mid{position:absolute;left:50%;top:calc(50% - 58px);transform:translate(-50%,-50%);display:flex;align-items:center;justify-content:center;max-width:100%}
 .cn-root .lightbox .close{position:absolute;right:20px;top:20px}
+.cn-root.has-win-controls .lightbox .close{right:calc(20px + var(--cn-chrome-right,0px))}
 .cn-root #agent{position:relative;width:380px;flex:none;background:var(--panel);display:flex;flex-direction:column;transition:margin-right .3s var(--ease)}
 .cn-root #agent.closed{margin-right:-380px}
 .cn-root #agent.full{position:absolute;inset:0;width:auto;z-index:65}
@@ -784,6 +784,8 @@
    （盒左 = 卡片右 −7.5，弧心 = 盒左 −6.5）；弧在盒内的 x/y 范围 6.9→19.2，13 的盒子装得下 */
 .cn-root .rz:after{content:"";position:absolute;right:5.5px;bottom:5.5px;width:13px;height:13px;background:currentColor;opacity:.9;-webkit-mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 13 13' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round'><path d='M1.15 11.98A20 20 0 0 0 11.98 1.15'/></svg>") center/100% 100% no-repeat;mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 13 13' fill='none' stroke='%23fff' stroke-width='1.5' stroke-linecap='round'><path d='M1.15 11.98A20 20 0 0 0 11.98 1.15'/></svg>") center/100% 100% no-repeat}
 .cn-root .node.sel .rz{opacity:1}
+/* 分组选中时把手柄提到组内成员之上：节点不建层叠上下文，z-index 直接比；只影响分组手柄，普通节点保持原样 */
+.cn-root .gnode.sel .rz{z-index:31}
 .cn-root .nl{position:absolute;inset:0;overflow:hidden;border-radius:inherit;z-index:1;pointer-events:none;background:var(--card)}
 .cn-root .nl-still{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.16}
 .cn-root .nl-shadow{position:absolute;inset:0;background:rgba(var(--ink),.04)}
@@ -937,7 +939,11 @@
 .cn-root .tgrid table{border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:100%;font-size:12px}
 .cn-root .tgrid th,.cn-root .tgrid td{padding:0;vertical-align:top}
 .cn-root .tgrid thead th{position:sticky;top:0;z-index:1;height:34px;background:var(--card-hi);text-align:left;font-weight:500;color:var(--fg2)}
-.cn-root .tgrid thead th .h{display:flex;align-items:center;gap:4px;height:34px;padding:0 6px 0 10px}
+.cn-root .tgrid thead th{height:46px}
+.cn-root .tgrid thead th .h{display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:2px;height:46px;padding:3px 6px 4px 10px}
+.cn-root .tgrid thead th .hmeta{display:flex;align-items:center;gap:4px;min-height:18px}
+.cn-root .tgrid thead th .hmeta .trole{max-width:calc(100% - 22px);overflow:hidden;text-overflow:ellipsis}
+.cn-root .tgrid thead th .h input{height:20px}
 .cn-root .tgrid thead th input{flex:1;min-width:0;height:24px;border-radius:6px;padding:0 4px;font-weight:500;color:var(--fg)}
 .cn-root .tgrid thead th input[readonly]{cursor:default}
 .cn-root .tgrid thead th input:not([readonly]){background:var(--sunken)}
@@ -947,7 +953,10 @@
 .cn-root .tgrid th.tin,.cn-root .tgrid td.tin{width:112px}
 .cn-root .tgrid th.tin .h{color:var(--fg3);font-size:11px}
 .cn-root .tgrid th.tact,.cn-root .tgrid td.tact{width:30px}
-.cn-root .tgrid tbody tr td{border-top:1px solid rgba(var(--ink),.06)}
+/* 行分隔不用 1px 线：靠交替行底色 + 行间距表达（硬规则：不画线框/发丝线） */
+.cn-root .tgrid tbody tr td{border-top:0}
+.cn-root .tgrid tbody tr:nth-child(even) td{background:rgba(var(--ink),.022)}
+.cn-root .tgrid tbody tr:nth-child(even):hover td{background:rgba(var(--ink),.04)}
 .cn-root .tgrid tbody tr:hover td{background:rgba(var(--ink),.025)}
 .cn-root .tgrid tbody tr.sel td{background:rgba(var(--ink),.06)}
 .cn-root .tgrid td textarea{display:block;width:100%;min-height:40px;resize:none;padding:9px 10px;font-size:12px;line-height:1.5;color:var(--fg1);background:transparent;cursor:default;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}
@@ -963,8 +972,13 @@
 .cn-root .tgrid thead th .trole.auto{color:var(--fg3);background:rgba(var(--ink),.04)}
 .cn-root .tgrid thead th .trole.media{color:var(--fg);background:rgba(var(--ink),.12)}
 .cn-root .tgrid thead th .trole:hover{background:var(--hover);color:var(--fg)}
-/* 通道表头两行：上行「输入 N」+ 数量，下行模式按钮，34px 表头内放得下 */
-.cn-root .tgrid th.tin .h{flex-direction:column;align-items:flex-start;justify-content:center;gap:0;padding:0 6px}
+/* 空表空态：一句引导 + 一个添加入口（不再只剩表头） */
+.cn-root .tgrid tbody tr.tempty td{height:96px;text-align:center;vertical-align:middle;color:var(--fg3);border-top:0}
+.cn-root .tgrid .te-hint{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--fg3);margin-right:10px}
+.cn-root .tgrid .te-add{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 10px;border:0;border-radius:8px;background:var(--sunken);color:var(--fg2);font-size:12px}
+.cn-root .tgrid .te-add:hover{background:var(--hover);color:var(--fg)}
+/* 通道表头两行：上行「输入 N」+ 数量，下行模式按钮 */
+.cn-root .tgrid th.tin .h{flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;height:46px;padding:2px 6px}
 .cn-root .tgrid th.tin .tin-top{display:flex;align-items:baseline;gap:4px;width:100%;line-height:12px}
 .cn-root .tgrid th.tin .tin-label{flex:none;font-size:11px;color:var(--fg3);white-space:nowrap}
 .cn-root .tgrid th.tin .tin-count{margin-left:auto;font-size:10px;color:var(--fg3);opacity:.75}
@@ -983,6 +997,10 @@
 .cn-root .tfoot button:hover{background:var(--hover);color:var(--fg)}
 .cn-root .tfoot .sp{flex:1}
 .cn-root .tfoot .meta{color:var(--fg3);font-size:11px}
+.cn-root .trefwarn{padding:6px 10px;background:#ffd60a14;color:var(--warn-fg);font-size:11px;line-height:1.5}
+.cn-root .trefwarn .tw{display:flex;gap:6px;align-items:flex-start}
+.cn-root .trefwarn .tw svg{margin-top:1px;flex:none}
+.cn-root .gp-batch .gp-warn{margin:0 0 6px}
 .cn-root .gp-batch{margin:0 12px 8px;border-radius:12px;background:var(--sunken);padding:8px}
 .cn-root .gp-batch .bh{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg2);padding:0 2px 6px}
 .cn-root .gp-batch .bh b{color:var(--fg);font-weight:500}
@@ -1097,7 +1115,7 @@
 /* 图片放大遮罩挂在 body 上：不在 .cn-root 里，主题变量取不到，颜色与动效写死 */
 .md-lb{position:fixed;inset:0;z-index:200;display:grid;place-items:center;padding:40px;background:rgba(0,0,0,.74);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);animation:fadeIn .14s ease;cursor:zoom-out}
 .md-lb img{max-width:100%;max-height:calc(100vh - 80px);border-radius:12px;box-shadow:0 24px 80px rgba(0,0,0,.55);cursor:default}
-.md-lb-x{position:fixed;top:18px;right:18px;width:38px;height:38px;padding:0;border:0;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);transition:background .16s ease}
+.md-lb-x{position:fixed;top:18px;right:calc(18px + var(--cn-chrome-right,0px));width:38px;height:38px;padding:0;border:0;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.14);color:#fff;cursor:pointer;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);transition:background .16s ease}
 .md-lb-x:hover{background:rgba(255,255,255,.24)}
 .md-lb-x svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
 @media(max-width:720px),(max-height:560px){.md-lb{padding:16px}.md-lb img{max-height:calc(100vh - 32px)}}
@@ -1444,8 +1462,11 @@
 .cn-root .ai .foot>*{flex-shrink:0}
 .cn-root .ai .foot>.pill{flex-shrink:1;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .cn-root .snode .nbody.sbody{background:transparent;outline:none!important;box-shadow:none;overflow:visible;border-radius:12px}
-.cn-root .snode>.nhead{opacity:0;transition:opacity var(--d-quick) var(--e-std)}
-.cn-root .snode.named>.nhead,.cn-root .snode:hover>.nhead,.cn-root .snode.sel>.nhead{opacity:1}
+/* 标题条常显：双击改名要能看见名字才会被发现（和分组一致）；用显隐表达状态就看不到了。
+   名字抬到工具条那 40px 悬停桥接区上面：条在节点头顶，桥接区盖住标题条时双击会落在条上（被 stop 掉） */
+.cn-root .snode>.nhead{transition:color var(--d-quick) var(--e-std)}
+.cn-root .snode>.nhead .t{position:relative;z-index:7}
+.cn-root .snode:hover>.nhead,.cn-root .snode.sel>.nhead{color:var(--fg1)}
 .cn-root .snode>.nhead .st{color:var(--fg3);font-size:11px}
 .cn-root .stack-body{position:absolute;inset:0}
 .cn-root .stack-card{position:absolute;left:0;top:50%;width:100%;height:100%;border-radius:12px;overflow:hidden;background:var(--card);box-shadow:0 4px 14px #00000038;transform-origin:50% 50%;translate:0 -50%;transition:transform var(--d-spatial) var(--e-std),box-shadow var(--d-quick) var(--e-std)}
@@ -1475,6 +1496,10 @@
 .cn-root .stack-tools-wrap{position:absolute;left:50%;bottom:calc(100% + 34px);transform-origin:50% 100%;transform:translate(-50%) scale(max(1,min(var(--zinv,1),3)));z-index:6;pointer-events:none}
 /* 40px 桥接挂在条自己身上：条可见（.cn-fm.on）时它才可命中，隐藏时不会在节点头顶留一条隐形悬停带 */
 .cn-root .stack-tools:after{content:"";position:absolute;left:0;right:0;top:100%;height:40px}
+/* 堆叠工具条常压在封面图上：按小工具条「加厚底」配方，模糊和两层柔和投影都保留，不描边；只影响这一条 */
+.cn-root .cn-fm.stack-tools{background:rgba(24,24,24,.95);-webkit-backdrop-filter:blur(44px) saturate(190%);backdrop-filter:blur(44px) saturate(190%);box-shadow:0 20px 48px rgba(0,0,0,.30),0 6px 16px rgba(0,0,0,.18)}
+.cn-root[data-theme=dark] .cn-fm.stack-tools{background:rgba(24,24,24,.95)}
+.cn-root[data-theme=light] .cn-fm.stack-tools{background:rgba(255,255,255,.96);box-shadow:0 20px 48px rgba(0,0,0,.16),0 6px 16px rgba(0,0,0,.10)}
 /* 隐藏已由 StackBody 的 show 判断接管（拖拽时不给 .cn-fm 加点 .on）；这条保留是防将来有人重新挂
    .dragging-any / .drop 类，别删（同组的 .snode.drop 一并留着） */
 .cn-root .dragging-any .stack-tools-wrap,.cn-root .snode.drop .stack-tools-wrap{display:none}
@@ -2228,10 +2253,15 @@ html.agent-layer-open .cn-root #agent{backdrop-filter:none;-webkit-backdrop-filt
    .modal 的入场动画 dlgIn 带 transform，动画（--d-std 220ms）期间它就成了绝对定位后代的包含块：
    .tpl-wrap 先量到那个 0x0 居中壳上（屏幕中心），动画结束才回落到 .modal-bg 的左侧锚点 —— 用户看到的就是
    「点模板库右边闪一下」。面板自己的入场在 .tpl 上（tplIn），所以把外层这条 animation 关掉；
-   弹层类型同时挂在 .modal-bg 上（overlay.tsx 已加），不依赖 :has() 的匹配时机。 */
-.cn-root .modal-bg.tpl-panel{background:transparent;position:absolute;padding:0;pointer-events:none}
+   弹层类型同时挂在 .modal-bg 上（overlay.tsx 已加），不依赖 :has() 的匹配时机。
+   .modal-bg 保持基础的 position:fixed（视口做包含块）：useAnchorPos 也是按视口算的，
+   宿主给的画布框（.cn-root）比窗口高时（桌面 / iframe）才不会把面板顶到折线以下。 */
+.cn-root .modal-bg.tpl-panel{background:transparent;padding:0;pointer-events:none}
 .cn-root[data-theme="light"] .modal-bg.tpl-panel{background:transparent}
 .cn-root .modal-bg.tpl-panel>.modal{animation:none}
+/* 兜底：dlgIn 只要落在 .modal 上就带 transform，它会成为 .tpl-wrap 的包含块（面板被带到屏幕中心）。
+   这一条不依赖 .modal-bg 上有没有 tpl-panel 类，权重也压过上面的 .modal-bg .modal 规则。 */
+.cn-root .modal-bg .modal.tpl-panel{animation:none}
 .cn-root .agrid .a.sel{background:var(--sunken)}
 .cn-root .agrid .a.sel:after{content:"";position:absolute;inset:0;background:color-mix(in srgb,var(--hi) 20%,transparent);pointer-events:none}
 .cn-root .agrid .a.sel:before{content:"";position:absolute;left:6px;top:6px;width:8px;height:8px;border-radius:50%;background:var(--hi);z-index:2;box-shadow:0 1px 4px rgba(0,0,0,.25)}
@@ -2295,6 +2325,25 @@ html.agent-layer-open .cn-root #agent{backdrop-filter:none;-webkit-backdrop-filt
 .cn-root .folder-dialog p{margin:0;color:var(--fg2);font-size:12px;line-height:1.6}
 .cn-root .folder-dialog .fd-err{color:var(--bad);font-size:12px}
 .cn-root .folder-dialog .fd-foot{display:flex;justify-content:flex-end;gap:8px;padding-top:2px}
+/* 表格审查弹层：只读检查结果；分组靠软底 / 圆点，不画边框 */
+.cn-root .modal.table-review-modal{width:min(520px,calc(100vw - 32px))}
+.cn-root .tbl-review{display:flex;flex-direction:column;gap:10px;padding:14px}
+.cn-root .tbl-review .tr-head{display:flex;align-items:center;gap:6px;height:30px}
+.cn-root .tbl-review .tr-head b{font-size:14px;font-weight:600}
+.cn-root .tbl-review .tr-head .sp{flex:1}
+.cn-root .tbl-review .tr-head .ib{width:26px;height:26px}
+.cn-root .tbl-review .tr-sum{color:var(--fg2);font-size:12px;line-height:1.6}
+.cn-root .tbl-review .tr-stats{display:flex;flex-wrap:wrap;gap:6px}
+.cn-root .tbl-review .tr-stat{padding:3px 8px;border-radius:7px;background:rgba(var(--ink),.05);color:var(--fg3);font-size:11px;line-height:1.5}
+.cn-root .tbl-review .tr-list{display:flex;flex-direction:column;gap:6px;max-height:44vh;overflow:auto;scrollbar-width:thin}
+.cn-root .tbl-review .tr-item{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:10px;background:rgba(var(--ink),.04);color:var(--fg2);font-size:12px;line-height:1.55}
+.cn-root .tbl-review .tr-item .dot{flex:none;width:6px;height:6px;border-radius:50%;margin-top:5px;background:var(--fg3)}
+.cn-root .tbl-review .tr-item.error{background:color-mix(in srgb,var(--bad) 12%,transparent);color:var(--fg)}
+.cn-root .tbl-review .tr-item.error .dot{background:var(--bad)}
+.cn-root .tbl-review .tr-item.warn{background:#ffd60a14;color:var(--fg)}
+.cn-root .tbl-review .tr-item.warn .dot{background:var(--warn-fg)}
+.cn-root .tbl-review .tr-ok{padding:18px;border-radius:12px;background:rgba(var(--ink),.04);color:var(--fg2);font-size:12px;text-align:center}
+.cn-root .tbl-review .tr-foot{display:flex;justify-content:flex-end;padding-top:2px}
 .cn-root .lib-newfolder{color:var(--fg3);font-size:12px}
 .cn-root .lib-newfolder:hover{color:var(--fg)}
 /* 文件夹行：列表是扁平的（没有箭头、没有子级缩进），整行单击 = 直接进入 */
@@ -2508,3 +2557,38 @@ html.agent-layer-open .cn-root #agent{backdrop-filter:none;-webkit-backdrop-filt
    top 沿用 16，正好落在助手卡片顶边 64 上方那条空档里；#stage 是 overflow:hidden，只有 fixed 能越出裁切。
    mac 下 --cn-chrome-right 为 0、不挂 has-win-controls，规则不生效，保持 #stage 相对定位。 */
 .cn-root.has-win-controls #tr { position: fixed; }
+
+/* 全屏查看器底栏图标：悬停提示要在 0.5s 内出来，且贴在工具栏上方 */
+.cn-root .lightbox .lb-btn[data-tip]:hover:after,
+.cn-root .lightbox .lb-pct[data-tip]:hover:after {
+  transition: opacity var(--d-feedback) var(--e-std) 0.12s, visibility 0s linear 0.12s;
+}
+.cn-root .lightbox .lb-tools [data-tip]:after { font-size: 11.5px; }
+
+
+/* 助手卡片里的参数弹层：宽度跟助手面板走，左右各留 8px，和卡片对齐；窄面板里不会被挤出屏幕 */
+.cn-root #pop.param-pop { min-width: 0; width: min(380px, calc(var(--agent-w, 380px) - 16px)); }
+
+
+
+/* ---------- 拆分图层（工具条入口 + 节点内联编辑器） ---------- */
+/* 结果节点只剩编辑器内容：没有标题栏 / 外部关闭键，整块 body 透明地贴在画布上 */
+.cn-root .splitnode{user-select:none;background:transparent}
+/* 选择态/悬浮态与浅色主题里有更高优先级的 .nbody 规则，这里显式关掉底框 */
+.cn-root .splitnode .nbody.splitbody{padding:0;background:transparent!important;outline:0!important;box-shadow:none!important;border:none!important;border-radius:0;overflow:visible}
+.cn-root .splitframe{position:absolute;inset:0;display:block;width:100%;height:100%;border:0;background:transparent}
+/* 彻底去框：选中不画任何 outline / border / 阴影（选中反馈由编辑器自身的图层栏承担） */
+.cn-root .splitnode,.cn-root .splitnode.sel,.cn-root .splitnode .nbody,.cn-root .splitnode .nbody.splitbody{outline:0!important;box-shadow:none!important;border:none!important}
+/* 编辑器还没 ready 时的玻璃卡片：同时是窗口拖动把手（ready 之后由 iframe 内的工具条 / loading 卡片接管） */
+.cn-root .splitload{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--panel) 84%,transparent);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);box-shadow:var(--glass-shadow);color:var(--fg2);font-size:12px;white-space:nowrap;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}
+.cn-root .splitload:active{cursor:grabbing}
+/* 常驻拖动把手：左上角一颗 30px 磨砂玻璃 + 6 点 grip；不铺满窗口、不挡工具条 */
+.cn-root .splitgrip{position:fixed;left:8px;top:8px;width:30px;height:30px;z-index:40;display:grid;place-items:center;border-radius:9px;background:color-mix(in srgb,var(--panel) 82%,transparent);-webkit-backdrop-filter:blur(12px) saturate(140%);backdrop-filter:blur(12px) saturate(140%);box-shadow:0 8px 20px rgba(0,0,0,.28);color:var(--fg2);cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;transition:background-color var(--d-quick)}
+.cn-root .splitgrip:hover{background:color-mix(in srgb,var(--panel) 92%,transparent);color:var(--fg)}
+.cn-root .splitgrip:active,.cn-root .splitgrip.dragging{cursor:grabbing}
+.cn-root .splitgrip:before{content:"";width:12px;height:18px;background:currentColor;opacity:.6;-webkit-mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='18' viewBox='0 0 12 18'><g fill='%23fff'><circle cx='2.5' cy='2.5' r='1.6'/><circle cx='9.5' cy='2.5' r='1.6'/><circle cx='2.5' cy='9' r='1.6'/><circle cx='9.5' cy='9' r='1.6'/><circle cx='2.5' cy='15.5' r='1.6'/><circle cx='9.5' cy='15.5' r='1.6'/></g></svg>") center/12px 18px no-repeat;mask:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='18' viewBox='0 0 12 18'><g fill='%23fff'><circle cx='2.5' cy='2.5' r='1.6'/><circle cx='9.5' cy='2.5' r='1.6'/><circle cx='2.5' cy='9' r='1.6'/><circle cx='9.5' cy='9' r='1.6'/><circle cx='2.5' cy='15.5' r='1.6'/><circle cx='9.5' cy='15.5' r='1.6'/></g></svg>") center/12px 18px no-repeat}
+/* 右下角缩放把手：常驻可见 + 30px 命中区（窗口找不到把手，别再藏起来） */
+.cn-root .splitnode .rz{opacity:1;width:30px;height:30px;right:-15px;bottom:-15px}
+.cn-root .splitnode .rz:before{content:"";position:absolute;left:4px;top:4px;width:22px;height:22px;border-radius:7px;background:color-mix(in srgb,var(--panel) 78%,transparent);-webkit-backdrop-filter:blur(10px) saturate(140%);backdrop-filter:blur(10px) saturate(140%);box-shadow:0 6px 16px rgba(0,0,0,.28)}
+.cn-root .splitnode .rz:after{right:8px;bottom:8px;width:14px;height:14px}
+.cn-root .splitmiss{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--fg3);font-size:12px}

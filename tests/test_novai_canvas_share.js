@@ -210,6 +210,16 @@ function testBackend() {
     const output = (result.stdout || '') + (result.stderr || '');
     console.log(output.trim());
     assert.equal(result.status, 0, '后端分享单测退出码 ' + result.status);
+
+    // 跨机克隆 / 生成链路的私网素材回归（对方口令保留、私网地址兜底、失败节点标缺失）
+    const lanResult = spawnSync(python, [path.join(__dirname, 'test_canvas_share_lan_media.py')], {
+        cwd: root,
+        encoding: 'utf8',
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+    });
+    const lanOutput = (lanResult.stdout || '') + (lanResult.stderr || '');
+    console.log(lanOutput.trim());
+    assert.equal(lanResult.status, 0, '后端私网素材单测退出码 ' + lanResult.status);
 }
 
 testShareDoc();

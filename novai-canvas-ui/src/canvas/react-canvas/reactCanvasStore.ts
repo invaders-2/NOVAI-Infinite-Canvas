@@ -51,7 +51,7 @@ export const NODE_SIZE: Record<NodeKind, { w: number; h: number }> = {
   video: { w: 568, h: 320 },
   audio: { w: 568, h: 320 },
   model3d: { w: 420, h: 260 },
-  table: { w: 320, h: 160 },
+  table: { w: 650, h: 360 },
   "smart-batch": { w: 320, h: 160 },
   "smart-loop": { w: 320, h: 160 },
   timeline: { w: 560, h: 280 },

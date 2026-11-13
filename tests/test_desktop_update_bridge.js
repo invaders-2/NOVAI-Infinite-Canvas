@@ -13,6 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const updateStore = require('../desktop/update-state');
 
 const root = path.join(__dirname, '..');
 const read = p => fs.readFileSync(path.join(root, p), 'utf8');
@@ -29,6 +30,116 @@ function topLevelFunction(src, name) {
         if (lines[i] === '}') return lines.slice(start, i + 1).join('\n');
     }
     return '';
+}
+
+function sliceBetween(src, startText, endText) {
+    const start = src.indexOf(startText);
+    if (start < 0) return '';
+    const end = endText ? src.indexOf(endText, start) : -1;
+    return end > start ? src.slice(start, end) : src.slice(start);
+}
+
+/* 抽出 preload 的更新块，用假 ipcRenderer/contextBridge 真跑订阅逻辑（不启动 Electron）。 */
+function loadPreloadUpdater(preloadSrc) {
+    const start = preloadSrc.indexOf('const updateStageListeners');
+    const end = preloadSrc.indexOf('// 低层桥', start);
+    const block = preloadSrc.slice(start, end > start ? end : undefined);
+    const handlers = {};
+    const exposed = {};
+    const invokes = [];
+    const sandbox = {
+        ipcRenderer: {
+            on: (channel, fn) => { handlers[channel] = fn; },
+            invoke: (channel, payload) => { invokes.push({ channel, payload }); return Promise.resolve({ ok: true }); },
+        },
+        contextBridge: { exposeInMainWorld: (name, api) => { exposed[name] = api; } },
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.runInNewContext(block, sandbox, { filename: 'desktop/preload-updater.js' });
+    return { updater: exposed.novaiUpdater, handlers, invokes };
+}
+
+/* 抽出 registerUpdaterIpc 真跑四个新 IPC；saveUpdateState 落到真实 update-state.json。 */
+function loadUpdaterIpc(mainSrc, options) {
+    const opts = options || {};
+    const handlers = {};
+    const calls = { save: [], stages: [], download: 0, downloadedStage: 0 };
+    let updatePersist = updateStore.defaultState();
+    let stateDir = '';
+    const sandbox = {
+        ipcMain: { handle: (name, fn) => { handlers[name] = fn; } },
+        app: { isPackaged: opts.appIsPackaged !== false, getVersion: () => '2.0.6' },
+        process: { platform: opts.platform || 'win32' },
+        MAC_UPDATE_ZIP_OVERRIDE: '',
+        autoUpdater: opts.autoUpdater || {},
+        updaterSupported: () => true,
+        pendingUpdateInfo: opts.pendingUpdateInfo === undefined ? { version: '2.0.7' } : opts.pendingUpdateInfo,
+        updateStage: opts.updateStage || 'downloaded',
+        stageVersion: '2.0.7',
+        pendingNotes: null,
+        macPreparedUpdate: opts.macPreparedUpdate || null,
+        pendingReinstallWanted: true,
+        updatePersist: updatePersist,
+        saveUpdateState: (patch) => {
+            calls.save.push(patch);
+            updatePersist = updateStore.writeState(stateDir, Object.assign({}, updatePersist, patch));
+            sandbox.updatePersist = updatePersist;
+            return updatePersist;
+        },
+        sendUpdateStage: (payload) => { calls.stages.push(payload); },
+        sendDownloadedStageOnce: () => { calls.downloadedStage += 1; },
+        startUpdateDownload: (info) => { calls.download += 1; calls.lastDownloadInfo = info; },
+        startManualUpdateCheck: () => ({ ok: true, supported: true, phase: 'check', stage: 'checking' }),
+        startMacSelfUpdate: async () => ({ ok: true, supported: true, phase: 'download' }),
+        applyUpdateNow: async () => ({ ok: true, supported: true, phase: 'install', stage: 'installing' }),
+    };
+    if (opts.stateDir) stateDir = opts.stateDir;
+    const fn = vm.runInNewContext(topLevelFunction(mainSrc, 'registerUpdaterIpc') + '\nregisterUpdaterIpc', sandbox);
+    fn();
+    return { handlers, calls, sandbox, readState: () => updateStore.readState(stateDir) };
+}
+
+/* 退出时收敛只跑一次：第二次调用不能再触发安装。 */
+function loadConverge(mainSrc, options) {
+    const opts = options || {};
+    const calls = { save: [], stages: [], install: 0 };
+    const sandbox = {
+        app: { isPackaged: true, getVersion: () => opts.currentVersion || '2.0.6' },
+        process: { platform: opts.platform || 'win32' },
+        updatePersist: updateStore.sanitizeState(opts.state || { pendingVersion: '2.0.7' }),
+        updateStage: opts.updateStage || 'downloaded',
+        macPreparedUpdate: opts.macPreparedUpdate || null,
+        quitInstallTriggered: false,
+        updateState: updateStore,
+        stopDownloadProgressTicker: () => {},
+        saveUpdateState: (patch) => {
+            calls.save.push(patch);
+            sandbox.updatePersist = Object.assign({}, sandbox.updatePersist, patch);
+        },
+        sendUpdateStage: (payload) => { calls.stages.push(payload); },
+        installMacPreparedUpdate: async () => { calls.install += 1; return { ok: true }; },
+        clog: () => {},
+    };
+    const fn = vm.runInNewContext(topLevelFunction(mainSrc, 'convergeUpdateOnQuit') + '\nconvergeUpdateOnQuit', sandbox);
+    fn();
+    fn();
+    return { calls, sandbox };
+}
+
+/* 启动自检通过：bootAttempts 清零且只写一次。 */
+function loadMarkBootSuccess(mainSrc) {
+    const calls = [];
+    const sandbox = {
+        app: { isPackaged: true, getVersion: () => '2.0.7' },
+        bootSettled: false,
+        pendingReinstallWanted: false,
+        saveUpdateState: (patch) => { calls.push(patch); },
+        clog: () => {},
+    };
+    const fn = vm.runInNewContext(topLevelFunction(mainSrc, 'markBootSuccess') + '\nmarkBootSuccess', sandbox);
+    fn();
+    fn();
+    return { calls, sandbox };
 }
 
 /* ── 把 ESM 版 update.js 剥成脚本，在 vm 里跑真实 startUpdate / rollback ── */
@@ -83,6 +194,28 @@ const noResponse = () => Promise.resolve({ ok: false, status: 404, json: async (
     ok(/checkNow:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('novai:update-check'\)/.test(preload), 'checkNow → novai:update-check');
     ok(/downloadAndInstall:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('novai:update-install'\)/.test(preload), 'downloadAndInstall → novai:update-install');
 
+    const preloadStage = loadPreloadUpdater(preload);
+    ok(!!preloadStage.updater && typeof preloadStage.updater.onStage === 'function', 'preload 暴露 onStage');
+    // 页面的 onStage 在 DOM 之后才订阅，applied 可能先到：必须缓存并补发一次
+    preloadStage.handlers['novai:update-stage'](null, { stage: 'applied', version: '2.0.7', previousVersion: '2.0.6' });
+    const replayed = [];
+    const off = preloadStage.updater.onStage((payload) => replayed.push(payload));
+    ok(replayed.length === 1 && replayed[0].stage === 'applied' && replayed[0].version === '2.0.7', 'onStage 首次订阅补发未消费的 applied');
+    ok(typeof off === 'function', 'onStage 返回 off() 取消订阅函数');
+    const secondListener = [];
+    preloadStage.updater.onStage((payload) => secondListener.push(payload));
+    ok(secondListener.length === 0, '同一次 applied 只补发一次，不重复弹更新说明');
+    off();
+    preloadStage.handlers['novai:update-stage'](null, { stage: 'downloaded', version: '2.0.7' });
+    ok(replayed.length === 1, 'off() 之后不再接收更新事件');
+
+    await preloadStage.updater.restartNow();
+    await preloadStage.updater.installOnQuit();
+    await preloadStage.updater.markNotesSeen('2.0.7');
+    await preloadStage.updater.retryInstall();
+    ok(preloadStage.invokes.map((item) => item.channel).join(',') === 'novai:update-restart,novai:update-later,novai:update-notes-seen,novai:update-retry', '四个新 invoke 通道名与契约一致');
+    ok(preloadStage.invokes[2].payload && preloadStage.invokes[2].payload.version === '2.0.7', 'markNotesSeen 带 version 参数');
+
     console.log('[2] main.js 的 electron-updater 复用逻辑');
     const main = read('desktop/main.js');
     const registerIpc = topLevelFunction(main, 'registerIpc');
@@ -92,15 +225,32 @@ const noResponse = () => Promise.resolve({ ok: false, status: 404, json: async (
 
     const installHandler = (main.match(/ipcMain\.handle\('novai:update-install'[\s\S]*?\n  \}\);/g) || [''])[0];
     ok(!!installHandler, '能取到 update-install 处理器');
-    const downloadedBranch = (installHandler.match(/if \(updateStage === 'downloaded'\) \{[\s\S]*?\n    \}/) || [''])[0];
-    ok(/showUpdateInstallPrompt\(\)/.test(downloadedBranch), '已 downloaded 时弹「立即重启」确认');
+    const downloadedBranch = (installHandler.match(/if \(updateStage === 'downloaded'\)[^\n]*/) || [''])[0];
+    ok(/applyUpdateNow\(\)/.test(downloadedBranch), '已 downloaded 时直接走安装（不再弹原生确认框）');
     ok(!/downloadUpdate\(/.test(downloadedBranch), '已 downloaded 时不再调用 downloadUpdate');
 
-    const installPrompt = topLevelFunction(main, 'showUpdateInstallPrompt');
-    ok(/stopBackendForUpdate\(\)\.then\(\(\) => \{[\s\S]*?autoUpdater\.quitAndInstall\(true, true\)[\s\S]*?autoUpdater\.quitAndInstall\(\);/.test(installPrompt), '安装前先 stopBackendForUpdate 再 quitAndInstall（Windows 静默 / macOS 原样）');
-    ok(/showUpdateAvailablePrompt/.test(topLevelFunction(main, 'setupAutoUpdate')), 'update-available 复用同一个确认框');
-    ok(/autoUpdater\.on\('update-downloaded'/.test(main) && /showUpdateInstallPrompt\(\)/.test(main), 'update-downloaded 复用同一个安装确认框');
+    const applyFn = topLevelFunction(main, 'applyUpdateNow');
+    ok(/await stopBackendForUpdate\(\)/.test(applyFn), '安装前先停后端');
+    ok(applyFn.indexOf('stopBackendForUpdate') < applyFn.indexOf('quitAndInstall'), '先 stopBackendForUpdate 再 quitAndInstall');
+    ok(/if \(process\.platform === 'win32'\) autoUpdater\.quitAndInstall\(true, true\);/.test(applyFn), 'Windows 静默安装参数仍是 quitAndInstall(true, true)');
+    ok(/else autoUpdater\.quitAndInstall\(\);/.test(applyFn), '其它平台保持 quitAndInstall()');
+    ok(/stopDownloadProgressTicker\(\)/.test(applyFn) && /stage: 'installing'/.test(applyFn), '真正安装前先发 installing，再静默退出');
+
+    const setupFn = topLevelFunction(main, 'setupAutoUpdate');
+    const availableBlock = sliceBetween(setupFn, "autoUpdater.on('update-available'", "autoUpdater.on('download-progress'");
+    ok(!!availableBlock, '取到 update-available 处理块');
+    ok(!/dialog\.showMessageBox|showUpdateAvailablePrompt|showMacUpdateAvailablePrompt/.test(availableBlock), 'update-available 不再弹任何原生窗口（旧行为）');
+    ok(/startUpdateDownload\(info\)/.test(availableBlock), 'update-available 直接后台静默下载');
+    const downloadedBlock = sliceBetween(setupFn, "autoUpdater.on('update-downloaded'", "autoUpdater.on('error'");
+    ok(!!downloadedBlock, '取到 update-downloaded 处理块');
+    ok(!/showUpdateInstallPrompt|dialog\.showMessageBox/.test(downloadedBlock), 'update-downloaded 不再弹安装确认框（旧行为）');
+    ok(/onUpdatePackageReady\(version, info\)/.test(downloadedBlock), 'update-downloaded 转交 onUpdatePackageReady 发 downloaded 事件');
+    const readyFn = topLevelFunction(main, 'onUpdatePackageReady');
+    ok(/stage: 'downloaded', version: ver/.test(readyFn), 'downloaded 事件带 version');
+    ok(/payload\.notes = pendingNotes/.test(readyFn), 'downloaded 事件带 notes（拿得到才给）');
+    ok(/setTimeout\(\(\) => \{ createUpdateBackup\(ver\)/.test(readyFn), '下载完成后空闲时段备份旧版');
     ok(/manualUpdateCheck/.test(main), '手动检查才有「已是最新版本」提示（启动自动检查保持安静）');
+    ok(/startDownloadProgressTicker\(stageVersion\)/.test(main) && /setInterval\(emitDownloadProgressStage, 400\)/.test(main), '下载进度按 400ms 固定节拍推送（≤500ms）');
 
     const configFn = topLevelFunction(main, 'ensureAppUpdateConfig');
     ok(!!configFn, '启动更新器前有 app-update.yml 缺失兜底');
@@ -183,7 +333,7 @@ const noResponse = () => Promise.resolve({ ok: false, status: 404, json: async (
     }
 
     console.log('[9] 桌面版进度订阅生命周期');
-    ok(/sendUpdateProgress\(\{ stage: 'installing', percent: 100, final: true \}\)/.test(main), '主进程在真正开始安装时发 final 标记（订阅据此退订）');
+    ok(/sendUpdateStage\(\{ stage: 'installing'/.test(main), '主进程真正开始安装时先发 installing（新契约，前端据此切卡片）');
     const makeDesktop = (label) => {
         const handlers = [];
         const offs = [];
@@ -234,6 +384,53 @@ const noResponse = () => Promise.resolve({ ok: false, status: 404, json: async (
     ok(pending.length === 1 && timeout.offs.length === 0, '订阅时挂了 30 分钟超时');
     pending[0].fn();
     ok(timeout.offs.length === 1, '30 分钟超时后退订');
+
+    console.log('[10] IPC 契约 v1：四个新 invoke 的真实行为');
+    const ipcDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'novai-updater-ipc-'));
+    const ipc = loadUpdaterIpc(main, { stateDir: ipcDir, updateStage: 'downloaded', platform: 'win32' });
+    ok(!!ipc.handlers['novai:update-restart'], '注册 novai:update-restart');
+    ok(!!ipc.handlers['novai:update-later'], '注册 novai:update-later');
+    ok(!!ipc.handlers['novai:update-notes-seen'], '注册 novai:update-notes-seen');
+    ok(!!ipc.handlers['novai:update-retry'], '注册 novai:update-retry');
+
+    const later = await ipc.handlers['novai:update-later']();
+    ok(later && later.ok === true && later.phase === 'install', 'installOnQuit 返回 {ok:true, phase:"install"}');
+    ok(ipc.readState().pendingVersion === '2.0.7', 'installOnQuit 把 pendingVersion 真写进 update-state.json');
+
+    const notesSeen = await ipc.handlers['novai:update-notes-seen'](null, { version: '2.0.7' });
+    ok(notesSeen && notesSeen.ok === true, 'markNotesSeen 返回 ok:true');
+    ok(ipc.readState().notesSeenVersion === '2.0.7', 'markNotesSeen 记录已看版本');
+
+    ipc.sandbox.autoUpdater = { autoInstallOnAppQuit: false };
+    const retried = await ipc.handlers['novai:update-retry']();
+    ok(retried && retried.ok === true && retried.phase === 'check', 'retryInstall 返回 {ok:true, phase:"check"} 并重新检查');
+    ok(ipc.sandbox.autoUpdater.autoInstallOnAppQuit === true, '重试后重新允许退出时安装');
+    ok(ipc.calls.save.some((patch) => patch.installAttempts === 0 && patch.lastInstallError === ''), '重试清除失败状态');
+
+    const idleIpc = loadUpdaterIpc(main, { stateDir: fs.mkdtempSync(path.join(require('os').tmpdir(), 'novai-updater-idle-')), updateStage: 'idle' });
+    const notReady = await idleIpc.handlers['novai:update-later']();
+    ok(notReady && notReady.ok === false && notReady.phase === 'download', '没下载完时 installOnQuit 不会假装成功');
+
+    const devIpc = loadUpdaterIpc(main, { stateDir: fs.mkdtempSync(path.join(require('os').tmpdir(), 'novai-updater-dev-')), appIsPackaged: false });
+    const devRestart = await devIpc.handlers['novai:update-restart']();
+    ok(devRestart && devRestart.ok === false && devRestart.phase === 'install' && devRestart.reason === 'dev', 'dev 下 restartNow 明确返回 ok:false（不静默退出）');
+    [ipcDir].forEach((dir) => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) {} });
+
+    console.log('[11] 退出收敛只执行一次 / 启动自检清零');
+    const converge = loadConverge(main, { state: { pendingVersion: '2.0.7', installAttempts: 0 }, updateStage: 'downloaded', platform: 'win32' });
+    ok(converge.calls.save.length === 1 && converge.calls.save[0].installAttempts === 1, 'before-quit 收敛只触发一次安装');
+    ok(converge.calls.stages.filter((payload) => payload.stage === 'installing').length === 1, '只发一次 installing，重复调用不再装');
+    const alreadyNew = loadConverge(main, { state: { pendingVersion: '2.0.6', installAttempts: 0 }, currentVersion: '2.0.6', updateStage: 'downloaded' });
+    ok(alreadyNew.calls.save.length === 1 && alreadyNew.calls.save[0].pendingVersion === '' && alreadyNew.calls.stages.length === 0, '当前已是待装版本时只清 pending，不重复安装');
+    const gaveUp = loadConverge(main, { state: { pendingVersion: '2.0.7', installAttempts: 2 }, updateStage: 'downloaded' });
+    ok(gaveUp.calls.save.length === 0 && gaveUp.calls.stages.length === 0, '安装重试次数用完不再自动装');
+
+    const boot = loadMarkBootSuccess(main);
+    ok(boot.calls.length === 1 && boot.calls[0].bootAttempts === 0 && boot.calls[0].lastRunVersion === '2.0.7', '主窗口加载完成后 bootAttempts 清零');
+    ok(boot.sandbox.bootSettled === true, '重复加载不会重复写状态');
+    const didFinish = sliceBetween(main, "mainWindow.webContents.on('did-finish-load'", "mainWindow.webContents.on('zoom-changed'");
+    ok(/onMainWindowLoaded\(\)/.test(didFinish), 'did-finish-load 触发启动自检清零');
+    ok(/markBootSuccess\(\)/.test(topLevelFunction(main, 'onMainWindowLoaded')), '启动自检通过走 markBootSuccess');
 
     console.log('');
     if (fails.length) {

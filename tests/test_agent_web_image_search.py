@@ -21,6 +21,61 @@ import main
 from server import web_image_search
 
 
+# 断网防护：本文件只验证逻辑，模型读图 / 图搜 / 原图下载都必须被拦住。
+# 单个用例需要更具体的假实现时，仍按需用 patch 覆盖；覆盖结束后自动回到这里的兜底。
+_MODULE_PATCHES = []
+
+
+class _BlockedHttpClient:
+    """兜底 httpx 客户端：不进网络，任何请求直接失败，防止用例悄悄联网。"""
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def get(self, *args, **kwargs):
+        raise AssertionError("测试禁止真实网络请求（httpx GET）")
+
+    def stream(self, *args, **kwargs):
+        raise AssertionError("测试禁止真实网络请求（httpx stream）")
+
+
+async def _blocked_run_chat(chat, messages):
+    raise main.AgentRunError("测试禁止真实模型调用", code="network_blocked")
+
+
+async def _blocked_vision_payload(raw_url):
+    raise main.AgentToolError("测试禁止真实读图", code="vision_unavailable")
+
+
+async def _blocked_fetch_image(client, url, referer="", max_bytes=web_image_search.MAX_DOWNLOAD_BYTES):
+    raise AssertionError("测试禁止真实图片下载：%s" % url)
+
+
+def setUpModule():
+    _MODULE_PATCHES.extend([
+        patch.object(web_image_search.httpx, "AsyncClient", _BlockedHttpClient),
+        patch.object(web_image_search, "fetch_image", _blocked_fetch_image),
+        patch.object(main, "_agent_vision_image_payload", _blocked_vision_payload),
+        patch.object(main, "_agent_run_chat", _blocked_run_chat),
+        # 本机真实 API 配置可能配了看图模型：兜底清空候选来源，不许任何用例读到它
+        patch.object(main, "_agent_available_providers", lambda: []),
+        patch.object(main, "_agent_pick_caption_model", lambda exclude_key="", fallback_chat=None: None),
+    ])
+    for item in _MODULE_PATCHES:
+        item.start()
+
+
+def tearDownModule():
+    while _MODULE_PATCHES:
+        _MODULE_PATCHES.pop().stop()
+
+
 def _image_bytes(width, height, fmt="PNG"):
     from PIL import Image
     buffer = BytesIO()
@@ -1069,7 +1124,9 @@ class AgentReverseChainTests(unittest.TestCase):
             return "data:image/jpeg;base64,AAAA"
 
         with patch.object(main, "_agent_vision_image_payload", fake_payload), \
-             patch.object(main, "_agent_pick_caption_model", lambda exclude_key="": None):
+             patch.object(main, "_agent_pick_caption_model", lambda exclude_key="": None), \
+             patch.object(main, "_agent_vision_candidates",
+                          lambda preferred=None, exclude_key="": []):
             with self.assertRaises(main.AgentToolError) as ctx:
                 asyncio.run(main._agent_reverse_image_search("/assets/uploads/a.jpg", 8))
         self.assertEqual(ctx.exception.code, "vision_unavailable")
@@ -1195,33 +1252,33 @@ class VisionCandidateFallbackTests(unittest.TestCase):
         )
 
     def test_candidate_list_uses_config_order_and_skips_denied(self):
-        providers = {"modelscope": {"id": "modelscope", "chat_models": ["Qwen3-VL-235B"]},
-                     "apimart": {"id": "apimart", "chat_models": ["gemini-3-flash-preview"]}}
+        providers = {"modelscope": {"id": "modelscope", "chat_models": ["fixture-vision-a"]},
+                     "apimart": {"id": "apimart", "chat_models": ["fixture-vision-b"]}}
         patches = self._patch_providers(providers, ["modelscope", "apimart"])
         for item in patches:
             item.start()
             self.addCleanup(item.stop)
         keys = [main._agent_chat_vision_key(c) for c in main._agent_vision_candidates()]
-        self.assertEqual(keys, ["modelscope:Qwen3-VL-235B", "apimart:gemini-3-flash-preview"])
+        self.assertEqual(keys, ["modelscope:fixture-vision-a", "apimart:fixture-vision-b"])
         # 第一个失败进黑名单后，候选列表跳过它
-        main._AGENT_VISION_DENY.add("modelscope:Qwen3-VL-235B")
+        main._AGENT_VISION_DENY.add("modelscope:fixture-vision-a")
         keys = [main._agent_chat_vision_key(c) for c in main._agent_vision_candidates()]
-        self.assertEqual(keys, ["apimart:gemini-3-flash-preview"])
+        self.assertEqual(keys, ["apimart:fixture-vision-b"])
 
     def test_preferred_run_chat_comes_first(self):
-        providers = {"apimart": {"id": "apimart", "chat_models": ["gemini-3-flash-preview"]}}
+        providers = {"apimart": {"id": "apimart", "chat_models": ["fixture-vision-b"]}}
         patches = self._patch_providers(providers, ["apimart"])
         for item in patches:
             item.start()
             self.addCleanup(item.stop)
-        preferred = self._chat("runprovider", "gpt-4o")
+        preferred = self._chat("runprovider", "fixture-vision-chat")
         keys = [main._agent_chat_vision_key(c) for c in main._agent_vision_candidates(preferred)]
-        self.assertEqual(keys[0], "runprovider:gpt-4o")
-        self.assertIn("apimart:gemini-3-flash-preview", keys)
+        self.assertEqual(keys[0], "runprovider:fixture-vision-chat")
+        self.assertIn("apimart:fixture-vision-b", keys)
 
     def test_reverse_switches_to_next_candidate_on_failure(self):
-        bad = self._chat("modelscope", "Qwen3-VL-235B")
-        good = self._chat("apimart", "gemini-3-flash-preview")
+        bad = self._chat("modelscope", "fixture-vision-a")
+        good = self._chat("apimart", "fixture-vision-b")
         calls = []
 
         async def fake_chat(chat, messages):
@@ -1241,20 +1298,20 @@ class VisionCandidateFallbackTests(unittest.TestCase):
              patch.object(main, "_agent_run_chat", fake_chat):
             result = asyncio.run(main._agent_vision_read_image_for_search("/assets/uploads/a.jpg"))
 
-        self.assertEqual(calls, ["modelscope:Qwen3-VL-235B", "apimart:gemini-3-flash-preview"])
-        self.assertIn("modelscope:Qwen3-VL-235B", main._AGENT_VISION_DENY)
-        self.assertEqual(result["model"], "gemini-3-flash-preview")
+        self.assertEqual(calls, ["modelscope:fixture-vision-a", "apimart:fixture-vision-b"])
+        self.assertIn("modelscope:fixture-vision-a", main._AGENT_VISION_DENY)
+        self.assertEqual(result["model"], "fixture-vision-b")
         self.assertEqual(result["queries"], ["咖啡杯 白底", "陶瓷杯 俯拍"])
 
     def test_reverse_all_candidates_failed_aggregates_reasons(self):
-        bad1 = self._chat("modelscope", "Qwen3-VL-235B")
-        bad2 = self._chat("apimart", "gemini-3-flash-preview")
+        bad1 = self._chat("modelscope", "fixture-vision-a")
+        bad2 = self._chat("apimart", "fixture-vision-b")
 
         async def fake_chat(chat, messages):
             if chat["provider"] == "modelscope":
                 raise main.AgentRunError('上游模型接口错误 {"msgCode":"A0211","msg":"user token expired"}',
                                          code="provider_http_error")
-            raise main.AgentRunError("请求上游模型接口出错：timed out", code="provider_unreachable")
+            raise main.AgentRunError("模拟上游超时：timed out", code="provider_unreachable")
 
         async def fake_payload(url):
             return "data:image/jpeg;base64,AAAA"
@@ -1269,16 +1326,16 @@ class VisionCandidateFallbackTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "vision_failed")
         message = ctx.exception.message
         self.assertIn("已尝试 2 个候选", message)
-        self.assertIn("modelscope:Qwen3-VL-235B", message)
+        self.assertIn("modelscope:fixture-vision-a", message)
         self.assertIn("user token expired", message)
-        self.assertIn("apimart:gemini-3-flash-preview", message)
+        self.assertIn("apimart:fixture-vision-b", message)
         self.assertIn("timed out", message)
         self.assertEqual(main._AGENT_VISION_DENY,
-                         {"modelscope:Qwen3-VL-235B", "apimart:gemini-3-flash-preview"})
+                         {"modelscope:fixture-vision-a", "apimart:fixture-vision-b"})
 
     def test_caption_images_continues_to_next_candidate(self):
-        bad = self._chat("modelscope", "Qwen3-VL-235B")
-        good = self._chat("apimart", "gemini-3-flash-preview")
+        bad = self._chat("modelscope", "fixture-vision-a")
+        good = self._chat("apimart", "fixture-vision-b")
         calls = []
 
         async def fake_chat(chat, messages):
@@ -1299,14 +1356,14 @@ class VisionCandidateFallbackTests(unittest.TestCase):
                 "run:model", failures))
 
         self.assertEqual([c["caption"] for c in caps], ["一只白底咖啡杯", "一只白底咖啡杯"])
-        self.assertEqual(model_name, "gemini-3-flash-preview")
-        self.assertEqual(calls, ["modelscope:Qwen3-VL-235B", "apimart:gemini-3-flash-preview",
-                                 "apimart:gemini-3-flash-preview"])
-        self.assertIn("modelscope:Qwen3-VL-235B", failures[0])
+        self.assertEqual(model_name, "fixture-vision-b")
+        self.assertEqual(calls, ["modelscope:fixture-vision-a", "apimart:fixture-vision-b",
+                                 "apimart:fixture-vision-b"])
+        self.assertIn("modelscope:fixture-vision-a", failures[0])
 
 
     def test_vision_setup_reports_aggregated_reasons_when_all_fail(self):
-        bad = self._chat("modelscope", "Qwen3-VL-235B")
+        bad = self._chat("modelscope", "fixture-vision-a")
         events = []
 
         async def fake_chat(chat, messages):
@@ -1320,12 +1377,12 @@ class VisionCandidateFallbackTests(unittest.TestCase):
              patch.object(main, "_agent_captions_save"):
             mode, prompt_text = asyncio.run(main._agent_run_vision_setup(
                 [{"label": "图1", "url": "/output/a.png"}],
-                {"provider": "run", "model": "gpt-4o", "base": "https://r.invalid/v1", "headers": {}},
+                {"provider": "run", "model": "fixture-vision-chat", "base": "https://r.invalid/v1", "headers": {}},
                 lambda name, data: events.append((name, data))))
 
         self.assertEqual(mode, "none")
         event_text = events[-1][1]["text"]
-        self.assertIn("modelscope:Qwen3-VL-235B", event_text)
+        self.assertIn("modelscope:fixture-vision-a", event_text)
         self.assertIn("user token expired", event_text)
         self.assertIn("试过的看图模型都失败", event_text)
         self.assertIn("user token expired", prompt_text)

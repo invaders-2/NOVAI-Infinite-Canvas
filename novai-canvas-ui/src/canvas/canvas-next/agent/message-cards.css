@@ -903,3 +903,32 @@
     .cn-root button.wsearch-less[class]:hover { transform: none; }
 }
 
+
+/* 方案卡参数按钮（替代原生 select）：外观与原来的字段一致，点开走 #pop 弹层 */
+.cn-root .plan-card[class] .plan-params[class] .pr-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--sunken);
+  color: var(--fg);
+  font-size: 11.5px;
+  line-height: 28px;
+  text-align: left;
+  cursor: pointer;
+}
+.cn-root .plan-card[class] .plan-params[class] .pr-btn .t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cn-root .plan-card[class] .plan-params[class] .pr-btn:hover { background: var(--hover); }
+.cn-root .plan-card[class] .plan-params[class] .pr-btn:disabled { opacity: .5; cursor: default; }

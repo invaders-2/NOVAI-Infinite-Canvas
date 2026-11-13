@@ -44,6 +44,10 @@ export function QaCardView({ card, busy, onChange, onSubmit, onSkip }: { card: Q
         item={active}
         items={items}
         onItemChange={setActive}
+        // Hexta 的问卷根节点是原生 <form>：跳过最后一题 / 末题回车都会 requestSubmit，
+        // 不拦的话整页会按 GET 提交，画布地址里的 ?canvas= / ?id= 被冲掉 → 变成「没有指定要打开的画布」。
+        // 这里统一接住，交给卡片的提交逻辑。
+        onSubmit={(e) => { e.preventDefault(); onSubmit(); }}
         shortcuts="numbers"
         transition="lift"
       >
@@ -60,7 +64,8 @@ export function QaCardView({ card, busy, onChange, onSubmit, onSkip }: { card: Q
           </QuestionnaireChoices> : null}
           <QuestionnaireInput
             onChange={(e) => onChange({ ...card, other: card.other.map((x, i) => (i === qi ? e.target.value : x)) })}
-            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter" && !e.nativeEvent.isComposing) onSubmit(); }}
+            // 回车在这里直接提交：preventDefault 挡住原生表单的隐式提交，不然会再发一次同样的消息
+            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); onSubmit(); } }}
             placeholder={q.options.length ? "其他（可不填）" : "你的回答"}
             value={card.other[qi] || ""}
           />

@@ -16,6 +16,7 @@ import { groupBackground } from "../groupStyle";
 import { isGifUrl, thumbStep, useGifPoster, useThumbnailUrl } from "./useThumbnail";
 import { previewThumbUrl } from "../table";
 import { AudioBody } from "./AudioBody";
+import { isSplitNode, SplitNodeBody } from "./SplitNode";
 import { useAssetUrl } from "./useAsset";
 import { useMediaUrl } from "./useMedia";
 import { useCtl } from "./ctx";
@@ -119,6 +120,15 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
       </div>
     );
   }
+  // 拆分结果节点：自定义外壳（32px 标题栏 + 节点内 inline 编辑器），不套普通图片节点的标题/占位
+  if (node.kind === "image" && isSplitNode(node)) {
+    return (
+      <div ref={ref} className={cls + " splitnode"} data-id={node.id} style={style}>
+        <SplitNodeBody node={node} />
+        <div className="rz" data-rz title="拖动调整大小" />
+      </div>
+    );
+  }
   const g = genOf(node); const out = outOf(node); const running = !!run;
   return (
     <div ref={ref} className={cls} data-id={node.id} style={style}>
@@ -135,7 +145,7 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
         onPointerLeave={node.kind === "image" || node.kind === "video" ? () => setHoverNode(false) : undefined}>
         <Body {...p} out={out} running={running} hover={hoverNode} />
         {g.hist.length > 1 && !running ? <div className="vstrip tnum"><button data-act="vprev" onPointerDown={(e) => p.onAct(node, "vprev", e)}><Icon name="left" size="xs" /></button><button className="vnum" data-act="vmenu" title="版本操作" onPointerDown={(e) => p.onAct(node, "vmenu", e)}>{g.hi + 1}/{g.hist.length}</button><button data-act="vnext" onPointerDown={(e) => p.onAct(node, "vnext", e)}><Icon name="right" size="xs" /></button></div> : null}
-        {node.kind === "image" && out && !running ? <button className={"favstar" + (g.fav ? " on" : "")} data-act="fav" title={g.fav ? "取消收藏" : "收藏到素材库"} onPointerDown={(e) => p.onAct(node, "fav", e)}><Icon name="star" size="s" /></button> : null}
+        {(node.kind === "image" || node.kind === "video") && out && !running ? <button className={"favstar" + (g.fav ? " on" : "")} data-act="fav" title={g.fav ? "取消收藏" : "收藏到素材库（收藏后可在提示词编辑器里 @ 引用）"} onPointerDown={(e) => p.onAct(node, "fav", e)}><Icon name="star" size="s" /></button> : null}
         {(node.kind === "image" || node.kind === "video" || node.kind === "audio") && out && !running ? <button className="node-replace" data-act="replace" title="替换素材（位置 / 尺寸 / 连线 / 提示词保留）" style={{ height: 24, padding: "0 9px", borderRadius: 7, background: "rgba(0,0,0,.62)", color: "#fff", fontSize: 11, gap: 3, zIndex: 3, whiteSpace: "nowrap", alignItems: "center" }} onPointerDown={(e) => { e.stopPropagation(); p.onAct(node, "replace", e); }}><Icon name="upload" size="xs" />替换</button> : null}
         {p.batchInfo && !running ? <span className="bbadge tnum">{p.batchInfo}</span> : null}
         {p.queued && !running ? <span className="qbadge" data-queued><span className="runsig" />排队中</span> : null}

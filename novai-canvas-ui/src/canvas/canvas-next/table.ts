@@ -14,8 +14,9 @@
  * 不做合并单元格。上限沿用：手工 200 列 / 5000 行，模型生成 40 列 / 200 行，单元格 20000 字。
  */
 import type { CanvasDoc, CanvasNode } from "../react-canvas/reactCanvasStore";
-import { groupLabel, isStack, stackItems } from "./stack";
-import { durationTiers, expandGroupInputs, genOf, inputsOf, isGenKind, outOf, srcOf, textOf, uid, type AnyParams, type GenKind, type InputRef, type ModelSpec, type VideoMode, type VideoParams } from "./model";
+import { groupLabel, isStack } from "./stack";
+import { durationTiers, genOf, inputsOf, isGenKind, outOf, srcOf, textOf, uid, type AnyParams, type GenKind, type InputRef, type ModelSpec, type VideoMode, type VideoParams } from "./model";
+import { unmentionedInputs } from "./mentions";
 
 export const TABLE_LIMITS = { cols: 200, rows: 5000, llmCols: 40, llmRows: 200, cell: 20000 };
 export type TableData = {
@@ -29,6 +30,8 @@ export type TableData = {
   inputMode?: "auto" | "shared" | "sequence" | "pair";
   /** 每条输入通道的模式（key = "input-1"、"input-2"…）；没写过的通道默认「沿用」 */
   inputModes?: Record<string, ChannelMode>;
+  /** inputModes 里由系统（出表声明 / 行文本推断）写入的通道 id；用户手点表头后移除，重新出表不能覆盖用户手设的模式 */
+  inputModesAuto?: string[];
   /** 每列的用途（和 columns 等长）；"" 或缺省 = 按列名自动识别，见 guessRole */
   roles?: string[];
 };
@@ -134,6 +137,8 @@ export function withTable(node: CanvasNode, t: TableData): CanvasNode {
   return { ...node, text: t.title, data: { ...(node.data && typeof node.data === "object" ? node.data : {}), table: t } };
 }
 
+/** 系统写入过模式的通道 id（脏值丢弃）；用来区分「用户手点」和「出表自动写」 */
+const autoModeIdsOf = (raw: unknown): string[] => Array.isArray(raw) ? [...new Set(raw.map((x) => String(x ?? "")).filter((x) => /^input-\d+$/.test(x)))] : [];
 /** 归一化（DX OS Mx）：列名去空补「未命名列」，行补齐列数，非字符串 stringify，截断 */
 export function normalizeTable(raw: unknown, llm: boolean): TableData | null {
   if (!raw || typeof raw !== "object") return null;
@@ -145,7 +150,7 @@ export function normalizeTable(raw: unknown, llm: boolean): TableData | null {
   // 图片单元格（内嵌的 data URL）不截断，截了图就坏了
   const cell = (v: unknown) => { const x = typeof v === "string" ? v : v == null ? "" : JSON.stringify(v); return /^data:image\//.test(x) ? x : x.slice(0, TABLE_LIMITS.cell); };
   const rows = r.rows.slice(0, maxR).map((row) => { const arr = Array.isArray(row) ? row : row && typeof row === "object" ? columns.map((c) => (row as Record<string, unknown>)[c]) : [row]; return columns.map((_, i) => cell(arr[i])); });
-  return { kind: "table", version: 1, title: typeof r.title === "string" && r.title ? r.title : "多维表格", columns, rows, ...(typeof r.sourceId === "string" ? { sourceId: r.sourceId } : {}), ...(r.inputMode === "shared" || r.inputMode === "sequence" || r.inputMode === "pair" ? { inputMode: r.inputMode } : {}), ...(Object.keys(channelModesOf(r.inputModes)).length ? { inputModes: channelModesOf(r.inputModes) } : {}), ...(Array.isArray(r.roles) && !llm && r.roles.some((x) => isRole(x)) ? { roles: columns.map((_, i) => (isRole(r.roles && (r.roles as unknown[])[i]) ? String((r.roles as unknown[])[i]) : "")) } : {}) };
+  return { kind: "table", version: 1, title: typeof r.title === "string" && r.title ? r.title : "多维表格", columns, rows, ...(typeof r.sourceId === "string" ? { sourceId: r.sourceId } : {}), ...(r.inputMode === "shared" || r.inputMode === "sequence" || r.inputMode === "pair" ? { inputMode: r.inputMode } : {}), ...(Object.keys(channelModesOf(r.inputModes)).length ? { inputModes: channelModesOf(r.inputModes) } : {}), ...(!llm && Array.isArray(r.inputModesAuto) ? { inputModesAuto: autoModeIdsOf(r.inputModesAuto) } : {}), ...(Array.isArray(r.roles) && !llm && r.roles.some((x) => isRole(x)) ? { roles: columns.map((_, i) => (isRole(r.roles && (r.roles as unknown[])[i]) ? String((r.roles as unknown[])[i]) : "")) } : {}) };
 }
 function normalizeLegacy(raw: unknown): TableData | null {
   const any = raw as any;
@@ -173,6 +178,16 @@ export function parseInputGroups(raw: unknown): InputGroupPlan[] {
     out.push({ group, rowMode: mode });
   });
   return out;
+}
+/**
+ * 两遍 inputGroups 按 group 合并：primary（生成遍）优先，primary 没声明的 group 保留 secondary（规划遍）。
+ * 不能整体替换——生成遍常常只回报它关心的那几组，整体替换会把规划遍对其它组的判断丢掉。
+ */
+export function mergeInputGroups(primary: InputGroupPlan[], secondary: InputGroupPlan[]): InputGroupPlan[] {
+  const byGroup = new Map<number, InputGroupPlan>();
+  for (const p of secondary) byGroup.set(p.group, p);
+  for (const p of primary) byGroup.set(p.group, p);
+  return [...byGroup.values()].sort((a, b) => a.group - b.group);
 }
 /** 解析模型返回（DX OS a6）：剥 ```json、取首尾大括号、JSON.parse、校验；顺带把 inputGroups 透传出来 */
 export function parseTableReply(text: string): { table: TableData; inputGroups: InputGroupPlan[] } {
@@ -204,6 +219,7 @@ export function planPrompt(task: string, mode: TextOutputMode, groups: Array<{ n
     "必须为每一个输入组指定它在逐行执行里的用法 rowMode。判据是「这一组里的图彼此是什么关系」：",
     '- "per-row"（逐行）：同一组里是每行各一个不同主体/物品（例如一组不同款商品的静物图，一行换一个主体）。第 N 行只引用这一组的第 N 张；这一组有几张就几行。',
     '- "every-row"（全部）：同一组是同一个产品的多角度照片（例如同一产品的白底多角度图），整组是这一行的多角度参考，每一行都要用上整组。',
+    '- 同一个主体的三视图 / 立绘 / 特写 / 姿势 / 多角度 / 白底 / 细节图都是 every-row：它们是同一主体的多套参考，每一行都要带上整组，绝不增加行数。',
     "一行具体引用哪一张，由「这一组是逐行还是全部」决定：逐行组按行号取一张，全部组整组都带上。",
     "行的数量由 per-row 的组决定；every-row 的组只增加每行带的素材数（多角度参考），不增加行数。",
     "补充判据（产品替换任务，非常重要）：",
@@ -231,6 +247,20 @@ export function parseListPlan(text: string): ListPlan | null {
   const rowCount = Math.floor(Number(raw.rowCount));
   if (!inputGroups.length) return null;
   return { inputGroups, ...(Number.isFinite(rowCount) && rowCount > 0 ? { rowCount } : {}) };
+}
+/** 规划遍没解析出来时的重试：只要求 rowCount + inputGroups，别让一次格式跑偏就丢掉模式 */
+export function planRepairPrompt(task: string, mode: TextOutputMode, groups: Array<{ name: string; count: number }>): string {
+  return [
+    "上一次的规划不是合法 JSON。请只返回一个 JSON 对象，不要解释、不要 Markdown：",
+    '{"rowCount":行数,"inputGroups":[{"group":1,"rowMode":"per-row"或"every-row"}]}',
+    "",
+    "用户要求：",
+    task.slice(0, 2000),
+    "",
+    "输入组（组号 = 输入列编号；先判断每组是 per-row 还是 every-row）：",
+    ...groups.map((g, i) => `第 ${i + 1} 组（输入 ${i + 1}）「${g.name}」${g.count} 张`),
+    mode === "storyboard" ? "分镜表：rowCount = 镜头数，由用户要求决定。" : "rowCount 必须等于 per-row 组的张数；every-row 组整组每行都用，不增加行数。",
+  ].join("\n");
 }
 /** 规划内容写进生成遍（对齐旧版把 plan 塞进 buildListGeneratePrompt） */
 export function planTextOf(plan: ListPlan, groups: Array<{ name: string; count: number }>): string {
@@ -260,7 +290,8 @@ export function tablePrompt(task: string, mode: TextOutputMode, mediaCount: numb
     ...(planText ? ["", "已确认的规划（请严格按它执行）：", planText] : []),
     "每一组素材怎么用，由你按任务判断，并在 JSON 里用 inputGroups 声明（group 从 1 开始，对应上面的组号）。",
     "行数按「逐行」的组确定；「全部」的组每一行都带整组，不增加行数。",
-    "不声明（默认「沿用」）：每行从这一组取一张，第 i 行取第 i 张，这一组张数不够时沿用最后一张——这是最常用的用法，不同素材不同行就靠它。",
+    "不声明、行文本也没有明确说法时（默认「沿用」）：每行从这一组取一张，第 i 行取第 i 张，这一组张数不够时沿用最后一张——这是最常用的用法，不同素材不同行就靠它。",
+    "没有声明 inputGroups 时，系统会按每一行文本里对这个输入组的说法判断：写「输入 2 整组」= 全部，写「输入 1 第 2 张」= 逐行；所以每一行都要写清楚是哪一组、怎么用。",
     '- "per-row"（逐行）：这一组是每行各用一张（不同主体 / 物品 / 款式），第 N 行用第 N 张；声明后这一组有几张就应有几行。',
     '- "every-row"（全部）：只用于「同一主体的多角度 / 多套参考，且确实希望每一行都带上整组」。它会让每一行多带整组素材，不要为了保险起见把每一组都声明成 every-row。',
     "「逐行」的组：第 N 行只能用这一组的第 N 张，绝不能引用同组其它行的图；每行就一张主体参考。",
@@ -269,7 +300,7 @@ export function tablePrompt(task: string, mode: TextOutputMode, mediaCount: numb
     "**产品替换**任务：待替换的「场景 / 参考图」组用 per-row（几张就几行）；用来替换的「产品图 / 白底多角度图」组用 every-row（整组每行都带上，绝不因为白底图张数多就增加行数）。",
     "产品替换的行数必须等于 per-row 组的张数；同一个产品的白底 / 多角度图再多，也只是一组 every-row，不是多行。",
     "同时回报每一组的用法 inputGroups：{\"group\":组号,\"rowMode\":\"per-row\"或\"every-row\"}。per-row = 行驱动（第 N 行用第 N 张）；every-row = 每一行都要用上整组。",
-    "没有声明 per-row 时，表格行数应等于素材最多那组的张数：按「沿用」逐行取图时，第 i 行从各组各取一张（某组不够就沿用它的最后一张）。",
+    "没有声明 per-row 时，表格行数按用户要求确定（例如「每行一个场景」就按场景组的张数）；同一主体的三视图 / 姿势 / 多角度 / 白底产品图整组每行都用、不增加行数；只有实在判断不了时才用素材最多那组的张数。",
     "如果任务区分了「目标主体」和「风格/版式参考」，每行内容都必须显式写清它们的关系。",
     "不要只写「使用图1」「参考图2」这类占位说明，每个文字单元格都要有足够的信息密度。",
     cols,
@@ -289,6 +320,8 @@ export type TableMedia = {
   nodeId: string; kind: GenKind; title: string; src: string; url?: string;
   /** 这张图在这一行里的身份：输入列「两张一组」或图片列（首帧 / 尾帧 / 参考图）给出；没有 = 按生成节点的方式分配 */
   as?: "first" | "last" | "ref";
+  /** 来自输入通道时的通道身份：名字 + 编号 + 通道内第几张 / 通道共几张（截断告警和参考图清单要用） */
+  channel?: string; channelId?: string; channelPos?: number; channelTotal?: number;
 };
 /**
  * 输入通道：一个上游来源 = 一列「输入 N」（对齐旧版 static/js/shared/table-node.js 的 Co / ab 与
@@ -324,17 +357,34 @@ export type TableChannel = {
 };
 /** 能当输入列来源的节点：图片 / 视频 / 音频 / 分组（文本走提示词上下文，表格不能再套表格） */
 const isChannelSource = (n: CanvasNode) => n.kind === "image" || n.kind === "video" || n.kind === "audio" || n.kind === "group";
-/** 一个来源的素材：分组 / 堆叠展开成组内成员（普通分组按画布位置、堆叠按叠内顺序），只要已经出结果的 */
+/**
+ * 分组 / 堆叠递归展开到最内层节点：普通分组按画布位置从上到下、从左到右，堆叠保持叠内顺序；
+ * 嵌套分组在父组里占它自己的位置，内层再按同样规则展开（组里套组不再丢图）。
+ */
+function groupMembersDeep(doc: CanvasDoc, g: CanvasNode): CanvasNode[] {
+  const byId = new Map(doc.nodes.map((n) => [n.id, n]));
+  const seen = new Set<string>();
+  const walk = (node: CanvasNode): CanvasNode[] => {
+    if (seen.has(node.id)) return [];
+    seen.add(node.id);
+    const list = (node.children || []).map((id) => byId.get(id)).filter((n): n is CanvasNode => !!n);
+    if (!isStack(node)) list.sort((a, b) => a.y - b.y || a.x - b.x);
+    return list.flatMap((child) => (child.kind === "group" ? walk(child) : [child]));
+  };
+  return walk(g);
+}
+/** 一个来源的素材：分组 / 堆叠递归展开成组内成员，只要已经出结果的 */
 function channelItemsOf(doc: CanvasDoc, ref: InputRef): TableMedia[] {
   const seen = new Set<string>();
-  return expandGroupInputs(doc, [ref])
-    .filter((x) => isGenKind(x.node.kind) && x.node.kind !== "text" && !!outOf(x.node))
+  const nodes = ref.node.kind === "group" ? groupMembersDeep(doc, ref.node) : [ref.node];
+  return nodes
+    .filter((x) => isGenKind(x.kind) && x.kind !== "text" && !!outOf(x))
     .filter((x) => {
-      const key = x.node.id + "#" + (outOf(x.node)?.url || "");
+      const key = x.id + "#" + (outOf(x)?.url || "");
       if (seen.has(key)) return false;
       seen.add(key); return true;
     })
-    .map((x) => ({ nodeId: x.node.id, kind: x.node.kind as GenKind, title: genOf(x.node).title, src: srcOf(x.node), url: outOf(x.node)?.url }));
+    .map((x) => ({ nodeId: x.id, kind: x.kind as GenKind, title: genOf(x).title, src: srcOf(x), url: outOf(x)?.url }));
 }
 /** 某个上游节点自己的素材（出表时算通道默认模式、给模型附参考图都用它） */
 export function channelItemsOfSource(doc: CanvasDoc, sourceId: string): TableMedia[] {
@@ -379,6 +429,97 @@ export function plannedChannelMode(group: number, plans: InputGroupPlan[]): Chan
   const hit = plans.find((p) => p.group === group);
   if (!hit) return "";
   return hit.rowMode === "per-row" ? "sequence" : "all";
+}
+
+/**
+ * 没有模型 / 规划遍声明的 inputGroups 时，只从**模型返回的行文本**里找证据：
+ *   行文本出现「输入 i 整组 / 全部 / 所有 / 每张」→ 这条通道是「全部」；
+ *   出现「输入 i 第 k 张」（或「第 k 张 … 输入 i」）→ 这条通道是「逐行」。
+ * 没有任何证据的通道不返回（不写 inputModes，保持既有「沿用」默认，不按组名瞎猜）。
+ */
+export function inferChannelModesFromRows(t: TableData, channels: TableChannel[]): Record<string, ChannelMode> {
+  const text = t.rows.flat().join("\n");
+  const out: Record<string, ChannelMode> = {};
+  if (!text.trim() || !channels.length) return out;
+  const ALL = /整组|全部|全组|所有|整列|每一张|每张|都用/;
+  const refRe = /输入\s*(\d+)(?!\d)/g;   // 数字边界：输入 1 不能命中「输入 10」
+  const all = new Set<number>(); const seq = new Set<number>();
+  // 按句 / 行切段，避免跨句把别的组的「整组」算进来
+  for (const seg of text.split(/[\n；;。！!？?]/)) {
+    const refs: Array<{ n: number; start: number; end: number }> = [];
+    for (const m of seg.matchAll(refRe)) {
+      const n = Number(m[1]); if (!Number.isFinite(n) || n < 1) continue;
+      const start = m.index ?? 0; refs.push({ n, start, end: start + m[0].length });
+    }
+    // 输入 N 之后 16 字窗口内的说法；遇到下一个「输入 N」/「第 k 张」就截断（避免串到下一组）
+    const tailOf = (i: number) => {
+      const tail = seg.slice(refs[i].end, refs[i].end + 16);
+      const stop = tail.search(/输入\s*\d+(?!\d)/);
+      return stop >= 0 ? tail.slice(0, stop) : tail;
+    };
+    refs.forEach((r, i) => {
+      const tail = tailOf(i);
+      if (ALL.test(tail)) all.add(r.n);
+      else if (/第\s*\d+\s*张/.test(tail)) seq.add(r.n);
+    });
+    // 并列：「输入 1、输入 2 整组」「输入 1 和 输入 2 第 2 张」→ 共享最后一个输入组后面的说法
+    for (let i = 0; i < refs.length; i++) {
+      let j = i;
+      while (j + 1 < refs.length && /^\s*(?:、|和|与|及|,|，|\/|\+)\s*$/.test(seg.slice(refs[j].end, refs[j + 1].start))) j++;
+      if (j > i) {
+        const tail = tailOf(j);
+        for (let k = i; k <= j; k++) {
+          if (ALL.test(tail)) all.add(refs[k].n);
+          else if (/第\s*\d+\s*张/.test(tail)) seq.add(refs[k].n);
+        }
+      }
+      i = j;
+    }
+    // 倒装：「第 2 张来自输入 10」→ 逐行；同样要数字边界
+    for (const m of seg.matchAll(/第\s*\d+\s*张[^\n。；;，,]{0,16}?输入\s*(\d+)(?!\d)/g)) {
+      const n = Number(m[1]); if (Number.isFinite(n) && n >= 1) seq.add(n);
+    }
+  }
+  channels.forEach((ch, i) => {
+    const n = i + 1;
+    if (all.has(n)) out[ch.id] = "all";
+    else if (seq.has(n)) out[ch.id] = "sequence";
+  });
+  return out;
+}
+/**
+ * 表格常驻告警：行文本里引用了不存在的「输入 N」；或表格上还挂着不在这次提示词组里的旧通道。
+ * TableNode / 批量面板都读它，不能只靠 toast。
+ */
+export function tableInputWarnings(doc: CanvasDoc, tableId: string, channelsIn?: TableChannel[]): string[] {
+  const tn = doc.nodes.find((n) => n.id === tableId);
+  if (!tn || tn.kind !== "table") return [];
+  const t = tableOf(tn);
+  const channels = channelsIn || tableChannels(doc, tableId);
+  const warns: string[] = [];
+  const bad = new Set<number>();
+  for (const row of t.rows) for (const cell of row) {
+    for (const hit of String(cell || "").matchAll(/输入\s*(\d+)/g)) {
+      const n = Number(hit[1]);
+      if (!Number.isFinite(n) || n < 1 || n > channels.length) bad.add(n);
+    }
+  }
+  if (bad.size) {
+    warns.push(`行文本引用了 ${[...bad].sort((a, b) => a - b).map((n) => `「输入 ${n}」`).join("、")}，但表格只有 ${channels.length} 条输入通道——提示词里的组号可能过期，请重新出表或改行文本。`);
+  }
+  const sourceNode = t.sourceId ? doc.nodes.find((n) => n.id === t.sourceId) : undefined;
+  if (sourceNode) {
+    const srcIds = new Set(inputsOf(doc, sourceNode.id).filter((x) => isChannelSource(x.node)).map((x) => x.node.id));
+    const extra = channels.filter((ch) => !srcIds.has(ch.sourceId));
+    if (extra.length) {
+      warns.push(`表格上还有 ${extra.length} 条不在这次提示词组里的输入通道：${extra.map((ch) => `输入 ${channelIndexFromId(ch.id) + 1}「${ch.title}」`).join("、")}（已排在最后；不需要可以删掉那条连线）。`);
+    }
+  }
+  return warns;
+}
+/** 生成节点上游所有表格的常驻告警（批量面板用） */
+export function batchInputWarnings(doc: CanvasDoc, genId: string): string[] {
+  return inputsOf(doc, genId).filter((x) => x.node.kind === "table").flatMap((x) => tableInputWarnings(doc, x.node.id));
 }
 
 /** 裁到 need 行（保留前 need 行，最少留 1 行）；没有 per-row 组（need = 0）时不动，避免误删纯文字行 */
@@ -437,7 +578,11 @@ export function batchRows(doc: CanvasDoc, genId: string, skip?: FillTarget | nul
     };
     for (const tn of tables) {
       const t = tableOf(tn); const roles = rolesOf(t);
-      tableChannels(doc, tn.id).forEach((ch) => channelItemsForRow(ch, r).forEach(pushMedia));
+      tableChannels(doc, tn.id).forEach((ch) => channelItemsForRow(ch, r).forEach((m) => {
+        // 通道内第几张 / 共几张：截断告警点名、参考图清单标「整组 / 第 k 张」都要用
+        const pos = ch.items.indexOf(m) + 1;
+        pushMedia({ ...m, channel: ch.title, channelId: ch.id, ...(pos > 0 ? { channelPos: pos } : {}), ...(ch.items.length ? { channelTotal: ch.items.length } : {}) });
+      }));
       (t.rows[r] || []).forEach((v, i) => {
         const val = (v || "").trim(); if (!val || (skip && skip.table === tn.id && skip.col === i)) return;
         const role = roles[i].role; const name = t.columns[i];
@@ -460,15 +605,57 @@ export function batchRows(doc: CanvasDoc, genId: string, skip?: FillTarget | nul
 }
 
 /** 发给模型的这一行输入（engine 再并到生成节点自己的输入里） */
-export type RowInput = { nodeId: string; title: string; kind: GenKind; url: string; role: "reference" | "first_frame" | "last_frame" | "source_video" | "driving_audio" | "context" };
+export type RowInput = { nodeId: string; title: string; kind: GenKind; url: string; role: "reference" | "first_frame" | "last_frame" | "source_video" | "driving_audio" | "context"; channel?: string; channelId?: string; channelPos?: number; channelTotal?: number };
+/** 参考图清单只看这几类图（上下文 / 视频 / 音频不占「图 N」的位置） */
+export type RefOrderItem = { kind: string; role: string; title?: string; channel?: string; channelId?: string; channelPos?: number; channelTotal?: number };
+/**
+ * 系统生成的「参考图顺序」清单：把扁平的图片列表和提示词里的「输入 N / 图 N」对上，
+ * 模型只会看图片列表时也能知道第几张是哪一组、是不是整组。只在表格批量行请求里追加。
+ */
+export function refOrderText(items: RefOrderItem[]): string {
+  const imgs = items.filter((x) => x.kind === "image" && (x.role === "reference" || x.role === "first_frame" || x.role === "last_frame"));
+  if (!imgs.length) return "";
+  const runs: Array<{ start: number; end: number; first: RefOrderItem }> = [];
+  imgs.forEach((x, i) => {
+    const last = runs[runs.length - 1];
+    const sameChannel = !!(last && x.channelId && last.first.channelId === x.channelId);
+    const nextPos = last ? (last.first.channelPos || 0) + (i - last.start) : 0;
+    if (last && sameChannel && (x.channelPos || 0) === nextPos) last.end = i;
+    else runs.push({ start: i, end: i, first: x });
+  });
+  const lines = runs.map((run) => {
+    const x = run.first; const n = channelIndexFromId(x.channelId || "") + 1;
+    const count = run.end - run.start + 1;
+    const range = count > 1 ? `图${run.start + 1}-${run.end + 1}` : `图${run.start + 1}`;
+    if (n < 1) return `${range}=${x.title ? `「${x.title}」` : "参考图"}`;
+    const name = x.channel ? `「${x.channel}」` : "";
+    const pos = x.channelPos || 1;
+    const whole = !!x.channelTotal && x.channelTotal > 1 && count >= x.channelTotal;
+    const where = whole ? `整组（第${pos}-${pos + count - 1}张）` : count > 1 ? `第${pos}-${pos + count - 1}张` : `第${pos}张`;
+    return `${range}=输入${n}${name}${where}`;
+  });
+  return ["参考图顺序（系统按输入通道排好，下面说的「图 N」就是这次请求里的第 N 张图）：", ...lines].join("\n");
+}
 export type RowPlan = { params: AnyParams; inputs: RowInput[]; warnings: string[]; /** 这一行自带了图：生成节点自己连的图片不再发送，免得首帧打架 */ ownImages: boolean };
+/**
+ * 生成节点自己连的图片数：这些图会和行素材一起发送，但只有图片批量会发（视频行请求里 plan.ownImages=true，
+ * 自身连的图会被 buildRequest 主动挡掉），所以只对图片节点预留参考图名额。
+ * 只算「最终会发送」的：引用模式下没被 @ 的自身图不算。
+ */
+export function ownRefCount(doc: CanvasDoc, genId: string, kind: GenKind): number {
+  if (kind !== "image") return 0;
+  const node = doc.nodes.find((n) => n.id === genId); if (!node) return 0;
+  const all = inputsOf(doc, genId);
+  const skip = unmentionedInputs(node, all);
+  return all.filter((x) => x.node.kind === "image" && !!outOf(x.node)?.url && !skip.has(x.edge.id)).length;
+}
 /**
  * 一行的请求怎么组（纯函数，便于测试）：
  *   时长 / 比例列覆盖参数（时长取模型支持的最接近值）；
  *   视频：有首帧 + 尾帧 → 首尾帧；只有首帧 → 首帧；只有参考图 → 参考生视频；模型不支持时降级并给出说明；
- *   图片：这一行的图都当参考图（按模型上限截断）。
+ *   图片：这一行的图都当参考图（按模型上限截断；reservedRefs = 生成节点自身参考图占用的名额，行素材只能用剩下的）。
  */
-export function planRow(kind: GenKind, params: AnyParams, m: ModelSpec | undefined, row: BatchRow): RowPlan {
+export function planRow(kind: GenKind, params: AnyParams, m: ModelSpec | undefined, row: BatchRow, reservedRefs = 0): RowPlan {
   const warnings: string[] = []; const p = { ...(params as Record<string, unknown>) } as Record<string, unknown>;
   if (row.ratio && (kind === "image" || kind === "video")) {
     if (!m?.ratios?.length || m.ratios.includes(row.ratio)) p.ratio = row.ratio; else warnings.push(`比例 ${row.ratio} 该模型不支持，沿用 ${p.ratio}`);
@@ -485,15 +672,29 @@ export function planRow(kind: GenKind, params: AnyParams, m: ModelSpec | undefin
     p.dur = d;
   }
   const out: RowInput[] = [];
-  const add = (x: TableMedia, role: RowInput["role"]) => out.push({ nodeId: x.nodeId, title: x.title, kind: x.kind, url: x.url || x.src, role });
+  const add = (x: TableMedia, role: RowInput["role"]) => out.push({ nodeId: x.nodeId, title: x.title, kind: x.kind, url: x.url || x.src, role, ...(x.channel ? { channel: x.channel } : {}), ...(x.channelId ? { channelId: x.channelId } : {}), ...(x.channelPos ? { channelPos: x.channelPos } : {}), ...(x.channelTotal ? { channelTotal: x.channelTotal } : {}) });
+  // 超上限时点名被截的通道：不能只报「超过 N 张」，用户看不出是哪一列被截了
+  const cutDetail = (imgs: TableMedia[], cap: number): string => {
+    const groups = new Map<string, { sent: number; total: number }>();
+    imgs.forEach((x, i) => { const key = x.channel || ""; const g = groups.get(key) || { sent: 0, total: 0 }; g.total++; if (i < cap) g.sent++; groups.set(key, g); });
+    return [...groups].filter(([key, g]) => key && g.sent < g.total).map(([key, g]) => `「${key}」${g.total} 张只发送 ${g.sent} 张`).join("、");
+  };
   const imgs = row.media.filter((x) => x.kind === "image");
   row.media.filter((x) => x.kind !== "image").forEach((x) => add(x, x.kind === "video" ? "source_video" : x.kind === "audio" ? "driving_audio" : "context"));
   const done = (ownImages: boolean): RowPlan => ({ params: p as AnyParams, inputs: out, warnings, ownImages });
   if (!imgs.length) return done(false);
   if (kind !== "video") {
-    const cap = kind === "image" ? (m ? (m.i2i ? m.maxRefs ?? 0 : 0) : imgs.length) : imgs.length;
+    const totalCap = kind === "image" ? (m ? (m.i2i ? m.maxRefs ?? 0 : 0) : imgs.length) : imgs.length;
+    // 生成节点自身连的参考图先占名额，行素材只能用剩下的（reserved 超过上限时夹到上限，绝不让总数超 maxRefs）
+    const reserved = kind === "image" ? Math.max(0, Math.min(Math.floor(reservedRefs) || 0, totalCap)) : 0;
+    const cap = Math.max(0, totalCap - reserved);
     imgs.slice(0, cap).forEach((x) => add(x, "reference"));
-    if (imgs.length > cap) warnings.push(cap ? `参考图超过模型上限 ${cap} 张，多出的没有发送` : "该模型不支持参考图，这一行的图片没有发送");
+    if (imgs.length > cap) {
+      const cut = cutDetail(imgs, cap); const detail = cut ? `（${cut}）` : "";
+      if (!totalCap) warnings.push(`该模型不支持参考图，这一行的图片没有发送${detail}`);
+      else if (!cap) warnings.push(`参考图名额已被生成节点自身的参考图占满（${reserved}/${totalCap} 张），这一行的图片没有发送${detail}`);
+      else warnings.push(`参考图超过模型上限 ${totalCap} 张${reserved ? `（其中自身参考图占 ${reserved} 张）` : ""}，多出的没有发送${detail}`);
+    }
     return done(false);
   }
   const vm = (params as VideoParams).mode; const modes: VideoMode[] = m?.modes?.length ? m.modes : [vm];
@@ -525,7 +726,10 @@ export function planRow(kind: GenKind, params: AnyParams, m: ModelSpec | undefin
   if (last) add(last, "last_frame");
   if (want === "参考生视频") {
     const cap = m?.maxRefs ?? refs.length; refs.slice(0, cap).forEach((x) => add(x, "reference"));
-    if (refs.length > cap) warnings.push(`参考图超过模型上限 ${cap} 张，多出的没有发送`);
+    if (refs.length > cap) {
+      const cut = cutDetail(refs, cap);
+      warnings.push(`参考图超过模型上限 ${cap} 张，多出的没有发送${cut ? `（${cut}）` : ""}`);
+    }
   } else if (refs.length) warnings.push(`${want}模式不带参考图，参考图列没有发送`);
   return done(true);
 }
@@ -541,7 +745,7 @@ export type BatchSettings = {
   chain?: boolean;
 };
 export const DEFAULT_BATCH: BatchSettings = { concurrency: 3, startRow: 1, manual: false, selected: [], failure: "continue" };
-export type BatchJournal = { runId: string; rows: Array<{ row: number; status: "pending" | "running" | "completed" | "failed"; nodeId?: string; error?: string }> };
+export type BatchJournal = { runId: string; rows: Array<{ row: number; status: "pending" | "running" | "completed" | "failed"; nodeId?: string; error?: string; /** 开跑前算出的这一行提醒（截断 / 降级等），批量面板可复查 */ warn?: string }> };
 export function batchOf(node: CanvasNode): { settings: BatchSettings; journal: BatchJournal | null } {
   const raw = node.data && typeof node.data === "object" ? (node.data as { batch?: any }).batch : undefined;
   const s = { ...DEFAULT_BATCH, ...(raw?.settings || {}) } as BatchSettings;
@@ -684,6 +888,7 @@ export function tableFromCsv(text: string, prev?: TableData | null): CsvImport |
   // 内嵌的 data URL 图片不截断，截了图就坏了（和 normalizeTable 一致）
   const cell = (v: string) => (/^data:image\//.test(v) ? v : v.slice(0, TABLE_LIMITS.cell));
   const inputModes = channelModesOf(prev?.inputModes);
+  const inputModesAuto = autoModeIdsOf(prev?.inputModesAuto);
   const roles = columns.map((_, i) => (isRole(prev?.roles?.[i]) ? String(prev!.roles![i]) : ""));
   return {
     table: {
@@ -695,6 +900,7 @@ export function tableFromCsv(text: string, prev?: TableData | null): CsvImport |
       // 旧文档只有 inputMode（只映射第一通道），留着免得导入后通道模式跳回默认
       ...(prev?.inputMode ? { inputMode: prev.inputMode } : {}),
       ...(Object.keys(inputModes).length ? { inputModes } : {}),
+      ...(prev && Array.isArray(prev.inputModesAuto) ? { inputModesAuto } : {}),
       ...(roles.some(Boolean) ? { roles } : {}),
     },
     droppedRows: body.length - kept.length,
@@ -723,22 +929,23 @@ export function tableGenKindOf(prompt: string): TableGenKind {
   const video = last(/视频|短片|影片|动画|分镜|镜头|运镜|首尾帧|首帧|尾帧|mp4|video/gi);
   return video > image ? "video" : "image";
 }
-export type GroupInput = { groupId: string; name: string; role: "first" | "last" | "ref"; images: Array<{ nodeId: string; title: string; url: string }> };
+export type GroupInput = { groupId: string; name: string; role: "first" | "last" | "ref"; images: Array<{ nodeId: string; title: string; url: string }>; /** 这组在输入通道里的编号（1 起，= 提示词里的「输入 N」）；由 engine 按 sources 顺序补上 */ channel?: number };
 /** 组里的图片（有结果的才算）：堆叠按叠内顺序，分组按画布位置从上到下、从左到右 */
 export function groupImages(doc: CanvasDoc, g: CanvasNode): Array<{ nodeId: string; title: string; url: string }> {
-  const byId = new Map(doc.nodes.map((n) => [n.id, n]));
-  const members = isStack(g) ? stackItems(doc, g) : (g.children || []).map((id) => byId.get(id)).filter((n): n is CanvasNode => !!n).sort((a, b) => a.y - b.y || a.x - b.x);
-  return members.filter((n) => n.kind === "image" && outOf(n)?.url).map((n) => ({ nodeId: n.id, title: genOf(n).title, url: outOf(n)!.url! }));
+  return (g.kind === "group" ? groupMembersDeep(doc, g) : [])
+    .filter((n) => n.kind === "image" && outOf(n)?.url)
+    .map((n) => ({ nodeId: n.id, title: genOf(n).title, url: outOf(n)!.url! }));
 }
 /** 批量图片的分组都作为参考图；批量视频才按组名 / 连线顺序分配首帧、尾帧与参考图。 */
 export function groupInputs(doc: CanvasDoc, id: string, intent: TableGenKind = "video"): GroupInput[] {
   const gs = inputsOf(doc, id).filter((x) => x.node.kind === "group").map((x) => x.node);
-  const named = gs.map((g) => { const name = g.text && g.text !== "分组" && g.text !== "堆叠" ? g.text : ""; const r = intent === "image" ? "ref" : name ? guessRole(name) : null; return { g, name, role: r === "first" || r === "last" || r === "ref" ? r : null }; });
+  // 名字统一走 groupLabel（堆叠重命名后 tableChannels / groupInputs / 提示词组名一致）
+  const named = gs.map((g) => { const name = groupLabel(g); const r = intent === "image" ? "ref" : guessRole(name); return { g, name, role: r === "first" || r === "last" || r === "ref" ? r : null }; });
   const taken = new Set(named.map((x) => x.role).filter(Boolean));
   return named.map(({ g, name, role }) => {
     let r = role;
     if (!r) { r = !taken.has("first") ? "first" : !taken.has("last") ? "last" : "ref"; taken.add(r); }
-    return { groupId: g.id, name: name || (isStack(g) ? "堆叠" : "分组"), role: r, images: groupImages(doc, g) };
+    return { groupId: g.id, name, role: r, images: groupImages(doc, g) };
   });
 }
 /** 出表提示里关于分组的说明 */
@@ -749,8 +956,9 @@ export function groupNote(groups: GroupInput[], withImages: boolean, intent: Tab
     ? withImages ? "这些图已按顺序附上（图的标题写明了是哪一组第几张）。请看图，为每一行写出可直接用于图片生成或编辑的提示词，明确各组参考图的主体、作用，以及需要修改和保持不变的内容。" : "请按行写出可直接用于图片生成或编辑的提示词，明确各组参考图的作用，以及需要修改和保持不变的内容。"
     : withImages ? "这些图已按顺序附上（图的标题写明了是哪一组第几张）。请看图，为每一行写出从首帧画面自然过渡到尾帧画面的主体动作、镜头运动和氛围，可直接用作视频提示词。" : "请按行写出每个镜头的画面、动作和运镜，可直接用作视频提示词。";
   return [
-    `素材分组：${groups.map((g) => `「${g.name}」${g.images.length} 张，作为每一行的${ROLE_META[g.role].label}`).join("；")}。`,
-    `表格必须正好 ${n} 行（N = 素材最多那组的张数）：第 i 行从每组各取第 i 张，某组张数不够时沿用该组最后一张。素材由系统放进独立的输入通道列（输入 N），不要在表里创建图片列。`,
+    `素材分组：${groups.map((g) => `「${g.name}」${g.images.length} 张${g.channel ? `（输入 ${g.channel}）` : ""}，作为每一行的${ROLE_META[g.role].label}`).join("；")}。`,
+    "表格行数按用户要求确定（例如「每行一个场景」就按场景组的张数）；同一主体的三视图 / 姿势 / 多角度 / 白底产品图整组是每一行都要用的参考，不增加行数；只有实在判断不了时才用素材最多那组的张数。素材由系统放进独立的输入通道列（输入 N），不要在表里创建图片列。",
+    "每一行的提示词都要对每个输入组写清用法：要整组就写「输入 2 整组」（同一主体的三视图 / 姿势 / 多角度产品图都写整组）；只取其中一张就写「输入 1 第 2 张」。不要只写「参考图」「图 1」这类看不出是哪一组的说法。",
     instruction,
   ].join("");
 }
@@ -795,7 +1003,8 @@ export function tableAutoSize(t: TableData, inputChannels: number | TableChannel
     return Math.max(rowHeight(row, count > 0), inputCellHeight(items));
   };
   // 上限 1600：多通道 + 多数据列会超过 800，和 reactCanvasStore 里 table 的宽度上限保持一致
-  const w = Math.max(320, Math.min(1600, count * TABLE_INPUT_COL_W + t.columns.length * TABLE_COL_W + 36));
+  // 带输入通道的表默认至少 650：420 宽下提示词列只能露出半列，用户以为表格只有输入列
+  const w = Math.max(count > 0 ? 650 : 320, Math.min(1600, count * TABLE_INPUT_COL_W + t.columns.length * TABLE_COL_W + 36));
   const h = Math.min(640, TABLE_HEAD_H + t.rows.reduce((s, row, i) => s + rowOf(row, i), 0) + 40);
   return { w, h: Math.max(160, h) };
 }

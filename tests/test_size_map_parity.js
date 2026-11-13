@@ -1,26 +1,22 @@
 #!/usr/bin/env node
-// 三处「官方 size×resolution 映射表」逐格一致性校验（防止再次分叉）：
+// 两处「官方 size×resolution 映射表」逐格一致性校验（防止再次分叉；在线生图页已下线删除，web sizeData 那一路随之移除）：
 //   1) static/js/smart-canvas.js 的 const SIZE_MAP（前端真值源）；
-//   2) web/src/pages/online/sizeData.js 的 SIZE_OPTIONS 与 MODEL_SIZE_PRESETS['gpt-image-2']；
-//   3) main.py 的 _AGENT_SMART_SIZE_MAP（画布助手建图片节点用的尺寸表）。
+//   2) main.py 的 _AGENT_SMART_SIZE_MAP（画布助手建图片节点用的尺寸表）。
 //
 // 官方口径（https://docs.apimart.ai gpt-image-2 generation）：size 15 比例 × resolution 1k/2k/4k。
 // 真值锚点直接读 main.py 的 APIMART_OFFICIAL_PIXELS（1k 有两组等价像素时取第一组），
 // 不另抄一份常量；前端整表另有 tests/test_size_map_official.js 对着后端 apimart_size_resolution 校验。
 //
-// 差分证明（把后两处指到改前备份，应报出不一致格数并非零退出）：
-//   NOVAI_PARITY_WEB_SRC=/tmp/novai-lastcopy-evidence/backup/sizeData.js \
+// 差分证明（把 main.py 表指到改前备份，应报出不一致格数并非零退出）：
 //   NOVAI_PARITY_MAIN_SRC=/tmp/novai-lastcopy-evidence/backup/main.py \
 //     node tests/test_size_map_parity.js
 // 运行：node tests/test_size_map_parity.js
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { pathToFileURL } = require('url');
 
 const ROOT = path.join(__dirname, '..');
 const SMART_SRC = process.env.NOVAI_PARITY_SMART_SRC || path.join(ROOT, 'static/js/smart-canvas.js');
-const WEB_SRC = process.env.NOVAI_PARITY_WEB_SRC || path.join(ROOT, 'web/src/pages/online/sizeData.js');
 const MAIN_SRC = process.env.NOVAI_PARITY_MAIN_SRC || path.join(ROOT, 'main.py');
 const LEVELS = ['1k', '2k', '4k'];
 const PRINT_ALL = process.env.NOVAI_PARITY_ALL === '1';  // 打印完整 39 格 parity 表（出证据用）
@@ -78,28 +74,6 @@ function extractSizeMap(src){
   return map;
 }
 
-// ── web sizeData.js（真模块优先；备份路径不在 web/ 下时退回去 export 求值）──────
-async function loadWebData(srcPath){
-  try {
-    const mod = await import(pathToFileURL(srcPath).href);
-    if(mod && mod.SIZE_OPTIONS) return { SIZE_OPTIONS: mod.SIZE_OPTIONS, MODEL_SIZE_PRESETS: mod.MODEL_SIZE_PRESETS };
-  } catch(err) { /* 备份路径可能不在 type:module 目录下，走下面的兜底 */ }
-  const stripped = fs.readFileSync(srcPath, 'utf8').replace(/\bexport\s+/g, '');
-  const fn = new Function(stripped + '\nreturn { SIZE_OPTIONS, MODEL_SIZE_PRESETS };');
-  return fn();
-}
-function optionsToTable(options){
-  const table = {};
-  Object.keys(options || {}).forEach(key => {
-    const tiers = {};
-    ((options[key]) || []).forEach(item => {
-      if(Array.isArray(item) && item[0] && item[1]) tiers[String(item[1]).toLowerCase()] = item[0];
-    });
-    table[key] = tiers;
-  });
-  return table;
-}
-
 // ── main.py _AGENT_SMART_SIZE_MAP ────────────────────────────────────────────
 function extractAgentMap(src){
   const block = (src.match(/_AGENT_SMART_SIZE_MAP = \{[\s\S]*?\n\}/) || [])[0];
@@ -131,30 +105,23 @@ async function main(){
   const mainSrc = fs.readFileSync(MAIN_SRC, 'utf8');
   const official = parseOfficialPixels(mainSrc);
   const smartMap = extractSizeMap(fs.readFileSync(SMART_SRC, 'utf8'));
-  const web = await loadWebData(WEB_SRC);
-  const sizeOptions = optionsToTable(web.SIZE_OPTIONS);
-  const gpt2Preset = optionsToTable(web.MODEL_SIZE_PRESETS && web.MODEL_SIZE_PRESETS['gpt-image-2']);
   const agentMap = extractAgentMap(mainSrc);
 
   console.log('[size-map-parity] 前端 SIZE_MAP = ' + (process.env.NOVAI_PARITY_SMART_SRC || 'static/js/smart-canvas.js'));
-  console.log('[size-map-parity] web sizeData  = ' + (process.env.NOVAI_PARITY_WEB_SRC || 'web/src/pages/online/sizeData.js'));
   console.log('[size-map-parity] main.py 表    = ' + (process.env.NOVAI_PARITY_MAIN_SRC || 'main.py'));
 
   coverage('前端 SIZE_MAP', smartMap, ALL_KEYS);
-  coverage('web SIZE_OPTIONS', sizeOptions, ALL_KEYS);
-  coverage("web gpt-image-2 预设", gpt2Preset, ALL_KEYS);
   coverage('main.py _AGENT_SMART_SIZE_MAP', agentMap, ALL_KEYS);
 
   console.log('');
-  console.log('[size-map-parity] key        ratio  档位  smart SIZE_MAP | web SIZE_OPTIONS | web gpt-image-2 | main.py 助手表 | 官方');
+  console.log('[size-map-parity] key        ratio  档位  smart SIZE_MAP | main.py 助手表 | 官方');
   let mismatches = 0;
   Object.keys(ALL_KEYS).forEach(key => {
     const ratio = ALL_KEYS[key];
     LEVELS.forEach(level => {
       const expected = (ALIGNED_PIXELS[key] && ALIGNED_PIXELS[key][level])
         || ((official[ratio] || {})[level]) || '(官方缺)';
-      const cells = [smartMap[key] && smartMap[key][level], sizeOptions[key] && sizeOptions[key][level],
-        gpt2Preset[key] && gpt2Preset[key][level], agentMap[key] && agentMap[key][level]];
+      const cells = [smartMap[key] && smartMap[key][level], agentMap[key] && agentMap[key][level]];
       const diff = cells.filter(value => value !== expected).length;
       mismatches += diff;
       if(diff || PRINT_ALL){
@@ -162,17 +129,14 @@ async function main(){
           + cells.map(value => value || '(缺)').join(' | ') + ' | ' + expected + '  ← 差异 ' + diff);
       }
       ok(cells[0] === expected, key + '@' + level + ' 前端 SIZE_MAP = ' + expected + '（实际 ' + cells[0] + '）');
-      ok(cells[1] === expected, key + '@' + level + ' web SIZE_OPTIONS = ' + expected + '（实际 ' + cells[1] + '）');
-      ok(cells[2] === expected, key + '@' + level + ' web gpt-image-2 = ' + expected + '（实际 ' + cells[2] + '）');
-      ok(cells[3] === expected, key + '@' + level + ' main.py _AGENT_SMART_SIZE_MAP = ' + expected + '（实际 ' + cells[3] + '）');
+      ok(cells[1] === expected, key + '@' + level + ' main.py _AGENT_SMART_SIZE_MAP = ' + expected + '（实际 ' + cells[1] + '）');
     });
   });
-  ok(mismatches === 0, '三处逐格与官方表差异为 0（实际 ' + mismatches + ' 格）');
+  ok(mismatches === 0, '两处逐格与官方表差异为 0（实际 ' + mismatches + ' 格）');
 
   console.log('');
   console.log('[size-map-parity] 与前端 SIZE_MAP 的两两差异（45 格）：');
-  [['web SIZE_OPTIONS', sizeOptions], ['web gpt-image-2 预设', gpt2Preset],
-    ['main.py _AGENT_SMART_SIZE_MAP', agentMap]].forEach(pair => {
+  [['main.py _AGENT_SMART_SIZE_MAP', agentMap]].forEach(pair => {
     let diff = 0;
     Object.keys(ALL_KEYS).forEach(key => LEVELS.forEach(level => {
       const left = smartMap[key] && smartMap[key][level];

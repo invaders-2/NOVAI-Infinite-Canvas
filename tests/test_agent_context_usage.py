@@ -184,10 +184,15 @@ class ContextWindowResolutionTests(unittest.TestCase):
     def test_env_wins_over_default_table(self):
         self.assertEqual(self._resolve({"model": "claude-sonnet-5", "provider_cfg": {}}, env="444"), 444)
 
-    def test_default_table_only_has_verified_claude(self):
+    def test_default_table_only_has_verified_vendors(self):
         for model in ("claude-sonnet-5", "claude-3-7", "Claude-Opus-4"):
             with self.subTest(model=model):
                 self.assertEqual(self._resolve({"model": model, "provider_cfg": {}}), 200000)
+        # 厂商公开文档的窗口：GPT-5 系列 400K、GPT-4.1 约 1M、Gemini 2.5 / 3 约 1M
+        for model, window in (("gpt-5.5", 400000), ("GPT-5-mini", 400000), ("gpt-4.1-mini", 1047576),
+                              ("gemini-2.5-pro", 1048576), ("gemini-3.1-pro-preview", 1048576)):
+            with self.subTest(model=model):
+                self.assertEqual(self._resolve({"model": model, "provider_cfg": {}}), window)
         for model in ("gemini-2.0-flash", "gpt-4o", "deepseek-v3", "anthropic/claude-3", "", None):
             with self.subTest(model=model):
                 self.assertEqual(self._resolve({"model": model, "provider_cfg": {}}), 0)

@@ -122,40 +122,49 @@ assert.ok(panel.includes('onEnter={() => { if (a.busy) enqueueDraft(); else void
 assert.ok(panel.includes('助手执行中 · 按 Enter 加入队列'), '全屏忙碌 placeholder');
 assert.ok(panel.includes('"Enter 加入队列"'), '窄面板忙碌 placeholder');
 
-// 自动发送：空闲 + 260ms + takeFirst
-const flushBody = panel.slice(at('const flushQueue = async () => {'), at('// 助手刚由忙转闲'));
-assert.ok(flushBody.includes('takeFirst(a.queue)'), '自动发送取队首');
-assert.ok(flushBody.includes('a.queue = taken.rest; a.emit();'), '发之前先从队列移除');
-assert.ok(panel.includes('window.setTimeout(() => { flushTimer.current = 0; void flushQueue(); }, 260)'), '空闲后 260ms 自动发');
+// 自动发送：空闲 + 260ms + takeFirst（按对话：后台对话结束也能自己发）
+const flushBody = panel.slice(at('async function flushThreadQueue(threadId: string) {'), at('// 当前对话刚由忙转闲'));
+assert.ok(flushBody.includes('takeFirst(a.threadQueue(tId))'), '自动发送取目标对话队首');
+assert.ok(flushBody.includes('a.setThreadQueue(tId, taken.rest); a.emit();'), '发之前先从目标对话队列移除');
+assert.ok(flushBody.includes('await send(false, item.snap, tId)'), '自动发送用目标对话发送');
+assert.ok(flushBody.includes('queueFlushing.current.has(tId)'), '同一对话不并发 flush');
+assert.ok(panel.includes('const timer = window.setTimeout(() => { flushTimers.current.delete(tId); void flushThreadQueue(tId); }, 260)'), '空闲后 260ms 自动发（定时器按对话）');
 assert.ok(panel.includes('const becameIdle = wasBusy.current && !a.busy;'), '只认忙变闲这一下，不抽空虚队列');
-assert.ok(panel.includes('if (!becameIdle || flushTimer.current) return;'), '忙碌 / 空队列不触发');
-assert.ok(panel.includes('flushTimer.current = window.setTimeout(() => { flushTimer.current = 0; void flushQueue(); }, 260);'), '定时器放 ref，动队列不取消自动发送');
+assert.ok(panel.includes('const switched = !!lastThread.current && lastThread.current !== a.activeThreadId;'), '切对话也重新判断忙闲（首次加载不算）');
+assert.ok(panel.includes('if (!becameIdle && !(switched && !a.busy)) return;'), '忙碌 / 空队列 / 切到忙对话都不触发');
+assert.ok(panel.includes('if (flushTimers.current.has(tId)) return;'), '同一对话不重复排自动发送');
 
 // 编辑还原 + 立即发送 + 切线程清空
 const editBody = panel.slice(at('const editQueued = (item: QueuedMsg) => {'), at('const deleteQueued ='));
 assert.ok(editBody.includes('a.draft = item.snap.text'), '编辑还原原始文本（含 @ 记号）');
 assert.ok(editBody.includes('setWebPlugin(item.snap.webPlugin)'), '编辑还原联网开关');
-assert.ok(editBody.includes('edRef.current?.focus()'), '编辑后聚焦输入框');
+assert.ok(editBody.includes('edRef.current?.focus({ caret: "end" })'), '编辑后聚焦输入框');
 assert.ok(editBody.includes('已放回输入框，改完再发'), '编辑 toast');
-const nowBody = panel.slice(at('const sendQueuedNow = (item: QueuedMsg) => {'), at('const flushQueue ='));
-assert.ok(nowBody.includes('setPendingUrgent(item)') && nowBody.includes('stopTask()'), '忙碌时立即发送先停当前任务再优先发');
+const nowBody = panel.slice(at('const sendQueuedNow = (item: QueuedMsg) => {'), at('function scheduleFlush(threadId: string) {'));
+assert.ok(nowBody.includes('a.pendingUrgent = item;') && nowBody.includes('stopTask()'), '忙碌时立即发送先停当前任务再优先发');
 assert.ok(nowBody.includes('已停止当前任务，马上发送这条'), '立即发送 toast');
 assert.ok(nowBody.includes('if (!a.busy) { void send(false, item.snap); return; }'), '空闲时立即发送直接发');
-assert.ok(nowBody.includes('if (pendingUrgent) {'), '忙碌时已有 pendingUrgent 走独立分支');
-const pendingBranch = nowBody.slice(nowBody.indexOf('if (pendingUrgent) {'), nowBody.indexOf('setPendingUrgent(item)'));
+assert.ok(nowBody.includes('if (a.pendingUrgent) {'), '忙碌时已有 pendingUrgent 走独立分支');
+const pendingBranch = nowBody.slice(nowBody.indexOf('if (a.pendingUrgent) {'), nowBody.indexOf('a.pendingUrgent = item;'));
 assert.ok(pendingBranch.includes('prependUrgent(a.queue, item)'), '第二条立即发送插到优先队首');
 assert.ok(pendingBranch.includes('a.queue = prependUrgent(a.queue, item); a.emit();'), '插队后刷新队列');
 assert.ok(pendingBranch.includes('return;'), '这一分支直接返回，不再 setPendingUrgent 覆盖前一条');
 assert.ok(pendingBranch.includes('当前任务结束后马上发这条'), '第二条的 toast 说明当前任务结束后发');
 assert.ok(/import \{[^}]*prependUrgent[^}]*\} from "\.\.\/canvas-next\/agent\/queue"/.test(panel), 'AgentPanel 从 queue 引入 prependUrgent');
 
-assert.ok(state.includes('queue: import("./queue").QueuedMsg[] = [];'), 'AgentState 增加 queue 字段');
+assert.ok(state.includes('get queue(): QueuedMsg[]'), 'AgentState 队列按对话取');
+assert.ok(state.includes('get draft(): string'), 'AgentState 草稿按对话取');
+assert.ok(state.includes('get pendingUrgent(): QueuedMsg | null'), '立即发送按对话取');
+assert.ok(state.includes('threadQueue(threadId: string)') && state.includes('setThreadQueue(threadId: string, list: QueuedMsg[])'), '按对话读写队列（后台自动发送用）');
 const switchBody = state.slice(state.indexOf('async switchThread'), state.indexOf('async newThread'));
-assert.ok(switchBody.includes('this.queue = [];'), '切线程清空队列');
+assert.ok(!switchBody.includes('this.queue = [];'), '切线程保留各会话队列');
+assert.ok(switchBody.includes('this.activeThreadId = id;'), '切线程只换 active');
 const newBody = state.slice(state.indexOf('async newThread'), state.indexOf('async ensureThread'));
-assert.ok(newBody.includes('this.queue = [];'), '新建对话清空队列');
+assert.ok(newBody.includes('value.queue = []; value.pendingUrgent = null; value.draft = "";'), '新建对话只初始化新会话的空队列 / 立即发送 / 草稿');
 
-assert.ok(panel.includes('send(fromQa = false, outgoing?: QueuedMsg["snap"])'), 'send 增加 outgoing 快照参数');
+assert.ok(panel.includes('send(fromQa = false, outgoing?: QueuedMsg["snap"], targetThreadId?: string)'), 'send 增加 outgoing 快照 + 目标对话参数');
+assert.ok(panel.includes('{a.queue.length ? <div className="ap2-queue"'), '队列 UI 只渲染当前对话的队列');
+assert.ok(panel.includes('a.queue.map((item, index)'), '队列行取当前对话');
 assert.ok(panel.includes('ctxNodes(outgoing ? { pinned: outgoing.pinned, selected: outgoing.selected } : undefined)'), 'ctxNodes 支持快照覆盖');
 assert.ok(panel.includes('if (!outgoing) { a.draft = "";'), '发排队消息不清空当前草稿');
 
@@ -181,4 +190,4 @@ assert.ok(/\.ap2-queue-row:focus-within \.ap2-queue-acts\s*\{\s*opacity:\s*1/.te
 assert.ok(/\.ap2-queue-btn\s*\{[^}]*width:\s*23px[^}]*border-radius:\s*8px/.test(queueCss), '按钮 23px / 8px 圆角');
 assert.ok(/\.ap2-queue-hd\s*\{[^}]*font-size:\s*11px/.test(queueCss), '头部 11px');
 
-console.log('test_novai_canvas_agent_queue: 全部断言通过（' + QUEUE_MAX + ' 条上限 / FIFO / 编辑 / 立即发送 / 自动发送 / 切线程清空 / 样式）');
+console.log('test_novai_canvas_agent_queue: 全部断言通过（' + QUEUE_MAX + ' 条上限 / FIFO / 编辑 / 立即发送 / 自动发送（按对话）/ 切换保留 / 样式）');

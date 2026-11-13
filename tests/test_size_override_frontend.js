@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 /*
- * 供应商级「能力覆盖」前端消费校验（两套画布 + 在线生图页）。
+ * 供应商级「能力覆盖」前端消费校验（两套画布；在线生图页已下线删除）。
  *
  * 场景：中转站 43.130.6.197 的 gemini-3.1-flash-image 声明
  *   ratios = 10 个比例 / resolutions = ["1k"]（见 /tmp/novai-matrix-evidence/REPORT.md）。
  * 断言：
- *   1) 带覆盖：两套画布 imageRatiosFor / imageResLevelsFor 与在线页 supportedRatios /
- *      resolutionOptions 只列 1k 与那 10 个比例；1:4 / 1:8 / 4:1 / 8:1 / 9:21 不出现，
- *      0.5k / 2k / 4k 不出现；
- *   2) 不带覆盖：三处与静态表逐字节一致（防回归）；
+ *   1) 带覆盖：两套画布 imageRatiosFor / imageResLevelsFor 只列 1k 与那 10 个比例；
+ *      1:4 / 1:8 / 4:1 / 8:1 / 9:21 不出现，0.5k / 2k / 4k 不出现；
+ *   2) 不带覆盖：两处与静态表逐字节一致（防回归）；
  *   3) 差分：不带覆盖时被覆盖项确实在列（改前会列出、改后不列）。
  *
  * 运行：node tests/test_size_override_frontend.js
@@ -17,14 +16,11 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { pathToFileURL } = require('url');
 
 const ROOT = path.join(__dirname, '..');
 const CLASSIC_SRC = process.env.NOVAI_OVERRIDE_TEST_CLASSIC_SRC || path.join(ROOT, 'static/js/canvas.js');
 const SMART_SRC = process.env.NOVAI_OVERRIDE_TEST_SMART_SRC || path.join(ROOT, 'static/js/smart-canvas.js');
 const STATIC_POLICY_SRC = process.env.NOVAI_OVERRIDE_TEST_POLICY_SRC || path.join(ROOT, 'static/js/shared/size-policy.js');
-const ONLINE_SIZES_SRC = path.join(ROOT, 'web/src/pages/online/onlineSizes.js');
-const WEB_POLICY_SRC = path.join(ROOT, 'web/src/pages/online/sizePolicy.js');
 
 let pass = 0;
 const fails = [];
@@ -42,9 +38,6 @@ const GEMINI_14 = ['square', 'portrait14', 'portrait18', 'portrait', 'landscape'
 const GEMINI_10 = ['square', 'portrait', 'landscape', 'portrait43', 'landscape43',
     'portrait45', 'landscape54', 'story', 'wide', 'ultrawide'];
 const GEMINI_14_LABELS = ['1:1', '1:4', '1:8', '2:3', '3:2', '3:4', '4:1', '4:3', '4:5', '5:4', '8:1', '9:16', '16:9', '21:9'];
-// 在线页比例下拉顺序 = RATIOS 顺序（15 键）+ EXTRA_RATIOS
-const ONLINE_10 = ['square', 'portrait', 'landscape', 'portrait43', 'landscape43', 'story', 'wide', 'ultrawide', 'landscape54', 'portrait45'];
-const ONLINE_14 = ONLINE_10.concat(['portrait14', 'portrait18', 'landscape41', 'landscape81']);
 const API_RES_LEVELS = ['0.5k', '1k', '1.5k', '2k', '3k', '4k'];
 const TIERS = [
     { id: '1k', maxPixels: 1572864 },
@@ -175,28 +168,7 @@ async function main() {
     eq(visibleSmartTiles, ['square', 'story', 'wide', 'portrait43', 'landscape43', 'landscape', 'portrait', 'landscape54', 'portrait45', 'ultrawide'],
         '覆盖 智能画布比例格可见项只有 10 个');
 
-    /* ── 4. 在线生图页（真模块）── */
-    globalThis.fetch = async () => ({ ok: true, json: async () => policyTable(true) });
-    const { NovaSizePolicy } = await import(pathToFileURL(WEB_POLICY_SRC).href);
-    const online = await import(pathToFileURL(ONLINE_SIZES_SRC).href);
-
-    // 未加载策略 = 无覆盖：与静态预设一致（真实模型名走 nano-banana-2 别名预设）
-    eq(online.supportedRatios('nano-banana-2').map(r => r.id), ONLINE_14, '基线 在线页比例 = 官方 14');
-    eq(online.resolutionOptions('nano-banana-2', 'square').map(o => o.value), ['0.5k', '1k', '2k', '4k'], '基线 在线页档位 = 0.5K/1K/2K/4K');
-    eq(online.supportedRatios(RELAY_MODEL).map(r => r.id), ONLINE_14, '基线 在线页真实模型名 = 官方 14');
-
-    await NovaSizePolicy.load();
-    eq(online.supportedRatios('nano-banana-2').map(r => r.id), ONLINE_10, '覆盖 在线页别名只列 10 个比例');
-    eq(online.supportedRatios(RELAY_MODEL).map(r => r.id), ONLINE_10, '覆盖 在线页真实模型名只列 10 个比例');
-    eq(online.resolutionOptions(RELAY_MODEL, 'square').map(o => o.value), ['1k'], '覆盖 在线页档位只有 1k');
-    eq(online.computeSize({ model: RELAY_MODEL, ratio: 'wide', resolution: '1k' }), '1376x768', '覆盖 在线页 16:9@1K 像素不变');
-    ONLINE_10.forEach(id => ok(online.supportedRatios(RELAY_MODEL).map(r => r.id).indexOf(id) >= 0, '覆盖 在线页保留 ' + id));
-    ok(online.supportedRatios(RELAY_MODEL).map(r => r.id).indexOf('portrait14') < 0
-        && online.supportedRatios(RELAY_MODEL).map(r => r.id).indexOf('landscape41') < 0, '覆盖 在线页不出现 1:4 / 4:1');
-    // 未声明的模型保持现状
-    eq(online.supportedRatios('gpt-image-2').map(r => r.id).length, 15, '覆盖 在线页其它模型仍是 15 比例');
-
-    /* ── 5. 差分：不带覆盖时被覆盖项确实在列 ── */
+    /* ── 4. 差分：不带覆盖时被覆盖项确实在列 ── */
     eq(classicBase.imageRatiosFor(RELAY_MODEL), null, '差分 改前真实模型名不限制比例');
     eq(classicRatioOpts.filter(v => classicBase.imageRatiosFor(RELAY_MODEL) === null || classicBase.imageRatiosFor(RELAY_MODEL).indexOf(v) >= 0).length,
         classicRatioOpts.length, '差分 改前经典画布列出全部静态比例（含 9:21）');

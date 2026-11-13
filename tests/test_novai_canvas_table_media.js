@@ -258,7 +258,7 @@ const runToTable = async (docIn, output, replies = [tableJson]) => {
     ok(ask.includes('第 1 组（输入 1）「静物图」3 张') && ask.includes('第 2 组（输入 2）「白底多角度」4 张'), '提示词列出每组编号 / 组名 / 张数');
     ok(ask.includes('默认「沿用」') && ask.includes('沿用最后一张'), '提示词写明默认沿用（每行取一张、超出沿用最后一张）');
     ok(ask.includes('不要为了保险') && ask.includes('都声明成 every-row'), '提示词说明 every-row 不要滥用');
-    ok(ask.includes('行数应等于素材最多那组的张数'), '提示词写明行数 = 素材最多那组的张数');
+    ok(ask.includes('表格行数按用户要求确定') && ask.includes('只有实在判断不了时才用素材最多那组的张数'), '提示词写明行数按用户要求（逐行组张数），不再只看素材最多那组');
     eq(table.parseInputGroups([{ group: 1, rowMode: 'per_row' }, { group: '2', rowMode: 'every-row' }, { group: 0, rowMode: 'per-row' }, { group: 3, rowMode: 'bogus' }]),
         [{ group: 1, rowMode: 'per-row' }, { group: 2, rowMode: 'every-row' }], 'inputGroups 解析：组号从 1、兼容下划线写法、脏值丢弃');
     const chOf = (mode, n) => ({ id: 'input-1', sourceId: 's', title: 't', mode, items: Array.from({ length: n }, (_, i) => ({ nodeId: 'n' + i, kind: 'image', title: 't', src: '/assets/n' + i + '.jpg', url: '/assets/n' + i + '.jpg' })) });
@@ -438,7 +438,7 @@ const runToTable = async (docIn, output, replies = [tableJson]) => {
     const storeF = new FakeStore({ ...productNodes, comments: [] }, textSpec);
     storeF.backend = storeF.backendFor('抱歉，我无法给出 JSON 规划', JSON.stringify({ kind: 'table', version: 1, columns: ['画面'], rows: [['一'], ['二'], ['三'], ['四']] }));
     ok(await engine.runTextToTable(storeF, 't1'), '规划失败也能出表');
-    eq(storeF.backend.prompts.length, 2, '规划失败后走单遍（规划 + 生成）');
+    eq(storeF.backend.prompts.length, 3, '规划失败后重试一次规划（只要 JSON），再走单遍（规划 + 重试 + 生成）');
     const tblF = storeF.state.doc.nodes.find((n) => n.kind === 'table');
     eq(table.tableOf(tblF).rows.length, 4, '没有 plan → 不补不裁，按模型行数');
     ok(!table.tableOf(tblF).inputModes, '没有 plan → 不写模式，回落沿用');

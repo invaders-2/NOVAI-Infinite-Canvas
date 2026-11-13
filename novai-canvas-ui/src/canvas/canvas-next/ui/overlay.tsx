@@ -62,7 +62,11 @@ function Popover({ st }: { st: NonNullable<PopState> }) {
           return st.rect ?? { x: r.left, y: r.top, width: r.width, height: r.height };
         })()
         : { x: st.anchor.x, y: st.anchor.y, width: 0, height: 0 };
-      const placed = placePopover({ anchor, popup: pr, viewport: { width: innerWidth, height: innerHeight }, dir: st.dir, align: st.align, margin: 8, gap: 8 });
+      const placed = placePopover({
+        anchor, popup: pr, viewport: { width: innerWidth, height: innerHeight }, dir: st.dir, align: st.align, margin: 8, gap: 8,
+        // 助手里的卡片弹层（模型/参数/组合）：高度收到 min(420px, 55vh)，翻边按收小后的高度算，少挡卡片正文
+        capHeight: st.agent ? Math.min(420, innerHeight * 0.55) : undefined,
+      });
       const next = { x: placed.x, y: placed.y, origin: placed.origin, menu: placed.menu, maxWidth: placed.maxWidth, maxHeight: placed.maxHeight, scrollX: placed.scrollX, scrollY: placed.scrollY };
       // 子菜单（combobox）首帧的行高常比定稿矮几像素，只有位置真的变了才重排，避免无谓 re-render
       setPos((cur) => (cur && cur.x === next.x && cur.y === next.y && cur.menu === next.menu && cur.maxHeight === next.maxHeight && cur.maxWidth === next.maxWidth && cur.scrollY === next.scrollY && cur.scrollX === next.scrollX ? cur : next));

@@ -7,6 +7,9 @@ const SOURCE_KEY = 'studio_update_source';
 const DISMISSED_KEY = 'novai.update.dismissedVersion';
 /* 更新成功、重启之前写入目标版本；重启后据此弹一次「已更新到 vX.Y.Z」 */
 const UPDATED_TO_KEY = 'novai.updatedTo';
+/* 卡片点了「稍后 / ×」记下版本，同版本不再打扰；出现更高版本才会重新提醒 */
+const CARD_SNOOZE_KEY = 'novai.update.cardSnoozed';
+const PREVIEW_PARAM = 'novaiUpdatePreview';
 const PROJECT_URL = 'https://github.com/invaders-2/NOVAI-Infinite-Canvas';
 const RELEASE_LATEST_URL = 'https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases/latest';
 
@@ -17,6 +20,13 @@ function writeLS(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 function desktopUpdater() {
     const u = typeof window !== 'undefined' ? window.novaiUpdater : null;
     return u && typeof u.downloadAndInstall === 'function' ? u : null;
+}
+
+/* 新版桌面端（IPC 契约 v1）：主进程后台静默下载，只用 novai:update-stage 推事件。
+   没有 onStage 的（浏览器 / 老桌面端）返回 null，调用方继续走「发现新版本 → 手动点更新」。 */
+function stageBridge() {
+    const u = typeof window !== 'undefined' ? window.novaiUpdater : null;
+    return u && typeof u.onStage === 'function' ? u : null;
 }
 
 export const upd = reactive({
@@ -31,8 +41,11 @@ export const upd = reactive({
     progress: null,        // { stage, percent, current_file, files_done, files_total }
     phase: 'idle',         // idle | running | restarting | done | error
     error: '',             // 给用户看的一句人话
+    card: '',              // 右下角卡片：'' | 'downloaded' | 'installing' | 'error'
+    cardVersion: '',
+    cardError: '',
 });
-export const updDone = reactive({ open: false, version: '', notes: null });
+export const updDone = reactive({ open: false, version: '', previous: '', notes: null });
 let abortCtl = null;
 /* 桌面版进度订阅：Windows 的下载在 downloadAndInstall 返回之后才开始，
    Promise 结束时不能退订；保留到终态、用户关弹窗或 30 分钟超时。 */
@@ -151,7 +164,8 @@ export async function checkForUpdates(manual = false) {
             upd.remote = best.version;
             state.remoteVersion = best.version;
             if (best.notes) upd.notes = best.notes;
-            if (!manual) maybeRemind(best.version);
+            /* 新版桌面端由主进程静默下载，前端不再弹「发现新版本」 */
+            if (!manual && !stageBridge()) maybeRemind(best.version);
         }
         if (manual) {
             if (found) { toast(`发现新版本 ${versionLabel(best.version)}，点击查看更新`, { icon: 'arrowup', onClick: openUpdateModal }); openUpdateModal(); }
@@ -278,7 +292,78 @@ export async function startUpdate() {
     }
 }
 
-/* ───────── 重启后的「已更新到 vX.Y.Z」 ───────── */
+/* ───────── 更新说明（重启后 / applied 事件共用） ───────── */
+const MEDIA_TYPES = ['image', 'gif', 'video'];
+const TYPE_LABELS = { feature: '新功能', fix: '修复', improve: '优化' };
+export function noteTypeLabel(type) { return TYPE_LABELS[String(type || '')] || ''; }
+
+function pickMedia(media) {
+    if (!media || typeof media !== 'object') return null;
+    const type = String(media.type || '').toLowerCase();
+    const src = String(media.src || '').trim();
+    if (!MEDIA_TYPES.includes(type) || !src) return null;
+    const caption = String(media.caption || '').trim();
+    return caption ? { type, src, caption } : { type, src };
+}
+/* 更新说明兼容两种数据：带 media 的新结构和只有字符串的旧结构 */
+export function normalizeNotes(notes) {
+    if (!notes || typeof notes !== 'object' || !Array.isArray(notes.items)) return null;
+    const items = [];
+    for (const raw of notes.items) {
+        if (raw == null) continue;
+        if (typeof raw === 'string') {
+            const text = raw.trim();
+            if (text) items.push({ type: '', text });
+            continue;
+        }
+        if (typeof raw !== 'object') continue;
+        const text = String(raw.text || raw.title || '').trim();
+        if (!text) continue;
+        const item = { type: String(raw.type || '').trim(), text };
+        const media = pickMedia(raw.media);
+        if (media) item.media = media;
+        items.push(item);
+    }
+    if (!items.length) return null;
+    return {
+        version: String(notes.version || '').trim(),
+        updated_at: String(notes.updated_at || notes.date || '').trim(),
+        items,
+    };
+}
+function fetchChangelogNotes(into) {
+    fetch('/api/changelog').then(r => (r.ok ? r.json() : null)).then(d => {
+        const notes = normalizeNotes(d);
+        if (notes) into.notes = notes;
+    }).catch(() => {});
+}
+/* applied 事件与 localStorage 标记两条链路都走这里：同一版本一次会话只弹一次。
+   applied 携带的说明更完整（含 media），已弹出时用它升级内容而不是再弹一次。 */
+let doneShownFor = '';
+function upgradeNotes(notes) {
+    const next = normalizeNotes(notes);
+    if (!next) return null;
+    if (!updDone.notes) return next;
+    const nextHasMedia = next.items.some(it => it.media);
+    const curHasMedia = (updDone.notes.items || []).some(it => it && it.media);
+    return nextHasMedia || !curHasMedia ? next : null;
+}
+function openUpdateDone(version, notes, previous) {
+    const v = String(version || '').trim();
+    if (v && doneShownFor && compareVersions(v, doneShownFor) === 0) {
+        if (!updDone.open) return;
+        const next = upgradeNotes(notes);
+        if (next) updDone.notes = next;
+        if (previous) updDone.previous = String(previous).trim();
+        return;
+    }
+    if (v) doneShownFor = v;
+    updDone.version = v;
+    updDone.previous = String(previous || '').trim();
+    updDone.notes = normalizeNotes(notes) || normalizeNotes(upd.notes);
+    updDone.open = true;
+    if (!updDone.notes) fetchChangelogNotes(updDone);
+}
 /* 标记与当前版本对不上（用户又换了版本）就静默清掉，不打扰用户 */
 export async function checkUpdateDone() {
     const target = readLS(UPDATED_TO_KEY);
@@ -286,16 +371,214 @@ export async function checkUpdateDone() {
     if (!state.version) await loadInfo();
     if (!state.version) return;   // 拿不到当前版本就先留着标记，下次启动再判断
     if (compareVersions(target, state.version) !== 0) { writeLS(UPDATED_TO_KEY, ''); return; }
-    updDone.version = target;
-    updDone.notes = (upd.notes && Array.isArray(upd.notes.items) && upd.notes.items.length) ? upd.notes : null;
-    updDone.open = true;
-    if (!updDone.notes) {
-        fetch('/api/changelog').then(r => (r.ok ? r.json() : null)).then(d => { if (d && Array.isArray(d.items) && d.items.length) updDone.notes = d; }).catch(() => {});
-    }
+    openUpdateDone(target, upd.notes, '');
 }
 export function closeUpdateDone() {
+    const v = updDone.version;
     updDone.open = false;
     writeLS(UPDATED_TO_KEY, '');
+    const desktop = stageBridge();
+    if (v && desktop && typeof desktop.markNotesSeen === 'function') {
+        try { desktop.markNotesSeen(v); } catch (e) {}
+    }
+}
+
+/* ───────── 新版桌面端：静默下载 → 右下角卡片 → 重启安装 ───────── */
+const STAGE_ERROR_TEXT = {
+    check: '没能检查到新版本，稍后会自动再试',
+    download: '新版本没有下载成功，请检查网络后重试',
+    install: '安装没有完成，点重试再试一次',
+};
+function stageErrorText(phase) { return STAGE_ERROR_TEXT[String(phase || '')] || '更新没有完成，点重试再试一次'; }
+/* 「稍后 / ×」记过这个版本就静默，出现更高版本才会再提醒 */
+function cardSnoozed(version) {
+    const v = readLS(CARD_SNOOZE_KEY);
+    return !!(v && version && compareVersions(version, v) <= 0);
+}
+let installWatchdog = null;
+function clearInstallWatchdog() { if (installWatchdog) { clearTimeout(installWatchdog); installWatchdog = null; } }
+/* 点了「立即重启」后主进程要退出重装；迟迟没退出说明卡住了，退回可重试的失败态 */
+function armInstallWatchdog() {
+    clearInstallWatchdog();
+    installWatchdog = setTimeout(() => {
+        installWatchdog = null;
+        if (upd.card !== 'installing') return;
+        upd.card = 'error';
+        upd.cardError = '安装没有开始，点重试再试一次';
+    }, 25000);
+}
+function applyUpdateStage(payload) {
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const version = String(p.version || '').trim();
+    switch (p.stage) {
+        case 'downloading': {
+            const total = Number(p.total) || 0;
+            const transferred = Number(p.transferred) || 0;
+            const percent = Number.isFinite(Number(p.percent)) ? Number(p.percent) : (total ? (transferred / total) * 100 : 0);
+            upd.progress = { stage: 'downloading', percent: Math.max(0, Math.min(100, percent)), transferred, total };
+            upd.running = true;
+            upd.phase = 'running';
+            upd.card = '';   // 后台静默下载，不弹卡片
+            clearInstallWatchdog();
+            return;
+        }
+        case 'downloaded': {
+            clearInstallWatchdog();
+            upd.running = false;
+            upd.phase = 'idle';
+            upd.progress = null;
+            if (version) { upd.remote = version; state.remoteVersion = version; }
+            if (p.notes) upd.notes = normalizeNotes(p.notes) || upd.notes;
+            upd.cardVersion = version || upd.remote || '';
+            upd.cardError = '';
+            upd.card = cardSnoozed(upd.cardVersion) ? '' : 'downloaded';
+            return;
+        }
+        case 'installing': {
+            upd.cardVersion = version || upd.cardVersion;
+            upd.cardError = '';
+            upd.card = 'installing';
+            armInstallWatchdog();
+            return;
+        }
+        case 'error': {
+            clearInstallWatchdog();
+            upd.running = false;
+            upd.phase = 'error';
+            upd.progress = null;
+            upd.error = stageErrorText(p.phase);
+            console.warn('[update] 桌面更新失败：', p.phase || '', p.message || '');
+            upd.cardVersion = version || upd.cardVersion || upd.remote || '';
+            upd.cardError = upd.error;
+            upd.card = cardSnoozed(upd.cardVersion) ? '' : 'error';
+            return;
+        }
+        case 'applied': {
+            clearInstallWatchdog();
+            upd.running = false;
+            upd.phase = 'done';
+            writeLS(UPDATED_TO_KEY, '');   // applied 已接管，旧链路不能再弹第二次
+            openUpdateDone(version, p.notes, p.previousVersion);
+            return;
+        }
+    }
+}
+export async function restartUpdateNow() {
+    const desktop = stageBridge();
+    if (!desktop || typeof desktop.restartNow !== 'function') return;
+    upd.cardError = '';
+    upd.card = 'installing';
+    armInstallWatchdog();
+    try {
+        const res = await desktop.restartNow();
+        if (res && res.ok === false) {
+            clearInstallWatchdog();
+            upd.card = 'error';
+            upd.cardError = stageErrorText(res.phase || 'install');
+            console.warn('[update] 主进程没受理重启安装：', res.reason || '');
+        }
+    } catch (e) {
+        console.error('[update] 重启安装失败：', e);
+        clearInstallWatchdog();
+        upd.card = 'error';
+        upd.cardError = '没能启动安装，点重试再试一次';
+    }
+}
+/* 稍后：登记成「退出时安装」，本次会话不再打扰 */
+export function snoozeUpdateCard() {
+    const desktop = stageBridge();
+    if (desktop && typeof desktop.installOnQuit === 'function') {
+        try { desktop.installOnQuit(); } catch (e) { console.error('[update] 登记退出时安装失败：', e); }
+    }
+    if (upd.cardVersion) writeLS(CARD_SNOOZE_KEY, upd.cardVersion);
+    clearInstallWatchdog();
+    upd.card = '';
+}
+export function dismissUpdateCard() {
+    if (upd.cardVersion) writeLS(CARD_SNOOZE_KEY, upd.cardVersion);
+    clearInstallWatchdog();
+    upd.card = '';
+}
+export async function retryUpdateInstall() {
+    const desktop = stageBridge();
+    if (!desktop) return;
+    if (typeof desktop.retryInstall !== 'function') { restartUpdateNow(); return; }
+    upd.cardError = '';
+    upd.card = '';   // 重试后回到静默，等主进程重新推事件
+    clearInstallWatchdog();
+    try {
+        const res = await desktop.retryInstall();
+        if (res && res.ok === false) {
+            upd.card = 'error';
+            upd.cardError = stageErrorText(res.phase || 'download');
+        }
+    } catch (e) {
+        console.error('[update] 重试更新失败：', e);
+        upd.card = 'error';
+        upd.cardError = '重试没有成功，稍后再试一次';
+    }
+}
+
+/* 调试开关：?novaiUpdatePreview=downloaded|applied|error
+   没有 Electron 桥时才生效，注入假桥播一次事件；给截图验证用，真实桌面端不受影响。 */
+function previewMode() {
+    if (typeof window === 'undefined') return '';
+    if (stageBridge()) return '';
+    try {
+        const mode = new URLSearchParams(window.location.search).get(PREVIEW_PARAM) || '';
+        return ['downloaded', 'applied', 'error'].includes(mode) ? mode : '';
+    } catch (e) {
+        return '';
+    }
+}
+function previewNotes() {
+    return {
+        version: '2.0.7',
+        updated_at: '2026-11-10T12:00:00+08:00',
+        items: [
+            { type: 'feature', text: '画布支持框选多个节点后一键对齐，间距可调', media: { type: 'gif', src: '/static/images/modelscope.gif', caption: '一键对齐演示' } },
+            { type: 'feature', text: '首页导航换成液态玻璃，选中块跟随指针滑动', media: { type: 'image', src: '/static/images/logo.png', caption: '新的导航选中态' } },
+            { type: 'improve', text: '视频预览改为静音循环播放', media: { type: 'video', src: '/static/images/templates/video-relay.mp4', caption: '视频循环预览' } },
+            { type: 'fix', text: '修复更新下载到一半断网后进度停在原地的问题' },
+            { type: 'fix', text: '修复深色模式下右下角卡片发灰的问题' },
+        ],
+    };
+}
+function installPreviewBridge(mode) {
+    if (typeof window === 'undefined') return;
+    const listeners = [];
+    window.novaiUpdater = {
+        checkNow: async () => ({ ok: true, version: '2.0.7' }),
+        downloadAndInstall: async () => ({ ok: true }),
+        onProgress: () => () => {},
+        onStage: (cb) => {
+            if (typeof cb !== 'function') return () => {};
+            listeners.push(cb);
+            return () => { const i = listeners.indexOf(cb); if (i >= 0) listeners.splice(i, 1); };
+        },
+        restartNow: async () => ({ ok: true }),
+        installOnQuit: async () => ({ ok: true }),
+        markNotesSeen: async () => ({ ok: true }),
+        retryInstall: async () => ({ ok: true }),
+    };
+    const emit = (p) => listeners.slice().forEach(fn => { try { fn(p); } catch (e) {} });
+    setTimeout(() => {
+        if (mode === 'downloaded') emit({ stage: 'downloaded', version: '2.0.7', notes: previewNotes() });
+        else if (mode === 'applied') emit({ stage: 'applied', version: '2.0.7', previousVersion: '2.0.6', notes: previewNotes() });
+        else emit({ stage: 'error', phase: 'download', message: 'preview' });
+    }, 700);
+}
+let stageOff = null;
+/* 接上新版桌面端返回 true；有桥就完全交给主进程，前端不再主动查更新、不弹「发现新版本」 */
+export function initUpdateStage() {
+    const preview = previewMode();
+    if (preview) installPreviewBridge(preview);
+    const desktop = stageBridge();
+    if (!desktop) return false;
+    if (!stageOff) {
+        try { stageOff = desktop.onStage(applyUpdateStage) || null; } catch (e) { stageOff = null; console.error('[update] 订阅桌面更新事件失败：', e); }
+    }
+    return true;
 }
 
 /* ───────── 回滚（旧版只有函数没有按钮，这里补上入口） ───────── */
@@ -316,7 +599,9 @@ export async function rollback(name) {
 export function initUpdates() {
     let s = {};
     try { s = JSON.parse(localStorage.getItem('studio_general_settings') || '{}') || {}; } catch (e) {}
-    if (s.autoCheckUpdate !== false) checkForUpdates(false);
+    /* 新版桌面端：主进程自己查 + 后台下载，前端只等 novai:update-stage */
+    if (initUpdateStage()) loadInfo();
+    else if (s.autoCheckUpdate !== false) checkForUpdates(false);
     else loadInfo();
     checkUpdateDone();
 }

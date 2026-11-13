@@ -27,7 +27,6 @@ const query = ref('');
 const sort = ref((() => { try { const v = localStorage.getItem(SORT_KEY); return SORTS.some(s => s.id === v) ? v : 'updated'; } catch (e) { return 'updated'; } })());
 const sortOpen = ref(false);
 const menuFor = ref('');          // 哪张卡片的「更多」菜单开着
-const pickerOpen = ref(false);
 const trashOpen = ref(false);
 const confirm = ref(null);        // { title, desc, ok, run }
 const confirmBusy = ref(false);
@@ -106,22 +105,20 @@ function canvasUrl(c) {
 function open(c) { closeMenus(); openCanvasUrl(canvasUrl(c)); }
 function continueLast() {
     const latest = canvases.value.slice().sort((a, b) => (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0))[0];
-    if (latest) open(latest); else pickerOpen.value = true;
+    if (latest) open(latest); else create();
 }
-async function create(kind) {
+async function create() {
     if (creating.value) return;
-    creating.value = kind;
-    const smart = kind === 'smart';
-    const title = (smart ? '智能画布' : '智能画布BEAT') + ' ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    creating.value = 'classic';
+    const title = '智能画布 ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     try {
         const d = await getJSON('/api/canvases', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title, icon: smart ? 'sparkles' : '🧩', kind: smart ? 'smart' : 'classic', project: 'default', board_x: 40, board_y: 40 }),
+            body: JSON.stringify({ title, icon: '🧩', kind: 'classic', project: 'default', board_x: 40, board_y: 40 }),
         });
         if (!d.canvas) throw new Error('no canvas');
         if (d.canvas.project == null) d.canvas.project = 'default';
         canvases.value = canvases.value.concat(d.canvas);
-        pickerOpen.value = false;
         open(d.canvas);
     } catch (e) {
         toast('创建画布失败，请检查服务是否在运行', { danger: true, icon: 'alert' });
@@ -327,7 +324,6 @@ function onKey(e) {
     if (!visible.value || e.key !== 'Escape') return;
     if (confirm.value) { if (!confirmBusy.value) confirm.value = null; return; }
     if (rename.value) { rename.value = null; return; }
-    if (pickerOpen.value) { pickerOpen.value = false; return; }
     if (trashOpen.value) { trashOpen.value = false; return; }
     closeMenus();
 }
@@ -370,10 +366,10 @@ onBeforeUnmount(() => {
             <!-- 顶部 -->
             <section class="cl-hero">
                 <div class="cl-intro">
-                    <h1 class="display">智能画布BEAT</h1>
+                    <h1 class="display">智能画布</h1>
                     <p class="p">自由布局的 AI 创作空间。在无限画布上串联图像、视频、对话节点，构建你的创意工作流。</p>
                     <div class="cl-acts">
-                        <button type="button" class="nv-btn primary" @click="pickerOpen = true"><NvIcon name="plus" />开始创作</button>
+                        <button type="button" class="nv-btn primary" :disabled="!!creating" @click="create()"><NvIcon name="plus" />开始创作</button>
                         <button type="button" class="nv-btn" @click="continueLast"><NvIcon name="clock" />继续上次</button>
                     </div>
                 </div>
@@ -405,7 +401,7 @@ onBeforeUnmount(() => {
                         </div>
                     </Transition>
                 </div>
-                <button type="button" class="nv-btn primary" @click="pickerOpen = true"><NvIcon name="plus" />新建画布</button>
+                <button type="button" class="nv-btn primary" :disabled="!!creating" @click="create()"><NvIcon name="plus" />新建画布</button>
             </div>
 
             <!-- 卡片 -->
@@ -416,7 +412,7 @@ onBeforeUnmount(() => {
                 <span class="ic"><NvIcon name="grid9" :size="22" /></span>
                 <h2 class="t2">暂无画布</h2>
                 <p class="p">点击「新建画布」开始你的第一个创作</p>
-                <button type="button" class="nv-btn primary" @click="pickerOpen = true"><NvIcon name="plus" />新建画布</button>
+                <button type="button" class="nv-btn primary" :disabled="!!creating" @click="create()"><NvIcon name="plus" />新建画布</button>
             </div>
             <div v-else-if="!shown.length" class="cl-empty">
                 <span class="ic"><NvIcon name="search" :size="22" /></span>
@@ -428,7 +424,7 @@ onBeforeUnmount(() => {
                     <button type="button" class="cl-prev" :data-n="thumbsOf(c).length" :aria-label="'打开 ' + (c.title || '未命名画布')" @click="open(c)">
                         <img v-for="(u, k) in thumbsOf(c)" :key="k" :src="thumbSrc(u)" alt="" loading="lazy" decoding="async" fetchpriority="low" width="480" height="300" @error="onThumbError(c, u)">
                         <span v-if="!thumbsOf(c).length" class="cl-blank"><NvIcon name="grid9" :size="22" /></span>
-                        <span class="nv-badge" :class="c.kind === 'smart' ? 'strong' : 'on-image'">{{ c.kind === 'smart' ? '智能' : 'BEAT' }}</span>
+                        <span class="nv-badge" :class="c.kind === 'smart' ? 'strong' : 'on-image'">{{ c.kind === 'smart' ? '旧版' : '智能画布' }}</span>
                     </button>
                     <div class="cl-more-wrap">
                         <button type="button" class="cl-more" aria-label="更多操作" :aria-expanded="menuFor === c.id" @click.stop="toggleMenu(c.id)"><NvIcon name="more" /></button>
@@ -468,27 +464,6 @@ onBeforeUnmount(() => {
                     <svg class="ring" viewBox="0 0 18 18"><circle class="bg" cx="9" cy="9" r="7" /><circle class="fg" cx="9" cy="9" r="7" /></svg>
                     <span>已删除「{{ undo.title }}」</span>
                     <button type="button" @click="doUndo">撤销</button>
-                </div>
-            </div>
-        </Transition>
-
-        <!-- 新建选择器 -->
-        <Transition name="sheet">
-            <div v-if="pickerOpen" class="nv-scrim cl-scrim" @click.self="pickerOpen = false">
-                <div class="cl-modal" role="dialog" aria-modal="true" aria-label="新建画布">
-                    <div class="cl-mhead"><h3>新建画布</h3><button type="button" class="nv-icon-btn sm" aria-label="关闭" @click="pickerOpen = false"><NvIcon name="x" /></button></div>
-                    <div class="cl-picks">
-                        <button type="button" class="cl-pick" :disabled="!!creating" @click="create('classic')">
-                            <span class="ic"><NvIcon name="grid9" /></span>
-                            <span class="tx"><b>智能画布BEAT</b><span>NOVAI 无限画布，自由拖拽布局图像与节点</span></span>
-                            <span v-if="creating === 'classic'" class="spin"></span><NvIcon v-else name="arrowr" class="go" />
-                        </button>
-                        <button type="button" class="cl-pick" :disabled="!!creating" @click="create('smart')">
-                            <span class="ic"><NvIcon name="sparkles" /></span>
-                            <span class="tx"><b>智能画布</b><span>AI 驱动的智能工作流，自动编排生成管线</span></span>
-                            <span v-if="creating === 'smart'" class="spin"></span><NvIcon v-else name="arrowr" class="go" />
-                        </button>
-                    </div>
                 </div>
             </div>
         </Transition>
@@ -634,16 +609,6 @@ onBeforeUnmount(() => {
 .cl-mhead h3 { margin: 0; flex: 1; font: 500 16px/24px var(--font-sans); letter-spacing: -.01em; }
 .cl-mhead .grow + .nv-btn { margin-right: 2px; }
 .cl-mhead h3 + .grow { display: none; }
-.cl-picks { padding: 0 20px 20px; display: flex; flex-direction: column; gap: 8px; }
-.cl-pick { display: flex; align-items: center; gap: 14px; padding: 14px 14px; border: 0; border-radius: 14px; background: var(--fill-1); cursor: pointer; text-align: left; color: var(--ink); transition: background var(--duration-fast), transform var(--duration-base) var(--ease-out); }
-.cl-pick:hover { background: var(--fill-2); }
-.cl-pick:active { transform: scale(.99); }
-.cl-pick:disabled { cursor: default; opacity: .7; }
-.cl-pick .ic { width: 40px; height: 40px; flex: none; border-radius: 12px; background: var(--solid); box-shadow: var(--shadow-float); display: flex; align-items: center; justify-content: center; }
-.cl-pick .tx { flex: 1; display: flex; flex-direction: column; gap: 3px; }
-.cl-pick b { font: 500 13px/18px var(--font-sans); } .cl-pick .tx span { font: 400 12px/18px var(--font-sans); color: var(--ink-3); }
-.cl-pick .go { width: 16px; height: 16px; color: var(--ink-3); transition: transform var(--duration-base) var(--ease-out); }
-.cl-pick:hover .go { transform: translateX(3px); color: var(--ink); }
 .cl-mbody { padding: 0 24px 20px; }
 .cl-note { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--fill-1); font: 400 12px/16px var(--font-sans); color: var(--ink-3); }
 .cl-note .nv-i { width: 14px; height: 14px; }

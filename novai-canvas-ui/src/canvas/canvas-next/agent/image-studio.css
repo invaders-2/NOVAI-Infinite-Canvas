@@ -263,7 +263,6 @@
 .cn-root .studio-linkbtn:focus-visible,
 .cn-root .studio-primary:focus-visible,
 .cn-root .studio-lb-nav:focus-visible,
-.cn-root .studio-lb-close:focus-visible,
 .cn-root .studio-lb-btn:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--solid) 52%, transparent);
   outline-offset: 2px;
@@ -491,7 +490,6 @@
   font-size: 13px;
 }
 
-.cn-root .studio-lb-close,
 .cn-root .studio-lb-nav {
   position: absolute;
   z-index: 2;
@@ -507,10 +505,8 @@
   transition: background-color var(--d-feedback) var(--e-std);
 }
 
-.cn-root .studio-lb-close:hover,
 .cn-root .studio-lb-nav:hover { background: rgba(255, 255, 255, 0.26); }
 
-.cn-root .studio-lb-close { right: 18px; top: 18px; width: 34px; height: 34px; }
 .cn-root .studio-lb-nav { top: 50%; width: 40px; height: 40px; margin-top: -20px; }
 .cn-root .studio-lb-nav.prev { left: 18px; }
 .cn-root .studio-lb-nav.next { right: 18px; }
@@ -687,7 +683,6 @@
   .cn-root .studio-tile-pick,
   .cn-root .studio-act,
   .cn-root .studio-lb,
-  .cn-root .studio-lb-close,
   .cn-root .studio-lb-nav { transition: none; animation: none; }
   .cn-root .studio-tile-skeleton { animation: none; background: var(--sunken); }
   .cn-root .studio-lb-skeleton { animation: none; }

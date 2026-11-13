@@ -25,6 +25,11 @@ export type QueuedMsg = {
   urgent?: boolean;
 };
 
+/** 用一段现成文本（建议芯片 / 快捷动作）建快照：文本原样进 snap.text，不读 draft */
+export function snapshotForText(text: string, base: Omit<QueueSnapshot, "text">): QueueSnapshot {
+  return { ...base, text: String(text ?? "") };
+}
+
 export type EnqueueResult = { ok: boolean; list: QueuedMsg[] };
 
 /** 追加到队尾；到上限就原样返回（调用方据此提示，别丢用户输入） */

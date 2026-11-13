@@ -86,8 +86,13 @@ class SniffMediaExtTests(unittest.TestCase):
         kind, ext = assets_routes._resolve_media_kind_ext("v.mp4", "video/mp4", b"garbage")
         self.assertEqual((kind, ext), ("video", ".mp4"))
 
-    def test_svg_is_not_promoted(self):
-        kind, _ = assets_routes._resolve_media_kind_ext("/a.svg", "application/octet-stream", b"<svg xmlns='http://www.w3.org/2000/svg'></svg>")
+    def test_svg_kept_by_extension(self):
+        # task-5 后 .svg 是已知图片扩展名（后端不再一律改 .png），import-urls 按扩展名收成 image/.svg；
+        # 网页采集层的 SVG 过滤不在这里（见 tests/test_page_import.py 的 meta_svg_dropped / data_and_svg_skipped）
+        kind, ext = assets_routes._resolve_media_kind_ext("/a.svg", "application/octet-stream", b"<svg xmlns='http://www.w3.org/2000/svg'></svg>")
+        self.assertEqual((kind, ext), ("image", ".svg"))
+        # 真正认不出的矢量/游标格式仍然拒绝
+        kind, _ = assets_routes._resolve_media_kind_ext("/a.cur", "application/octet-stream", b"\x00\x00\x02\x00")
         self.assertIsNone(kind)
 
 

@@ -215,8 +215,12 @@ const goodSha = crypto.createHash('sha512').update(fs.readFileSync(hashFile)).di
     const preload = read('desktop/preload.js');
     const updateJs = read('web/src/lib/update.js');
     ok(/const macUpdater = require\('\.\/mac-updater'\)/.test(main), '主进程 require mac-updater');
-    ok(/autoUpdater\.on\('update-available'[\s\S]{0,400}showMacUpdateAvailablePrompt\(info\)/.test(main), 'update-available 在 darwin 走自替换确认框');
-    ok(/message: '发现新版本 v' \+ next/.test(main) && /自动替换安装/.test(main), '确认框文案（下载并自动替换）');
+    ok(!/showMacUpdateAvailablePrompt/.test(main), 'mac 原生更新确认框已移除（旧行为）');
+    const availableAt = main.indexOf("autoUpdater.on('update-available'");
+    const availableBlock = availableAt >= 0 ? main.slice(availableAt, main.indexOf("autoUpdater.on('download-progress'", availableAt)) : '';
+    ok(!!availableBlock && !/dialog\.showMessageBox|showMacUpdateAvailablePrompt/.test(availableBlock), 'update-available 在 darwin 也不弹窗');
+    ok(/startUpdateDownload\(info\)/.test(availableBlock), 'update-available 直接走静默下载（mac 内部转 startMacSilentDownload）');
+    ok(/function startMacSilentDownload/.test(main) && /await prepareMacUpdate\(info\)/.test(main), 'mac 静默下载只下 zip 并校验，不退出应用');
     ok(/net\.request\(\{ url: url, method: 'GET', redirect: 'follow' \}\)/.test(main), '下载使用 Electron net（跟随 302）');
     ok(/createHash\('sha512'\)/.test(main) && /sha512 校验失败/.test(main), '下载同时校验 sha512');
     ok(/runCommand\('ditto', \['-x', '-k'/.test(main), 'ditto 解压');
@@ -237,8 +241,12 @@ const goodSha = crypto.createHash('sha512').update(fs.readFileSync(hashFile)).di
     const pkg = JSON.parse(read('desktop/package.json'));
     ok(Array.isArray(pkg.build.files) && pkg.build.files.includes('mac-updater.js'), '打包 files 里包含 mac-updater.js');
     const ipcInstall = (main.match(/ipcMain\.handle\('novai:update-install'[\s\S]*?\n  \}\);/g) || [''])[0];
-    ok(/process\.platform === 'darwin'\) \{/.test(ipcInstall) && /startMacSelfUpdate\(pendingUpdateInfo, true\)/.test(ipcInstall), 'renderer 点「立即更新」在 darwin 直接进入自替换');
-    ok(/if \(process\.platform === 'darwin'\) return;[\s\S]{0,200}showUpdateInstallPrompt\(\);/.test(main), 'darwin 不再弹旧的「手动覆盖安装」对话框');
+    ok(/process\.platform === 'darwin'\) \{/.test(ipcInstall) && /applyUpdateNow\(\)/.test(ipcInstall), 'renderer 点「立即重启」在 darwin 走自替换安装');
+    ok(/MAC_UPDATE_ZIP_OVERRIDE/.test(ipcInstall) && /startMacSelfUpdate\(null, true\)/.test(ipcInstall), '离线测试钩子仍直接走自替换');
+    const downloadedAt = main.indexOf("autoUpdater.on('update-downloaded'");
+    const downloadedBlock = downloadedAt >= 0 ? main.slice(downloadedAt, main.indexOf("autoUpdater.on('error'", downloadedAt)) : '';
+    ok(!/showUpdateInstallPrompt|dialog\.showMessageBox/.test(downloadedBlock), 'darwin 不再弹旧的「手动覆盖安装」对话框');
+    ok(/onUpdatePackageReady\(version, info\)/.test(downloadedBlock), 'darwin 下载完成同样推 downloaded 事件');
 
     console.log('[6] 镜像 latest-mac.yml 解析与「镜像失败回退 GitHub」');
     function mainFunction(name) {
@@ -298,11 +306,14 @@ const goodSha = crypto.createHash('sha512').update(fs.readFileSync(hashFile)).di
     } catch (err) { githubError = err.message; }
     ok(githubError === 'GitHub reset', 'GitHub 也失败时把 GitHub 错误抛给上层（走原有失败提示）');
 
+    const prepareFn = mainFunction('prepareMacUpdate');
+    ok(/withMacUpdateSource\(/.test(prepareFn), 'prepareMacUpdate 先镜像后 GitHub');
+    ok(/resolveMirrorMacUpdate\(app\.getVersion\(\)\)/.test(prepareFn), '镜像 manifest 用当前版本判断');
+    ok(/source: 'mirror'/.test(prepareFn) && /source: 'github'/.test(prepareFn), '两个来源都传给 prepareMacZip');
+    ok(/本次 macOS 更新源=/.test(prepareFn), '日志记录最终使用的更新源');
     const startFn = mainFunction('startMacSelfUpdate');
-    ok(/withMacUpdateSource\(/.test(startFn), 'startMacSelfUpdate 先镜像后 GitHub');
-    ok(/resolveMirrorMacUpdate\(app\.getVersion\(\)\)/.test(startFn), '镜像 manifest 用当前版本判断');
-    ok(/source: 'mirror'/.test(startFn) && /source: 'github'/.test(startFn), '两个来源都传给 prepareMacZip');
-    ok(/本次 macOS 更新源=/.test(startFn), '日志记录最终使用的更新源');
+    ok(/prepareMacUpdate\(info \|\| pendingUpdateInfo\)/.test(startFn) && /installMacPreparedUpdate\(prepared/.test(startFn), 'startMacSelfUpdate 复用已下载 zip 并走两阶段安装');
+    ok(/macPreparedUpdate/.test(startFn), '已下载好的 zip 不会重复下载');
     const prepFn = mainFunction('prepareMacZip');
     ok(/downloadMacUpdateZip\(attemptUrls\[attempt\], zipPath, expectedSha, expectedSize\)/.test(prepFn), '镜像和 GitHub 复用 downloadMacUpdateZip');
     ok(/verifySha512\(zipPath, expectedSha\)/.test(prepFn) && /大小校验失败/.test(prepFn), '下载后校验 sha512 / size');

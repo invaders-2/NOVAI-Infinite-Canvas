@@ -1,4 +1,4 @@
-// 通用弹层定位（从 pages/chat/usePop.js 移来，首页与对话页共用）
+// 通用弹层定位（从原对话页移来；对话页已下线，保留作通用弹层能力）
 // 输入框里的几个弹层（模型 / 尺寸 / 思考强度）：Teleport 到 body，按触发按钮的位置 fixed 定位，
 // 优先向上弹、上方放不下才向下（与旧 positionModelPicker 同一规则）；同一时间只开一个；点外面 / Esc 关闭。
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';

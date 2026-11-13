@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 供应商列表只保留「已配置 Key」的供应商（has_key !== false）。
 //
-// 口径与 static/gpt-chat.html 一致：p.enabled !== false && p.has_key !== false && (p[key]||[]).length。
+// 口径：p.enabled !== false && p.has_key !== false && (p[key]||[]).length。
 // 没配 Key 的供应商不出现在模型/供应商下拉里；过滤后为空就真的为空，
 // 不允许再被 defaultApiProviders() / 硬编码 comfly 兜底加回来。
 //

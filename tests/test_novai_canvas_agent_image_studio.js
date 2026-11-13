@@ -51,7 +51,9 @@ has(studio, 'document.querySelector<HTMLElement>(".cn-root")', '查看器 portal
 has(studio, 'event.key === "Escape"', '查看器支持 Esc');
 has(studio, 'event.key === "ArrowLeft"', '查看器支持 ←');
 has(studio, 'event.key === "ArrowRight"', '查看器支持 →');
-has(studio, 'event.target === event.currentTarget', '遮罩点击关闭（只在点到遮罩本身时关）');
+has(studio, 'const closeOnBlank = (event: MouseEvent<HTMLDivElement>)', '点空白关闭的处理函数');
+has(studio, 'closest("img, video, canvas, a, button, .studio-lb-bar")', '图片 / 视频 / 信息栏 / 按钮本体不关闭');
+hasNot(studio, 'studio-lb-close', '大图不再有右上角关闭按钮');
 has(studio, 'onDoubleClick={onDoubleClick}', '整块双击可打开大图');
 has(studio, 'kind === "video"', '视频角标');
 has(studio, 'error ? <span className="studio-tile-badge"', '导入失败角标');
@@ -214,6 +216,18 @@ const html = read('static/canvas.html');
 const versions = [...html.matchAll(/canvas\.(?:css|js)\?v=([0-9.]+)/g)].map((m) => m[1]);
 assert.strictEqual(versions.length, 2, 'canvas.css / canvas.js 各一处 ?v=');
 assert.strictEqual(versions[0], versions[1], 'canvas.css / canvas.js 版本号必须一致');
-assert.ok(/^2\.0\.05\.\d+$/.test(versions[0]), '版本号前缀 2.0.05.<epoch 秒>');
+/* 版本号不写死：读项目版本（desktop/package.json，退回 VERSION）再比对；页面 tag 用 2.0.06，
+   package.json 是 2.0.6，按数字分段归一后再比，避免前导零差异。 */
+const projectVersion = (() => {
+    try { return String(JSON.parse(read('desktop/package.json')).version || ''); } catch (e) {}
+    try { return read('VERSION').trim().split('\n')[0].trim(); } catch (e) {}
+    return '';
+})();
+const versionTagOk = (tag) => {
+    if (!/^\d+(\.\d+)+$/.test(tag)) return false;
+    const norm = (v) => String(v).split('.').map((x) => String(Number(x))).join('.');
+    return projectVersion ? norm(tag.slice(0, tag.lastIndexOf('.'))) === norm(projectVersion) : true;
+};
+assert.ok(versionTagOk(versions[0]), '版本号是「项目版本.mtime」形式（当前 ' + versions[0] + '，项目版本 ' + projectVersion + '）');
 
 console.log('\nALL PASS · 源码契约 ' + '60+ 项');

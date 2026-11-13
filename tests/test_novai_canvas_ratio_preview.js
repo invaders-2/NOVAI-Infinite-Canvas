@@ -9,7 +9,7 @@ const root = path.join(__dirname, '..');
 function load(entry) {
     const result = esbuild.buildSync({
         entryPoints: [path.join(root, entry)], bundle: true, platform: 'node',
-        format: 'cjs', write: false, logLevel: 'silent',
+        format: 'cjs', write: false, logLevel: 'silent', loader: { '.css': 'text' },
     });
     const module = { exports: {} };
     new Function('module', 'exports', 'require', result.outputFiles[0].text)(module, module.exports, require);
@@ -27,6 +27,8 @@ global.localStorage = {
 const fit = load('novai-canvas-ui/src/canvas/canvas-next/mediaFit.ts');
 const model = load('novai-canvas-ui/src/canvas/canvas-next/model.ts');
 const { CanvasStore } = load('novai-canvas-ui/src/canvas/canvas-next/store.ts');
+const engine = load('novai-canvas-ui/src/canvas/canvas-next/engine.ts');
+const actions = load('novai-canvas-ui/src/canvas/canvas-next/actions.ts');
 
 const eq = (a, b, msg) => assert.deepStrictEqual(a, b, msg);
 
@@ -40,6 +42,17 @@ eq(fit.ratioOf('auto'), null, 'auto 没有已知比例');
 eq(fit.ratioOf(''), null, '空串 → null');
 eq(fit.ratioOf(undefined), null, 'undefined → null');
 eq(fit.ratioOf('0:4'), null, '宽 0 不合法');
+// 「原图比例」的显式 WxH（params.sourceSize）也要能解析成比例
+eq(fit.sizeRatioOf('2048x1536'), 4 / 3, 'sourceSize 2048x1536 → 4:3');
+eq(fit.sizeRatioOf(' 2048×1536 '), 4 / 3, 'sourceSize 允许 × 与空格');
+eq(fit.sizeRatioOf('1024'), null, '缺一半 → null');
+eq(fit.sizeRatioOf('0x100'), null, '宽 0 → null');
+eq(fit.sizeRatioOf(''), null, '空串 → null');
+assert.strictEqual(fit.isAdaptiveRatio('自适应'), true);
+assert.strictEqual(fit.isAdaptiveRatio('adaptive'), true);
+assert.strictEqual(fit.isAdaptiveRatio('auto'), true);
+assert.strictEqual(fit.isAdaptiveRatio('16:9'), false);
+assert.strictEqual(fit.isAdaptiveRatio(''), false);
 
 /* ---------- 假后端 ---------- */
 const imgModel = { id: 'prov::img', name: 'img', vendor: 'v', kind: 'image', ratios: ['自适应', '1:1', '3:4', '16:9', '9:16', '21:9'], sizes: ['1K', '2K'], batch: [1, 2, 4], maxRefs: 0, i2i: false, secs: 10, tags: [] };
@@ -66,6 +79,7 @@ function emptyNode(kind, w, h, extra = {}) {
     return n.id;
 }
 const sizeOf = (id) => { const n = store.node(id); return { w: n.w, h: n.h }; };
+const inputsOfId = (id) => model.inputsOf(store.state.doc, id);
 const setRatio = (id, ratio) => store.patchGen(id, (g) => ({ params: { ...g.params, ratio } }));
 
 /* ---------- 空图片节点：改比例立刻按比例摆正 ---------- */
@@ -82,8 +96,9 @@ setRatio(img, '1:1');
 eq(sizeOf(img), { w: 240, h: 240 }, '1:1 → 240×240');
 setRatio(img, '3:4');
 const beforeAdaptive = sizeOf(img);
+// 原图比例：比例本身不写死，必须从源图尺寸（上游结果 / params.sourceSize）来；没有源图就拿不到，保持原尺寸、不猜 1:1
 setRatio(img, '自适应');
-eq(sizeOf(img), beforeAdaptive, '自适应没有已知比例：保持原尺寸');
+eq(sizeOf(img), beforeAdaptive, '原图比例但没有源图：保持原尺寸');
 setRatio(img, 'adaptive');
 eq(sizeOf(img), beforeAdaptive, 'adaptive 同样保持原尺寸');
 
@@ -104,7 +119,7 @@ setRatio(vid, '3:4');
 eq(sizeOf(vid), { w: 320, h: 427 }, '视频 3:4 → 320×427');
 const vidBefore = sizeOf(vid);
 setRatio(vid, 'adaptive');
-eq(sizeOf(vid), vidBefore, '视频 adaptive 保持原尺寸');
+eq(sizeOf(vid), vidBefore, '视频原图比例但没有源图：保持原尺寸');
 
 /* ---------- 有结果的节点：真实比例优先 ---------- */
 const done = emptyNode('image', 240, 320);
@@ -114,6 +129,79 @@ setRatio(done, '16:9');
 eq(sizeOf(done), { w: 240, h: 320 }, '已有结果的节点改比例：尺寸不动');
 store.patchGen(done, (g) => ({ params: { ...g.params, size: '2K' } }));
 eq(sizeOf(done), { w: 240, h: 320 }, '已有结果的节点改其它参数也不动');
+
+/* ---------- 原图比例：有源图 / 有显式 WxH 就按源图比例摆正 ---------- */
+const setOriginal = (id, size) => store.patchGen(id, (g) => ({ params: { ...g.params, ratio: '自适应', sourceSize: size } }));
+
+// 面板选「原图比例」时把显式 WxH 写进 params.sourceSize：宽度沿用节点当前宽，位置不动
+const autoSrc = emptyNode('image', 360, 270, { hist: [{ url: '/assets/source-4x3.png', w: 2048, h: 1536 }], hi: 0 });
+const autoTarget = emptyNode('image', 240, 240);
+actions.connect(store, autoSrc, autoTarget);
+store.updateNode(autoTarget, (n) => ({ ...n, x: 88, y: 66 }));
+setOriginal(autoTarget, '2048x1536');
+eq(sizeOf(autoTarget), { w: 240, h: 180 }, '原图比例（sourceSize 2048×1536）→ 240×180');
+eq({ x: store.node(autoTarget).x, y: store.node(autoTarget).y }, { x: 88, y: 66 }, '按源图比例摆正只改宽高，位置不动');
+
+// 只写了 sourceSize（没有连线 / 上游没有结果）：一样按它摆正；换比例再摆一次
+const sizeOnly = emptyNode('image', 240, 240);
+setOriginal(sizeOnly, '1024x1024');
+eq(sizeOf(sizeOnly), { w: 240, h: 240 }, 'sourceSize 1024×1024 → 240×240');
+setOriginal(sizeOnly, '1600x900');
+eq(sizeOf(sizeOnly), { w: 240, h: 135 }, 'sourceSize 1600×900 → 240×135');
+
+// 只有上游结果的真实尺寸、还没写 sourceSize：也按它摆正（不猜 1:1）
+const srcOnlySrc = emptyNode('image', 360, 270, { hist: [{ url: '/assets/source-9x16.png', w: 1080, h: 1920 }], hi: 0 });
+const srcOnly = emptyNode('image', 240, 240);
+actions.connect(store, srcOnlySrc, srcOnly);
+setRatio(srcOnly, '自适应');
+eq(sizeOf(srcOnly), { w: 240, h: 427 }, '原图比例：只有上游结果尺寸也按它摆正（9:16 → 240×427）');
+
+// 连入 / 更换参考图之后（比例已经是原图比例）：按新源图比例摆正一次
+const lateSrc = emptyNode('image', 360, 270, { hist: [{ url: '/assets/late.png', w: 900, h: 1600 }], hi: 0 });
+const late = emptyNode('image', 240, 240);
+setRatio(late, '自适应');
+eq(sizeOf(late), { w: 240, h: 240 }, '还没有源图：原图比例保持原尺寸');
+actions.connect(store, lateSrc, late);
+eq(sizeOf(late), { w: 240, h: 427 }, '连入 9:16 源图后立刻按它摆正（不用等生成）');
+assert(Math.abs(fit.sizeRatioOf(model.genOf(store.node(late)).params.sourceSize) - 9 / 16) < 1e-6, '源图比例记进 params.sourceSize（按尺寸档长边）');
+// 同比例的源图再连进来：备忘没变，不重摆（用户拖过的尺寸不会被弹回去）
+store.updateNode(late, (n) => ({ ...n, w: 360, h: 360 }));
+actions.connect(store, emptyNode('image', 100, 100, { hist: [{ url: '/assets/late2.png', w: 600, h: 1200 }], hi: 0 }), late);
+eq(sizeOf(late), { w: 360, h: 360 }, '同比例的源图再连进来：不把拖过的尺寸弹回去');
+// 移除第一张、源图换成第二张（1:2）：源图比例变了，按新比例摆正（320×640 收进最大盒）
+store.removeEdge(inputsOfId(late)[0].edge.id);
+actions.afterInputsChanged(store, late);
+eq(sizeOf(late), { w: 320, h: 640 }, '换掉的源图比例不同：按新源图比例摆正一次');
+
+// 已有结果的节点：真实结果比例优先
+const withOut = emptyNode('image', 240, 320, { hist: [{ url: '/assets/out.png', w: 1024, h: 768 }], hi: 0 });
+setOriginal(withOut, '2048x1536');
+eq(sizeOf(withOut), { w: 240, h: 320 }, '已有结果的节点：真实结果比例优先，不按原图比例改尺寸');
+
+// 用户拖过的尺寸：只在比例取值真的变了（或源图比例第一次可用）时摆正
+const dragged2 = emptyNode('image', 240, 240);
+setOriginal(dragged2, '2048x1536');
+eq(sizeOf(dragged2), { w: 240, h: 180 }, '原图比例先摆正一次');
+store.updateNode(dragged2, (n) => ({ ...n, w: 360, h: 300 }));
+store.patchGen(dragged2, (g) => ({ params: { ...g.params, size: '1K' } }));
+eq(sizeOf(dragged2), { w: 360, h: 300 }, '只改清晰度：不把拖过的尺寸弹回去');
+store.patchGen(dragged2, (g) => ({ params: { ...g.params, sourceSize: '1024x768' } }));
+eq(sizeOf(dragged2), { w: 360, h: 300 }, '同比例换尺寸档（2048×1536 → 1024×768）：不重摆');
+store.patchGen(dragged2, (g) => ({ params: { ...g.params, sourceSize: '1024x1024' } }));
+eq(sizeOf(dragged2), { w: 360, h: 360 }, '源图比例真的变了（4:3 → 1:1）：按当前宽度重新摆正');
+
+// 视频节点同一套逻辑
+const vidSrc = emptyNode('image', 360, 270, { hist: [{ url: '/assets/vsrc.png', w: 1080, h: 1920 }], hi: 0 });
+const vidAuto = emptyNode('video', 320, 180);
+actions.connect(store, vidSrc, vidAuto);
+setRatio(vidAuto, 'adaptive');
+eq(sizeOf(vidAuto), { w: 320, h: 569 }, '视频原图比例：9:16 源图 → 320×569');
+const vidLateSrc = emptyNode('image', 360, 270, { hist: [{ url: '/assets/vlate.png', w: 1080, h: 1920 }], hi: 0 });
+const vidLate = emptyNode('video', 320, 180);
+setRatio(vidLate, 'adaptive');
+actions.connect(store, vidLateSrc, vidLate);
+eq(sizeOf(vidLate), { w: 320, h: 569 }, '连入 9:16 源图后视频生成前就按它摆正');
+assert(Math.abs(fit.sizeRatioOf(model.genOf(store.node(vidLate)).params.sourceSize) - 9 / 16) < 1e-6, '视频同样记下源图比例备忘（只判断比例是否变，不发请求）');
 
 /* ---------- 文本 / 非图片视频节点 ---------- */
 const txt = emptyNode('text', 280, 200);
@@ -167,7 +255,15 @@ const modelSrc = src('model.ts');
 assert(fitSrc.includes('export function ratioOf') && fitSrc.includes('export function fitMediaBox'), 'mediaFit 导出 ratioOf 与 fitMediaBox');
 assert(engineSrc.includes('ratioOf') && !engineSrc.includes('export function ratioOf'), 'engine 改成从 mediaFit 引入 ratioOf，不再自己定义一份');
 assert(modelSrc.includes('const wantRatio =') && modelSrc.includes('fitMediaBox(size.w, wantRatio, 1)'), '新建节点用同一套盒子按默认比例定初始尺寸');
-assert(storeSrc.includes('function fitEmptyRatio') && storeSrc.includes('fitEmptyRatio(n, fn(n))'), 'updateNode 挂上「空节点按比例摆正」的不变量');
+assert(storeSrc.includes('function fitEmptyRatio') && storeSrc.includes('fitEmptyRatio(n, fn(n), d)'), 'updateNode 挂上「空节点按比例摆正」的不变量（带上文档，原图比例要读源图尺寸）');
+assert(storeSrc.includes('wantedRatio(doc, next, kind)') && storeSrc.includes('declaredRatio(genOf(prev).params)'), '空节点摆正：目标比例按源图算，比较只看参数里已写着的比例');
+const originalRatioSrc = src('originalRatio.ts');
+assert(originalRatioSrc.includes('export function wantedRatio') && originalRatioSrc.includes('export function declaredRatio'), 'originalRatio 提供「这次要用的比例 / 参数里已写着的比例」');
+assert(originalRatioSrc.includes('sizeRatioOf(p.sourceSize)') && originalRatioSrc.includes('sourceBoxInDoc(doc, node, kind)'), '原图比例先认 params.sourceSize，再退到源图真实像素');
+assert(engineSrc.includes('wantedRatio(store.state.doc, node, node.kind as GenKind, req.params)') && engineSrc.includes('const wantBox ='), '生成中占位也走同一个比例函数（原图比例能识别 sourceSize / 源图尺寸）');
+const actionsSrc = src('actions.ts');
+assert(actionsSrc.includes('function syncSourceRatio') && actionsSrc.includes('syncSourceRatio(store, n)'), '输入变化后同步原图比例');
+assert(actionsSrc.includes('sourceSizeForTier(sourceBoxForNode(store, n, n.kind as GenKind), tier)'), '连入 / 更换参考图后按新源图尺寸重写备忘（0 尺寸不写）');
 
 /* ---------- 源码接线：换比例的尺寸过渡 / 拖拽缩放不播 / 圆角缩放手柄 ---------- */
 const nodeViewSrc = src('ui/NodeView.tsx');
@@ -200,6 +296,7 @@ assert(cssSrc.includes('.cn-root .rz{') && cssSrc.includes('color:var(--solid)')
 // 空状态的浮动工具条：图片只留「上传」一颗，文本 / 视频 / 音频不挂（生成中、有结果、非生成类都不受影响）
 const genPanelSrc = src('ui/GenPanel.tsx');
 assert(genPanelSrc.includes('if (isGenKind(node.kind) && !out && !running && node.kind !== "image") return null;'), 'Toolbar：空状态的文本 / 视频 / 音频不渲染整条，图片例外');
+assert(genPanelSrc.includes('if (kind !== "image" && kind !== "video") return;') && genPanelSrc.includes('isAdaptiveRatio(ratioMemo.ratio)'), '面板量到源图尺寸后写回备忘（图片 / 视频同一处）');
 // 空图片节点不再走 FloatMenuBar，而是单独一颗按钮：只有一个 upload 按钮、图标 + 文字常显
 const emptyUpload = genPanelSrc.slice(genPanelSrc.indexOf('className="float enter ntb-empty-upload"'), genPanelSrc.indexOf('if (running) items ='));
 assert(emptyUpload.includes('data-tb="upload"') && emptyUpload.includes('<Icon name="upload" />上传'), '空图片节点：图标 + 「上传」文字都写在按钮里（不靠 hover 展开）');
@@ -216,4 +313,50 @@ assert(cssEmpty.includes('gap:6px'), '图标与文字间距 6');
 assert(cssSrc.includes('#ntb.ntb-empty-upload .ib svg.i{width:15px;height:15px'), 'upload 图标 15px');
 assert(/\.cn-root \.node\.sel \.rz\{opacity:1\}/.test(cssSrc), '手柄仍然只在选中时显示');
 
-console.log('[PASS] 空状态图片 / 视频节点宽高跟随所选比例（改比例立刻摆正、自适应与已有结果不动、拖过的尺寸只认比例变化、新建即按默认比例；换比例有尺寸过渡、拖拽缩放不播、缩放手柄是角外圆头弧线；空状态图片节点一颗磨砂玻璃「上传」单按钮条、其它生成类空状态不挂浮动工具条）');
+/* ---------- 生成中占位：点生成那一帧就按原图比例（不等到结果回来） ---------- */
+(async () => {
+    const pressed = [];
+    let runStore = null;
+    const backend = {
+        available: () => true,
+        loadDoc: async () => ({ doc: { nodes: [], edges: [], comments: [] }, version: 1 }),
+        listModels: async () => [imgModel, vidModel],
+        saveDoc: async () => ({ ok: true, version: 2 }),
+        importAsset: async (_canvas, url) => url,
+        resolveAsset: async (url) => url,
+        generate: async (req) => {
+            const n = runStore.node(req.nodeId);
+            pressed.push({ node: req.nodeId, ratio: req.params.ratio, sourceSize: req.params.sourceSize, w: n.w, h: n.h });
+            return { outputs: [{ url: '/out/' + req.nodeId + '.png', w: 2048, h: 1536 }] };
+        },
+    };
+    runStore = new CanvasStore(backend, 'canvas-ratio-placeholder-test');
+    const imgParams = (patch) => ({ ...model.defaultParams('image', imgModel), model: imgModel.id, ...patch });
+    const vidParams = (patch) => ({ ...model.defaultParams('video', vidModel), model: vidModel.id, ...patch });
+    const docOf = (nodes, edges) => ({ doc: { nodes, edges, comments: [] }, loaded: true, models: [imgModel, vidModel] });
+
+    // A) 面板写下的显式 WxH：没连参考图也能算（请求里的 sourceSize 就够）
+    const a = model.newNode('image', 0, 0, { w: 240, h: 240, prompt: '画一张', params: imgParams({ ratio: '自适应', sourceSize: '2048x1536' }) }, imgModel);
+    runStore.set(docOf([a], []));
+    assert.strictEqual(await engine.runNode(runStore, a.id), true, '原图比例 + sourceSize：生成跑起来了');
+    assert.deepStrictEqual({ w: pressed[0].w, h: pressed[0].h }, { w: 240, h: 180 }, '点生成那一帧占位就是 240×180（4:3），不用等结果');
+    assert.deepStrictEqual({ w: runStore.node(a.id).w, h: runStore.node(a.id).h }, { w: 240, h: 180 }, '结果回来按真实像素摆正（2048×1536 → 240×180）');
+
+    // B) 只有上游参考图的真实尺寸（还没写 sourceSize）：占位直接复用源图尺寸
+    const up = model.newNode('image', 0, 0, { w: 240, h: 320, hist: [{ url: '/in.png', w: 1536, h: 2048 }], hi: 0, params: imgParams({ ratio: '3:4' }) }, imgModel);
+    const b = model.newNode('image', 600, 0, { w: 240, h: 240, prompt: '看这张参考图', params: imgParams({ ratio: '自适应' }) }, imgModel);
+    runStore.set(docOf([up, b], [{ id: 'eb', from: up.id, to: b.id }]));
+    assert.strictEqual(await engine.runNode(runStore, b.id), true, '原图比例 + 上游源图：生成跑起来了');
+    const pb = pressed[pressed.length - 1];
+    assert.deepStrictEqual({ w: pb.w, h: pb.h }, { w: 240, h: 320 }, '上游 3:4 参考图：生成中占位也是 240×320');
+
+    // C) 视频节点同一套：adaptive + 9:16 参考图 → 占位就是 9:16
+    const vsrc = model.newNode('image', 0, 0, { w: 240, h: 427, hist: [{ url: '/vsrc.png', w: 1080, h: 1920 }], hi: 0, params: imgParams({ ratio: '3:4' }) }, imgModel);
+    const v = model.newNode('video', 600, 0, { w: 320, h: 180, prompt: '镜头推进', params: vidParams({ ratio: 'adaptive' }) }, vidModel);
+    runStore.set(docOf([vsrc, v], [{ id: 'ev', from: vsrc.id, to: v.id }]));
+    assert.strictEqual(await engine.runNode(runStore, v.id), true, '视频原图比例：生成跑起来了');
+    const pv = pressed[pressed.length - 1];
+    assert.deepStrictEqual({ w: pv.w, h: pv.h }, { w: 320, h: 569 }, '视频生成中占位按 9:16 源图摆正（320×569）');
+
+    console.log('[PASS] 空状态图片 / 视频节点宽高跟随所选比例（改比例立刻摆正、原图比例按源图 / sourceSize 摆正、生成中占位第一帧就是原图比例、没有源图与已有结果不动、拖过的尺寸只认比例变化、新建即按默认比例；换比例有尺寸过渡、拖拽缩放不播、缩放手柄是角外圆头弧线；空状态图片节点一颗磨砂玻璃「上传」单按钮条、其它生成类空状态不挂浮动工具条）');
+})().catch((error) => { console.error(error); process.exit(1); });

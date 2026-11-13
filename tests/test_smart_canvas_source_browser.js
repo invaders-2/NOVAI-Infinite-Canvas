@@ -121,7 +121,7 @@ ok(/payload && payload\.open === true\) return;[\s\S]*?closePanel\(\)/.test(js),
 ok(/bindSourceViewClosedSubscription\(\)/.test(js), 'init 里调用订阅');
 ok(/let closeSubscribed = false/.test(js) && /if\(closeSubscribed \|\|/.test(js), '订阅只注册一次（防重复关闭）');
 ok(/pywebviewready[\s\S]*?bindSourceViewClosedSubscription/.test(js), 'pywebviewready 后补订阅');
-ok(/function closePanel\(\)\{[\s\S]*?if\(!panel \|\| !panelOpen\) return;/.test(js), 'closePanel 防重复关闭');
+ok(/function closePanel\(\)\{[\s\S]*?if\(!panel\) return;[\s\S]*?const wasOpen = panelOpen;[\s\S]*?if\(!wasOpen\) return;/.test(js), 'closePanel 幂等：UI 只收一次，原生视图每次都发关闭');
 ok(/classList\.remove\('source-fullscreen'\)/.test(js), '关闭移除 body.source-fullscreen');
 
 console.log('[2f] 面板内工具栏');
@@ -179,7 +179,7 @@ ok(/viewOverlay = true;/.test(js) && /viewOverlay = false;/.test(js), '区分叠
 ok(/window\.frameElement/.test(js) && /fr\.left \+ r\.left \* scale/.test(js) && /fr\.top \+ r\.top \* scale/.test(js), 'rect 含 frameElement 偏移 + 祖先 scale 补偿');
 ok(/fr\.width \/ offsetWidth/.test(js), 'scale = fr.width / frame.offsetWidth');
 ok(/r\.width \* scale/.test(js) && /r\.height \* scale/.test(js), '宽高同样乘 scale');
-ok(/Math\.round\(x\)/.test(js) && /Math\.round\(r\.width \* scale\)/.test(js), 'rect 全部取整');
+ok(/Math\.round\(box\.left\)/.test(js) && /Math\.round\(box\.width\)/.test(js) && /Math\.round\(box\.height\)/.test(js), 'rect 全部取整');
 ok(/function clampViewRect/.test(js) && /viewport\.width - x/.test(js) && /viewport\.height - y/.test(js), 'rect 夹在可视区内（越界收缩宽高）');
 ok(/await viewApi\.open\(\{ source: key, rect, url \}\)/.test(js), 'open_source_view({source, rect, url})');
 ok(/openCustomUrl/.test(js) && /normalizeHttpUrl/.test(js), '自定义网页地址校验与打开');
@@ -189,7 +189,7 @@ ok(/viewApi\.bounds\(\{ rect \}\)/.test(js), 'setBounds 重新对齐');
 ok(/x: -20000/.test(js) && /function hideNativeView/.test(js), '形变期间把原生视图挪出窗口');
 ok(/morphBusy = true;\s*if\(viewOverlay && nativeOpen\) hideNativeView\(\);/.test(js), '形变一开始就隐藏原生视图');
 ok(/morphTimer = setTimeout\(\(\) => \{[\s\S]*?morphBusy = false;[\s\S]*?onMorphSettled\(\);[\s\S]*?\}, wait \+ 16\);/.test(js), '形变结束（260ms 后）再 open/对齐');
-ok(/closeNativeView\(\);[\s\S]{0,160}classList\.remove\('source-browser-open'\)/.test(js), '关闭面板时 close_source_view');
+ok(/closeNativeView\(\);[\s\S]{0,400}classList\.remove\('source-browser-open'\)/.test(js), '关闭面板时 close_source_view');
 ok(/new ResizeObserver/.test(js) && /window\.addEventListener\('resize'/.test(js), 'ResizeObserver + window resize 重新 setBounds');
 ok(/resizeObserver\.observe\(panel\)/.test(js), '面板宽度变化也重新 setBounds');
 ok(/rect: \(\) => viewRect\(\)/.test(js), '对外暴露 rect 计算便于校验');

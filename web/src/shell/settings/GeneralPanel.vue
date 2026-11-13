@@ -33,6 +33,99 @@ function save(key, value) {
 const dataDir = ref('%APPDATA%\\NOVAI');
 function openDataFolder() { const a = pyApi(); if (a && a.open_data_dir) a.open_data_dir().catch(() => {}); else toast('网页模式下请在本机文件管理器里打开数据目录'); }
 
+/* 存储位置：数据库 / 画布 / 素材库 / 生成文件都放在这个目录下。
+   设置写在后端稳定位置的配置文件（Windows %APPDATA%\\NOVAI\\config.json，其它 ~/.NOVAI/），
+   所以数据目录搬走后重启仍能找到新位置；迁移是「先完整复制并校验 → 再改设置」，旧目录保留。 */
+const loc = reactive({ loading: true, error: '', info: null });
+const locTarget = ref('');
+const locBusy = ref(false);
+const locPlan = ref(null);
+const locDone = ref('');
+const locStatus = ref('');
+const locSourceLabel = computed(() => {
+    const source = loc.info && loc.info.data_root_source;
+    return source === 'config' ? '已设置' : source === 'env' ? '环境变量' : '默认位置';
+});
+const locItems = computed(() => (loc.info && loc.info.items) || []);
+const locTotal = computed(() => (loc.info && loc.info.total) || { files: 0, bytes: 0 });
+const locPlanText = computed(() => {
+    const plan = locPlan.value;
+    if (!plan) return '';
+    const parts = (plan.entries || []).map(e => e.name + ' ' + e.files + ' 个文件（' + formatBytes(e.bytes) + '）');
+    const head = plan.action === 'adopt' ? '将切换到已有的数据目录' : '将复制到';
+    const tail = plan.action === 'adopt' ? '当前数据不会删除。' : '旧目录会保留作备份，确认没问题后可自行删除。';
+    return head + ' ' + plan.target + '：' + (parts.join('、') || '没有要复制的内容') + '，共 ' + formatBytes((plan.total || {}).bytes) + '。' + tail;
+});
+async function loadLocation() {
+    try {
+        const r = await fetch('/api/config/storage', { headers: { Accept: 'application/json' } });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        loc.info = await r.json();
+        loc.error = '';
+        if (loc.info && loc.info.data_root) dataDir.value = loc.info.data_root;
+    } catch (e) { loc.error = '读取存储位置失败：' + ((e && e.message) || '接口不可用'); }
+    loc.loading = false;
+}
+async function pickLocationFolder() {
+    const api = pyApi();
+    if (!api || !api.select_directory) { toast('网页模式下请直接填写文件夹路径', { danger: true, icon: 'alert' }); return; }
+    try {
+        const picked = await api.select_directory();
+        if (picked) { locTarget.value = picked; locPlan.value = null; locDone.value = ''; }
+    } catch (e) {}
+}
+async function checkLocation() {
+    const target = String(locTarget.value || '').trim();
+    if (!target) { toast('请先填写新的存储位置', { danger: true, icon: 'alert' }); return; }
+    locBusy.value = true; locDone.value = '';
+    try {
+        const r = await fetch('/api/config/storage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: target, dry_run: true }) });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+        locPlan.value = data;
+    } catch (e) {
+        locPlan.value = null;
+        toast('检查失败：' + ((e && e.message) || '接口不可用'), { danger: true, icon: 'alert' });
+    }
+    locBusy.value = false;
+}
+async function applyLocation(target) {
+    locBusy.value = true;
+    locStatus.value = target ? '正在复制数据，请不要关闭 NOVAI（文件大的话要等一会儿）…' : '正在保存设置…';
+    try {
+        const r = await fetch('/api/config/storage', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: target }) });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+        locPlan.value = null;
+        locDone.value = String(data.message || '已保存，重启 NOVAI 后生效。');
+        toast('存储位置已更新，重启 NOVAI 后生效', { icon: 'check', duration: 6000 });
+        await loadLocation();
+        refreshStorage();
+    } catch (e) {
+        toast('迁移失败：' + ((e && e.message) || '接口不可用'), { danger: true, icon: 'alert', duration: 8000 });
+    }
+    locBusy.value = false;
+    locStatus.value = '';
+}
+async function rollbackLocation() {
+    if (typeof confirm === 'function' && !confirm('回滚到上一次的存储位置？数据一直留着，这里只是把设置指回去，重启 NOVAI 后生效。')) return;
+    locBusy.value = true;
+    try {
+        const r = await fetch('/api/config/storage/rollback', { method: 'POST' });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data.detail || ('HTTP ' + r.status));
+        locDone.value = String(data.message || '已回滚，重启 NOVAI 后生效。');
+        await loadLocation();
+        refreshStorage();
+    } catch (e) { toast('回滚失败：' + ((e && e.message) || '接口不可用'), { danger: true, icon: 'alert' }); }
+    locBusy.value = false;
+    locStatus.value = '';
+}
+async function resetLocation() {
+    if (typeof confirm === 'function' && !confirm('恢复默认存储位置？这里只改设置，不会搬动或删除数据，重启 NOVAI 后生效。')) return;
+    await applyLocation('');
+}
+
 /* 存储与缓存 */
 const FILE_CHOICES = [500, 2000, 5000, 10000];
 const VERSION_CHOICES = [5, 10, 20, 50];
@@ -320,6 +413,7 @@ const SOURCES = [{ value: 'github', label: 'GitHub' }, { value: 'gitee', label: 
 
 onMounted(() => {
     load();
+    loadLocation();
     refreshStorage();
     refreshWebAccess();
     refreshProxy();
@@ -342,8 +436,40 @@ onMounted(() => {
             <SetRow label="开机自启动" desc="系统启动时自动运行 NOVAI"><NvSwitch :model-value="g.autoStart" label="开机自启动" @update:model-value="save('autoStart', $event)" /></SetRow>
             <SetRow label="恢复上次窗口状态" desc="启动时恢复上次关闭时的窗口大小和位置"><NvSwitch :model-value="g.restoreWindow" label="恢复上次窗口状态" @update:model-value="save('restoreWindow', $event)" /></SetRow>
         </SetCard>
-        <SetCard title="数据目录" desc="NOVAI 的用户数据存储位置。">
-            <div class="path-row"><span class="path">{{ dataDir }}</span><button type="button" class="nv-btn sm ghost" @click="openDataFolder"><NvIcon name="folder" />打开</button></div>
+        <SetCard title="存储位置" desc="数据库、画布、素材库、生成文件都放在这个目录下；换盘时整份搬过去，旧目录保留。">
+            <SetRow label="当前数据目录" :desc="loc.error || (loc.info && loc.info.warning) || '位置设置写在系统用户配置目录里，不在数据目录内，所以搬走数据后重启还能找回它'" stack>
+                <div class="path-row wide">
+                    <span class="path">{{ (loc.info && loc.info.data_root) || dataDir }}</span>
+                    <span class="loc-badge" :class="loc.info && loc.info.data_root_source">{{ locSourceLabel }}</span>
+                    <button type="button" class="nv-btn sm ghost" @click="openDataFolder"><NvIcon name="folder" />打开</button>
+                </div>
+            </SetRow>
+            <SetRow v-if="loc.info && loc.info.restart_required" label="等待重启" desc="设置已保存，重启 NOVAI 后才会切过去；旧位置的数据一个都没删，随时可以回滚">
+                <span class="loc-note">{{ loc.info.configured_data_root || '默认位置' }}</span>
+            </SetRow>
+            <SetRow label="会一起迁移的内容" :desc="'共 ' + locTotal.files + ' 个文件 · ' + formatBytes(locTotal.bytes)" stack>
+                <div class="loc-items">
+                    <span v-for="item in locItems" :key="item.name" class="loc-chip">{{ item.name }} <i>{{ item.files }}</i></span>
+                </div>
+            </SetRow>
+            <SetRow label="新位置" desc="选一个空文件夹，或已有 NOVAI 数据的文件夹；先检查再迁移（迁移期间请别同时生成或编辑），失败不会丢数据" stack>
+                <div class="loc-form">
+                    <label class="nv-field loc-input"><input v-model="locTarget" type="text" placeholder="例如 D:\NOVAI 或 /Volumes/Data/NOVAI" aria-label="新的存储位置" autocomplete="off" spellcheck="false" @input="locPlan = null"></label>
+                    <button type="button" class="nv-btn sm ghost" :disabled="locBusy" @click="pickLocationFolder"><NvIcon name="folder" />浏览</button>
+                    <button type="button" class="nv-btn sm" :disabled="locBusy" @click="checkLocation">检查</button>
+                </div>
+                <p v-if="locPlan" class="loc-plan">{{ locPlanText }}</p>
+                <div v-if="locPlan" class="loc-actions">
+                    <button type="button" class="nv-btn sm primary" :disabled="locBusy" @click="applyLocation(locPlan.target)">确认{{ locPlan.action === 'adopt' ? '切换' : '迁移' }}</button>
+                    <button type="button" class="nv-btn sm ghost" :disabled="locBusy" @click="locPlan = null">取消</button>
+                </div>
+                <p v-if="locStatus" class="loc-plan busy"><span class="spin sm"></span>{{ locStatus }}</p>
+                <p v-if="locDone" class="loc-plan done">{{ locDone }}</p>
+            </SetRow>
+            <SetRow label="维护" desc="回滚只改设置：旧位置的数据从来没删；恢复默认同理，不会搬动文件">
+                <button v-if="loc.info && loc.info.can_rollback" type="button" class="nv-btn sm ghost" :disabled="locBusy" @click="rollbackLocation"><NvIcon name="refresh" />回滚到上次位置</button>
+                <button type="button" class="nv-btn sm ghost" :disabled="locBusy" @click="resetLocation"><NvIcon name="refresh" />恢复默认</button>
+            </SetRow>
         </SetCard>
         <SetCard title="存储与缓存" desc="预览缓存占用、历史上限与生成文件的存放位置。">
             <SetRow label="预览缓存" :desc="previewText">
@@ -445,6 +571,20 @@ onMounted(() => {
 .path-row.wide { padding: 0; width: 100%; }
 .path { flex: 1; min-width: 0; height: 32px; padding: 0 12px; border-radius: var(--radius-md); background: var(--solid); display: flex; align-items: center; font: 400 12px/1 var(--font-mono); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .muted { color: var(--ink-4); font-size: 12px; }
+.loc-badge { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 8px; background: var(--solid); font: 400 11.5px/1 var(--font-sans); color: var(--ink-2); }
+.loc-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-4); }
+.loc-badge.config::before { background: var(--accent); }
+.loc-badge.env::before { background: var(--danger); }
+.loc-note { font: 400 11.5px/1.4 var(--font-mono); color: var(--ink-2); word-break: break-all; }
+.loc-items { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px 0; }
+.loc-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 9px; background: var(--solid); font: 400 12px/1 var(--font-mono); color: var(--ink-2); }
+.loc-chip i { font-style: normal; color: var(--ink-4); }
+.loc-form { display: flex; align-items: center; gap: 8px; width: 100%; }
+.loc-input { flex: 1; min-width: 0; }
+.loc-plan { margin: 10px 0 0; font: 400 11.5px/1.6 var(--font-sans); color: var(--ink-3); word-break: break-all; }
+.loc-plan.done { color: var(--ink-2); }
+.loc-plan.busy { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-2); }
+.loc-actions { display: flex; gap: 8px; margin-top: 10px; }
 .wp-hint { max-width: 220px; font: 400 11.5px/1.3 var(--font-mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wp-url { width: 240px; }
 .spin.sm { width: 12px; height: 12px; }

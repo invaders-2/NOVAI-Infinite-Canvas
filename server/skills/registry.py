@@ -237,7 +237,12 @@ def _build_pack_definition(pack_dir, skill_id, parsed, target_dir, version):
     manifest = _pack_manifest(pack_dir)
     root = os.path.abspath(target_dir)
     body = str(parsed.get("body") or "")
-    header = "技能根目录：%s（脚本用 python3 直接运行；需要风格/镜头库细节时先读 references/ 下对应文件）" % root
+    # runtime=canvas：技能完全靠画布助手自带工具完成（没有脚本、助手也读不了技能目录里的文件），
+    # 不加「脚本用 python3 直接运行 / 先读 references/」这句——它会让助手去找不存在的命令行和文件
+    if str(manifest.get("runtime") or "").strip().lower() == "canvas":
+        header = ""
+    else:
+        header = "技能根目录：%s（脚本用 python3 直接运行；需要风格/镜头库细节时先读 references/ 下对应文件）" % root
     tags = manifest.get("tags")
     tags = tags if isinstance(tags, list) else []
     return {
@@ -254,7 +259,8 @@ def _build_pack_definition(pack_dir, skill_id, parsed, target_dir, version):
         "source_skill_code": "",
         "input_schema": {"files": [], "params": []},
         "deliverables": [],
-        "skill_prompt": "%s\n\n%s" % (header, body.replace("<skill-root>", root)),
+        "skill_prompt": ("%s\n\n%s" % (header, body.replace("<skill-root>", root))) if header
+                        else body.replace("<skill-root>", root).strip(),
         # 新装的官方技能包默认不启用：跟「官方技能需在应用市场添加」一致，
         # 否则老用户升级后市场显示未添加、助手却已经能用（2026-11 用户要求固定上架）
         "enabled": False,

@@ -13,7 +13,7 @@ import { ComboMenu } from "../ui/combo";
 import { OptCards, ratioShape } from "../ui/OptCards";
 import { openPop } from "../ui/overlay";
 import {
-  countOptions, durationOptions, imageRatioOptions, imageResolutionOptions, patchPlanStep, readPlanParams,
+  buildGenerationApproveSteps, countOptions, countPlan, durationOptions, imageRatioOptions, imageResolutionOptions, generationReady, maxBatchOf, patchPlanStep, readPlanParams,
   splitModelId, videoModeOptions, videoRatioOptions, videoResOptions, type PlanKind, type PlanStep,
 } from "./planParams";
 import "./message-cards.css";
@@ -31,6 +31,8 @@ const kindOf = (step: PlanStep): PlanKind | "audio" | null => {
   const t = String((step.args || {}).type || "").toLowerCase();
   return t === "image" || t === "video" ? t : t === "audio" ? "audio" : null;
 };
+
+
 const KIND_LABEL: Record<string, string> = { image: "图片", video: "视频", audio: "配音" };
 
 function initRow(step: PlanStep, kind: PlanKind | "audio" | null, models: ModelSpec[], prompt = ""): Row {
@@ -47,7 +49,7 @@ const vendorOf = (m: ModelSpec) => (m.vendor || "").trim() || splitModelId(m.id)
 function ParamField({ label, text, busy, render }: { label: string; text: string; busy: boolean; render: (close: () => void) => ReactNode }) {
   return <label className="gen-field"><span>{label}</span>
     <button type="button" className="gen-select gen-param" disabled={busy} aria-label={label}
-      onClick={(e) => openPop(e.currentTarget, (close) => render(close), "up", "left", "gen-pop")}>
+      onClick={(e) => openPop(e.currentTarget, (close) => render(close), "up", "left", "gen-pop param-pop")}>
       <span className="gen-model-text">{text}</span>
       <Icon name="down" size="xs" />
     </button>
@@ -65,7 +67,7 @@ function GridPop({ title, busy, options, current, apply }: {
   const [value, setValue] = useState(current);
   return <>
     <div className="mh">{title}</div>
-    <OptCards cols={Math.max(1, options.length)} items={options.map((o) => ({
+    <OptCards cols={Math.max(1, Math.min(options.length, 4))} items={options.map((o) => ({
       key: o.value, label: o.label, shape: o.shape, on: o.value === value, disabled: busy,
       pick: () => { setValue(o.value); apply(o.value); },
     }))} />
@@ -135,35 +137,21 @@ export function GenerationCard({ plan, models, busy, onApprove, onDiscard, onFoc
   const needModel = kinds.map((k) => k === "image" || k === "video");
   const picked = rows.filter((r) => r.on).length;
   const missing = rows.filter((r, i) => r.on && needModel[i] && !r.modelId).length;
-  const allReady = picked > 0 && missing === 0;
+  const allReady = generationReady(rows, kinds);
   const byKind = (k: string) => models.filter((m) => m.kind === k);
   /** 同类节点不止一个时，给一个「统一选择」 */
   const bulkKinds = (["image", "video"] as const).filter((k) => kinds.filter((x) => x === k).length > 1 && byKind(k).length);
   const setAll = (k: PlanKind, modelId: string) => setRows((prev) => prev.map((r, i) => (kinds[i] === k ? { ...r, modelId } : r)));
 
-  const approve = () => {
-    const out: AgentTaskPlan["steps"] = [];
-    steps.forEach((step, i) => {
-      const k = kinds[i]; const r = rows[i]; if (!r?.on) return;
-      const args = (step.args || {}) as Record<string, any>; const info = infoOf(step);
-      // 卡片里改过提示词：先写回节点，再生成
-      if (info && r.prompt.trim() && r.prompt.trim() !== (info.prompt || "").trim()) {
-        out.push({ tool: "update_node", args: { canvas_id: args.canvas_id, node_id: args.node_id, prompt: r.prompt.trim() }, description: "改「" + info.title + "」的提示词" });
-      }
-      if (k !== "image" && k !== "video") { out.push(step); return; }
-      const patched = patchPlanStep(step, k, models, { modelConfigId: r.modelId, ratio: r.ratio, resolution: r.resolution, ...(k === "image" ? { count: r.count } : { duration: r.duration }) });
-      // 画布节点参数用档位（1k/2k/4k），像素尺寸不往后端写（settings 不认 size）
-      const settings = ((patched.args || {}) as Record<string, any>).settings;
-      if (settings && typeof settings === "object") {
-        delete settings.size;
-        if (k === "video") { if (r.mode) settings.mode = r.mode; else delete settings.mode; }
-      }
-      out.push(patched);
-    });
-    onApprove(out);
-  };
+  /** 点「执行生成」：把这一行选好的模型 / 参数转成真正可执行的步骤交给后端 */
+  const approve = () => onApprove(buildGenerationApproveSteps(steps, rows, models, nodes));
 
-  const total = useMemo(() => rows.reduce((sum, r, i) => sum + (!r.on ? 0 : kinds[i] === "image" ? r.count : 1), 0), [rows]);
+  const total = useMemo(() => rows.reduce((sum, r, i) => {
+    if (!r.on) return sum;
+    if (kinds[i] !== "image") return sum + 1;
+    const spec = r.modelId ? models.find((m) => m.id === r.modelId) : undefined;
+    return sum + countPlan(spec, r.count).groups;
+  }, 0), [rows, models]);
   return <Card className="message-card gen-card" size="sm">
     <CardHeader className="mc-head">
       <div className="mc-head-row">
@@ -200,6 +188,12 @@ export function GenerationCard({ plan, models, busy, onApprove, onDiscard, onFoc
                   <ParamField label="比例" text={ratioDisplayLabel(r.ratio)} busy={busy} render={gridPop("比例" + (spec ? " · " + spec.name : ""), imageRatioOptions(spec, r.ratio).map((v) => ({ value: v, label: ratioDisplayLabel(v), shape: ratioShape(v, 20) })), r.ratio, (v) => set(i, { ratio: v }))} />
                   <ParamField label="分辨率" text={r.resolution} busy={busy} render={gridPop("分辨率" + (spec ? " · " + spec.name : ""), imageResolutionOptions(spec, r.resolution).map((v) => ({ value: v, label: v })), r.resolution, (v) => set(i, { resolution: v }))} />
                   <ParamField label="张数" text={r.count + " 张"} busy={busy} render={gridPop("一次生成几张", countOptions(spec, r.count).map((v) => ({ value: String(v), label: v + " 张" })), String(r.count), (v) => set(i, { count: Number(v) }))} />
+                  {(() => {
+                    const plan = countPlan(spec, r.count);
+                    if (plan.groups <= 1) return null;
+                    const per = plan.batchUnknown || plan.unknownBatch ? "该模型批量上限未知，按一次 1 张处理" : "该模型一次最多 " + plan.perGroup + " 张";
+                    return <div className="gen-note gen-split" data-count-split> {per}，将分 {plan.groups} 次生成（{plan.sizes.join(" + ")}）{plan.bumped ? "，尾数会补到该模型最小档位" : ""}</div>;
+                  })()}
                 </> : <>
                   <ParamField label="比例" text={ratioDisplayLabel(r.ratio)} busy={busy} render={gridPop("比例" + (spec ? " · " + spec.name : ""), videoRatioOptions(spec, r.ratio).map((v) => ({ value: v, label: ratioDisplayLabel(v), shape: ratioShape(v, 16) })), r.ratio, (v) => set(i, { ratio: v }))} />
                   {videoResOptions(spec, r.resolution).length ? <ParamField label="分辨率" text={r.resolution} busy={busy} render={gridPop("分辨率" + (spec ? " · " + spec.name : ""), videoResOptions(spec, r.resolution).map((v) => ({ value: v, label: v })), r.resolution, (v) => set(i, { resolution: v }))} /> : null}

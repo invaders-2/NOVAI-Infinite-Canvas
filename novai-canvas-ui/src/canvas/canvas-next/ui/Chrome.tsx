@@ -43,6 +43,7 @@ import { applyTheme, followsShellTheme, requestShellTheme } from "./theme";
 import { clipable, createTimelineFrom } from "../playlist";
 import { useAssetUrl } from "./useAsset";
 import { useLbZoom } from "./lightboxZoom";
+import { CommentMode } from "./comment-mode";
 import { compareOriginal } from "./compareSource";
 import { useMediaUrl } from "./useMedia";
 import { cloneWorkflowForImport, deletePersonalTemplate, loadPersonalTemplates, parseWorkflowFile, savePersonalTemplate, workflowFileContents } from "../personalTemplates";
@@ -905,22 +906,32 @@ async function tplStrip(t: TplEntry, skin: "dark" | "light"): Promise<string[]> 
   return shots;
 }
 
-/** 面板锚点：贴模板按钮右侧、顶部对齐（SPEC ①：left = 按钮右缘 + 14，top = 按钮 top）；越界时按 8px 边距内收 */
-function useAnchorPos(anchor: Element | null, width: number, height: number) {
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+/** 面板锚点：贴模板按钮右侧（SPEC ①：left = 按钮右缘 + 14，top = 按钮 top），
+ *  但整体（引导卡 + 面板）按**视口**算：.tpl-wrap 的定位祖先是 fixed 的全屏 .modal-bg，
+ *  量 .cn-root 会被宿主给的「比窗口更高的画布框」带偏（面板被顶到折线以下、引导卡留在视口里）。
+ *  视口装不下「500 面板 + 引导卡」时先收面板高度（.tpl 内容本来就能滚），面板永远完整可见。 */
+function useAnchorPos(anchor: Element | null, width: number, height: number, tipRef: { current: HTMLElement | null }, tipOn: boolean, gap: number, ready = true) {
+  const [pos, setPos] = useState<{ left: number; top: number; height: number } | null>(null);
   useLayoutEffect(() => {
     const measure = () => {
-      const root = document.querySelector(".cn-root");
-      if (!anchor || !anchor.isConnected || !root) { setPos(null); return; }
-      const a = anchor.getBoundingClientRect(); const r = root.getBoundingClientRect();
-      const left = Math.max(8, Math.min(a.right - r.left + 14, r.width - width - 8));
-      const top = Math.max(8, Math.min(a.top - r.top, r.height - height - 8));
-      setPos({ left: Math.round(left), top: Math.round(top) });
+      if (!anchor || !anchor.isConnected) { setPos(null); return; }
+      const a = anchor.getBoundingClientRect();
+      const vw = window.innerWidth; const vh = window.innerHeight;
+      const above = tipOn ? (tipRef.current?.offsetHeight || 0) + gap : 0;
+      const panelH = Math.max(0, Math.min(height, vh - 16 - above));
+      const left = Math.max(8, Math.min(a.right + 14, vw - width - 8));
+      const top = Math.max(8 + above, Math.min(a.top, vh - 8 - panelH));
+      const next = { left: Math.round(left), top: Math.round(top), height: Math.floor(panelH) };
+      setPos((cur) => (cur && cur.left === next.left && cur.top === next.top && cur.height === next.height ? cur : next));
     };
     measure();
+    // 引导卡文案（有没有公共模板）与字体定稿会改高度，量到就重排一次
+    const tipEl = tipOn ? tipRef.current : null;
+    const observer = tipEl && typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (tipEl) observer?.observe(tipEl);
     window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [anchor, width, height]);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", measure); };
+  }, [anchor, width, height, tipRef, tipOn, gap, ready]);
   return pos;
 }
 
@@ -985,7 +996,13 @@ function TemplatesPanel({ ctl, close, anchor }: { ctl: Ctl; close: () => void; a
   const pagingRef = useRef(false);
   const pageGen = useRef(0);
   const alive = useRef(true);
-  const pos = useAnchorPos(anchor, 500, 500);
+  const tipRef = useRef<HTMLDivElement>(null);
+  /** 整组挂到 overlay 的 .modal-bg（#modal）下、而不是 .modal 里：.modal 只要带上入场动画或任何 transform
+   *  就会成为绝对定位后代的包含块，写在 style 里的视口坐标会被它整体带到屏幕中心去（用户看到的「面板跑到右下角」）。
+   *  挂到固定定位的 .modal-bg 下，left/top 才真的是视口坐标；关窗动画 .modal-bg.closing .tpl 也还在。 */
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => { setHost(document.getElementById("modal")); }, []);
+  const pos = useAnchorPos(anchor, 500, 500, tipRef, tip, 10, !!host);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     try {
@@ -1139,21 +1156,22 @@ function TemplatesPanel({ ctl, close, anchor }: { ctl: Ctl; close: () => void; a
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [gallery, detail, preview, closeGallery]);
-  // 点面板外关闭：透明层不吃指针，所以自己监听；点模板按钮本身交给切换，不先关再开
+  // 点面板外关闭：透明层不吃指针，所以自己监听；点模板按钮本身交给切换，不先关再开。
+  // 引导卡和面板是一个整体（同一个 .tpl-wrap），点引导卡上的「知道了 / 了解更多」不算点外面。
   useEffect(() => {
     if (gallery || creating || preview) return;
     const onDown = (e: PointerEvent) => {
       const t = e.target as Node | null;
-      if (!t || panelRef.current?.contains(t)) return;
+      if (!t || panelRef.current?.contains(t) || tipRef.current?.contains(t)) return;
       if (anchor && anchor.contains(t)) return;
       close();
     };
     document.addEventListener("pointerdown", onDown, true);
     return () => document.removeEventListener("pointerdown", onDown, true);
   }, [gallery, creating, preview, close, anchor]);
-  return <>
-    <div className="tpl-wrap" style={pos ? { left: pos.left, top: pos.top } : { visibility: "hidden" }}>
-      {tip ? <TplTip templates={read.list.length} count={tipCount} onMore={tipMore} onDismiss={dismissTip} onNever={neverTip} /> : null}
+  const wrap = (
+    <div className="tpl-wrap" style={pos ? { left: pos.left, top: pos.top, height: pos.height } : { visibility: "hidden" }}>
+      {tip ? <TplTip innerRef={tipRef} templates={read.list.length} count={tipCount} onMore={tipMore} onDismiss={dismissTip} onNever={neverTip} /> : null}
       <div className="tpl" data-tpl-panel role="dialog" aria-label="模板" ref={panelRef}>
       <div className="tpl-col">
         <div className="tpl-hd" data-tpl-hd>
@@ -1189,8 +1207,11 @@ function TemplatesPanel({ ctl, close, anchor }: { ctl: Ctl; close: () => void; a
           {err ? <div className="tpl-err" data-tpl-err>{err}</div> : null}
         </div>
       </div>
+      </div>
     </div>
-    </div>
+  );
+  return <>
+    {host ? createPortal(wrap, host) : null}
     {preview ? <TemplatePreview entry={preview} busy={false}
       onClose={() => setPreview(null)}
       onApply={() => { const t = preview; setPreview(null); applyNow(t); }}
@@ -1223,9 +1244,9 @@ function TemplatesPanel({ ctl, close, anchor }: { ctl: Ctl; close: () => void; a
 
 /** 面板上方引导卡：示意图用纯 CSS/SVG 画「节点逐个出现 + 连线生长」，每 7s 循环一次；
  *  prefers-reduced-motion 下不播放，直接显示完整示意图；颜色取主题变量，深色 / 浅色都可读。 */
-function TplTip({ templates, count, onMore, onDismiss, onNever }: { templates: number; count: number; onMore: () => void; onDismiss: () => void; onNever: () => void }) {
+function TplTip({ templates, count, onMore, onDismiss, onNever, innerRef }: { templates: number; count: number; onMore: () => void; onDismiss: () => void; onNever: () => void; innerRef?: { current: HTMLDivElement | null } }) {
   const hasTemplates = templates > 0;
-  return <div className="tpl-tip" data-tpl-tip>
+  return <div className="tpl-tip" data-tpl-tip ref={innerRef}>
     <div className="tpl-tip-shot" data-tpl-tip-shot><TplFlowAnim /></div>
     <div className="tpl-tip-main">
       <b>{hasTemplates ? "用一个模板开个头" : "从一张空白画布开始"}</b>
@@ -1407,22 +1428,22 @@ function MultiBar() {
   return <FloatMenu ref={barRef} id="multibar" data={{ "data-multi": String(nodes.length) }}
     style={{ scale: 1, ...(barPos ? { left: barPos.left, top: barPos.top } : {}) }}>
     <span className="cn-fm-count tnum" data-mb-count>已选 {nodes.length} 个</span>
-    {layoutable ? <FloatMenuButton icon="grid" label="布局" data={{ "data-mb": "layout" }} onClick={(e) => openPop(e.currentTarget, (close) => <>
+    {layoutable ? <FloatMenuButton icon="layoutgrid" label="布局" data={{ "data-mb": "layout" }} onClick={(e) => openPop(e.currentTarget, (close) => <>
       <div className="mh">排版 {nodes.length} 个节点</div>
       <button className="mi" data-layout="grid" onClick={() => { close(); layoutSelection(store, "grid"); }}><Icon name="grid" size="s" />宫格布局</button>
       <button className="mi" data-layout="horizontal" onClick={() => { close(); layoutSelection(store, "horizontal"); }}><Icon name="right" size="s" />水平流布局</button>
     </>, "down")} /> : null}
-    <FloatMenuButton icon="layers" label="对齐" data={{ "data-mb": "align" }} onClick={(e) => openPop(e.currentTarget, (close) => <>
+    <FloatMenuButton icon="align" label="对齐" data={{ "data-mb": "align" }} onClick={(e) => openPop(e.currentTarget, (close) => <>
       <div className="mh">对齐 {nodes.length} 个节点</div>
       <button className="mi" data-align="left" onClick={() => { close(); alignSelection(store, "left"); }}><Icon name="left" size="s" />左对齐</button>
       <button className="mi" data-align="top" onClick={() => { close(); alignSelection(store, "top"); }}><Icon name="up" size="s" />顶对齐</button>
-      <button className="mi" data-align="hgap" onClick={() => { close(); alignSelection(store, "hgap"); }}><Icon name="layers" size="s" />水平等距</button>
+      <button className="mi" data-align="hgap" onClick={() => { close(); alignSelection(store, "hgap"); }}><Icon name="distribute" size="s" />水平等距</button>
     </>, "down")} />
     <FloatMenuButton icon="layers" label="堆叠" title={"把选中的节点收成一叠（" + keyHint("stack") + "）"} data={{ "data-mb": "stack" }} onClick={() => stackSelection(store)} />
-    <FloatMenuButton icon="grid" label="分组" title={"编成一组（" + keyHint("group") + "）"} data={{ "data-mb": "group" }} onClick={() => groupSelection(store)} />
+    <FloatMenuButton icon="group" label="分组" title={"编成一组（" + keyHint("group") + "）"} data={{ "data-mb": "group" }} onClick={() => groupSelection(store)} />
     {nodes.some(clipable) ? <FloatMenuButton icon="video" label="建剪辑" title="把选中的视频 / 音频 / 图片按画布上的顺序放进一条新的剪辑时间线" data={{ "data-mb": "playlist" }} onClick={() => createTimelineFrom(store, nodes)} /> : null}
     {b
-      ? <><span className="cn-fm-count tnum" data-mb="prog">运行中 {b.done + b.failed}/{b.total}</span><FloatMenuButton icon="x" label="停止" disabled={b.stopped} data={{ "data-mb": "stop" }} onClick={() => stopGroup(store, b.key)} /></>
+      ? <><span className="cn-fm-count tnum" data-mb="prog">运行中 {b.done + b.failed}/{b.total}</span><FloatMenuButton icon="stop" label="停止" disabled={b.stopped} data={{ "data-mb": "stop" }} onClick={() => stopGroup(store, b.key)} /></>
       : <FloatMenuButton icon="play" label="一键运行" primary disabled={!runnable.length} data={{ "data-mb": "run" }}
         title={runnable.length ? `按依赖顺序运行 ${runnable.length} 个生成节点（${keyHint("run")}，先确认消耗）` : "选中的节点里没有可运行的"}
         onClick={() => runNodes(ctl, nodes)} />}
@@ -1650,13 +1671,14 @@ function FilesPanel() {
 
 export function Toasts() {
   const toasts = useS((s) => s.toasts);
-  return <div id="toasts">{toasts.map((t) => <div key={t.id} className={"toast" + (t.out ? " out" : "")} dangerouslySetInnerHTML={{ __html: escToast(t.html) }} />)}</div>;
+  return <div id="toasts">{toasts.map((t) => <div key={t.id} className={"toast" + (t.out ? " out" : "") + (t.action ? " is-action" : "")} onClick={t.action ? () => { t.action?.(); } : undefined} role={t.action ? "button" : undefined} dangerouslySetInnerHTML={{ __html: escToast(t.html) }} />)}</div>;
 }
 const TOAST_ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
 const escToast = (html: string) => html.replace(/[&<>"]/g, (c) => TOAST_ESC[c] || c);
 
 export function Lightbox() {
   const ctl = useCtl(); const [id, setId] = useState<string | null>(null); const doc = useS((s) => s.doc);
+  const [commentOpen, setCommentOpen] = useState(false);
   useEffect(() => { const on = (e: Event) => setId((e as CustomEvent).detail); addEventListener("cn:lightbox", on); return () => removeEventListener("cn:lightbox", on); }, []);
   const [out, setOut] = useState(false);
   const [cmp, setCmp] = useState(false);
@@ -1675,7 +1697,22 @@ export function Lightbox() {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
   const [videoSize, setVideoSize] = useState<{ w: number; h: number } | null>(null);
-  useLayoutEffect(() => { if (id) setOut(false); }, [id]);
+  useLayoutEffect(() => { if (id) { setOut(false); setCommentOpen(false); } }, [id]);
+  useLayoutEffect(() => {
+    if (!commentOpen) { setImgRect(null); return; }
+    zoom.reset();
+    const measure = () => {
+      const el = zoom.imgRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (!r.width) return;
+      setImgRect((p) => (p && Math.abs(p.x - r.left) < 1 && Math.abs(p.y - r.top) < 1 && Math.abs(p.w - r.width) < 1 && Math.abs(p.h - r.height) < 1 ? p : { x: r.left, y: r.top, w: r.width, h: r.height }));
+    };
+    measure();
+    const t = window.setTimeout(measure, 240);
+    window.addEventListener("resize", measure);
+    return () => { window.clearTimeout(t); window.removeEventListener("resize", measure); };
+  }, [commentOpen]);
   useEffect(() => { setCmp(false); }, [id]);
   useEffect(() => { setNatural(null); setVideoSize(null); }, [id]);
   useEffect(() => { if (cmp) setCmpPct(50); }, [cmp]);
@@ -1685,6 +1722,7 @@ export function Lightbox() {
   const imgSrc = gen && node && (node.kind === "image" || (node.kind === "video" && !cur?.url)) ? cur?.url || cur?.frame || "" : "";
   const imgUrl = useAssetUrl(imgSrc);
   const zoom = useLbZoom(imgSrc);
+  const [imgRect, setImgRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   // 「对比原图」：原图 = 生成前的那张图（来源节点结果 → 其它上游输入图 → 最后第一版）；视频/音频/提示词没有（null）
   const compare = useMemo(() => {
     if (!node || !gen || node.kind !== "image") return null;
@@ -1775,15 +1813,15 @@ export function Lightbox() {
   const at = o?.meta?.at || 0; const dt = at ? new Date(at) : null;
   const dateText = dt ? dt.getFullYear() + "/" + (dt.getMonth() + 1) + "/" + dt.getDate() : "";
   const showVer = g.hist.length > 1 && node.kind !== "text";
-  return <div className="lightbox" id="lightbox" tabIndex={-1} ref={(el) => { if (el && document.activeElement !== el && !el.contains(document.activeElement)) el.focus(); }}
+  return <div className={"lightbox" + (commentOpen ? " commenting" : "")} id="lightbox" tabIndex={-1} ref={(el) => { if (el && document.activeElement !== el && !el.contains(document.activeElement)) el.focus(); }}
     onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") close(); if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && g.hist.length > 1) ctl.store.patchGen(node.id, { hi: (g.hi + (e.key === "ArrowLeft" ? -1 : 1) + g.hist.length) % g.hist.length }); if (imgSrc && (e.key === "+" || e.key === "=" || e.key === "-" || e.key === "_" || e.key === "0")) { e.preventDefault(); if (e.key === "0") zoom.reset(); else zoom.zoomBy(e.key === "-" || e.key === "_" ? .8 : 1.25); } }}
     style={out ? { animation: "fadeOut 160ms var(--e-exit) forwards" } : undefined}
     onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-    <button className="lb-back" data-lb="back" title="返回画布" aria-label="返回画布" onPointerDown={(e) => e.stopPropagation()}
+    <button className="lb-back tipR" data-lb="back" data-tip="返回画布" aria-label="返回画布" onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => { e.stopPropagation(); close(); setTimeout(() => ctl.focusNode(node.id), 170); }}><Icon name="arrowleft" /></button>
     {!comparing && g.hist.length > 1 && (node.kind === "image" || node.kind === "video") ? <div className="lb-thumbs" data-lb="thumbs" onPointerDown={(e) => e.stopPropagation()}
       style={{ "--lb-sx": stripAt ? stripAt.left + "px" : "20px", "--lb-sy": stripAt ? stripAt.top + "px" : "50%" } as CSSProperties}>
-      {g.hist.map((h, i) => <button key={i} className={"lb-thumb" + (i === g.hi ? " on" : "")} aria-pressed={i === g.hi} aria-label={"第 " + (i + 1) + " 版"}
+      {g.hist.map((h, i) => <button key={i} className={"lb-thumb tipR" + (i === g.hi ? " on" : "")} aria-pressed={i === g.hi} data-tip={"第 " + (i + 1) + " 版"} aria-label={"第 " + (i + 1) + " 版"}
         onClick={(e) => { e.stopPropagation(); ctl.store.patchGen(node.id, { hi: i }); }}><LbThumb src={h.url || h.frame || ""} /></button>)}
     </div> : null}
     {node.kind === "text" ? <div className="lb-mid" ref={cardRef}><div className="txt">{o?.text}</div></div>
@@ -1823,11 +1861,15 @@ export function Lightbox() {
       </div> : null}
     </div>}
     <div className="lb-tools">
-      {node.kind !== "text" && (o?.url || o?.frame) ? <button className="lb-btn" data-lb="apply" title="放到画布" aria-label="放到画布" onClick={() => { const made = extractCurrentVersion(ctl.store, node.id); close(); if (made) setTimeout(() => ctl.focusNode(made.id), 170); }}><Icon name="copy" /></button> : null}
-      {node.kind !== "text" && o?.url ? <button className="lb-btn" data-lb="dl" title="下载" aria-label="下载" onClick={() => void download(node, ctl.store)}><Icon name="download" /></button> : null}
-      <button className={"lb-btn" + (fav ? " on" : "")} data-lb="fav" aria-pressed={fav} title={fav ? "取消收藏" : "收藏"} aria-label={fav ? "取消收藏" : "收藏"} onClick={() => ctl.store.patchGen(node.id, { fav: !fav })}><Icon name="star" /></button>
-      {imgSrc && zoom.pct > 100 ? <button className="lb-pct" data-lb="zoom" title="回到适应窗口" aria-label={"当前缩放 " + zoom.pct + "%，点击适应窗口"} onClick={zoom.reset}>{zoom.pct}%</button> : null}
+      {node.kind === "image" && imgUrl ? <button className={"lb-btn" + (commentOpen ? " on" : "")} data-lb="comment" data-tip="评论标注" aria-label="评论标注" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); setCmp(false); setCommentOpen((v) => !v); }}><Icon name="msg" /></button> : null}
+      {node.kind !== "text" && (o?.url || o?.frame) ? <button className="lb-btn" data-lb="apply" data-tip="放到画布" aria-label="放到画布" onClick={() => { const made = extractCurrentVersion(ctl.store, node.id); close(); if (made) setTimeout(() => ctl.focusNode(made.id), 170); }}><Icon name="copy" /></button> : null}
+      {node.kind !== "text" && o?.url ? <button className="lb-btn" data-lb="dl" data-tip="下载原图" aria-label="下载" onClick={() => void download(node, ctl.store)}><Icon name="download" /></button> : null}
+      <button className={"lb-btn" + (fav ? " on" : "")} data-lb="fav" aria-pressed={fav} data-tip={fav ? "取消收藏" : "收藏"} aria-label={fav ? "取消收藏" : "收藏"} onClick={() => ctl.store.patchGen(node.id, { fav: !fav })}><Icon name="star" /></button>
+      {imgSrc && zoom.pct > 100 ? <button className="lb-pct" data-lb="zoom" data-tip="回到适应窗口" aria-label={"当前缩放 " + zoom.pct + "%，点击适应窗口"} onClick={zoom.reset}>{zoom.pct}%</button> : null}
     </div>
+    {commentOpen && imgUrl ? <CommentMode rect={imgRect} nodeId={node.id} nodeTitle={title(node)} image={natural ? { w: natural.w, h: natural.h } : undefined}
+      onClose={() => setCommentOpen(false)}
+      onCommit={(payload) => { setCommentOpen(false); window.dispatchEvent(new CustomEvent("cn:annotations-to-chat", { detail: payload })); close(); }} /> : null}
   </div>;
 }
 function BigVideo({ src, onSize }: { src: string; onSize?: (w: number, h: number) => void }) {

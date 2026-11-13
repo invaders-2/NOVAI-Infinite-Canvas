@@ -14,7 +14,8 @@ import { setChipThumb } from "../ui/thumb";
 export type MentionKind = "node" | "ref" | "app" | "skill";
 export type MentionChip = { kind: MentionKind; id: string; title: string; src?: string; icon?: IconName; badge?: string };
 export type MentionInputHandle = {
-  focus: () => void;
+  /** 聚焦输入框。默认只聚焦、不动光标（插完胶囊的正确光标不能被顶掉）；要把光标送到末尾时显式传 caret: "end" */
+  focus: (opts?: { caret?: "end" | "keep" }) => void;
   /** 在触发字符处（没有就在光标处）插入一个引用胶囊 */
   insertMention: (chip: MentionChip) => void;
   /** 面板选了「不生成胶囊」的项（比如联网搜索）：只把触发字符删掉 */
@@ -191,6 +192,17 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(fu
     composing.current = { active: false, data: "" };
   };
 
+  /** 光标落到胶囊后面那个分隔空格之后：normalize 会把空格并进后面的文字节点（相邻文本节点合并），旧的文本节点引用会失效，
+   *  所以按 chip 现在的相邻节点现算，不能用插入时那个 sp */
+  const placeAfterChip = (chip: HTMLElement) => {
+    const s = getSelection(); if (!s) return;
+    const sep = chip.nextSibling;
+    const r = document.createRange();
+    if (sep && sep.nodeType === 3) r.setStart(sep, Math.min(1, (sep.nodeValue || "").length));
+    else r.setStartAfter(chip);
+    r.collapse(true); s.removeAllRanges(); s.addRange(r);
+  };
+
   const insertMention = (chip: MentionChip) => {
     const el = ref.current; if (!el) return;
     commitComposing();
@@ -205,7 +217,7 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(fu
     const sp = document.createTextNode("\u00a0");
     const after = document.createRange(); after.setStartAfter(node); after.collapse(true); after.insertNode(sp);
     el.normalize();
-    placeAfter(sp);
+    placeAfterChip(node);
     emit();
     fitLabel(node.querySelector(".pm-t") as HTMLElement || node);
     setTimeout(() => el.querySelectorAll(".pm-in").forEach((c) => c.classList.remove("pm-in")), 260);
@@ -225,7 +237,12 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(fu
   }, []);
 
   useImperativeHandle(handleRef, () => ({
-    focus: () => { const el = ref.current; if (!el) return; el.focus({ preventScroll: true }); caretToEnd(); },
+    focus: (opts) => {
+      const el = ref.current; if (!el) return;
+      el.focus({ preventScroll: true });
+      if (opts?.caret !== "end") return;
+      caretToEnd();
+    },
     insertMention,
     dropTrigger,
   }));

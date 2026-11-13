@@ -19,6 +19,8 @@ export function placePopover(opts: {
   align?: PopAlign;
   margin?: number;
   gap?: number;
+  /** 弹层高度上限（例如助手菜单 min(420px,55vh)）：先按上限算高度再决定上下翻边，避免挡住卡片正文 */
+  capHeight?: number;
 }): PopPlacement {
   const margin = Math.max(0, opts.margin ?? 8);
   const gap = Math.max(0, opts.gap ?? 8);
@@ -26,12 +28,14 @@ export function placePopover(opts: {
   const vh = Math.max(0, opts.viewport.height);
   const availW = Math.max(0, vw - margin * 2);
   const availH = Math.max(0, vh - margin * 2);
+  const cap = Math.max(0, opts.capHeight ?? Infinity);
   const maxWidth = Math.min(Math.max(0, opts.popup.width), availW);
-  const maxHeight = Math.min(Math.max(0, opts.popup.height), availH);
+  const wantH = Math.min(Math.max(0, opts.popup.height), cap);
+  const maxHeight = Math.min(wantH, availH);
   const scrollX = opts.popup.width > availW + 0.5;
-  const scrollY = opts.popup.height > availH + 0.5;
+  const scrollY = wantH > availH + 0.5 || wantH < opts.popup.height - 0.5;
   const w = scrollX ? maxWidth : Math.max(0, opts.popup.width);
-  const h = scrollY ? maxHeight : Math.max(0, opts.popup.height);
+  const h = wantH;
   const a = opts.anchor;
   const dir: PopDir = opts.dir ?? "down";
   const align: PopAlign = opts.align ?? "left";

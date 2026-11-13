@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// 第三份策略副本（web/src/pages/online/sizePolicy.js）与 static/js/shared/size-policy.js 的逐项 parity。
+// 第三份策略副本（web/src/lib/sizePolicy.js）与 static/js/shared/size-policy.js 的逐项 parity。
 //
 // 阶段 A 给 shared/size-policy.js 加了 minRatio/maxRatio（bounds 比例夹取），但 web 副本没同步，
 // 导致在线生图页面对 gpt-image-2 这类「带比例范围的 bounds」不做夹取、也不弹吸附提示。
@@ -20,7 +20,7 @@ const ok = (cond, msg) => { cond ? pass++ : fails.push(msg); };
 
 const ROOT = path.join(__dirname, '..');
 const STATIC_SRC = process.env.NOVAI_SIZE_TEST_POLICY_SRC || path.join(ROOT, 'static/js/shared/size-policy.js');
-const WEB_SRC = process.env.NOVAI_SIZE_TEST_WEB_SRC || path.join(ROOT, 'web/src/pages/online/sizePolicy.js');
+const WEB_SRC = process.env.NOVAI_SIZE_TEST_WEB_SRC || path.join(ROOT, 'web/src/lib/sizePolicy.js');
 
 const TIERS = [
     { id: '1k', maxPixels: 1572864 },

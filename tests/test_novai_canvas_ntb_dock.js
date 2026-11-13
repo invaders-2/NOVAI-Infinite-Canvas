@@ -10,8 +10,10 @@
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const { checkStaticCacheVersions } = require('./static-cache-version');
 const root = path.join(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+
 /** 去掉空白再比对：源码写得松、构建产物被压过，数值本身不变 */
 const flat = (s) => s.replace(/\s+/g, '');
 /** 玻璃 V2：一层白雾 linear-gradient 叠在 color-mix 底色之上（构建产物会把 rgba(255,255,255,.06) 压成 #ffffff0f） */
@@ -215,8 +217,9 @@ assert(builtJs.includes('is-open'), '构建产物 JS 打进了单颗展开的 is
 const html = read('static/canvas.html');
 const vers = [...html.matchAll(/novai-canvas\/(?:canvas\.css|canvas\.js)\?v=([0-9.]+)/g)].map((m) => m[1]);
 assert.strictEqual(vers.length, 2, 'canvas.html 里 css / js 各一处 ?v=');
-assert.strictEqual(vers[0], vers[1], 'css / js 的 ?v= 一致');
-assert(/^1\.0\.143\.\d{10}$/.test(vers[0]), '?v= 形如 1.0.143.<unix 秒>：' + vers[0]);
+const cache = checkStaticCacheVersions({ root, page: 'static/canvas.html' });
+assert.ok(cache.ok, 'canvas.html 的 ?v= 满足：VERSION 前缀 / 10 位 mtime / 无裸链接 / 多处一致' + (cache.problems.length ? '：' + cache.problems.join('；') : ''));
+assert.ok(cache.refs.has('/static/novai-canvas/canvas.css') && cache.refs.has('/static/novai-canvas/canvas.js'), 'css / js 两处 ?v= 都在：' + vers.join(' / '));
 
 console.log('[PASS] 节点工具栏 #ntb：Floating Dock + 磨砂玻璃 V2（浅 color-mix(#111 74%)+6% 白雾 / 深 color-mix(#1c1c1e 80%)+4% 白雾'
     + ' + blur(44px) saturate(190%)、圆角 14、padding 7、gap 4、高 50、border 0 + 两层柔和投影；'

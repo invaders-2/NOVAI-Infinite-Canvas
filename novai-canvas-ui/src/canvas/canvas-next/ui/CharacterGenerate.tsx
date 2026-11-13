@@ -145,42 +145,94 @@ async function persistOutput(ctl: Ctl, url: string, name: string): Promise<strin
   try { return (await be.importAsset(canvasId, url, name)) || url; } catch { return url; }
 }
 
-/* ---------- 生成任务单例：弹窗被外部卸载（保存冲突 / UI 重置）时不中断，任务继续跑并落库 ---------- */
+/* ---------- 生成任务集合：弹窗被外部卸载（保存冲突 / UI 重置）时不中断，各自继续跑并落库 ---------- */
 type JobSpec = { name: string; model: ModelSpec; form: Form; refs: string[]; whiten: boolean };
-type JobSnapshot = { active: boolean; name: string; steps: StepRun[]; saving: boolean; savedId: string | null; error: string };
-type Job = { spec: JobSpec; ctl: Ctl | null; active: boolean; steps: StepRun[]; urls: string[]; abort: AbortController | null; saving: boolean; savedId: string | null; error: string; startedAt: number };
-const JOB_KEY = "canvas-next:chgen:job";
-let job: Job | null = null;
-let jobSnap: JobSnapshot | null = null;
-let jobSavedCb: ((id: string) => void) | null = null;
+type PersistedJob = { id: string; spec: JobSpec; steps: StepRun[]; urls: string[]; startedAt: number };
+type Job = { id: string; spec: JobSpec; ctl: Ctl | null; active: boolean; steps: StepRun[]; urls: string[]; abort: AbortController | null; saving: boolean; savedId: string | null; error: string; startedAt: number };
+export type CharacterJobView = { id: string; active: boolean; name: string; steps: StepRun[]; done: number; failed: boolean; saving: boolean; savedId: string | null; error: string; startedAt: number };
+const JOBS_KEY = "canvas-next:chgen:jobs";
+/** 旧版单任务键：只读一次做迁移，迁移后删掉 */
+const LEGACY_JOB_KEY = "canvas-next:chgen:job";
+const jobs = new Map<string, Job>();
+/** 快照只在 emit 时重建：useSyncExternalStore 要求同一份数据返回同一个引用 */
+let jobsSnap: CharacterJobView[] = [];
+const jobSavedCbs = new Map<string, (id: string) => void>();
 const jobSubs = new Set<() => void>();
-function persistJob() {
-  try {
-    if (!job) { localStorage.removeItem(JOB_KEY); return; }
-    localStorage.setItem(JOB_KEY, JSON.stringify({ spec: job.spec, steps: job.steps, urls: job.urls, running: job.active, startedAt: job.startedAt }));
-  } catch { /* 配额 / 隐私模式：内存里继续跑 */ }
+const makeJobId = () => "ch_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+function decodeJob(raw: unknown): PersistedJob | null {
+  const saved = raw as Partial<PersistedJob> | null;
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return null;
+  const spec = saved.spec as JobSpec | undefined;
+  if (!spec || typeof spec !== "object") return null;
+  if (typeof spec.name !== "string" || !spec.name.trim()) return null;
+  if (!spec.form || typeof spec.form !== "object" || !spec.model || typeof spec.model !== "object") return null;
+  if (!Array.isArray(saved.steps) || !Array.isArray(saved.urls)) return null;
+  const form = spec.form as Partial<Form>;
+  const steps = SHOTS.map((_, i): StepRun => {
+    const s = saved.steps?.[i] as StepRun | undefined;
+    if (!s || typeof s !== "object") return { state: "idle", progress: 0 };
+    if (s.state === "running") return { state: "idle", progress: 0 };
+    return { ...s };
+  });
+  const urls = SHOTS.map((_, i) => (typeof saved.urls?.[i] === "string" ? saved.urls[i] : ""));
+  return {
+    id: typeof saved.id === "string" && saved.id ? saved.id : makeJobId(),
+    spec: {
+      ...spec,
+      form: { name: typeof form.name === "string" ? form.name : spec.name, attrs: { ...(form.attrs && typeof form.attrs === "object" ? form.attrs : {}) }, extra: typeof form.extra === "string" ? form.extra : "" },
+      refs: Array.isArray(spec.refs) ? spec.refs.filter((r): r is string => typeof r === "string") : [],
+      whiten: spec.whiten !== false,
+    },
+    steps,
+    urls,
+    startedAt: typeof saved.startedAt === "number" && saved.startedAt > 0 ? saved.startedAt : Date.now(),
+  };
 }
+/** 读存储：优先新数组；没有新键时把旧的单对象迁成一条。坏数据整条丢弃 */
+export function decodeJobs(rawNew: string | null, rawOld: string | null): PersistedJob[] {
+  const parse = (raw: string | null): unknown => { if (!raw) return null; try { return JSON.parse(raw); } catch { return null; } };
+  const next = parse(rawNew);
+  if (Array.isArray(next)) return next.map(decodeJob).filter((j): j is PersistedJob => !!j);
+  const migrated = decodeJob(parse(rawOld));
+  return migrated ? [migrated] : [];
+}
+const persistJobs = () => {
+  try {
+    if (!jobs.size) { localStorage.removeItem(JOBS_KEY); return; }
+    const out = [...jobs.values()].sort((a, b) => a.startedAt - b.startedAt)
+      .map((j) => ({ id: j.id, spec: j.spec, steps: j.steps, urls: j.urls, startedAt: j.startedAt }));
+    localStorage.setItem(JOBS_KEY, JSON.stringify(out));
+  } catch { /* 配额 / 隐私模式：内存里继续跑 */ }
+};
+const jobViewOf = (j: Job): CharacterJobView => ({
+  id: j.id, active: j.active, name: j.spec.name, steps: j.steps, saving: j.saving, savedId: j.savedId, error: j.error, startedAt: j.startedAt,
+  done: j.steps.filter((s) => s.state === "done").length, failed: j.steps.some((s) => s.state === "error"),
+});
 const jobEmit = () => {
-  jobSnap = job ? { active: job.active, name: job.spec.name, steps: job.steps.map((s) => ({ ...s })), saving: job.saving, savedId: job.savedId, error: job.error } : null;
-  persistJob();
+  jobsSnap = [...jobs.values()].sort((a, b) => a.startedAt - b.startedAt).map(jobViewOf);
+  persistJobs();
   for (const fn of jobSubs) fn();
 };
-function restoreJob() {
-  try {
-    const raw = localStorage.getItem(JOB_KEY); if (!raw) return;
-    const saved = JSON.parse(raw) as { spec: JobSpec; steps: StepRun[]; urls: string[]; startedAt?: number };
-    if (!saved?.spec || !Array.isArray(saved.steps) || !Array.isArray(saved.urls)) return;
-    const steps = saved.steps.map((s) => (s.state === "running" ? { state: "idle" as const, progress: 0 } : s));
-    job = { spec: { ...saved.spec, whiten: saved.spec.whiten !== false }, ctl: null, active: false, steps, urls: saved.urls, abort: null, saving: false, savedId: null, error: "", startedAt: saved.startedAt || Date.now() };
-    jobEmit();
-  } catch { /* 坏数据忽略 */ }
+function restoreJobs() {
+  let rawNew: string | null = null; let rawOld: string | null = null;
+  try { rawNew = localStorage.getItem(JOBS_KEY); rawOld = localStorage.getItem(LEGACY_JOB_KEY); } catch { return; }
+  const saved = decodeJobs(rawNew, rawOld);
+  if (rawOld) { try { localStorage.removeItem(LEGACY_JOB_KEY); } catch { /* ignore */ } }
+  if (!saved.length) return;
+  for (const p of saved) {
+    jobs.set(p.id, { id: p.id, spec: p.spec, ctl: null, active: false, steps: p.steps, urls: p.urls, abort: null, saving: false, savedId: null, error: "", startedAt: p.startedAt });
+  }
+  jobEmit();
 }
-restoreJob();
+restoreJobs();
 const jobSubscribe = (fn: () => void) => { jobSubs.add(fn); return () => { jobSubs.delete(fn); }; };
-const jobGetSnapshot = () => jobSnap;
-/** 表单挂载时登记「生成完自动开详情」；卸载后清空，弹窗不在就只 toast */
-export function setCharacterJobHandler(cb: ((id: string) => void) | null) { jobSavedCb = cb; }
-const jobStep = (i: number, patch: Partial<StepRun>) => { if (!job) return; job.steps = job.steps.map((s, k) => (k === i ? { ...s, ...patch } : s)); jobEmit(); };
+const jobGetSnapshot = () => jobsSnap;
+/** 每个任务一个「生成完自动开详情」回调；窗口卸载时只清掉自己那颗任务 */
+export function setCharacterJobHandler(jobId: string, cb: ((id: string) => void) | null) {
+  if (cb) jobSavedCbs.set(jobId, cb); else jobSavedCbs.delete(jobId);
+}
+const jobStep = (jobId: string, i: number, patch: Partial<StepRun>) => { const j = jobs.get(jobId); if (!j) return; j.steps = j.steps.map((s, k) => (k === i ? { ...s, ...patch } : s)); jobEmit(); };
 const buildJobInputs = (spec: JobSpec, i: number, portrait: string | null): GenInput[] => {
   if (!refOk(spec.model)) return [];
   const cap = Math.max(0, spec.model.maxRefs ?? 0);
@@ -189,35 +241,36 @@ const buildJobInputs = (spec: JobSpec, i: number, portrait: string | null): GenI
   for (let k = 0; k < spec.refs.length && out.length < cap; k++) out.push({ nodeId: "char:user:" + k, title: "参考图 " + (k + 1), kind: "image", order: out.length + 1, role: "reference", url: spec.refs[k] });
   return out;
 };
-async function saveJob() {
-  const j = job; if (!j || !j.ctl) return;
+async function saveJob(jobId: string) {
+  const j = jobs.get(jobId); if (!j || !j.ctl) return;
   j.saving = true; j.error = ""; jobEmit();
   try {
     // 兜底：老逻辑漏填时代时归到「当代现实」，别落进未分类
     const attrs = { ...j.spec.form.attrs, era: j.spec.form.attrs.era || "当代现实" };
     const el = saveElement({ name: j.spec.name, kind: "character", desc: j.spec.form.extra.trim(), refs: j.urls, attrs });
     const ctl = j.ctl;
+    const done = jobSavedCbs.get(jobId);
     j.saving = false; j.savedId = el.id;
     ctl.store.toast(`角色「${j.spec.name}」已生成并入库`);
-    const done = jobSavedCb;
-    job = null; jobEmit();
+    // 只删这一颗任务：其他并行任务不受影响
+    jobs.delete(jobId); jobSavedCbs.delete(jobId); jobEmit();
     done?.(el.id);
   } catch (e) {
-    if (!job) return;
-    job.saving = false;
-    job.error = e instanceof Error ? e.message : "保存角色失败";
+    const cur = jobs.get(jobId); if (!cur) return;
+    cur.saving = false;
+    cur.error = e instanceof Error ? e.message : "保存角色失败";
     jobEmit();
   }
 }
-async function runJob(indexes: number[]) {
-  const j = job; if (!j || j.active || !j.ctl) return;
+async function runJob(jobId: string, indexes: number[]) {
+  const j = jobs.get(jobId); if (!j || j.active || !j.ctl) return;
   const ctl = j.ctl;
   j.active = true; j.error = ""; jobEmit();
   let stopped = false;
   for (const i of indexes) {
-    if (job !== j) return;
+    if (jobs.get(jobId) !== j) return;
     const ac = new AbortController(); j.abort = ac;
-    jobStep(i, { state: "running", progress: 0, error: undefined });
+    jobStep(jobId, i, { state: "running", progress: 0, error: undefined });
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
@@ -227,7 +280,7 @@ async function runJob(indexes: number[]) {
       const m = j.spec.model;
       const params = { ...(defaultParams("image", m) as ImageParams), ratio: ratioFor(m, SHOTS[i].ratio), size: bestSize(m), count: 1 };
       const pending = ctl.store.backend.generate({ canvasId: ctl.store.state.canvasId, nodeId: "char:" + Date.now().toString(36) + ":" + i, kind: "image", model: m, prompt, resolvedPrompt: prompt, params, inputs },
-        (e) => { if (e.type === "progress") jobStep(i, { progress: e.progress }); }, ac.signal);
+        (e) => { if (e.type === "progress") jobStep(jobId, i, { progress: e.progress }); }, ac.signal);
       // 编辑通道（有参考图）单独加超时：卡住就当失败，后续步骤照常跑
       const guard = inputs.length ? new Promise<never>((_, no) => {
         timer = setTimeout(() => { timedOut = true; ac.abort(); no(new Error("EDIT_TIMEOUT")); }, EDIT_TIMEOUT_MS);
@@ -242,14 +295,14 @@ async function runJob(indexes: number[]) {
         raw = await whitenBackground(resolved);
       }
       const url = await persistOutput(ctl, raw, `${j.spec.name}-${SHOTS[i].title}`);
-      if (job !== j) return;
-      j.urls[i] = url; jobStep(i, { state: "done", progress: 1, url });
+      if (jobs.get(jobId) !== j) return;
+      j.urls[i] = url; jobStep(jobId, i, { state: "done", progress: 1, url });
     } catch (e) {
-      if (job !== j) return;
-      if (timedOut) jobStep(i, { state: "error", progress: 0, error: "参考图生成超时，可重试" });
+      if (jobs.get(jobId) !== j) return;
+      if (timedOut) jobStep(jobId, i, { state: "error", progress: 0, error: "参考图生成超时，可重试" });
       else {
         stopped = isStopped(e);
-        jobStep(i, { state: "error", progress: 0, error: stopped ? "已停止" : nodeError(e).err });
+        jobStep(jobId, i, { state: "error", progress: 0, error: stopped ? "已停止" : nodeError(e).err });
       }
       if (stopped) break;
     } finally {
@@ -257,60 +310,72 @@ async function runJob(indexes: number[]) {
       if (j.abort === ac) j.abort = null;
     }
   }
-  if (job !== j) return;
+  if (jobs.get(jobId) !== j) return;
   j.abort = null; j.active = false;
-  if (!stopped && j.urls.length === SHOTS.length && j.urls.every(Boolean)) await saveJob();
+  if (!stopped && j.urls.length === SHOTS.length && j.urls.every(Boolean)) await saveJob(jobId);
   else jobEmit();
 }
-export function startCharacterJob(ctl: Ctl, spec: JobSpec, indexes: number[]) {
-  if (job?.active) return;
-  const reuse = job && job.spec.name === spec.name ? job : null;
-  job = { spec, ctl, active: false, saving: false, savedId: null, error: "", abort: null, startedAt: Date.now(),
-    steps: reuse ? reuse.steps : SHOTS.map(() => ({ state: "idle", progress: 0 })),
-    urls: reuse ? [...reuse.urls] : SHOTS.map(() => "") };
+/** 每次都是全新任务（不复用同名任务的进度），返回任务 id，表单用它附着到这颗任务 */
+export function startCharacterJob(ctl: Ctl, spec: JobSpec, indexes: number[]): string {
+  let id = makeJobId();
+  while (jobs.has(id)) id = makeJobId();
+  jobs.set(id, { id, spec, ctl, active: false, saving: false, savedId: null, error: "", abort: null, startedAt: Date.now(),
+    steps: SHOTS.map(() => ({ state: "idle", progress: 0 })), urls: SHOTS.map(() => "") });
   jobEmit();
-  void runJob(indexes);
+  void runJob(id, indexes);
+  return id;
 }
-export function retryCharacterJob(ctl: Ctl, spec: JobSpec, i: number) {
-  if (!job || job.active) return;
-  job.spec = spec; job.ctl = ctl; job.error = "";
-  void runJob([i]);
+export function retryCharacterJob(jobId: string, ctl: Ctl, spec: JobSpec, i: number) {
+  const j = jobs.get(jobId); if (!j || j.active) return;
+  j.spec = spec; j.ctl = ctl; j.error = "";
+  void runJob(jobId, [i]);
 }
-export function saveCharacterJob(spec?: JobSpec) { if (job && !job.active) { if (spec) job.spec = spec; void saveJob(); } }
-export function cancelCharacterJob() { if (!job) return; const ac = job.abort; job = null; jobEmit(); ac?.abort(); }
+export function saveCharacterJob(jobId: string, spec?: JobSpec, ctl?: Ctl) {
+  const j = jobs.get(jobId); if (!j || j.active) return;
+  if (spec) j.spec = spec;
+  // 重载后任务的 ctl 是空的：从打开它的窗口借一个，手动「保存角色」才发得出去
+  if (ctl) j.ctl = ctl;
+  void saveJob(jobId);
+}
+export function cancelCharacterJob(jobId: string) {
+  const j = jobs.get(jobId); if (!j) return;
+  const ac = j.abort; jobs.delete(jobId); jobSavedCbs.delete(jobId); jobEmit(); ac?.abort();
+}
 /** 重载 / 失败后继续：已完成（urls 有值）的步骤跳过，其余重跑；全部完成则只补保存 */
-export function resumeCharacterJob(ctl: Ctl) {
-  if (!job || job.active) return;
+export function resumeCharacterJob(ctl: Ctl, jobId: string) {
+  const j = jobs.get(jobId); if (!j || j.active) return;
   if (!ctl.store.backend.available()) { ctl.store.toast("画布后端未连接，暂时不能继续生成"); return; }
-  job.ctl = ctl;
-  const pending = job.steps.map((_, i) => i).filter((i) => !job!.urls[i]);
-  if (!pending.length) { void saveJob(); return; }
-  void runJob(pending);
+  j.ctl = ctl;
+  const pending = j.steps.map((_, i) => i).filter((i) => !j.urls[i]);
+  if (!pending.length) { void saveJob(jobId); return; }
+  void runJob(jobId, pending);
 }
-export type CharacterJobView = { active: boolean; name: string; steps: StepRun[]; done: number; failed: boolean };
-/** 角色库头部用：生成中进度 / 继续上次生成 */
-export function useCharacterJob(): CharacterJobView | null {
-  const snap = useSyncExternalStore(jobSubscribe, jobGetSnapshot);
-  if (!snap) return null;
-  return { active: snap.active, name: snap.name, steps: snap.steps, done: snap.steps.filter((s) => s.state === "done").length, failed: snap.steps.some((s) => s.state === "error") };
+/** 角色库头部用：所有还没入库的任务，按开始时间升序（生成中的排后面也不会跳位） */
+export function useCharacterJobs(): CharacterJobView[] {
+  return useSyncExternalStore(jobSubscribe, jobGetSnapshot);
 }
 
-export function GenerateCharacter({ ctl, defaultEra, onClose, onSaved }: { ctl: Ctl; defaultEra?: string; onClose: () => void; onSaved: (id: string) => void }) {
-  // 时代必选：默认取打开表单时左栏选中的分类（全部角色 / 未分类 → 当代现实）
-  const [form, setForm] = useState<Form>({ name: "", attrs: { era: defaultEra || "当代现实" }, extra: "" });
+export function GenerateCharacter({ ctl, defaultEra, jobId, onClose, onSaved }: { ctl: Ctl; defaultEra?: string; jobId?: string; onClose: () => void; onSaved: (id: string) => void }) {
+  // attachId = 这个窗口当前附着的任务；null = 空白新表单（点头部的「AI 生成角色」进来的默认状态）
+  const [attachId, setAttachId] = useState<string | null>(jobId ?? null);
+  // 附着任务时表单初值取那颗任务的 spec；空白表单时代必选，默认取打开时左栏选中的分类
+  const openedJob = jobId ? jobs.get(jobId) : null;
+  const [form, setForm] = useState<Form>(() => openedJob
+    ? { name: openedJob.spec.name, attrs: { ...openedJob.spec.form.attrs }, extra: openedJob.spec.form.extra }
+    : { name: "", attrs: { era: defaultEra || "当代现实" }, extra: "" });
   // 纯白背景后处理默认开，状态记住
-  const [whiten, setWhiten] = useState<boolean>(() => { try { return localStorage.getItem("canvas-next:chgen:whiten") !== "0"; } catch { return true; } });
+  const [whiten, setWhiten] = useState<boolean>(() => openedJob ? openedJob.spec.whiten : (() => { try { return localStorage.getItem("canvas-next:chgen:whiten") !== "0"; } catch { return true; } })());
   // 空 = 还没手动选过（自动按「记住的 4K > gpt-image-2.5 / nano banana > maxRefs 最多」挑）；手动改过就尊重用户
-  const [modelId, setModelId] = useState<string>("");
+  const [modelId, setModelId] = useState<string>(() => openedJob?.spec.model.id || "");
   // null = 跟随当前模型的供应商；用户选了供应商只影响候选，不写记忆
   const [vendorSel, setVendorSel] = useState<string | null>(null);
   const [err, setErr] = useState("");
-  // 生成任务在模块级单例里：组件卸载后任务继续跑，重新打开时直接看到当前进度
-  const jobView = useSyncExternalStore(jobSubscribe, jobGetSnapshot);
+  // 任务在模块级集合里：组件卸载后各自继续跑；从头部 chip 进来时附着到那颗任务
+  const jobView = useCharacterJobs().find((j) => j.id === attachId) || null;
   const busy = !!jobView?.active;
   const steps = jobView?.steps ?? IDLE_STEPS;
   const [view, setView] = useState<{ items: ViewItem[]; start: number } | null>(null);
-  const [refs, setRefs] = useState<string[]>([]);
+  const [refs, setRefs] = useState<string[]>(() => openedJob ? [...openedJob.spec.refs] : []);
   const [uploading, setUploading] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null); const fileRef = useRef<HTMLInputElement>(null);
   // 模型清单可能在面板打开后才加载完，订阅一下，避免一直显示「没有可用模型」
@@ -326,10 +391,13 @@ export function GenerateCharacter({ ctl, defaultEra, onClose, onSaved }: { ctl: 
     for (const m of models) map.set(vendorOf(m), (map.get(vendorOf(m)) || 0) + 1);
     return [...map.entries()];
   }, [models]);
-  // 弹窗在不在只决定「要不要自动开详情」；组件卸载不取消任务（只有用户点取消/停止才 abort）
-  useEffect(() => { setCharacterJobHandler((id) => onSaved(id)); return () => setCharacterJobHandler(null); }, [onSaved]);
-  // 重新打开表单时把还在跑的任务名字带出来，别显示空表单
-  useEffect(() => { if (jobView && !form.name) setForm((f) => (f.name ? f : { ...f, name: jobView.name })); }, [jobView?.name]);
+  // 弹窗在不在只决定「要不要自动开详情」；组件卸载不取消任务（只有用户点停止/取消才 abort 那一颗）
+  // 回调按任务登记：关掉这个窗口只清掉自己，别的任务完成后不会误开详情
+  useEffect(() => {
+    if (!attachId) return;
+    setCharacterJobHandler(attachId, (id) => onSaved(id));
+    return () => setCharacterJobHandler(attachId, null);
+  }, [attachId, onSaved]);
   const openViewer = (i: number) => {
     const src = steps[i]?.url; if (!src) return;
     const items = steps.map((s, k) => ({ src: s.url || "", title: SHOTS[k].title, ratio: SHOTS[k].ratio })).filter((x) => x.src);
@@ -349,12 +417,15 @@ export function GenerateCharacter({ ctl, defaultEra, onClose, onSaved }: { ctl: 
     if (!ctl.store.backend.available()) { setErr("画布后端未连接，暂时不能生成；角色库之外的功能仍可用"); return; }
     if (!m) { setErr("还没有可用的图片模型：到 设置 › 模型 里添加一个再试"); return; }
     setErr("");
-    startCharacterJob(ctl, { name: form.name.trim(), model: m, form: { ...form, attrs: { ...form.attrs } }, refs: [...refs], whiten }, indexes);
+    // 每次点「生成四张」都是新任务，并附着到它：旧任务继续在后台跑
+    const id = startCharacterJob(ctl, { name: form.name.trim(), model: m, form: { ...form, attrs: { ...form.attrs } }, refs: [...refs], whiten }, indexes);
+    setAttachId(id);
+    setCharacterJobHandler(id, (elId) => onSaved(elId));
   };
   const retry = (i: number) => {
-    if (busy || !jobView) return;
+    if (busy || !attachId || !jobView) return;
     const spec = specNow(); if (!spec) return;
-    retryCharacterJob(ctl, spec, i);
+    retryCharacterJob(attachId, ctl, spec, i);
   };
 
   const readDataUrl = (f: File) => new Promise<string>((ok, no) => { const r = new FileReader(); r.onload = () => ok(String(r.result || "")); r.onerror = () => no(r.error || new Error("读取失败")); r.readAsDataURL(f); });
@@ -394,13 +465,19 @@ export function GenerateCharacter({ ctl, defaultEra, onClose, onSaved }: { ctl: 
     openPop(anchor, (done) => <ModelMenu models={vendorModels} currentId={model?.id} onPick={(m) => { done(); setModelId(m.id); ctl.store.rememberModel("image", m.id); setErr(""); }} />, "down", "left", "chgen-model-pop");
   };
 
-  const close = () => { cancelCharacterJob(); onClose(); };
-  const canSave = !!jobView && !jobView.active && !jobView.savedId && jobView.steps.every((s) => s.state === "done");
+  /** 关闭弹窗但不打断生成：任务在模块级单例里继续跑，完成后照常入库 + toast（只有显式「停止并关闭」才 abort） */
+  const dismiss = () => {
+    if (busy) ctl.store.toast("生成已转到后台继续，可在 AI 角色库顶部查看进度");
+    onClose();
+  };
+  const stopAndClose = () => { if (attachId) cancelCharacterJob(attachId); onClose(); };
+  const canSave = !!jobView && !jobView.active && jobView.steps.every((s) => s.state === "done");
+  const canResume = !!jobView && !jobView.active && !canSave;
   const saving = !!jobView?.saving;
   const shownErr = err || jobView?.error || "";
-  return <div className="chgen-layer" onPointerDown={(ev) => { if (ev.target === ev.currentTarget) close(); }}>
+  return <div className="chgen-layer" onPointerDown={(ev) => { if (ev.target === ev.currentTarget) dismiss(); }}>
     <div className="chgen" role="dialog" aria-label="AI 生成角色" onPointerDown={(ev) => ev.stopPropagation()}>
-      <div className="chgen-hd"><b>AI 生成角色</b><span className="chgen-sub">四张纯白底设定图，生成完自动入库</span><span className="sp" /><button className="chdt-ib" aria-label="关闭" onClick={close}><Icon name="x" size="s" /></button></div>
+      <div className="chgen-hd"><b>{jobView ? `AI 生成角色 · ${jobView.name}` : "AI 生成角色"}</b><span className="chgen-sub">四张纯白底设定图，生成完自动入库</span><span className="sp" /><button className="chdt-ib" aria-label="关闭" onClick={dismiss}><Icon name="x" size="s" /></button></div>
       <div className="chgen-main">
         <div className="chgen-left">
         <div className="chgen-f wide"><span>名字（必填，之后用 @名字 引用）</span><input ref={nameRef} className="rg-input" autoFocus data-ch-gen-name aria-invalid={!!nameIssue} value={form.name} maxLength={20} placeholder="例如：墨青" disabled={busy} onChange={(e) => { setForm((f) => ({ ...f, name: e.target.value })); setErr(""); }} onKeyDown={(e) => e.stopPropagation()} />{nameIssue ? <span className="chgen-hint" data-ch-gen-name-hint>{nameIssue}</span> : null}</div>
@@ -446,8 +523,9 @@ export function GenerateCharacter({ ctl, defaultEra, onClose, onSaved }: { ctl: 
           {shownErr ? <p className="chgen-err" data-ch-gen-error title={shownErr}>{shownErr}</p> : null}
         </div>
         <div className="chgen-ft-btns">
-          <button className="btn" onClick={close}>{busy ? "停止并关闭" : "取消"}</button>
-          {canSave ? <button className="btn solid" data-ch-gen-save disabled={saving} onClick={() => { const spec = specNow(); if (spec) saveCharacterJob(spec); }}>{saving ? "保存中…" : "保存角色"}</button>
+          <button className="btn" onClick={busy ? stopAndClose : dismiss}>{busy ? "停止并关闭" : "取消"}</button>
+          {canSave ? <button className="btn solid" data-ch-gen-save disabled={saving} onClick={() => { if (attachId) saveCharacterJob(attachId, specNow() ?? undefined, ctl); }}>{saving ? "保存中…" : "保存角色"}</button>
+            : canResume ? <button className="btn solid" data-ch-gen-resume onClick={() => { if (attachId) resumeCharacterJob(ctl, attachId); }}>{busy ? "生成中…" : "继续生成"}</button>
             : <button className="btn solid" data-ch-gen-run disabled={busy || !form.name.trim()} onClick={() => runSteps([0, 1, 2, 3])}>{busy ? "生成中…" : "生成四张"}</button>}
         </div>
       </div>

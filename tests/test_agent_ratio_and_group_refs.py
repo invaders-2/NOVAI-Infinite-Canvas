@@ -13,7 +13,7 @@ import asyncio
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
@@ -243,6 +243,112 @@ class AgentGroupReferenceTests(unittest.TestCase):
         nodes = [target, image_node("U", ["/u.png"])]
         conns = [{"from": "U", "to": "T", "kind": "input"}]
         self.assertEqual(self.refs(canvas_of(nodes, conns), target), ["/t.png", "/u.png", "/m.png"])
+
+
+class AgentExcludeSelfReferenceTests(unittest.TestCase):
+    """审查不合格重生成：exclude_self=True 时不再拿节点自己的旧图当参考，上游产物与手动参考照旧。"""
+
+    def refs(self, canvas, node, exclude_self=False):
+        return [r["url"] for r in main._agent_node_reference_items(canvas, node, exclude_self=exclude_self)]
+
+    def target(self):
+        return {"id": "T", "type": "smart-image", "images": [{"url": "/t.png", "kind": "image"}],
+                "manualInputRefs": [{"url": "/m.png", "nodeId": "x", "imageIndex": 0}]}
+
+    def canvas(self):
+        target = self.target()
+        nodes = [target, image_node("U", ["/u.png"])]
+        conns = [{"from": "U", "to": "T", "kind": "input"}]
+        return canvas_of(nodes, conns), target
+
+    def test_default_keeps_own_image_as_first_ref(self):
+        canvas, target = self.canvas()
+        self.assertEqual(self.refs(canvas, target), ["/t.png", "/u.png", "/m.png"])
+        self.assertEqual(self.refs(canvas, target, exclude_self=False), ["/t.png", "/u.png", "/m.png"])
+
+    def test_exclude_self_drops_own_image_keeps_upstream_and_manual(self):
+        canvas, target = self.canvas()
+        refs = self.refs(canvas, target, exclude_self=True)
+        self.assertNotIn("/t.png", refs)
+        self.assertEqual(refs, ["/u.png", "/m.png"])
+
+    def test_exclude_self_drops_group_members_too(self):
+        nodes = [group_node("A", ["m1", "m2"], images=[{"url": "/own.png", "kind": "image"}]),
+                 image_node("m1", ["/a.png"]), image_node("m2", ["/b.png"]), image_node("U", ["/u.png"])]
+        conns = [{"from": "U", "to": "A", "kind": "input"}]
+        canvas = canvas_of(nodes, conns)
+        self.assertEqual(self.refs(canvas, nodes[0]), ["/own.png", "/a.png", "/b.png", "/u.png"])
+        self.assertEqual(self.refs(canvas, nodes[0], exclude_self=True), ["/u.png"])
+
+
+class AgentReviewRegenerateWithoutSelfRefTests(unittest.TestCase):
+    """审查不合格 → 重生成步骤必须带 exclude_self_refs=True，否则旧坏图又被当参考图发一次。"""
+
+    def test_fix_steps_regenerate_with_exclude_self_refs(self):
+        canvas = canvas_of([image_node("i1", ["/old.png"])])
+        req = main.AgentReviewRequest(canvas_id="c1")
+        verdicts = [{"label": "图1", "node_id": "i1", "url": "/old.png", "kind": "image",
+                     "ok": False, "issues": ["主体偏了"], "revised_prompt": "主体居中、背景留白", "row": 0}]
+        steps, units = main._agent_review_fix_steps(canvas, req, verdicts)
+        self.assertEqual([s["tool"] for s in steps], ["update_node", "run_generation"])
+        self.assertEqual(steps[0]["args"]["prompt"], "主体居中、背景留白")
+        self.assertTrue(steps[1]["args"]["exclude_self_refs"])
+        self.assertEqual(steps[1]["args"]["node_id"], "i1")
+        self.assertEqual(units, 1)
+
+    def test_batch_regenerate_step_keeps_run_batch_args(self):
+        table = {"id": "t1", "type": "table", "table": {"columns": ["提示词"], "rows": [["一双白鞋"]]}}
+        batch = {"id": "b1", "type": "smart-batch"}
+        canvas = canvas_of([table, batch], [{"from": "t1", "to": "b1", "kind": "input"}])
+        req = main.AgentReviewRequest(canvas_id="c1", batch_node_id="b1")
+        verdicts = [{"label": "第 1 行", "node_id": "b1", "url": "/r1.png", "kind": "image",
+                     "ok": False, "issues": ["出现两双鞋"], "revised_prompt": "只有一双白鞋", "row": 1}]
+        steps, units = main._agent_review_fix_steps(canvas, req, verdicts)
+        self.assertEqual([s["tool"] for s in steps], ["update_node", "run_batch"])
+        self.assertNotIn("exclude_self_refs", steps[1]["args"])
+        self.assertEqual(units, 1)
+
+    def test_run_generation_schema_documents_exclude_self_refs(self):
+        schema = main.AGENT_TOOLS["run_generation"]["schema"]["properties"]["exclude_self_refs"]
+        self.assertEqual(schema["type"], "boolean")
+        self.assertFalse(schema["default"])
+
+
+class AgentClassicExcludeSelfRefTests(unittest.TestCase):
+    """经典画布：exclude_self_refs=true 时不再把节点自带的图塞进 reference_images，显式传入的照旧。"""
+
+    def canvas(self):
+        return {"id": "c1", "title": "老画布",
+                "nodes": [{"id": "n1", "type": "image", "text": "一只猫",
+                           "images": [{"url": "/old.png", "kind": "image"}]}],
+                "connections": []}
+
+    def refs(self, exclude_self, passed=()):
+        canvas = self.canvas()
+        captured = {}
+
+        def fake_create(kind, payload, runner_name, provider_id="", model_id="", extra=None):
+            captured["payload"] = payload
+            return {"id": "t1"}
+
+        calls = []
+        with patch.object(main, "load_canvas", return_value=canvas), \
+             patch.object(main, "_agent_is_beat_canvas", return_value=False), \
+             patch.object(main, "agent_image_size", return_value="1024x1024"), \
+             patch.object(main, "task_create", side_effect=fake_create), \
+             patch.object(main, "task_enqueue", new=AsyncMock(return_value=None)), \
+             patch.object(main, "_agent_mutate_canvas", side_effect=lambda cid, fn: (calls.append(fn), (canvas, None))[1]):
+            norm = main._agent_tool_run_generation_validate_classic(
+                {"canvas_id": "c1", "node_id": "n1", "reference_images": list(passed),
+                 "exclude_self_refs": exclude_self})
+            asyncio.run(main._agent_tool_run_generation_run_classic(norm))
+        self.assertEqual(norm["exclude_self_refs"], exclude_self is True)
+        return captured["payload"]["reference_images"]
+
+    def test_exclude_self_refs_true_keeps_only_explicit_refs(self):
+        self.assertEqual(self.refs(False), [{"url": "/old.png"}])
+        self.assertEqual(self.refs(True), [])
+        self.assertEqual(self.refs(True, ["/explicit.png"]), [{"url": "/explicit.png"}])
 
 
 class AgentPlanReferenceBoundaryTests(unittest.TestCase):

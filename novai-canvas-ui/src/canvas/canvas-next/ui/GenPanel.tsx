@@ -13,11 +13,13 @@ import { PromptEditor } from "./PromptEditor";
 import { requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRole, stopNode } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
 import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, durationTiers, formatClock, genOf, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatOptions, outputFormatShortLabel, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
-import { batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
-import { useCtl, useS } from "./ctx";
+import { batchInputWarnings, batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, ownRefCount, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
+import { useCtl, useS, type Ctl } from "./ctx";
+import { isSplitNode, startSplitNode } from "./SplitNode";
 import { startVoiceCapture, transcribeVoice, voiceErrorText, type VoiceCapture, type VoicePhase } from "../voiceInput";
 import { keyHint } from "./shortcuts";
-import { ratioDisplayLabel, sourceBoxForNode, sourceSizeForTier, type SourceBox } from "../originalRatio";
+import { ratioDisplayLabel, sourceBoxForNode, sourceSizeForTier, type RatioParams, type SourceBox } from "../originalRatio";
+import { isAdaptiveRatio } from "../mediaFit";
 import { ComboMenu } from "./combo";
 import { FloatMenuBar, FloatMenuButton } from "./FloatMenu";
 import { Icon, type IconName } from "./Icon";
@@ -56,12 +58,14 @@ export function SelectionUI() {
   const run = runtime[node.id];
   return <>
     <Toolbar key={"t" + node.id} refEl={tbRef} node={node} running={!!run} progress={run?.progress || 0} style={pos.tb || { left: -9999, top: -9999 }} />
-    {isGenKind(node.kind) ? <div id="gp" key={"g" + node.id} ref={gpRef} className={"float enter" + (node.kind === "video" ? " gp-video" : "")} style={pos.gp || { left: -9999, top: -9999 }} onPointerDown={(e) => e.stopPropagation()}><GenPanel node={node} /></div> : null}
+    {isGenKind(node.kind) && !isSplitNode(node) ? <div id="gp" key={"g" + node.id} ref={gpRef} className={"float enter" + (node.kind === "video" ? " gp-video" : "")} style={pos.gp || { left: -9999, top: -9999 }} onPointerDown={(e) => e.stopPropagation()}><GenPanel node={node} /></div> : null}
   </>;
 }
 
 function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; running: boolean; progress: number; style: React.CSSProperties; refEl: React.RefObject<HTMLDivElement | null> }) {
   const ctl = useCtl(); const store = ctl.store; const out = isGenKind(node.kind) ? outOf(node) : null; const g = isGenKind(node.kind) ? genOf(node) : null;
+  // 拆分结果节点自己就是编辑器：不挂普通图片工具条（关闭键在节点标题栏里）
+  if (isSplitNode(node)) return null;
   // 空状态（还没结果、也没在生成）的文本 / 视频 / 音频节点不挂这条工具条：这时条上只剩背景色、标记这类零碎入口，
   // 却一直压在节点上方（右键菜单里都有）。生成中要能停止、有结果要能编辑，都不受影响。空图片节点见下面单独的分支。
   if (isGenKind(node.kind) && !out && !running && node.kind !== "image") return null;
@@ -100,7 +104,7 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
   if (running) items = node.kind === "video"
     ? [B("frame", "frame", "截帧（快捷键 1）", "截帧"), <span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))]
     : [<span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))];
-  else if (node.kind === "image") items = [B("crop", "crop", "裁剪 / 旋转"), B("markup", "pencil", "涂鸦 / 文字 / 马赛克"), B("angle", "cube", "多角度"), B("mask", "brush", "局部重绘"), B("relight", "sun", "重打光"), B("adjust", "palette", "调色"), B("lossless", "layers", "无损改图"), B("more", "more", "更多"), <span key="s" className="vsep" />, tagBtn(), B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store)), B("full", "expand", "全屏查看", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })))];
+  else if (node.kind === "image") items = [B("crop", "crop", "裁剪 / 旋转"), B("markup", "pencil", "涂鸦 / 文字 / 马赛克"), B("angle", "cube", "多角度"), B("mask", "brush", "局部重绘"), B("relight", "sun", "重打光"), B("adjust", "palette", "调色"), B("lossless", "edit", "无损改图"), B("split", "layers", "拆分图层", "拆分图层", (el) => splitMenu(ctl, node.id, el)), B("more", "more", "更多"), <span key="s" className="vsep" />, tagBtn(), B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store)), B("full", "expand", "全屏查看", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })))];
   else if (node.kind === "text") items = [bgBtn(), tagBtn(), <span key="s" className="vsep" />, B("copy", "copy", "复制全部", "", async () => { try { await navigator.clipboard.writeText(textOf(node)); store.toast("已复制全部内容"); } catch { store.toast("剪贴板不可用"); } }), B("lib", "libadd", "保存到素材库", "", (el) => { const r = el.getBoundingClientRect(); void saveNodeToLibrary(ctl, node, { x: r.left, y: r.bottom + 6 }); }), B("full", "expand", "全屏编辑", "", () => window.dispatchEvent(new CustomEvent("cn:textdoc", { detail: node.id })))];
   else if (node.kind === "video" && out) items = [
     // TapNow 视频工具栏：修剪 / 智能切镜 / AI 编辑（替换·移除·续写·重拍）/ 截帧 / 更多 ┃ 标签 ┃ 保存素材库 / 下载 / 全屏
@@ -141,12 +145,16 @@ function GenPanel({ node }: { node: CanvasNode }) {
   const { roles, ignored } = rolesFor(kind, p, m, ins);
   const imgIns = ins.filter((x) => x.node.kind === "image");
   const originalSource = useSourceBox(node, kind);
-  const originalSize = (p as ImageParams).sourceSize || "";
+  // 原图比例：量到源图尺寸就记进 params.sourceSize（图片是请求要发的显式 WxH，视频只当比例备忘），
+  // 节点摆正由 store 的比例不变量处理；比例没变不会重摆，用户拖过的尺寸不会被弹回去
+  const ratioMemo = p as RatioParams;
+  const originalMemo = ratioMemo.sourceSize || "";
   useEffect(() => {
-    if (kind !== "image" || (p as ImageParams).ratio !== "自适应") return;
-    const size = sourceSizeForTier(originalSource, (p as ImageParams).size);
-    if (size && size !== originalSize) store.patchGen(node.id, (gg) => ({ params: { ...gg.params, sourceSize: size } }));
-  }, [kind, node.id, p, originalSource, originalSize]);
+    if (kind !== "image" && kind !== "video") return;
+    if (!isAdaptiveRatio(ratioMemo.ratio)) return;
+    const size = sourceSizeForTier(originalSource, kind === "image" ? (p as ImageParams).size : "1K");
+    if (size && size !== originalMemo) store.patchGen(node.id, (gg) => ({ params: { ...gg.params, sourceSize: size } }));
+  }, [kind, node.id, p, originalSource, ratioMemo.ratio, originalMemo]);
   const optsRef = useRef<HTMLDivElement>(null); const [fit, setFit] = useState(true);
   useLayoutEffect(() => { const o = optsRef.current; if (o) setFit(o.scrollWidth <= o.clientWidth + 1); });
   const [draft, setDraft] = useState(g.prompt); const lastId = useRef(node.id);
@@ -259,6 +267,12 @@ function GenPanel({ node }: { node: CanvasNode }) {
         ? `当前生成方式「${(p as VideoParams).mode}」不接受视频输入：@ 的本节点当前视频不会发送，切到「参考视频生视频」或「视频编辑」才行。`
         : `${m.name} 不支持参考图：提示词里 @ 的本节点当前结果不会发送。`);
     }
+    // 当前版本上记着生成时的自我参考源（或明确没有）：重新生成沿用那条记录，不会把新一版结果再喂回去。
+    // 这是有意的行为变化，在面板上说清楚怎么拿当前这一版继续改。
+    const fixed = outOf(node)?.meta?.selfSrc;
+    if (fixed !== undefined) warns.push(fixed
+      ? `重新生成会继续用最初带出去的「本节点」参考图，不会把新一版结果再喂回去。想拿当前这一版继续改，先右键「副本」复制成独立的${kind === "video" ? "视频" : "图片"}节点，再 @ 引用它。`
+      : `这一版生成时没有带「本节点」参考图，重新生成也不会补上上一版结果。想拿当前这一版继续改，先右键「副本」复制成独立的${kind === "video" ? "视频" : "图片"}节点，再 @ 引用它。`);
   }
   refsIn(g.prompt, ins).missing.forEach((r) => warns.push(`找不到引用「@${r}」：确认上游节点里有这一段。`));
 
@@ -404,8 +418,10 @@ function GenPanel({ node }: { node: CanvasNode }) {
       aria-label={"先思考：" + (ip.thinking === true ? "开" : ip.thinking === false ? "关" : "默认")}
       title={"先思考（" + (m?.name || "") + "）：" + (ip.thinking === true ? "开：先想再画" : ip.thinking === false ? "关：直接出图" : "默认（模型决定）")}
       onClick={(e) => paramPop(ctl, node, "thinking", e.currentTarget)}>先思考{ip.thinking === true ? " 开" : ip.thinking === false ? " 关" : " 默认"}</button>);
+    // 透明背景的入口在「比例 · 尺寸」弹层里（RatioPop），底栏只保留一个「 · 透明」状态摘要
+    const bgOn = ip.background === "transparent";
     const gifOn = outputFormatForRequest(ip.outputFormat) === "gif";
-    gline.push(<span key="gp-bar1" className="gp-bar" />, seg("ratio", <>{/^(auto|adaptive|自适应)$/i.test(ip.ratio) ? "原图比例" : ip.ratio} · {ip.size}{formats.length ? " · " + outputFormatShortLabel(ip.outputFormat) : ""}</>), gdot("c1"), seg("count", <>{ip.count}×</>));
+    gline.push(<span key="gp-bar1" className="gp-bar" />, seg("ratio", <>{/^(auto|adaptive|自适应)$/i.test(ip.ratio) ? "原图比例" : ip.ratio} · {ip.size}{!bgOn && formats.length ? " · " + outputFormatShortLabel(ip.outputFormat) : ""}{bgOn ? " · 透明" : ""}</>), gdot("c1"), seg("count", <>{ip.count}×</>));
     if (gifOn) gline.push(gdot("cgif"), seg("gifframes", <>{gifFrameCountFor(ip.frameCount, m)} 帧 · {gifFrameDurationFor(ip.frameDuration, m)}ms</>));
     if (m?.mj) gline.push(gdot("cmj"), seg("mj", <>{mjSummary(ip.mj)}</>, !!(ip.mj && (ip.mj.version || ip.mj.hd || typeof ip.mj.stylize === "number" || (ip.mj.speed && ip.mj.speed !== "fast")))));
     // 风格 / 摄影机按「模型真的会转发」才渲染（没有能力就不给入口，不置灰）
@@ -471,6 +487,24 @@ function GenPanel({ node }: { node: CanvasNode }) {
   </>;
 }
 
+/** 工具条「拆分图层」：自动 / 自定义两种拆法都打开同一个全屏编辑器（拆分本身不消耗积分） */
+function splitMenu(ctl: Ctl, id: string, anchor: Element) {
+  openPop(anchor, (close) => {
+    const fire = (mode: "auto" | "custom") => () => { close(); startSplitNode(ctl, id, mode); };
+    return <>
+      <div className="mh">拆分图层</div>
+      <button className="mi" data-split-mode="auto" onClick={fire("auto")}>
+        <span className="ic"><Icon name="layers" size="s" /></span>
+        <span>自动拆分<span className="d">自动识别图层和文字，先出结果再调</span></span>
+      </button>
+      <button className="mi" data-split-mode="custom" onClick={fire("custom")}>
+        <span className="ic"><Icon name="crop" size="s" /></span>
+        <span>自定义拆分<span className="d">框选区域并描述，只拆你圈出的部分</span></span>
+      </button>
+    </>;
+  }, "up");
+}
+
 /** 视频结果动作的「更多」：首帧/尾帧截帧、设为视频封面、应用到画布、下载、全屏（对齐 TapNow） */
 function videoMore(store: CanvasStore, node: CanvasNode, anchor: Element) {
   openPop(anchor, (close) => {
@@ -529,14 +563,21 @@ function BatchPanel({ node }: { node: CanvasNode }) {
   const setS = (patch: Partial<BatchSettings>) => store.updateNode(node.id, (n) => withBatch(n, { settings: patch }));
   const stOf = (row: number) => journal?.rows.find((r) => r.row === row);
   const first = rows.filter((r) => todo.has(r.row)).slice(0, s.concurrency).map((r) => r.row);
+  // 常驻说明（不只 toast）：输入编号对不上 / 多出来的旧通道；参考图超模型上限被截时点名是哪一列
+  const inputWarns = batchInputWarnings(doc, node.id);
+  // 生成节点自身连的图会占参考图名额：预览 / 行提醒都要用和真实请求同一个 reserved
+  const reservedRefs = ownRefCount(doc, node.id, node.kind as GenKind);
+  const refWarns = [...new Set(rows.filter((r) => todo.has(r.row)).flatMap((r) => planRow(node.kind as GenKind, g.params, m, r, reservedRefs).warnings).filter((w) => w.includes("参考图超过") || w.includes("不支持参考图") || w.includes("参考图名额已被")))];
   return <div className="gp-batch">
     <div className="bh"><Icon name="grid" size="s" /><b>生成输入</b><span className="tnum">{s.manual ? `独立运行 · 已选 ${s.selected.filter((x) => rows.some((r) => r.row === x)).length}/${rows.length}` : `批量 ${todo.size} 行 · 首批 ${Math.min(s.concurrency, todo.size)}`}</span><span className="sp" />{journal ? <button className="linkbtn" onClick={() => store.updateNode(node.id, (n) => withBatch(n, { journal: null }))} title="清除上次运行记录，下次从头生成">重置记录</button> : null}</div>
+    {inputWarns.map((w) => <div className="gp-warn" data-warn="table-input" key={w}><Icon name="alert" size="s" /><span>{w}</span></div>)}
+    {refWarns.map((w) => <div className="gp-warn" data-warn="ref-limit" key={w}><Icon name="alert" size="s" /><span>{w}</span></div>)}
     <div className="blist">
       {rows.map((r) => { const j = stOf(r.row); const sel = s.manual ? s.selected.includes(r.row) : first.includes(r.row); return (
         <button key={r.row} className={"brow" + (sel ? " sel" : "") + (todo.has(r.row) ? "" : " skip") + (s.manual ? "" : " dim")} onClick={() => { if (!s.manual) return; setS({ selected: s.selected.includes(r.row) ? s.selected.filter((x) => x !== r.row) : [...s.selected, r.row].sort((a, b) => a - b) }); }}>
           <span className="n tnum">{r.row}</span>
           <span className="md">{r.media.slice(0, 3).map((md) => <RowThumb key={md.nodeId} src={md.src} kind={md.kind} />)}</span>
-          <p>{(() => { const pl = planRow(node.kind as GenKind, g.params, m, r); const pp = pl.params as { mode?: string; dur?: number; ratio?: string }; const tags = [r.label, node.kind === "video" && pp.mode !== (g.params as { mode?: string }).mode ? pp.mode : null, r.dur != null && node.kind === "video" ? pp.dur + "s" : null, r.ratio ? pp.ratio : null].filter(Boolean); return <>{tags.length ? <b className="btag">{tags.join(" · ")}</b> : null}{r.text || (r.media.length ? "仅媒体输入" : "")}{pl.warnings.length ? <i className="bwarn" title={pl.warnings.join("\n")}> · {pl.warnings[0]}</i> : null}</>; })()}</p>
+          <p>{(() => { const pl = planRow(node.kind as GenKind, g.params, m, r, reservedRefs); const pp = pl.params as { mode?: string; dur?: number; ratio?: string }; const tags = [r.label, node.kind === "video" && pp.mode !== (g.params as { mode?: string }).mode ? pp.mode : null, r.dur != null && node.kind === "video" ? pp.dur + "s" : null, r.ratio ? pp.ratio : null].filter(Boolean); return <>{tags.length ? <b className="btag">{tags.join(" · ")}</b> : null}{tags.length && r.text ? " · " : null}{r.text || (r.media.length ? "仅媒体输入" : "")}{pl.warnings.length ? <i className="bwarn" title={pl.warnings.join("\n")}> · {pl.warnings[0]}</i> : j?.warn ? <i className="bwarn" title={j.warn}> · {j.warn}</i> : null}</>; })()}</p>
           <span className={"st" + (j?.status === "completed" ? " ok" : j?.status === "failed" ? " bad" : "")}>{j ? { completed: "已完成", failed: "失败", running: "生成中", pending: "待生成" }[j.status] : ""}</span>
         </button>); })}
       {!rows.length ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>上游表格还没有行</span></div> : null}
@@ -677,7 +718,6 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   if (k === "count") return pop((close) => {
     const options = mm.batchUnknown ? [1] : [4, 2, 1];
     return <><div className="mh">一次生成几张</div>{options.map((c) => <button key={c} className={"mi" + ((cur().g.params as ImageParams).count === c ? " on" : "")} disabled={dis || !mm.batch?.includes(c)} onClick={() => { close(); set({ count: c }); }}>{c}×<span className="k">{!dis && mm.batch?.includes(c) ? (c > 1 ? (store.state.ui.batchMode === "stack" ? "堆叠在本节点" : "铺开成新节点") : "") : "该模型不支持"}</span></button>)}
-      {mm.batchUnknown ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>上限未知，以实际为准</span></div> : null}
     </>;
   });
   if (k === "vtimes") return pop((close) => <><div className="mh">一次生成几条</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + (((cur().g.params as VideoParams).times || 1) === c ? " on" : "")} disabled={dis || !(mm.times || [1]).includes(c)} onClick={() => { close(); set({ times: c }); }}>{c}×<span className="k">{!dis && (mm.times || [1]).includes(c) ? (c > 1 ? "每条单独计费" : "") : "该模型不支持"}</span></button>)}</>);
@@ -691,11 +731,11 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   </>); }
   if (k === "dur") return pop(() => <DurPop node={node} m={mm} disabled={dis} />);
   if (k === "vgenmode") return pop((close) => <><div className="mh">生成模式</div><div className="seg wrap">{(mm.genModes || []).map((x) => <button key={x} className={(cur().g.params as VideoParams).genMode === x ? "on" : ""} disabled={dis} onClick={() => { close(); set({ genMode: x }); }}>{x}</button>)}</div></>);
-  if (k === "vturbo") return pop((close) => <><div className="mh">加速（极速模式）</div><div className="seg"><button className={(cur().g.params as VideoParams).turbo ? "on" : ""} disabled={dis} onClick={() => { close(); set({ turbo: true }); }}>开</button><button className={!(cur().g.params as VideoParams).turbo ? "on" : ""} disabled={dis} onClick={() => { close(); set({ turbo: false }); }}>关</button></div><div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>极速模式会优先出片，画质与稳定性可能下降</span></div></>);
-  if (k === "vaudio") return pop((close) => <><div className="mh">音频</div><div className="seg"><button className={(cur().g.params as VideoParams).sound ? "on" : ""} disabled={dis} onClick={() => { close(); set({ sound: true }); }}>开</button><button className={!(cur().g.params as VideoParams).sound ? "on" : ""} disabled={dis} onClick={() => { close(); set({ sound: false }); }}>关</button></div><div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>为生成的视频添加音频内容</span></div></>);
+  if (k === "vturbo") return pop((close) => <><div className="mh">加速（极速模式）</div><div className="seg"><button className={(cur().g.params as VideoParams).turbo ? "on" : ""} disabled={dis} onClick={() => { close(); set({ turbo: true }); }}>开</button><button className={!(cur().g.params as VideoParams).turbo ? "on" : ""} disabled={dis} onClick={() => { close(); set({ turbo: false }); }}>关</button></div></>);
+  if (k === "vaudio") return pop((close) => <><div className="mh">音频</div><div className="seg"><button className={(cur().g.params as VideoParams).sound ? "on" : ""} disabled={dis} onClick={() => { close(); set({ sound: true }); }}>开</button><button className={!(cur().g.params as VideoParams).sound ? "on" : ""} disabled={dis} onClick={() => { close(); set({ sound: false }); }}>关</button></div></>);
   if (k === "akind") return pop((close) => <><div className="mh">类型</div>{(mm.kinds || []).map((x) => <button key={x} className={"mi" + ((cur().g.params as AudioParams).kind === x ? " on" : "")} disabled={dis} onClick={() => { close(); set({ kind: x }); }}>{x}</button>)}</>);
   if (k === "adur") return pop((close) => <><div className="mh">时长</div>{(mm.adurs || []).map((x) => <button key={x} className={"mi" + ((cur().g.params as AudioParams).dur === x ? " on" : "")} disabled={dis} onClick={() => { close(); set({ dur: x }); }}>{x}</button>)}</>);
-  if (k === "output") return pop((close) => <><div className="mh">输出</div>{OUTPUT_MODES.map(([v, l, d]) => <button key={v} className={"mi" + (((cur().g.params as TextParams).output || "text") === v ? " on" : "")} disabled={dis} onClick={() => { close(); set({ output: v }); }}><span className="ic"><Icon name={v === "text" ? "text" : "grid"} size="s" /></span><span>{l}<span className="d">{d}</span></span></button>)}<div className="msep" /><div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>表格会建在右侧并自动连线，再跑一次会更新同一张表</span></div></>);
+  if (k === "output") return pop((close) => <><div className="mh">输出</div>{OUTPUT_MODES.map(([v, l, d]) => <button key={v} className={"mi" + (((cur().g.params as TextParams).output || "text") === v ? " on" : "")} disabled={dis} onClick={() => { close(); set({ output: v }); }}><span className="ic"><Icon name={v === "text" ? "text" : "grid"} size="s" /></span><span>{l}<span className="d">{d}</span></span></button>)}</>);
 }
 
 function useNodeParams<T>(node: CanvasNode) { const n = useS((s) => s.doc.nodes.find((x) => x.id === node.id)) || node; return genOf(n).params as T; }
@@ -722,7 +762,6 @@ function DraftRow({ on, disabled = false, range, onToggle }: { on: boolean; disa
   return <button className={"draft-row" + (on ? " on" : "")} data-p="vdraft" data-vopt="draft" disabled={disabled || !range}
     title={range ? `先按 ${range.low} 出草稿，满意后一键按 ${range.high} 出成片` : "该模型只有一档分辨率"} onClick={onToggle}>
     <span className="t">草稿模式</span>
-    <span className="d">{range ? `· 先按 ${range.low} 出草稿` : "· 该模型只有一档分辨率"}</span>
     <span className="sp" />
     {on ? <Icon name="check" size="s" /> : null}
   </button>;
@@ -763,7 +802,7 @@ function GifNumberRow({ dataP, label, value, min, max, step, unit, disabled, nor
     </span>
   </div>;
 }
-/** GIF 帧参数（只有输出格式选到 GIF 时才渲染）：帧数 2–16、每帧时长 20–2000 步进 10；灰字说明每帧尺寸会被拼版上限缩小 */
+/** GIF 帧参数（只有输出格式选到 GIF 时才渲染）：帧数 2–16、每帧时长 20–2000 步进 10 */
 function GifFrameRows({ model, params, disabled, onPatch }: { model?: ModelSpec; params: ImageParams; disabled?: boolean; onPatch: (patch: Partial<ImageParams>) => void }) {
   const spec = gifFrameSpec(model);
   return <>
@@ -774,10 +813,9 @@ function GifFrameRows({ model, params, disabled, onPatch }: { model?: ModelSpec;
       min={GIF_FRAME_FALLBACK.durationMin} max={GIF_FRAME_FALLBACK.durationMax} step={GIF_FRAME_FALLBACK.durationStep}
       unit={"ms · " + GIF_FRAME_FALLBACK.durationMin + "–" + GIF_FRAME_FALLBACK.durationMax} disabled={disabled}
       normalize={(raw) => gifFrameDurationFor(raw, model)} onCommit={(next) => onPatch({ frameDuration: next })} />
-    <div className="gif-tip">每帧尺寸会按拼版上限自动缩小（整版 ≤3840 单边、约 829 万像素）。</div>
   </>;
 }
-/** GIF 帧参数弹层（底栏「N 帧 · Nms」打开）：参数弹层太长要滚动，帧控件与灰字说明单独一屏 */
+/** GIF 帧参数弹层（底栏「N 帧 · Nms」打开）：参数弹层太长要滚动，帧控件单独一屏 */
 function GifFramePop({ node, model, disabled }: { node: CanvasNode; model?: ModelSpec; disabled?: boolean }) {
   const store = useCtl().store; const p = useNodeParams<ImageParams>(node);
   const set = (patch: Partial<ImageParams>) => store.patchGen(node.id, (g) => ({ params: { ...(g.params as ImageParams), ...patch } }));
@@ -798,23 +836,31 @@ function RatioPop({ node, model, disabled = false }: { node: CanvasNode; model?:
   const ratios = [...new Set((m.ratios || []).map(normRatio))];
   const formats = outputFormatOptions(m);
   const format = outputFormatForRequest(p.outputFormat);
+  // 透明背景和 GIF / SVG 互斥（透明只能出 PNG）：开着透明背景时不显示输出格式区块
+  const transparent = p.background === "transparent";
   return <>
     <div className="mh">分辨率</div>
     <OptCards cols={(m.sizes || []).length} items={(m.sizes || []).map((s) => ({ key: s, label: s, on: p.size === s, disabled, pick: () => chooseSize(s) }))} />
+    {m.nativeBackground ? <>
+      <div className="mh">背景</div>
+      <div className="seg" data-p="background">
+        <button className={transparent ? "" : "on"} data-background="default" disabled={disabled} onClick={() => set({ background: undefined })}>默认</button>
+        <button className={transparent ? "on" : ""} data-background="transparent" disabled={disabled} onClick={() => set({ background: "transparent", outputFormat: undefined })}>透明背景</button>
+      </div>
+    </> : null}
     <div className="mh">比例</div>
     <OptCards cols={4} items={ratios.map((r) => {
       const needSource = r === "自适应" && !hasSource;
       return { key: r, label: ratioDisplayLabel(r), shape: shape(r), on: p.ratio === r, disabled: disabled || needSource, title: needSource ? "需要有参考图或节点已有图" : undefined, pick: () => chooseRatio(r) };
     })} />
     {m.search ? <><div className="mh">联网搜索</div><div className="seg"><button className={p.search ? "on" : ""} disabled={disabled} onClick={() => set({ search: true })}>开</button><button className={!p.search ? "on" : ""} disabled={disabled} onClick={() => set({ search: false })}>关</button></div></> : null}
-    {formats.length ? <>
+    {!transparent && formats.length ? <>
       <div className="mh">输出格式</div>
       <div className="seg" data-p="output-format">
-        {formats.map((f) => <button key={f.value || "static"} className={format === f.value ? "on" : ""} disabled={disabled} title={OUTPUT_FORMAT_TIP[f.value]} onClick={() => set({ outputFormat: f.value || undefined })}>{f.label}</button>)}
+        {formats.map((f) => <button key={f.value || "static"} className={format === f.value ? "on" : ""} disabled={disabled} title={OUTPUT_FORMAT_TIP[f.value]} onClick={() => f.value ? set({ outputFormat: f.value, background: undefined }) : set({ outputFormat: undefined })}>{f.label}</button>)}
       </div>
     </> : null}
     {format === "gif" ? <GifFrameRows model={m} params={p} disabled={disabled} onPatch={set} /> : null}
-    {ratios.includes("自适应") && !hasSource ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>原图比例需要有参考图</span></div> : null}
   </>;
 }
 /** Midjourney 参数：版本 / 速度 / HD / 风格化（只列服务商规格声明的取值） */
@@ -838,7 +884,6 @@ function MjPop({ node, model, disabled = false }: { node: CanvasNode; model?: Mo
     {spec.hd.length ? <><div className="mh">高清 HD</div><div className="seg">
       <button data-mjhd="on" className={cur.hd ? "on" : ""} disabled={disabled || !hdOk} onClick={() => set({ hd: true })}>开</button>
       <button className={!cur.hd ? "on" : ""} disabled={disabled} onClick={() => set({ hd: false })}>关</button>
-      {!hdOk ? <span style={{ alignSelf: "center", marginLeft: 6, color: "var(--fg3)", fontSize: 12 }}>只支持 {spec.hd.map((v) => "v" + v).join(" / ")}</span> : null}
     </div></> : null}
     <div className="mh">风格化</div><div className="seg wrap">
       <button className={typeof cur.stylize !== "number" ? "on" : ""} disabled={disabled} onClick={() => set({ stylize: undefined })}>默认</button>
@@ -886,7 +931,6 @@ function DurPop({ node, m, disabled = false }: { node: CanvasNode; m: ModelSpec;
       {durationTiers(m.durs).auto || !(m.durs || []).length ? <button className={!p.dur || p.dur <= 0 ? "on" : ""} disabled={disabled} onClick={() => set({ dur: -1 })}>自动</button> : null}
       {durationTiers(m.durs).positive.map((d) => <button key={d} className={p.dur === d ? "on" : ""} disabled={disabled} onClick={() => set({ dur: d })}>{d}s</button>)}
     </div>
-    <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>「自动」由模型决定时长</span></div>
   </>;
 }
 

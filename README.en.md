@@ -125,11 +125,13 @@ No Python, no environment setup — grab the installer for your platform from [R
 | Platform | Installer | Notes |
 |----------|-----------|-------|
 | Windows | `NOVAI-Setup-<version>.exe` | Classic installer, small download |
-| Windows | `NOVAI-Electron-Setup-<version>.exe` | Electron build with Chromium and auto-update |
+| Windows | `NOVAI-Electron-Setup-<version>.exe` | Electron build with Chromium and auto-update; lets you choose the install folder |
 | macOS | `NOVAI-Setup-<version>.dmg` | Classic installer, drag into Applications |
 | macOS | `NOVAI-<version>-arm64.dmg` | Electron build with Chromium and auto-update |
 
 **Windows** — run the installer and follow the wizard, launch "NOVAI" from the desktop, and the browser opens `http://127.0.0.1:3000/`.
+
+> **The Windows Electron installer is per-current-user only, and lets you pick the install folder** (defaults to your user folder; any writable folder such as `D:\NOVAI` works). It never requests elevation, so installing for all users / into Program Files via UAC is not supported — silent updates would not be able to write there. Later updates still install silently into that same folder — no wizard, and `%APPDATA%\NOVAI` is untouched.
 
 **macOS** — open the DMG, drag `NOVAI.app` into Applications, double-click it, and the browser opens `http://127.0.0.1:3000/`.
 

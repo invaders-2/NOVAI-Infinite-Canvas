@@ -56,7 +56,8 @@ export function canvasAssetKindLabel(item) {
     if (String(item?.kind || '').toLowerCase() === 'text') return '文本';
     return '图片';
 }
-export function canvasKindLabel(kind) { return kind === 'smart' ? '智能画布' : '普通画布'; }
+// 与画布列表口径一致：classic 就是「智能画布」（/static/canvas.html），smart 是旧智能画布（/static/smart-canvas.html）
+export function canvasKindLabel(kind) { return kind === 'smart' ? '旧版智能画布' : '智能画布'; }
 
 // 类型筛选（素材库 / 本地上传 / 画布里的三个面板共用）。只列 图片/视频/音频，文本归在「全部」里；
 // 某个类型在当前面板一条数据都没有时不显示它的页签（没有音频数据就不显示音频），

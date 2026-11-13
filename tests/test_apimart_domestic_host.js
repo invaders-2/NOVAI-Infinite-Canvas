@@ -1,15 +1,13 @@
 #!/usr/bin/env node
 // APIMart 判定补国内备用域名 apib.ai：apib.ai / api.apib.ai 与 apimart.ai 是同一网关（实测；官方文档未记载）。
 //
-// 覆盖设置 / 在线生图 / 素材库 / 旧画布共八处判定：
+// 覆盖设置 / 素材库 / 旧画布共六处判定（在线生图页已下线删除，相关两处断言随之移除）：
 //   web/src/shell/settings/api/parts/OverviewBento.vue  isApimart
-//   web/src/pages/online/providers.js                   protocolOf
 //   web/src/pages/assets/lib/avatar.js                  providerPlatform
 //   static/js/api-settings.js                           isApimartProviderContext
 //   static/js/smart-canvas.js                           videoProviderPlatform
 //   static/js/asset-manager.js                          providerAvatarPlatform
 //   static/js/canvas.js                                 midjourneyApiProviders（域名正则）
-//   static/online.html                                  providerProtocol（旧在线生图页）
 //
 // 运行：node tests/test_apimart_domestic_host.js
 'use strict';
@@ -48,26 +46,21 @@ function extractBlock(src, startMarker, endMarker){
 }
 
 const overviewSrc = read('web/src/shell/settings/api/parts/OverviewBento.vue');
-const onlineSrc = read('web/src/pages/online/providers.js');
 const avatarSrc = read('web/src/pages/assets/lib/avatar.js');
 const settingsSrc = read('static/js/api-settings.js');
 const smartSrc = read('static/js/smart-canvas.js');
 const assetSrc = read('static/js/asset-manager.js');
 const canvasSrc = read('static/js/canvas.js');
-const onlineHtmlSrc = read('static/online.html');
 const settingsHtmlSrc = read('static/api-settings.html');
 const midjourneySnippet = extractFn(canvasSrc, 'midjourneyApiProviders');
-const onlineHtmlSnippet = extractBlock(onlineHtmlSrc, 'function providerProtocol(id){', "return 'api';");
 
 // ---- 静态断言：每处判定都要同时命中 apimart.ai 与 apib.ai ----
 const SITES = [
     ['OverviewBento.vue isApimart', extractComputed(overviewSrc, 'isApimart'), false],
-    ['online/providers.js protocolOf', extractFn(onlineSrc, 'protocolOf'), true],
     ['assets/avatar.js providerPlatform', extractFn(avatarSrc, 'providerPlatform'), true],
     ['api-settings.js isApimartProviderContext', extractFn(settingsSrc, 'isApimartProviderContext'), false],
     ['smart-canvas.js videoProviderPlatform', extractFn(smartSrc, 'videoProviderPlatform'), true],
     ['asset-manager.js providerAvatarPlatform', extractFn(assetSrc, 'providerAvatarPlatform'), true],
-    ['static/online.html providerProtocol', onlineHtmlSnippet, true],
 ];
 ok(midjourneySnippet.includes('apimart') && midjourneySnippet.includes('apib'),
     'canvas.js midjourneyApiProviders 正则同时命中 apimart / apib');

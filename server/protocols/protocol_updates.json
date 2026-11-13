@@ -537,6 +537,101 @@
           "note": "与画布 MJ 预设一致"
         }
       ]
+    },
+    {
+      "provider_id": "apimart",
+      "name": "APIMart",
+      "version": 3,
+      "released_at": "2026-11-11",
+      "summary": "新增 Seedream 5.5 图像模型（seedream-5-5）：1K/1.5K/2K 三档、auto + 10 个比例、n 只能 1、最多 10 张参考图（公网 URL 或 base64）、输出 png/jpeg；透明背景已支持（必须 PNG，生成时自动改格式），图层拆分（含 OCR）与精确像素尺寸编辑器暂无入口，只在本次更新包留档。",
+      "docs_url": "https://docs.apimart.ai/cn/api-reference/images/seedream-5-5/generation",
+      "new_models": {
+        "chat": [],
+        "image": [
+          "seedream-5-5"
+        ],
+        "video": [],
+        "audio": []
+      },
+      "protocol_changes": [],
+      "model_caps": [
+        {
+          "model": "seedream-5-5",
+          "kind": "image",
+          "caps": {
+            "ratios": [
+              "auto",
+              "1:1",
+              "4:3",
+              "3:4",
+              "16:9",
+              "9:16",
+              "3:2",
+              "2:3",
+              "2:1",
+              "1:2",
+              "21:9"
+            ],
+            "resolutions": [
+              "1K",
+              "1.5K",
+              "2K"
+            ],
+            "n_max": 1,
+            "ref_max": 10,
+            "base64_refs": true,
+            "output_formats": [
+              "png",
+              "jpeg"
+            ],
+            "native_background": true
+          }
+        }
+      ],
+      "parameter_changes": [
+        {
+          "model": "seedream-5-5",
+          "field": "size",
+          "from": "无独立条目",
+          "to": "auto + 10 个比例（含 2:1/1:2/21:9，不带 9:21）",
+          "note": "文档确证；auto 与 2K 等价"
+        },
+        {
+          "model": "seedream-5-5",
+          "field": "resolutions",
+          "from": "无独立条目",
+          "to": "[1K,1.5K,2K]",
+          "note": "不支持 3K/4K；精确像素尺寸（总像素 921600–4624220）项目未提供入口"
+        },
+        {
+          "model": "seedream-5-5",
+          "field": "ref_max",
+          "from": "未下发",
+          "to": "10",
+          "note": "image_urls 0–10 张，单张 ≤30MiB，公网 URL 与 data:image base64 都收"
+        },
+        {
+          "model": "seedream-5-5",
+          "field": "n_max",
+          "from": "未下发",
+          "to": "1",
+          "note": "文档确证 n 只能 1，多张由编辑器拆成多次请求"
+        },
+        {
+          "model": "seedream-5-5",
+          "field": "output_formats",
+          "from": "未下发",
+          "to": "[png,jpeg]",
+          "note": "png 为默认；图层拆分暂无编辑器入口"
+        },
+        {
+          "model": "seedream-5-5",
+          "field": "background",
+          "from": "未下发",
+          "to": "transparent（必须 PNG）",
+          "note": "文档确证 background 可选 auto/transparent/opaque，文生图与图生图都支持；透明背景必须配 output_format=png，生成侧会把输出格式强制改成 png"
+        }
+      ]
     }
   ]
 }

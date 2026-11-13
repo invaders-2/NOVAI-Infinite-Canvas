@@ -8,6 +8,10 @@ export type ToolStep = {
     secs?: string;
     /** 事件里的 callId：联网搜索的结果卡靠它把同一次搜索的步骤行从「处理过程」里摘掉 */
     callId?: string;
+    /** tool_call_delta 的「正在准备」占位行：step_start / step_result 到达后原地转正，不新增行 */
+    provisional?: boolean;
+    /** 工具名（占位行与正式行靠它对齐） */
+    tool?: string;
 };
 export type AgentMsg = {
   id: string;
@@ -17,8 +21,16 @@ export type AgentMsg = {
   html?: boolean;
   streaming?: boolean;
   skill?: string;
+  /** 后端写入的主动消息（origin:"agent"）：面板上轻微标记，不抢镜 */
+  origin?: "agent" | string;
+  /** 下一步建议（done 事件 / 结论 message 带的 suggestions）：渲染成可点芯片 */
+  suggestions?: string[];
   ctx?: Array<{ id: string; title: string; kind: string; src?: string }>;
-  think?: { live: boolean; open: boolean; secs: string; lines: string[] };
+  think?: { live: boolean; open: boolean; secs: string; lines: string[]; /** 与 lines 一一对应的 kind（reflect 会标「反思」） */ kinds?: string[] };
+  /** 长任务心跳（heartbeat 事件）：运行中的一行轻量阶段提示；done/error 或开始逐字输出后不显示 */
+  heartbeat?: { stage: string; elapsedMs: number; kind?: string };
+  /** 完成前自检（self_check 事件）：只有后端发过才有；没通过时可展开看逐条未满足项 */
+  selfCheck?: { round: number; passed: boolean; items: Array<{ text: string; ok: boolean; status?: string }> };
   tools?: ToolStep[];
   toolsOpen?: boolean;
   task?: { taskId: string; status: string; modelConfigId?: string | null; stopRequested?: boolean; plan?: import("../backend/types").AgentTaskPlan | null };
@@ -39,6 +51,12 @@ export type AgentMsg = {
   webSearch?: import("./webSearch").WebSearchCardData[];
   /** 生成结果的自动审查（后端 review 事件）：每批结果一张审查卡 */
   reviews?: import("./task").AgentReview[];
+  /** 后端每一轮的真实上下文占用（context_usage，NOVAI_AGENT_V2_CONTEXT 开启时才有）：面板据此显示分层 */
+  usage?: import("./contextUsage").AgentContextUsage;
+  /** 后端整理过上下文（context_compacted）：消息流里出现一行提示，可淡出 */
+  compactions?: import("./contextUsage").ContextCompaction[];
+  /** 阶段三流式：原生推理全文（reasoning_delta 逐字累加），显示在思考折叠区里 */
+  reasoning?: string;
 };
 export type ThinkingLevel = "off" | "light" | "standard" | "heavy";
 export const THINKING: Array<[ThinkingLevel, string, string]> = [
@@ -53,6 +71,27 @@ export type MemoryRecord = { resourceRef: string; text: string; scope: "user" | 
 export type Conv = { id: string; title: string; msgs: AgentMsg[]; at: number };
 /** 后端线程（NOVAI /api/agent/threads）：只带元信息，正文按 id 另拉 */
 export type ThreadRow = { id: string; title: string; count: number; at: number };
+
+type QueuedMsg = import("./queue").QueuedMsg;
+/** 一条对话自己的本地状态：切对话只换这份，不互相覆盖 */
+type ThreadLocal = {
+  msgs: AgentMsg[];
+  /** L5：本地消息版本号。历史加载在飞时用户又发了消息 → 版本变了，回来时不能整段覆盖本地消息 */
+  rev: number;
+  busy: boolean;
+  stop: boolean;
+  historyStart: number;
+  historyHasMore: boolean;
+  /** 本地是否已有这轮对话的完整近页（切回来直接用缓存，不再拿服务端历史覆盖后台任务消息） */
+  loaded: boolean;
+  /** 待发送队列与「立即发送」跟着对话走：切走再切回来还在 */
+  queue: QueuedMsg[];
+  pendingUrgent: QueuedMsg | null;
+  /** 输入框草稿也按对话存：切到别的对话不该把没发出去的话带过去 */
+  draft: string;
+};
+/** 还没建后端线程时的本地桶：ensureThread 会把这里的状态迁到新线程 id */
+const NEW_THREAD = "__new__";
 
 type Command = (request: Record<string, unknown>) => Promise<Record<string, any>>;
 type SkillCommand = (request: { command: string; payload: Record<string, unknown> }) => Promise<Record<string, any>>;
@@ -72,13 +111,15 @@ function markOpenQa(msgs: AgentMsg[]) {
   if (last && last.role === "a" && last.qa) last.qa = { ...last.qa, status: "open" };
 }
 
-function historyMessage(raw: Record<string, any>, index: number): AgentMsg | null {
+export function historyMessage(raw: Record<string, any>, index: number): AgentMsg | null {
   const parsedQ = raw?.role === "assistant" ? parseQuestions(String(raw.text ?? raw.content ?? "")) : null;
   if (parsedQ) raw = { ...raw, text: parsedQ.rest || "开始之前想先确认几件事：", content: undefined, _qa: parsedQ.questions, _qaKind: parsedQ.kind, _qaRegen: parsedQ.regen };
   const role = raw?.role === "user" ? "u" : raw?.role === "assistant" ? "a" : null;
   if (!role) return null;
   const at = Number(raw.at || 0) * 1000;
   const msg: AgentMsg = { id: "h" + index + "_" + Math.round(at), role, text: String(raw.text ?? raw.content ?? ""), at: at || undefined };
+  if (typeof raw.origin === "string" && raw.origin) msg.origin = raw.origin;
+  if (Array.isArray(raw.suggestions)) msg.suggestions = raw.suggestions.map((item: unknown) => String(item || "").trim()).filter(Boolean).slice(0, 3);
   // 历史里的问答卡：先当已回答，最后一条在 markOpenQa 里放开
   if (Array.isArray(raw._qa)) msg.qa = { ...newCard("", raw._qa, raw._qaKind, raw._qaRegen), status: "answered" };
   const steps = Array.isArray(raw.steps) ? raw.steps : [];
@@ -90,18 +131,44 @@ function historyMessage(raw: Record<string, any>, index: number): AgentMsg | nul
     }));
     msg.took = steps.reduce((sum: number, step: Record<string, any>) => sum + (Number(step.duration_ms) || 0), 0) / 1000;
   }
+  // K2：思考内容 / 自检结果 / 待确认方案 / 思考时长都随线程持久化过，刷新页面后按原样还原，
+  // 不再变成「只剩一句话、思考了 0.0s、待生成卡片消失」。
+  const savedTook = Number(raw.took);
+  if (Number.isFinite(savedTook) && savedTook >= 0) msg.took = savedTook;
+  const savedThink = raw.think && typeof raw.think === "object" ? raw.think as Record<string, any> : null;
+  if (savedThink && Array.isArray(savedThink.lines) && savedThink.lines.length) {
+    const lines = savedThink.lines.map((line: unknown) => String(line || "")).filter(Boolean);
+    if (lines.length) {
+      msg.think = {
+        live: false,
+        open: false,
+        secs: String(savedThink.secs ?? (Number.isFinite(savedTook) ? savedTook.toFixed(1) : "0")),
+        lines,
+        kinds: Array.isArray(savedThink.kinds) ? savedThink.kinds.map((kind: unknown) => String(kind || "")) : undefined,
+      };
+    }
+  }
+  const savedCheck = raw.self_check && typeof raw.self_check === "object" ? raw.self_check as Record<string, any> : null;
+  if (savedCheck && Array.isArray(savedCheck.items)) {
+    const items = savedCheck.items
+      .filter((item: any) => item && String(item.text || "").trim())
+      .map((item: any) => ({ text: String(item.text || ""), ok: item.ok === true, status: typeof item.status === "string" ? item.status : undefined }));
+    if (items.length) msg.selfCheck = { round: Number(savedCheck.round) || 0, passed: savedCheck.passed === true, items };
+  }
+  const savedPlan = raw.plan && typeof raw.plan === "object" ? raw.plan as Record<string, any> : null;
+  if (savedPlan && Array.isArray(savedPlan.steps) && savedPlan.steps.length && String(raw.run_id || "").trim()) {
+    // 已批准 / 已执行的方案不再给「执行」入口（后端批准时会把 plan 摘掉并记 plan_status）
+    const approved = String(raw.plan_status || "") === "approved";
+    msg.task = { taskId: String(raw.run_id), status: approved ? "COMPLETED" : "SUCCEEDED", plan: approved ? null : savedPlan as any };
+  }
   return msg;
 }
 
 export class AgentState {
-  msgs: AgentMsg[] = [];
-  busy = false;
-  stop = false;
-  draft = "";
-  /** 待发送队列（仅内存，不持久化；切对话 / 新建对话会清空，避免发到别的线程） */
-  queue: import("./queue").QueuedMsg[] = [];
+  /** 线程级本地状态：key = activeThreadId || "__new__"；不同对话的 msgs / busy / stop / 历史游标 / 队列 / 草稿各自独立 */
+  private threadState = new Map<string, ThreadLocal>();
   skill: string | null = null;
-  mode: "manual" | "auto" = "manual";
+  mode: "manual" | "auto" | "managed" = "manual";
   model = "Auto";
   effort: "auto" | "low" | "high" = read("canvas-next:agent:effort", "high");
   /** 思考强度（TapNow：关闭 / 轻度 / 标准 / 深度），随任务一起提交给运行时 */
@@ -130,21 +197,102 @@ export class AgentState {
   private v = 0;
   /** 历史只在首次挂载还原一次；之后切线程才会替换 msgs */
   private historyRestored = false;
-  /** 已加载的历史从线程里第几条开始；> 0 说明上面还有更早的消息，往上翻时按页补 */
-  historyStart = 0;
-  historyHasMore = false;
   loadingEarlier = false;
   /** 线程列表是否已经拿到过（restoreHistory 就不再重复拉一次） */
   private threadsReady = false;
 
   constructor(public canvasId: string) {
-    this.mode = read("canvas-next:agent:mode", "manual");
+    const savedMode: string = read<string>("canvas-next:agent:mode", "manual");
+    this.mode = savedMode === "auto" || savedMode === "managed" ? savedMode : "manual";
     this.bindIdentity();
+  }
+  private currentKey() { return this.activeThreadId || NEW_THREAD; }
+  private slot(threadId = this.currentKey()): ThreadLocal {
+    let value = this.threadState.get(threadId);
+    if (!value) {
+      value = { msgs: [], rev: 0, busy: false, stop: false, historyStart: 0, historyHasMore: false, loaded: false, queue: [], pendingUrgent: null, draft: "" };
+      this.threadState.set(threadId, value);
+    }
+    return value;
+  }
+  /** 当前对话的消息：切换对话就是另一份，后台任务不会写进别的对话 */
+  get msgs(): AgentMsg[] { return this.slot().msgs; }
+  set msgs(next: AgentMsg[]) { this.slot().msgs = next; }
+  /** 当前对话是否在跑：同一对话内仍串行，不同对话互不阻塞 */
+  get busy(): boolean { return this.slot().busy; }
+  set busy(next: boolean) { this.slot().busy = next; }
+  get stop(): boolean { return this.slot().stop; }
+  set stop(next: boolean) { this.slot().stop = next; }
+  /** 已加载的历史从线程里第几条开始；> 0 说明上面还有更早的消息，往上翻时按页补 */
+  get historyStart(): number { return this.slot().historyStart; }
+  set historyStart(next: number) { this.slot().historyStart = next; }
+  get historyHasMore(): boolean { return this.slot().historyHasMore; }
+  set historyHasMore(next: boolean) { this.slot().historyHasMore = next; }
+  /** 当前对话的待发送队列（仅内存，不持久化；切换对话时各存各的，切回来还在） */
+  get queue(): QueuedMsg[] { return this.slot().queue; }
+  set queue(next: QueuedMsg[]) { this.slot().queue = next; }
+  /** 「立即发送」在忙碌时等空闲的那一条：按对话存，切对话 / 新建对话只影响自己 */
+  get pendingUrgent(): QueuedMsg | null { return this.slot().pendingUrgent; }
+  set pendingUrgent(next: QueuedMsg | null) { this.slot().pendingUrgent = next; }
+  /** 当前对话的输入框草稿：切换对话不会把没发出去的话带过去 */
+  get draft(): string { return this.slot().draft; }
+  set draft(next: string) { this.slot().draft = next; }
+  /** 指定对话的消息（读别人的对话不改当前对话） */
+  threadMessages(threadId: string) { return this.slot(threadId || NEW_THREAD).msgs; }
+  /** 追加到发起时捕获的那条对话，即使期间已经切走也写回原对话 */
+  appendMessage(msg: AgentMsg, threadId?: string) {
+    const value = this.slot(threadId || this.currentKey());
+    value.msgs = [...value.msgs, msg];
+    value.rev += 1;
+    return msg;
+  }
+  appendMessages(msgs: AgentMsg[], threadId?: string) {
+    const value = this.slot(threadId || this.currentKey());
+    value.msgs = [...value.msgs, ...msgs];
+    value.rev += 1;
+    return msgs;
+  }
+  /** 按消息对象找到它所属的对话，只刷新那一条：后台任务的实时进度不会串到当前对话 */
+  patchMessage(msg: AgentMsg, patch: Partial<AgentMsg>) {
+    Object.assign(msg, patch);
+    for (const value of this.threadState.values()) {
+      const index = value.msgs.indexOf(msg);
+      if (index < 0) continue;
+      value.msgs = [...value.msgs.slice(0, index), msg, ...value.msgs.slice(index + 1)];
+      value.rev += 1;      // L5：运行中的实时更新也算本地改动，历史回来时不能被旧快照盖掉
+      break;
+    }
+    this.emit();
+  }
+  /** 消息所属对话里它上一句用户消息（问答卡 / 重生成按各自对话取） */
+  goalBefore(msg: AgentMsg) {
+    for (const value of this.threadState.values()) {
+      const index = value.msgs.indexOf(msg);
+      if (index < 0) continue;
+      return [...value.msgs.slice(0, index)].reverse().find((x) => x.role === "u")?.text || "";
+    }
+    return "";
+  }
+  setThreadBusy(threadId: string, busy: boolean) { this.slot(threadId || NEW_THREAD).busy = busy; }
+  setThreadStop(threadId: string, stop: boolean) { this.slot(threadId || NEW_THREAD).stop = stop; }
+  isThreadBusy(threadId: string) { return this.slot(threadId || NEW_THREAD).busy; }
+  /** 目标对话的待发送队列：后台会话结束自动发送时按它取，不碰当前对话 */
+  threadQueue(threadId: string) { return this.slot(threadId || NEW_THREAD).queue; }
+  setThreadQueue(threadId: string, list: QueuedMsg[]) { this.slot(threadId || NEW_THREAD).queue = list; }
+  threadPendingUrgent(threadId: string) { return this.slot(threadId || NEW_THREAD).pendingUrgent; }
+  setThreadPendingUrgent(threadId: string, item: QueuedMsg | null) { this.slot(threadId || NEW_THREAD).pendingUrgent = item; }
+  threadDraft(threadId: string) { return this.slot(threadId || NEW_THREAD).draft; }
+  setThreadDraft(threadId: string, text: string) { this.slot(threadId || NEW_THREAD).draft = text; }
+  /** 整体替换某条对话的消息（重新生成失败时撤回刚加的两条，只撤回原对话里的） */
+  setThreadMessages(msgs: AgentMsg[], threadId?: string) {
+    const value = this.slot(threadId || this.currentKey());
+    value.msgs = msgs;
+    value.rev += 1;
   }
   subscribe = (l: () => void) => { this.ls.add(l); return () => { this.ls.delete(l); }; };
   version = () => this.v;
   emit() { this.v++; this.ls.forEach((l) => l()); }
-  dispose() { this.generation++; this.identityOff?.(); }
+  dispose() { this.generation++; this.identityOff?.(); this.threadState.clear(); this.activeThreadId = ""; }
 
   private bindIdentity() {
     const identity = bridge<{ onEvent?: (cb: (event: any) => void) => () => void }>("identity");
@@ -155,7 +303,7 @@ export class AgentState {
       if (next === this.account) return;
       this.account = next;
       this.generation++;
-      this.memUser = []; this.memCanvas = []; this.threads = []; this.activeThreadId = ""; this.queue = [];
+      this.memUser = []; this.memCanvas = []; this.threads = []; this.activeThreadId = ""; this.threadState.clear();
       this.threadsReady = false; this.threadsLoading = null; this.historyRestored = false; this.skills = customSkills();
       this.businessError = ""; this.importState = ""; this.loading = true; this.emit();
       void this.loadAll();
@@ -193,12 +341,16 @@ export class AgentState {
     } catch { return false; }
   }
 
-  async addMemory(scope: "user" | "canvas", text: string) {
+  /** 写一条长期记忆。L1：面板里「记住：…」也走这里——带 threadId / userText 时后端会把这条
+   *  并进画布记忆（索引 + 项目档案 prefs，同一处去重）并把这一轮对话写进线程；
+   *  返回 { deduplicated, reply }：reply 是服务端存进线程的那句回复，面板要显示同一句。 */
+  async addMemory(scope: "user" | "canvas", text: string, extra?: { threadId?: string; userText?: string }) {
     const command = resourceCommand(); if (!command) throw new Error("当前环境没有记忆资源服务");
-    const content = text.trim(); if (!content) return;
-    const result = await command({ type: "resource/create", resourceType: "memory", name: content.slice(0, 80), content, memorySubtype: scope === "canvas" ? "project-memory" : "personal-preference", attributes: { scope, canvasId: scope === "canvas" ? this.canvasId : null } });
+    const content = text.trim(); if (!content) return { deduplicated: false, reply: "" };
+    const result = await command({ type: "resource/create", resourceType: "memory", name: content.slice(0, 80), content, memorySubtype: scope === "canvas" ? "project-memory" : "personal-preference", attributes: { scope, canvasId: this.canvasId, threadId: extra?.threadId || "", userText: extra?.userText || "" } });
     if (!result?.ok) throw new Error(String(result?.error || "记忆保存失败"));
     await this.loadMemories();
+    return { deduplicated: result.deduplicated === true, reply: String(result.reply || "") };
   }
 
   async deleteMemory(record: MemoryRecord) {
@@ -278,7 +430,8 @@ export class AgentState {
         if (generation !== this.generation) return true;
         this.threads = rows;
         this.threadsReady = true;
-        if (activeId) this.activeThreadId = activeId;
+        // 后台任务结束会顺带刷新列表：已经选中的对话不能被服务端 active_id 劫走
+        if (activeId && (!this.activeThreadId || !rows.some((row) => row.id === this.activeThreadId))) this.activeThreadId = activeId;
         this.emit(); return true;
       } catch { return false; }
     })();
@@ -287,19 +440,33 @@ export class AgentState {
     return loading;
   }
 
-  /** 拉一条线程的消息，整体替换当前对话（后端按时间正序给 user / assistant） */
+  /** 拉一条线程的消息，整体替换当前对话（后端按时间正序给 user / assistant）。
+
+   *  L5：请求在飞的时候用户可能刚发第一条消息（新画布 2–3 秒内发很常见）。回来时如果本地
+   *  消息版本变了，就不能整段覆盖——否则用户消息 + 「正在思考」会被空历史冲掉，回复也挂不上。
+   *  这时把服务端历史接在前面、本地新消息接在后面（按 role+文本去重，避免同一条出现两遍）。 */
   async loadThreadMessages(threadId: string, generation = this.generation) {
     const id = String(threadId || ""); if (!id) return false;
     try {
+      const revBefore = this.slot(id).rev;
       const result = await this.threadCommand("thread/messages", { threadId: id, limit: 60 });
       if (!result?.ok || !Array.isArray(result.messages)) return false;
       if (generation !== this.generation) return true;
       const start = Number(result.start) || 0;
-      this.msgs = result.messages.map((raw: Record<string, any>, i: number) => historyMessage(raw, start + i)).filter((msg: AgentMsg | null): msg is AgentMsg => !!msg);
-      markOpenQa(this.msgs);
-      this.historyStart = start;
+      const value = this.slot(id);
+      const loaded = result.messages.map((raw: Record<string, any>, i: number) => historyMessage(raw, start + i)).filter((msg: AgentMsg | null): msg is AgentMsg => !!msg);
+      if (value.rev !== revBefore && value.msgs.length) {
+        const key = (m: AgentMsg) => m.role + "\u0000" + String(m.text || "").trim();
+        const known = new Set(loaded.map(key));
+        value.msgs = [...loaded, ...value.msgs.filter((m) => !known.has(key(m)))];
+      } else {
+        value.msgs = loaded;
+      }
+      markOpenQa(value.msgs);
+      value.historyStart = start;
       // 老服务端没有 start：退回 has_more 判断（那种情况下也拿不到更早的页，只是不报错）
-      this.historyHasMore = start > 0 && result.has_more !== false;
+      value.historyHasMore = start > 0 && result.has_more !== false;
+      value.loaded = true;
       this.emit(); return true;
     } catch { return false; }
   }
@@ -314,45 +481,69 @@ export class AgentState {
       if (!result?.ok || !Array.isArray(result.messages) || generation !== this.generation || threadId !== this.activeThreadId) return 0;
       const start = Number(result.start) || 0;
       const older = result.messages.map((raw: Record<string, any>, i: number) => historyMessage(raw, start + i)).filter((msg: AgentMsg | null): msg is AgentMsg => !!msg);
-      this.msgs = [...older, ...this.msgs];
-      this.historyStart = start;
-      this.historyHasMore = start > 0;
+      const value = this.slot(threadId);
+      value.msgs = [...older, ...value.msgs];
+      value.historyStart = start;
+      value.historyHasMore = start > 0;
       return older.length;
     } catch { return 0; } finally { this.loadingEarlier = false; this.emit(); }
   }
 
-  /** 切到另一条线程：先让后端记住 active（之后的对话都落过去），再换消息 */
+  /** 切到另一条线程：先让后端记住 active（之后的对话都落过去），再换消息。
+   *  本地已加载过的对话直接用缓存：后台任务还在跑，不能被服务端历史覆盖掉。 */
   async switchThread(threadId: string) {
     const id = String(threadId || ""); if (!id) return false;
-    if (id === this.activeThreadId && this.msgs.length) return true;
+    if (id === this.activeThreadId && this.slot(id).loaded) return true;
     const switched = await this.threadCommand("thread/switch", { threadId: id });
     if (!switched?.ok) { this.businessError = String(switched?.error || "切换对话失败"); this.emit(); return false; }
+    // 队列 / 立即发送 / 草稿都按对话存：切过去只换一份，不丢也不串
     this.activeThreadId = id; this.businessError = "";
-    this.queue = [];
+    if (this.slot(id).loaded) { this.emit(); return true; }
     const loaded = await this.loadThreadMessages(id);
     if (!loaded) { this.businessError = "这条对话的消息读取失败"; this.emit(); }
     return loaded;
   }
 
-  /** 新建空线程并切过去（旧线程留在后端，菜单里还能切回来） */
+  /** 新建空线程并切过去（旧线程留在后端和本地，菜单里还能切回来，跑着的任务不受影响） */
   async newThread() {
     if (!taskCommand()) return false;
     this.businessError = "";
     const created = await this.threadCommand("thread/new");
     const id = String(created?.thread?.id || "");
     if (!created?.ok || !id) { this.businessError = String(created?.error || "新建对话失败"); this.emit(); return false; }
-    this.msgs = []; this.lockedModel = null; this.activeThreadId = id; this.historyStart = 0; this.historyHasMore = false; this.queue = [];
+    const value = this.slot(id);
+    value.msgs = []; value.busy = false; value.stop = false; value.historyStart = 0; value.historyHasMore = false; value.loaded = true;
+    value.queue = []; value.pendingUrgent = null; value.draft = "";
+    this.lockedModel = null; this.activeThreadId = id;
     await this.loadThreads();
     this.emit(); return true;
   }
 
-  /** 发送前确保有线程可写（第一次用这张画布时建「对话 1」） */
+  /** 发送前确保有线程可写（第一次用这张画布时建「对话 1」）：把 "__new__" 的本地状态整体迁过去，消息不丢 */
   async ensureThread(): Promise<string> {
     if (this.activeThreadId) return this.activeThreadId;
     if (!taskCommand()) return "";
     const created = await this.threadCommand("thread/new");
     const id = String(created?.thread?.id || "");
-    if (created?.ok && id) { this.activeThreadId = id; await this.loadThreads(); }
+    if (created?.ok && id) {
+      const pending = this.threadState.get(NEW_THREAD);
+      this.threadState.delete(NEW_THREAD);
+      const value = this.slot(id);
+      if (pending) {
+        value.msgs = [...pending.msgs, ...value.msgs];
+        value.busy = pending.busy || value.busy;
+        value.stop = pending.stop;
+        value.historyStart = pending.historyStart;
+        value.historyHasMore = pending.historyHasMore;
+        value.queue = [...pending.queue, ...value.queue];
+        value.pendingUrgent = pending.pendingUrgent || value.pendingUrgent;
+        value.draft = pending.draft || value.draft;
+      }
+      value.loaded = true;
+      this.activeThreadId = id;
+      await this.loadThreads();
+      this.emit();
+    }
     return id;
   }
 
@@ -364,10 +555,11 @@ export class AgentState {
     const listed = this.threadsReady ? true : await this.loadThreads(generation);
     if (!listed) { this.historyRestored = false; return; }
     if (generation !== this.generation || this.msgs.length || !this.activeThreadId) return;
+    if (this.slot(this.activeThreadId).loaded) return;
     await this.loadThreadMessages(this.activeThreadId, generation);
   }
 
-  setMode(m: "manual" | "auto") { this.mode = m; write("canvas-next:agent:mode", m); this.emit(); }
+  setMode(m: "manual" | "auto" | "managed") { this.mode = m; write("canvas-next:agent:mode", m); this.emit(); }
   setEffort(e: "auto" | "low" | "high") { this.effort = e; write("canvas-next:agent:effort", e); this.emit(); }
   setThinking(t: ThinkingLevel) { this.thinking = normThinking(t); write("canvas-next:agent:thinking", this.thinking); this.emit(); }
   skillsOn() { return this.skills.filter((s) => s.on); }

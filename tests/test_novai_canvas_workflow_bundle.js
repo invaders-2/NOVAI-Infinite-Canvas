@@ -15,6 +15,46 @@ const zlib = require('zlib');
 const esbuild = require('../novai-canvas-ui/node_modules/esbuild');
 const root = path.join(__dirname, '..');
 
+// 为什么放行复位和定位：border:0/none 是清 UA 默认边框、inset:0 是定位，设计规则禁的是用可见边框/inset 阴影表达层级。
+function findForbiddenBorders(cssText) {
+    const stripped = String(cssText || '').replace(/border-radius/gi, '');
+    const violations = [];
+    const declaration = /(?:^|[;{])\s*(border(?:-(?:top|right|bottom|left))?(?:-color|-width|-style)?)\s*:\s*([^;}]*)/gi;
+    let match = declaration.exec(stripped);
+    while (match) {
+        const property = match[1].toLowerCase();
+        const value = match[2].trim();
+        // 结尾的 !important 不改变值的语义（0!important / none !important 仍是复位），先剥掉再判断。
+        const bare = value.replace(/\s*!important\s*$/i, '').trim();
+        const tokens = bare.toLowerCase().split(/\s+/).filter(Boolean);
+        const resets = new Set(['0', '0px', '0em', 'none']);
+        const isReset = tokens.length > 0 && tokens.every((token) => resets.has(token));
+        if (!isReset) violations.push(property + ': ' + value);
+        match = declaration.exec(stripped);
+    }
+    return violations;
+}
+
+function findForbiddenInsetShadows(cssText) {
+    const violations = [];
+    const declaration = /(?:^|[;{])\s*((?:-webkit-)?box-shadow)\s*:\s*([^;}]*)/gi;
+    let match = declaration.exec(String(cssText || ''));
+    while (match) {
+        const value = match[2].trim();
+        if (/\binset\b/i.test(value)) violations.push(match[1].toLowerCase() + ': ' + value);
+        match = declaration.exec(String(cssText || ''));
+    }
+    return violations;
+}
+
+// 常驻自检：复位写法（含 !important）必须放行，可见边框仍要判违例——helper 被改坏时这里先红。
+assert.deepStrictEqual(findForbiddenBorders('.x{border:0!important}'), [],
+    'border:0!important 应放行');
+assert.deepStrictEqual(findForbiddenBorders('.x{border:none !important}'), [],
+    'border:none !important 应放行');
+assert.deepStrictEqual(findForbiddenBorders('.x{border:1px solid #fff}'), ['border: 1px solid #fff'],
+    'border:1px solid 仍判违例');
+
 function load(entry) {
     const result = esbuild.buildSync({
         entryPoints: [path.join(root, entry)], bundle: true, platform: 'node',
@@ -234,8 +274,10 @@ function makeDeflatedZip(files) {
     assert(css.includes('.cn-root .wf-drop') && css.includes('.cn-root .wf-status') && css.includes('.cn-root .wf-acts'), '面板样式');
     const wfCss = css.slice(css.indexOf('/* ---------- 工作流导入 / 导出面板 ---------- */'));
     assert(wfCss.length > 0 && css.includes('.cn-root .wf-sec'), '面板样式段落在');
-    assert(!/border/.test(wfCss.replace(/border-radius/g, '')), '面板样式不许用 border 表达层级');
-    assert(!/inset/.test(wfCss), '面板样式不许用 inset 阴影表达层级');
+    const borderViolations = findForbiddenBorders(wfCss);
+    assert.deepStrictEqual(borderViolations, [], '面板样式不许用可见 border 表达层级（复位 border:0 / border:none 放行，实际：' + borderViolations.join('；') + '）');
+    const insetShadowViolations = findForbiddenInsetShadows(wfCss);
+    assert.deepStrictEqual(insetShadowViolations, [], '面板样式不许用 inset 阴影表达层级（定位 inset:0 放行，实际：' + insetShadowViolations.join('；') + '）');
 
     console.log('[PASS] 智能画布BEAT 工作流导入导出（选中切片 / 去重 / URL 映射 / ZIP 读写 / 新建画布菜单）');
 })().catch((error) => { console.error(error); process.exit(1); });

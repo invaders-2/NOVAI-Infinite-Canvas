@@ -1,7 +1,11 @@
 # NOVAI 测试流水线：只跑测试，不打包、不发版。
-# 覆盖：关键 JS 语法检查 → node 测试（tests/run-all.js）→ python 单测 → main.py 编译检查。
+# 覆盖：版本号一致性 → 关键 JS 语法检查 → node 测试（tests/run-all.js --ci-baseline）→ 桌面更新状态单测 → python 单测 → main.py 编译检查。
 #
 # 说明：
+#   - Node 固定 20：Electron 33.4.11 内置 Node 20.18.x，测试应与应用运行时同代；
+#     升 22 会脱离实际运行环境，暂不升级（本仓库没有 engines 强制更高版本）。
+#   - tests/known-failures.json 是「已知失败基线」：--ci-baseline 只拦不在基线里的新增失败；
+#     基线里某项修好后会提示「基线过期，请删掉这条」，但不会拦 CI。
 #   - tests/run-all.js 默认跳过 test_video_storyboard_live.js（需要真实服务 + 配好的 provider）。
 #   - tests/test_canvas_log_cleanup.py 是**陈旧测试**：它 import 的
 #     main.delete_canvas_log / collect_local_media_urls / generated_media_path_from_url
@@ -29,7 +33,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 20
+      - name: Setup Node 20 (Electron 33 runtime)
         uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -38,6 +42,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
+      - name: Version consistency
+        run: python3 tools/check_version_consistency.py
 
       - name: Syntax check key JS files
         run: |
@@ -54,8 +61,11 @@ jobs:
         working-directory: novai-canvas-ui
         run: npm install --no-audit --no-fund
 
-      - name: Node tests
-        run: node tests/run-all.js
+      - name: Node tests (baseline)
+        run: |
+          node tests/run-all.js --ci-baseline
+          # 更新链路的状态/配置单测（不依赖 electron）。test_save_file.js 需要 desktop/node_modules，CI 不装，故不跑。
+          node --test desktop/__tests__/test_update_state.js desktop/__tests__/test_cloud_base_url.js
 
       - name: Install minimal deps needed to import main.py
         run: |
@@ -63,7 +73,7 @@ jobs:
           python -m pip install fastapi pydantic requests httpx pillow python-multipart
 
       - name: Python unit tests
-        run: python -m unittest tests.test_lan_auth tests.test_asset_dedupe tests.test_lovart_provider_injection tests.test_video_segments tests.test_agent_image_size tests.test_agent_run_history tests.test_agent_run_plan_mode tests.test_update_write_guard tests.test_video_platform_official tests.test_gemini_image_endpoint tests.test_image_data_uri_persist tests.test_apimart_protocol_alignment tests.test_apimart_mock_upstream tests.test_apimart_model_caps tests.test_apimart_video_params tests.test_apimart_model_categories tests.test_apimart_audio tests.test_apimart_size_notice tests.test_agent_audio_alias tests.test_apimart_tts tests.test_agent_chat_resolve tests.test_think_level_protocol_updates tests.test_ffmpeg_binary
+        run: python -m unittest tests.test_lan_auth tests.test_asset_dedupe tests.test_lovart_provider_injection tests.test_video_segments tests.test_agent_image_size tests.test_agent_run_history tests.test_agent_run_plan_mode tests.test_update_write_guard tests.test_video_platform_official tests.test_gemini_image_endpoint tests.test_image_data_uri_persist tests.test_apimart_protocol_alignment tests.test_apimart_mock_upstream tests.test_apimart_model_caps tests.test_apimart_video_params tests.test_apimart_model_categories tests.test_apimart_audio tests.test_apimart_size_notice tests.test_agent_audio_alias tests.test_apimart_tts tests.test_agent_chat_resolve tests.test_think_level_protocol_updates tests.test_ffmpeg_binary tests.test_refresh_static_versions tests.test_agent_beat_ref_ratio
 
       - name: Compile main.py
         run: python -m py_compile main.py

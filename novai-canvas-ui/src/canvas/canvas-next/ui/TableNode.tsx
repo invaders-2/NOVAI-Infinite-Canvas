@@ -4,10 +4,11 @@
  * 列名旁的小标签是列用途（提示词 / 首帧 / 尾帧 / 参考图 / 时长 / 比例 / 镜头名 / 不使用）：默认按列名自动识别，点开可改。
  * 首帧 / 尾帧 / 参考图列的单元格放图：把图片文件拖进单元格，或把画布上的图片节点拖到单元格上。
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
-import { CHANNEL_MODES, CHANNEL_MODE_LABEL, channelItemsForRow, csvFromTable, inputCellHeight, isMediaRef, mediaRefsIn, ROLE_META, ROLE_ORDER, rolesOf, rowHeight, tableChannels, tableFromCsv, tableOf, TABLE_CELL_PREVIEW_W, TABLE_INPUT_COL_W, TABLE_INPUT_MAX_SHOWN, TABLE_INPUT_PREVIEW_W, TABLE_LIMITS, withRole, withTable, guessRole, type ChannelMode, type ColRole, type TableData } from "../table";
+import { CHANNEL_MODES, CHANNEL_MODE_LABEL, channelItemsForRow, csvFromTable, inputCellHeight, isMediaRef, mediaRefsIn, ROLE_META, ROLE_ORDER, rolesOf, rowHeight, tableChannels, tableFromCsv, tableInputWarnings, tableOf, TABLE_CELL_PREVIEW_W, TABLE_INPUT_COL_W, TABLE_INPUT_MAX_SHOWN, TABLE_INPUT_PREVIEW_W, TABLE_LIMITS, withRole, withTable, guessRole, type ChannelMode, type ColRole, type TableData } from "../table";
 import { storyboardPipeline } from "../tableFlow";
+import { reviewTable } from "../tableReview";
 import { plainPrompt } from "../mentions";
 import { MEDIA_UPLOAD_LIMIT } from "../actions";
 import type { CanvasStore } from "../store";
@@ -22,9 +23,16 @@ export function TableNodeBody({ node, sel, full = false }: { node: CanvasNode; s
   // 表格数据 / 通道每次渲染重算会拖慢长表（每个通道要展开分组、查节点），按文档和节点缓存
   const t = useMemo(() => tableOf(node), [node]);
   const channels = useMemo(() => tableChannels(doc, node.id), [doc, node.id]);
+  // 行文本里的「输入 N」对不上真实通道 / 表格上挂着旧通道：常驻显示，不靠一闪而过的 toast
+  const warns = useMemo(() => tableInputWarnings(doc, node.id, channels), [doc, node.id, channels]);
   const save = (fn: (t: TableData) => TableData, history = false) => store.updateNode(node.id, (n) => withTable(n, fn(tableOf(n))), { history });
-  // 表头点一下循环 逐行 → 全部 → 沿用（每条通道各存一份，key = input-N）
-  const cycleMode = (id: string, mode: ChannelMode) => save((x) => ({ ...x, inputModes: { ...(x.inputModes || {}), [id]: CHANNEL_MODES[(CHANNEL_MODES.indexOf(mode) + 1) % CHANNEL_MODES.length] } }), true);
+  // 表头点一下循环 逐行 → 全部 → 沿用（每条通道各存一份，key = input-N）；手点过的通道不再让出表覆盖。
+  // 清空时也保留空数组：inputModesAuto 删字段 = 文档退回旧格式，下次出表会把手设模式当系统模式覆盖。
+  const cycleMode = (id: string, mode: ChannelMode) => save((x) => {
+    const next = CHANNEL_MODES[(CHANNEL_MODES.indexOf(mode) + 1) % CHANNEL_MODES.length];
+    const auto = (x.inputModesAuto || []).filter((k) => k !== id);
+    return { ...x, inputModes: { ...(x.inputModes || {}), [id]: next }, inputModesAuto: auto };
+  }, true);
   const key = (r: number | "h", c: number) => `${node.id}:${r}:${c}`;
   const startEdit = (k: string) => { store.snapshot(); store.setUI({ editCell: k, sel: new Set([node.id]) }); };
   const stopEdit = () => store.setUI({ editCell: null });
@@ -35,6 +43,27 @@ export function TableNodeBody({ node, sel, full = false }: { node: CanvasNode; s
   // 复制为 CSV：只导数据列，「输入 N」通道列由画布连线推导，不属于表格数据
   const copyCsv = () => { void navigator.clipboard?.writeText(csvFromTable(tableOf(store.node(node.id) || node)))?.then(() => store.toast("已复制 CSV"), () => store.toast("剪贴板不可用，请用「全屏编辑」后手动复制")); };
   const importCsv = () => openModal((close) => <CsvImportDialog store={store} nodeId={node.id} close={close} />);
+  // 表格审查：纯函数检查（不发请求）。下游模型只用来检查每行素材会不会超 maxRefs。
+  const openReview = () => {
+    const d = store.state.doc;
+    const gen = d.edges.filter((e) => e.from === node.id).map((e) => store.node(e.to)).find((n) => !!n && (n.kind === "image" || n.kind === "video"));
+    const m = gen ? store.modelOf(gen) : undefined;
+    const rv = reviewTable(d, node.id, { maxRefs: m?.maxRefs, modelName: m?.name, genId: gen?.id });
+    openModal((close) => <div className="tbl-review" data-review role="dialog" aria-label="表格审查">
+      <div className="tr-head"><Icon name="fit" size="s" /><b>表格审查</b><span className="sp" /><button className="ib" aria-label="关闭" onClick={close}><Icon name="x" size="s" /></button></div>
+      <div className="tr-sum">{rv.summary}</div>
+      <div className="tr-stats">
+        <span className="tr-stat">{rv.stats.rows} 行</span>
+        <span className="tr-stat">{rv.stats.columns} 列</span>
+        {rv.stats.channels.map((ch) => <span className="tr-stat" key={ch.id} data-channel-review={ch.id}>输入 {ch.index}「{ch.title}」{ch.count} 张 · {CHANNEL_MODE_LABEL[ch.mode]}</span>)}
+        {m ? <span className="tr-stat" data-review-model>下游：{m.name} · {m.i2i ? `参考图上限 ${m.maxRefs ?? 0} 张` : "不支持参考图"}</span> : null}
+      </div>
+      {rv.findings.length
+        ? <div className="tr-list">{rv.findings.map((f) => <div className={"tr-item " + f.level} data-level={f.level} key={f.level + f.text}><span className="dot" /><span>{f.text}</span></div>)}</div>
+        : <div className="tr-ok">未发现明显问题</div>}
+      <div className="tr-foot"><button className="btn" onClick={close}>关闭</button></div>
+    </div>, "table-review-modal");
+  };
   // 顶部浮条（#ntb）只派事件，动作必须在这里做：CsvImportDialog / csvFromTable 都在本组件里。
   // 全屏编辑时同一节点会再挂一份 body，靠 full 挡住，免得弹两层导入框。
   useEffect(() => {
@@ -65,14 +94,23 @@ export function TableNodeBody({ node, sel, full = false }: { node: CanvasNode; s
                   <div className="tin-top"><span className="tin-label">输入 {i + 1}</span><small className="tin-count">{ch.items.length}</small></div>
                   <button className="tmode" title={MODE_HINT[ch.mode]} data-channel={ch.id} data-mode={ch.mode} onPointerDown={(e) => { e.stopPropagation(); cycleMode(ch.id, ch.mode); }}>{CHANNEL_MODE_LABEL[ch.mode]}<Icon name="down" size="xs" /></button>
                 </div></th>)}
-                {t.columns.map((c, i) => <th key={i}><div className="h">
+                {t.columns.map((c, i) => <th key={i} title={c || "列名"}><div className="h">
                   <Cell tag="input" cellKey={key("h", i)} value={c} editing={editCell === key("h", i)} onStart={() => startEdit(key("h", i))} onStop={stopEdit} onChange={(v) => save((x) => ({ ...x, columns: x.columns.map((y, j) => (j === i ? v.slice(0, 120) : y)) }))} />
-                  <button className={"trole" + (roles[i].auto ? " auto" : "") + (ROLE_META[roles[i].role].media ? " media" : "")} data-role={roles[i].role} title={`列用途：${ROLE_META[roles[i].role].label}${roles[i].auto ? "（按列名自动识别）" : ""}。${ROLE_META[roles[i].role].hint}`} onPointerDown={(e) => { e.stopPropagation(); roleMenu(e.currentTarget, c, roles[i], (r) => save((x) => withRole(x, i, r), true)); }}>{ROLE_META[roles[i].role].label}</button>
-                  <button className="xcol" title="删除列" onPointerDown={(e) => { e.stopPropagation(); delCol(i); }}><Icon name="x" size="xs" /></button>
+                  {/* 列用途 / 删除放第二行：132px 列宽下标题才有整行宽度，不再只露出「画面提」 */}
+                  <div className="hmeta">
+                    <button className={"trole" + (roles[i].auto ? " auto" : "") + (ROLE_META[roles[i].role].media ? " media" : "")} data-role={roles[i].role} title={`列用途：${ROLE_META[roles[i].role].label}${roles[i].auto ? "（按列名自动识别）" : ""}。${ROLE_META[roles[i].role].hint}`} onPointerDown={(e) => { e.stopPropagation(); roleMenu(e.currentTarget, c, roles[i], (r) => save((x) => withRole(x, i, r), true)); }}>{ROLE_META[roles[i].role].label}</button>
+                    <button className="xcol" title="删除列" onPointerDown={(e) => { e.stopPropagation(); delCol(i); }}><Icon name="x" size="xs" /></button>
+                  </div>
                 </div></th>)}
                 <th className="tact" />
               </tr></thead>
               <tbody>
+                {t.rows.length === 0 ? <tr className="tempty">
+                  <td colSpan={channels.length + t.columns.length + 1}>
+                    <span className="te-hint"><Icon name="grid" size="s" />还没有行，点下面「+ 行」添加；也可以从上游素材生成</span>
+                    <button className="te-add" onPointerDown={(e) => { e.stopPropagation(); addRow(); }}><Icon name="plus" size="xs" />添加一行</button>
+                  </td>
+                </tr> : null}
                 {t.rows.map((row, r) => {
                   // 该行每条通道取到的素材；这一行最多有几张决定行高（有几张显示几张，超过 9 张才折叠）
                   const rowItems = channels.map((ch) => channelItemsForRow(ch, r));
@@ -93,17 +131,22 @@ export function TableNodeBody({ node, sel, full = false }: { node: CanvasNode; s
               </tbody>
             </table>
           </div>
+          {warns.length ? <div className="trefwarn" data-warn="table-input">
+            {warns.map((w) => <div className="tw" key={w}><Icon name="alert" size="xs" /><span>{w}</span></div>)}
+          </div> : null}
           <div className="tfoot" style={{ flexWrap: "wrap", rowGap: 4 }}>
             <button onPointerDown={(e) => { e.stopPropagation(); addRow(); }}><Icon name="plus" size="xs" />行</button>
             <button onPointerDown={(e) => { e.stopPropagation(); addCol(); }}><Icon name="plus" size="xs" />列</button>
-            <button title={hasFirst ? "接出「首帧图」和「分镜视频」两个节点：先逐行出首帧并填回表格，再逐行出视频" : "补上首帧 / 尾帧两列，并接出「首帧图」和「分镜视频」两个节点"} data-act="storyboard-flow" onPointerDown={(e) => { e.stopPropagation(); storyboardPipeline(store, node.id); }}><Icon name="video" size="xs" />分镜出片</button>
             {/* 复制 / 导入在节点上是顶部浮条的事；全屏页里浮条被弹层盖住，这里留一份入口 */}
             {full ? <>
               <button data-act="table-csv-copy" title="把整张表（不含输入通道列）复制成 CSV，第一行是列名" style={{ whiteSpace: "nowrap" }} onPointerDown={(e) => e.stopPropagation()} onClick={copyCsv}><Icon name="copy" size="xs" />复制 CSV</button>
               <button data-act="table-csv-import" title="粘贴 CSV / TSV 替换整张表（保留标题、输入通道模式和列用途）" style={{ whiteSpace: "nowrap" }} onPointerDown={(e) => e.stopPropagation()} onClick={importCsv}><Icon name="upload" size="xs" />导入 CSV</button>
             </> : null}
+            {/* 动作按卡片规范放右侧：「+行/+列」留在左侧作工具，分镜出片 / 审查靠右 */}
             <span className="sp" />
             <span className="meta">双击单元格编辑</span>
+            <button title={hasFirst ? "接出「首帧图」和「分镜视频」两个节点：先逐行出首帧并填回表格，再逐行出视频" : "补上首帧 / 尾帧两列，并接出「首帧图」和「分镜视频」两个节点"} data-act="storyboard-flow" onPointerDown={(e) => { e.stopPropagation(); storyboardPipeline(store, node.id); }}><Icon name="video" size="xs" />分镜出片</button>
+            <button data-act="table-review" title="审查这张表：通道 / 模式 / 行数 / 输入编号 / 空行 / 下游模型参考图上限 / 批量失败行（只读检查，不发请求）" onPointerDown={(e) => e.stopPropagation()} onClick={openReview}><Icon name="fit" size="xs" />审查</button>
           </div>
         </div>
       </div>
@@ -168,19 +211,37 @@ function Cell({ tag, value, editing, onStart, onStop, onChange, cellKey, maxH = 
   useEffect(() => { if (editing) ref.current?.focus({ preventScroll: true }); }, [editing]);
   // 以前是写死 rows={2} + CSS overflow:hidden：行高涨了字也不涨，第 3 行起被裁掉。
   // 这里按内容量 scrollHeight 设高度（编辑态随输入实时变），超过上限才切成格内滚动。
-  useLayoutEffect(() => {
+  const measure = useCallback(() => {
     const el = ref.current; if (!el || tag !== "textarea") return;
     const cs = getComputedStyle(el);
     const lineH = parseFloat(cs.lineHeight) || 18;
     const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    const wasHidden = el.style.overflowY;
     el.style.height = "auto";
     const want = el.scrollHeight;
-    // 触到上限时把可视高度收成「整行」：否则最后一行只露出半行，正是这次要修的观感问题
+    // 触到上限时把可视高度收成「整行」：否则最后一行只露出半行
     const cap = Math.max(lineH + padY, Math.floor((maxH - padY) / lineH) * lineH + padY);
     const next = Math.min(want, cap);
     el.style.height = next + "px";
     el.style.overflowY = want > next + 1 ? "auto" : "hidden";
-  }, [value, editing, maxH, tag]);
+    void wasHidden;
+  }, [maxH, tag]);
+  useLayoutEffect(() => { measure(); }, [measure, value, editing]);
+  // 宽度变化（760→420 这类拖窄）会改变换行数：只读态靠 scrollHeight 量的高度必须重算，否则末尾字被裁掉
+  useEffect(() => {
+    const el = ref.current; if (!el || tag !== "textarea") return;
+    const host = el.parentElement;
+    if (!host || typeof ResizeObserver === "undefined") return;
+    let lastWidth = host.clientWidth;
+    const ro = new ResizeObserver(() => {
+      const width = host.clientWidth;
+      if (width === lastWidth) return;
+      lastWidth = width;
+      measure();
+    });
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [measure, tag]);
   const common = {
     ref, value, readOnly: !editing, "data-cell": cellKey,
     onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(e.target.value),

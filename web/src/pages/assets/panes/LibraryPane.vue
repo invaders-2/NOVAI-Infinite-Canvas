@@ -10,8 +10,9 @@ import ProgressiveMore from '../parts/ProgressiveMore.vue';
 import KindBar from '../parts/KindBar.vue';
 import LibraryTree from './LibraryTree.vue';
 import AssetDetail from './AssetDetail.vue';
-import { S, run } from '../lib/state.js';
+import { S, run, setTab } from '../lib/state.js';
 import { assetKind, assetKindLabel, assetKindName, shortDate } from '../lib/util.js';
+import { uniqueItems } from '../lib/canvas.js';
 import { useProgressive, useMarquee } from '../lib/compose.js';
 import * as A from '../lib/library.js';
 
@@ -21,6 +22,8 @@ const detail = computed(() => A.selectedItem(items.value));
 const imageCount = computed(() => A.selectedImages().length);
 const targets = computed(() => A.moveTargets());
 const filtering = computed(() => !!A.activeClassEntry());
+// 「资产库」默认页可能是空的（生成物没手动保存过就在这里），而「画布里的」往往有货：空态给一条引导
+const canvasAssetCount = computed(() => uniqueItems().length);
 const ktabs = computed(() => A.kindTabs());
 const emptyText = computed(() => {
     if (!S.kind) return '当前分组还没有素材，可以上传，或从智能画布输出保存到素材库。';
@@ -88,7 +91,12 @@ function move(target) { if (target) run(A.moveSelected(target)); }
                                :meta="assetKindLabel(it) + ' · ' + shortDate(it.created_at)" :active="detail && detail.id === it.id" :checked="L.ids.has(it.id)" :manage="L.manage"
                                @select="A.clickCard" @toggle="A.toggleSelect" />
                     <ProgressiveMore v-if="prog.rest.value" :key="prog.shown.value" :rest="prog.rest.value" @more="prog.more" />
-                    <div v-if="!items.length" class="am-emptybox">{{ emptyText }}</div>
+                    <div v-if="!items.length" class="am-emptybox">
+                        {{ emptyText }}
+                        <button v-if="canvasAssetCount && !S.kind && !filtering" type="button" class="nv-btn sm" @click="setTab('canvas-assets')">
+                            去「画布里的」看 {{ canvasAssetCount }} 个画布资产
+                        </button>
+                    </div>
                 </div>
                 <div v-if="marq.box.value" class="am-marq" :style="marq.box.value"></div>
             </div>

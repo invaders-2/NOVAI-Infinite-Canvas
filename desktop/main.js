@@ -6,7 +6,7 @@
 //  4. 退出时确保结束后端进程，避免残留占用端口
 //  5. iframe 子页面注入迷你桥（postMessage 转发），前端零改动获得完整桌面能力
 
-const { app, BrowserWindow, WebContentsView, session, shell, dialog, ipcMain, Tray, Menu, screen, desktopCapturer, nativeImage, net } = require('electron');
+const { app, BrowserWindow, WebContentsView, session, shell, dialog, ipcMain, Tray, Menu, screen, desktopCapturer, nativeImage, net, Notification, nativeTheme } = require('electron');
 const { spawn, execFile } = require('child_process');
 const http = require('http');
 const path = require('path');
@@ -15,6 +15,7 @@ const crypto = require('crypto');
 const macUpdater = require('./mac-updater');
 const { resolveBaseUrl } = require('./cloud-config');
 const { trayIconCandidates, firstExistingTrayIcon } = require('./tray-icon');
+const updateState = require('./update-state');
 
 // 后端端口：与正式版一致使用 3000（数据目录也相同，Electron 版就是正式版的桌面壳）。
 // 若 3000 上已有 NOVAI 后端在跑（正式版/网页版），直接复用而不重复启动；
@@ -133,25 +134,166 @@ function logFfmpegVersion(binary) {
   });
 }
 
-// 数据目录：与正式版 launcher.py 完全一致（Windows = APPDATA/NOVAI，macOS/Linux = ~/NOVAI），
-// 确保 Electron 版与正式版共享同一份用户数据（画布/配置/对话）——
-// 用户从正式版换到 Electron 版无需迁移、无需重新下载任何数据。
+// 稳定配置：与后端 main.py 的口径完全一致（Windows = %APPDATA%\NOVAI\config.json，
+// macOS/Linux = ~/.NOVAI/config.json）。它必须放在数据目录之外——用户把数据搬到别的盘后，
+// 下次启动要靠它找回"数据在哪"，否则又会回到旧目录。NOVAI_CONFIG_DIR 只给验收/隔离用。
+function stableConfigFile() {
+  if (process.env.NOVAI_CONFIG_DIR) return path.join(process.env.NOVAI_CONFIG_DIR, 'config.json');
+  if (process.platform === 'win32') return path.join(process.env.APPDATA || require('os').homedir(), 'NOVAI', 'config.json');
+  return path.join(require('os').homedir(), '.NOVAI', 'config.json');
+}
+
+// 读用户设置的存储位置；不存在/坏了/盘没插一律返回空串（回落到默认目录，绝不挡住启动）。
+function readConfiguredDataDir() {
+  try {
+    const file = stableConfigFile();
+    if (!fs.existsSync(file)) return '';
+    const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const raw = String((cfg && cfg.data_root) || '').trim();
+    if (!raw) return '';
+    const abs = path.resolve(raw.replace(/^~(?=$|[\\/])/, require('os').homedir()));
+    if (!fs.existsSync(abs)) {
+      clog('boot', '存储位置配置不可用（磁盘未连接？）: ' + abs + '，本次使用默认数据目录');
+      return '';
+    }
+    return abs;
+  } catch (err) {
+    clog('boot', '读取存储位置配置失败: ' + ((err && err.message) || err));
+    return '';
+  }
+}
+
+// ── 默认数据根：与 main.py default_data_root() / launcher.py 同口径 ──
+// 新装且安装目录可写 → 安装目录（程序装在哪，数据就在哪：data/ assets/ output/ history.json）；
+// 用户目录里已经有数据（老用户）、安装目录只读（AppImage / deb 装到 /usr、/opt、Windows 的
+// Program Files）、macOS 一律用用户目录（Windows %APPDATA%\NOVAI，其它 ~/NOVAI）。
+// 改规则要三处一起改。
+function userDataRoot() {
+  if (process.platform === 'win32') {
+    return path.join(process.env.APPDATA || require('os').homedir(), 'NOVAI');
+  }
+  return path.join(require('os').homedir(), 'NOVAI');
+}
+
+// 目录可写探测：建一个探针文件再删掉（安装目录权限 / 只读挂载都靠它兜底）。
+function dirWritable(dir) {
+  try {
+    if (!fs.existsSync(dir)) return false;
+    const probe = path.join(dir, '.novai-write-test');
+    fs.writeFileSync(probe, 'ok');
+    fs.unlinkSync(probe);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function pathWithin(target, root) {
+  try {
+    const rel = path.relative(root, target);
+    return rel === '' || (!!rel && !rel.startsWith('..') && !path.isAbsolute(rel));
+  } catch (_) {
+    return false;
+  }
+}
+
+function installDirReadonly(dir) {
+  if (!dir) return true;
+  if (String(process.env.APPIMAGE || '').trim()) return true;
+  const systemDirs = [];
+  if (process.platform === 'win32') {
+    ['PROGRAMFILES', 'PROGRAMFILES(X86)', 'PROGRAMW6432'].forEach((key) => {
+      if (process.env[key]) systemDirs.push(process.env[key]);
+    });
+  } else {
+    systemDirs.push('/usr', '/opt', '/snap');
+  }
+  if (systemDirs.some((root) => pathWithin(dir, root))) return true;
+  return !dirWritable(dir);
+}
+
+// 用户目录里是否已经有 NOVAI 数据。信号宁宽勿窄：认成老用户最多继续用旧位置；
+// 认成新用户却把账号库/画布/素材切到安装目录，老用户看到的就是「数据全没了」。
+function userRootHasData(root) {
+  if (!root) return false;
+  try {
+    if (!fs.existsSync(root)) return false;
+    const files = [path.join(root, 'data', 'users.db'), path.join(root, 'data', 'settings.json'), path.join(root, 'history.json')];
+    if (files.some((file) => fs.existsSync(file))) return true;
+    return ['data/canvases', 'assets', 'output'].some((rel) => {
+      try { return fs.readdirSync(path.join(root, rel)).length > 0; } catch (_) { return false; }
+    });
+  } catch (_) {
+    return false;
+  }
+}
+
+function decideDefaultDataDir() {
+  const userRoot = userDataRoot();
+  if (process.platform === 'darwin') return { dir: userRoot, origin: 'user' };
+  let installDir = String(process.env.NOVAI_INSTALL_DIR || '').trim();
+  if (!installDir) {
+    try { installDir = process.execPath ? path.dirname(process.execPath) : ''; } catch (_) { installDir = ''; }
+  }
+  if (installDirReadonly(installDir)) return { dir: userRoot, origin: 'user' };
+  if (userRootHasData(userRoot)) return { dir: userRoot, origin: 'user' };
+  return { dir: installDir, origin: 'install' };
+}
+
+// 首次判定写进稳定配置并记来源（已有 data_root 不覆盖）。老用户的数据根已经在用户目录且
+// 有数据时不写：写了会被当成「用户自己选过位置」，挡掉首次启动的「迁到安装目录」提示。
+function persistDataRoot(dir, origin) {
+  try {
+    if (!dir) return;
+    if (origin === 'user' && userRootHasData(dir)) return;
+    const file = stableConfigFile();
+    let cfg = {};
+    if (fs.existsSync(file)) {
+      try {
+        const loaded = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (loaded && typeof loaded === 'object') cfg = loaded;
+      } catch (_) { cfg = {}; }
+    }
+    if (String(cfg.data_root || '').trim()) return;
+    cfg.data_root = dir;
+    cfg.data_root_origin = origin;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    // 先写临时文件再替换：写一半崩掉会让下次启动读不到 data_root，数据根翻回用户目录
+    const tmpFile = file + '.tmp';
+    fs.writeFileSync(tmpFile, JSON.stringify(cfg, null, 2));
+    fs.renameSync(tmpFile, file);
+    clog('boot', '默认数据目录 ' + dir + '（来源 ' + origin + '）已写入 ' + file);
+  } catch (err) {
+    clog('boot', '记录默认数据目录失败（不影响启动）: ' + ((err && err.message) || err));
+  }
+}
+
+// 数据目录：env > 稳定配置 data_root > 默认判定（见 decideDefaultDataDir）。
+// 与正式版 launcher.py / main.py 同口径，切换安装方式仍共享同一份用户数据。
 // 独立于 .app 包内部（可写、非只读、升级不丢）。
 function resolveDataDir() {
   // 显式给的数据目录优先：隔离验收或自定义部署时，别把探针拖出来的节点写进日常数据
   if (process.env.NOVAI_DATA_DIR) return process.env.NOVAI_DATA_DIR;
+  // 设置 → 通用 → 存储位置 里选过目录的话，后端把 data_root 写进稳定配置，这里必须读同一份，
+  // 否则安装版用户改完设置一重启又回到旧目录（后端拿到的 NOVAI_DATA_DIR 还是旧的）。
+  const configured = readConfiguredDataDir();
+  if (configured) return configured;
   if (!app.isPackaged) return path.join(__dirname, '..', 'data');
-  const dir = path.join(process.env.APPDATA || require('os').homedir(), 'NOVAI');
+  const decided = decideDefaultDataDir();
+  persistDataRoot(decided.dir, decided.origin);
+  clog('boot', '默认数据目录: ' + decided.dir + '（来源 ' + decided.origin + '）');
   // 兼容早期 Electron 测试版（数据曾写到系统 appData/NOVAI，macOS 上与正式版不一致）：
   // 正式目录不存在而旧目录存在时整体搬迁，避免老测试用户数据"消失"。
-  try {
-    const legacy = path.join(app.getPath('appData'), 'NOVAI');
-    if (legacy !== dir && !fs.existsSync(dir) && fs.existsSync(legacy)) {
-      fs.renameSync(legacy, dir);
-      clog('boot', '已迁移旧版 Electron 数据目录: ' + legacy + ' -> ' + dir);
-    }
-  } catch (_) {}
-  return dir;
+  if (decided.origin === 'user') {
+    try {
+      const legacy = path.join(app.getPath('appData'), 'NOVAI');
+      if (legacy !== decided.dir && !fs.existsSync(decided.dir) && fs.existsSync(legacy)) {
+        fs.renameSync(legacy, decided.dir);
+        clog('boot', '已迁移旧版 Electron 数据目录: ' + legacy + ' -> ' + decided.dir);
+      }
+    } catch (_) {}
+  }
+  return decided.dir;
 }
 
 // ---------- 后端日志 ----------
@@ -242,10 +384,10 @@ function startBackend(port) {
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",
     });
-    // Win 安装根目录传给后端：素材默认跟随安装目录（用户安装时选的大容量盘）。
-    // 仅 win32 设置——mac 的 .app 包内只读、linux AppImage 挂载只读，
-    // 后端写探测失败会自动回落到数据目录（~/NOVAI 或 APPDATA/NOVAI）。
-    if (app.isPackaged && process.platform === 'win32') {
+    // Win/Linux 安装根目录传给后端：新装且安装目录可写时数据根就是安装目录（程序装在哪，
+    // 数据就在哪）；只读安装目录（AppImage / deb 装到 /usr）由后端按同一规则回落用户目录。
+    // macOS 不传：.app 包内只读、升级整体替换，数据只能留在 ~/NOVAI。
+    if (app.isPackaged && process.platform !== 'darwin') {
       backendEnv.NOVAI_INSTALL_DIR = path.dirname(process.execPath);
     }
     // Windows 安装包自带 ffmpeg/ffprobe（resources/bin/win）：注入给后端，不依赖用户机器预装。
@@ -280,6 +422,23 @@ function startBackend(port) {
         if (fs.existsSync(dir) && pathParts.indexOf(dir) < 0) pathParts.unshift(dir);
       });
       backendEnv[pathKey] = pathParts.join(';');
+    }
+    // macOS 从 Finder/Launchpad 启动时进程 PATH 只有系统默认目录（没有 /opt/homebrew/bin），
+    // 后端就找不到 Homebrew 装的 tesseract 等命令，拆分图层的文字层会被跳过。
+    if (process.platform === 'darwin' || process.platform === 'linux') {
+      const posixBinDirs = process.platform === 'darwin'
+        ? ['/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', '/usr/local/sbin']
+        : ['/usr/local/bin'];
+      const pathKeys = Object.keys(backendEnv).filter((key) => key.toLowerCase() === 'path');
+      const pathKey = pathKeys[0] || 'PATH';
+      const currentPath = pathKeys.map((key) => backendEnv[key]).filter(Boolean).join(':');
+      pathKeys.forEach((key) => { delete backendEnv[key]; });
+      const pathParts = currentPath.split(':').filter(Boolean);
+      const prependDirs = posixBinDirs.filter((dir) => fs.existsSync(dir) && pathParts.indexOf(dir) < 0);
+      backendEnv[pathKey] = prependDirs.concat(pathParts).join(':');
+      clog('boot', prependDirs.length
+        ? '补充后端 PATH: ' + prependDirs.join(' ')
+        : '后端 PATH 无需补充（这些目录不存在或已在 PATH 中）');
     }
     if (app.isPackaged) {
       try { fs.mkdirSync(backendEnv.NOVAI_DATA_DIR, { recursive: true }); } catch (_) {}
@@ -480,8 +639,15 @@ function loadTrayImage() {
     return null;
   }
   let image = nativeImage.createFromPath(found.path);
-  if (found.resize) image = image.resize({ width: found.resize, height: found.resize });
-  clog('tray', '托盘图标: ' + found.path + (found.resize ? '（缩放到 ' + found.resize + 'px）' : ''));
+  if (found.template) {
+    // macOS 模板图：系统按菜单栏明暗自动反色；@2x 同目录存在就补一层，Retina 下不糊
+    try {
+      const hi = nativeImage.createFromPath(found.path.replace(/\.png$/i, '@2x.png'));
+      if (hi && !hi.isEmpty()) image.addRepresentation({ scaleFactor: 2, buffer: hi.toPNG() });
+    } catch (_) {}
+    try { image.setTemplateImage(true); } catch (_) {}
+  } else if (found.resize) image = image.resize({ width: found.resize, height: found.resize });
+  clog('tray', '托盘图标: ' + found.path + (found.template ? '（macOS 菜单栏模板图）' : found.resize ? '（缩放到 ' + found.resize + 'px）' : ''));
   return image;
 }
 
@@ -506,10 +672,17 @@ function createTray() {
         },
       },
     ]);
-    tray.setContextMenu(menu);
-    tray.on('click', () => showMainWindow());
-    // Windows 用户习惯双击托盘图标回到主界面
-    tray.on('double-click', () => showMainWindow());
+    // macOS 状态栏图标：左键直接打开主界面（用户预期），菜单放到右键 / Control+点击。
+    // 设了 setContextMenu 时 AppKit 会把左键也变成「弹菜单」，点一下打不开窗口。
+    if (process.platform === 'darwin') {
+      tray.on('click', () => { showMainWindow(); });
+      tray.on('right-click', () => { try { tray.popUpContextMenu(menu); } catch (_) { /* 菜单弹出失败不影响打开窗口 */ } });
+    } else {
+      tray.setContextMenu(menu);
+      tray.on('click', () => showMainWindow());
+      // Windows 用户习惯双击托盘图标回到主界面
+      tray.on('double-click', () => showMainWindow());
+    }
     clog('tray', '托盘已创建');
     return true;
   } catch (err) {
@@ -764,6 +937,42 @@ function isSourceViewOpen() {
   return isSourceViewVisible();
 }
 
+// 视图到底挂没挂在主窗口 contentView 上：以 Electron 的 children 为准（removeChildView 对非子视图是 no-op），
+// 不信任自己记的 sourceViewAttached —— 前端重载、主窗口重建、异常路径都会让两者对不上。
+function contentViewContainsView(view) {
+  if (!view) return false;
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  try {
+    const contentView = mainWindow.contentView;
+    if (!contentView) return false;
+    const children = contentView.children;
+    if (Array.isArray(children)) return children.indexOf(view) !== -1;
+  } catch (_) {}
+  return null; // 拿不到 children：未知
+}
+
+function isSourceViewAttachedToWindow() {
+  const attached = contentViewContainsView(sourceView);
+  return attached === null ? sourceViewAttached : attached;
+}
+
+// 摘除视图并回读真实状态。removeChildView 本身对非子视图是 no-op，不会抛；
+// 回读仍挂在树上时返回 false，交给 hideSourceView 兜底销毁。
+function contentViewRemoveView(view) {
+  if (!view) return true;
+  if (!mainWindow || mainWindow.isDestroyed()) return true;
+  try {
+    const contentView = mainWindow.contentView;
+    if (!contentView) return true;
+    if (typeof contentView.removeChildView === 'function') contentView.removeChildView(view);
+    const stillAttached = contentViewContainsView(view);
+    return stillAttached === null ? true : stillAttached === false;
+  } catch (err) {
+    clog('source-view', '摘除视图失败: ' + (err && err.message || err));
+    return false;
+  }
+}
+
 function sourceViewState() {
   const open = isSourceViewVisible();
   let url = '';
@@ -773,6 +982,7 @@ function sourceViewState() {
   return {
     ok: true,
     open: open,
+    attached: isSourceViewAttachedToWindow(),
     source: open ? sourceViewSource : null,
     url: url,
     bounds: lastSourceViewRect,
@@ -949,15 +1159,57 @@ function normalizeSourceViewRect(rect) {
   };
 }
 
+// 主窗口内容区尺寸（DIP）。所有 bounds 都要收敛进这块矩形：WebContentsView 是原生叠层，
+// 一旦 bounds 越出窗口就会盖住窗口外的区域，甚至整窗铺满面板自己的关闭按钮。
+function mainWindowContentSize() {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const bounds = mainWindow.getContentBounds();
+      const width = Math.max(0, Math.round(Number(bounds.width) || 0));
+      const height = Math.max(0, Math.round(Number(bounds.height) || 0));
+      if (width > 0 && height > 0) return { width: width, height: height };
+    }
+  } catch (_) {}
+  return { width: 0, height: 0 };
+}
+
+// 形变期间画布侧把原生视图挪出窗口用的哨兵坐标（source-browser.js 的 HIDDEN_RECT）
+const SOURCE_VIEW_HIDDEN_SENTINEL = -10000;
+
+function isHiddenSourceRect(rect) {
+  const bounds = normalizeSourceViewRect(rect);
+  return !!bounds && (bounds.x <= SOURCE_VIEW_HIDDEN_SENTINEL || bounds.y <= SOURCE_VIEW_HIDDEN_SENTINEL);
+}
+
+// 把渲染端 rect 夹回主窗口内容区：越界收缩、偏移挪回，窗口尺寸变化后也不会留一个越界/铺满的视图。
+// 哨兵坐标（隐藏用）原样放行，但宽高压到 80，避免把“隐藏”变成一块大视图。
+function clampSourceViewRectToWindow(rect, winSize) {
+  const bounds = normalizeSourceViewRect(rect);
+  if (!bounds) return null;
+  if (bounds.x <= SOURCE_VIEW_HIDDEN_SENTINEL || bounds.y <= SOURCE_VIEW_HIDDEN_SENTINEL) {
+    return { x: bounds.x, y: bounds.y, width: Math.min(bounds.width, 80), height: Math.min(bounds.height, 80) };
+  }
+  const win = winSize && Number(winSize.width) > 0 && Number(winSize.height) > 0 ? winSize : null;
+  if (!win) return bounds;
+  const x = Math.max(0, Math.min(bounds.x, win.width - 1));
+  const y = Math.max(0, Math.min(bounds.y, win.height - 1));
+  return {
+    x: x,
+    y: y,
+    width: Math.max(1, Math.min(bounds.width, win.width - x)),
+    height: Math.max(1, Math.min(bounds.height, win.height - y)),
+  };
+}
+
 function applySourceViewBounds(rect) {
   if (!isSourceViewOpen()) return false;
-  const bounds = normalizeSourceViewRect(rect);
+  const bounds = clampSourceViewRectToWindow(rect, mainWindowContentSize());
   if (!bounds) return false;
-  // 控件已移到画布页：rect 由画布侧算好（工具栏下方），这里按传入值原样 setBounds
-  const layoutBounds = bounds;
+  // 控件已移到画布页：rect 由画布侧算好（工具栏下方），这里只做窗口内收敛后 setBounds
   try {
-    sourceView.setBounds(layoutBounds);
-    lastSourceViewRect = bounds;
+    sourceView.setBounds(bounds);
+    // 隐藏哨兵不能写进 lastSourceViewRect：关闭/切站之后重开按它会开到窗口外
+    if (!isHiddenSourceRect(bounds)) lastSourceViewRect = bounds;
     const now = Date.now();
     if (now - lastSourceBoundsLogAt >= 150) {
       lastSourceBoundsLogAt = now;
@@ -1035,6 +1287,23 @@ function handleSourceZoomShortcut(event, input) {
     if (!action) return;
     if (typeof event.preventDefault === 'function') event.preventDefault();
     setSourceZoom(action);
+  } catch (_) {}
+}
+
+// 内嵌页面有焦点时画布页收不到 keydown（键盘事件被原生视图吃掉），Esc 只能在这里兜底：
+// 视图万一盖住了画布面板的 ×，这是用户一定还能用的关闭入口。
+function handleSourceEscapeKey(event, input) {
+  try {
+    if (!input || input.type !== 'keyDown') return;
+    if (String(input.key || '') !== 'Escape') return;
+    if (!isSourceViewOpen()) return;
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+    hideSourceView();
+    const closedState = sourceViewState();
+    try {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('novai:source-view-closed', closedState);
+    } catch (_) {}
+    clog('source-view', 'Esc 关闭面板');
   } catch (_) {}
 }
 
@@ -1294,6 +1563,8 @@ function createSourceView() {
   attachMediaRequestProbe(wc);
   // Ctrl/Cmd +/-/0：主窗口与内嵌 view 都挂 before-input-event（view 有自己的焦点）
   attachSourceZoomShortcuts(wc);
+  // Esc 关闭面板：页面焦点在内嵌视图里时，画布页的 Esc 收不到
+  wc.on('before-input-event', handleSourceEscapeKey);
   // macOS 触控板原生 swipe（三指/部分触控板）；right → back，left → forward，与 wheel 共用去抖
   // 页面每次 dom-ready 都重注入控件 CSS（导航/站点重写后可能丢）
   wc.on('dom-ready', () => {
@@ -1410,8 +1681,9 @@ async function openSourceView(source, rect, options) {
   const view = sourceView;
   sourceViewSource = effectiveSourceKey;
   if (isCustom) rememberCustomSourceUrl(url);
-  // 保活：面板重新打开时把同一个 view 挂回窗口，不重建、不重新登录
-  if (!sourceViewAttached) {
+  // 保活：面板重新打开时把同一个 view 挂回窗口，不重建、不重新登录。
+  // 以窗口 children 为准：前端重载/异常后 sourceViewAttached 可能与实际不符，漏挂会让视图永远不出现。
+  if (!isSourceViewAttachedToWindow()) {
     try {
       mainWindow.contentView.addChildView(view);
       sourceViewAttached = true;
@@ -1421,7 +1693,12 @@ async function openSourceView(source, rect, options) {
       destroySourceView();
       return { ok: false, open: false, source: null, error: msg };
     }
+  } else {
+    // children 回读已挂着、本地 flag 却是 false（重载/异常后）：先把状态对齐，
+    // 否则 isSourceViewOpen() 一直为 false，后面的 bounds 会被整段丢掉。
+    sourceViewAttached = true;
   }
+  try { view.setVisible(true); } catch (_) {}
   sourceViewVisible = true;
   // 每次打开/切站都强制回到默认 75%（Boss 要求，不沿用上次手动缩放）
   try { view.webContents.setZoomFactor(SOURCE_DEFAULT_ZOOM); } catch (_) {}
@@ -1434,27 +1711,44 @@ async function openSourceView(source, rect, options) {
   }
   const error = await loadSourceViewUrl(view.webContents, () => view.webContents.loadURL(url), url);
   if (error) return { ok: false, open: isSourceViewOpen(), source: sourceViewSource, error: error };
+  // 打开请求可能要等首屏好几秒；这期间面板被关掉 / 切了站点时，不能再把状态翻回“可见”，也
+  // 不能把视图留在窗口上（前端此刻的 nativeOpen 还是 false，靠它会漏发关闭命令）。
+  if (sourceView !== view) {
+    // 这次打开已被切站取代：告诉前端别用这个结果改状态（新站点自己有并行的打开流程）
+    return { ok: true, open: false, superseded: true, source: null, url: url, bounds: lastSourceViewRect };
+  }
+  if (!sourceViewVisible) {
+    hideSourceView();
+    return { ok: true, open: false, superseded: true, source: null, url: url, bounds: lastSourceViewRect };
+  }
   sendSourceTheme();
   sendSourceUiState();
-  return { ok: true, open: true, source: sourceViewSource, url: url, bounds: lastSourceViewRect };
+  return { ok: true, open: isSourceViewOpen(), source: sourceViewSource, url: url, bounds: lastSourceViewRect };
 }
 
-// 关闭面板：只隐藏 view，不销毁 webContents —— 页面状态和登录态都保留
+// 关闭面板：只隐藏 view，不销毁 webContents —— 页面状态和登录态都保留。
+// 幂等：状态是否同步、调几次都行；每次都以“窗口上确实没有这个视图”为结束条件。
 function hideSourceView() {
+  sourceViewVisible = false;
+  // 关闭面板时把缩放复位到默认 75%（下次打开强制默认）
+  if (sourceBoundsReapplyTimer) { clearTimeout(sourceBoundsReapplyTimer); sourceBoundsReapplyTimer = null; }
   if (!isSourceViewAlive()) {
+    if (sourceView) contentViewRemoveView(sourceView);
+    sourceViewAttached = false;
+    return;
+  }
+  // 先整块隐藏：即使摘除失败，也不让它继续挡在画布上（setVisible 是原生层的最后一道保险）
+  try { sourceView.setVisible(false); } catch (_) {}
+  const removed = contentViewRemoveView(sourceView);
+  sourceViewAttached = false;
+  if (!removed && isSourceViewAlive()) {
+    // 回读仍挂在窗口上（父视图异常）：直接销毁。少一个登录态，总比关不掉的页面强。
+    clog('source-view', '视图摘除后仍在窗口上，改为销毁视图');
+    destroySourceView();
     sourceViewVisible = false;
     sourceViewAttached = false;
     return;
   }
-  if (sourceViewAttached) {
-    try {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.contentView.removeChildView(sourceView);
-    } catch (_) {}
-    sourceViewAttached = false;
-  }
-  sourceViewVisible = false;
-  // 关闭面板时把缩放复位到默认 75%（下次打开强制默认）
-  if (sourceBoundsReapplyTimer) { clearTimeout(sourceBoundsReapplyTimer); sourceBoundsReapplyTimer = null; }
   resetSourceZoom();
   flushSourceCookies();
 }
@@ -1499,10 +1793,8 @@ async function handleSourceViewAction(payload) {
         sourceBoundsReapplyTimer = setTimeout(() => {
           sourceBoundsReapplyTimer = null;
           if (!isSourceViewAlive()) return;
-          try {
-            sourceView.setBounds(retryRect);
-            lastSourceViewRect = retryRect;
-          } catch (_) {}
+          // 走同一条夹取路径：重放的 rect 也要收敛进窗口，不能绕开窗口边界
+          applySourceViewBounds(retryRect);
         }, 100);
       }
       return { ok: ok, open: isSourceViewOpen(), source: sourceViewSource, bounds: lastSourceViewRect };
@@ -2539,13 +2831,595 @@ function registerIpc() {
 // ---------- 自动更新 ----------
 let autoUpdater = null;
 // idle | checking | available | downloading | downloaded | installing
-// 原生对话框和网页端「一键更新」共用这一份状态，避免重复检查 / 重复下载 / 重复弹窗。
+// 静默下载、前端卡片和网页端「一键更新」共用这一份状态，避免重复检查 / 重复下载。
 let updateStage = 'idle';
 let pendingUpdateInfo = null;
-let availablePromptOpen = false;
-let installPromptOpen = false;
 // 手动触发的检查结束（且没新版本）时要给用户一句反馈；启动自动检查不打扰
 let manualUpdateCheck = false;
+
+// 新版客户端 IPC 契约 v1：主进程 → 渲染进程只用这一个通道推更新阶段。
+const UPDATE_STAGE_CHANNEL = 'novai:update-stage';
+
+// 本次下载的版本（进度事件里只有百分比，版本号要自己带上）
+let stageVersion = '';
+let pendingNotes = null;
+let notifiedDownloadVersion = '';
+// macOS 下载/安装分两步：下载好的 zip 留着，等用户点「立即重启」或退出时再替换
+let macPreparedUpdate = null;
+let macDownloadingVersion = '';
+let macDownloadRunning = false;
+let downloadProgressTimer = null;
+let lastDownloadProgress = null;
+let updatePersist = updateState.defaultState();
+let appliedStage = null;
+let bootSettled = false;
+let pendingReinstallWanted = false;
+let pendingReinstallTimer = null;
+let quitInstallTriggered = false;
+let updateSimDone = false;
+let installFailureNotice = '';
+
+function isDevMode() {
+  return !app.isPackaged || process.argv.indexOf('--dev') >= 0;
+}
+
+function updateStateDir() {
+  try { return app.getPath('userData'); } catch (_) { return ''; }
+}
+
+function readUpdateState() {
+  return updateState.readState(updateStateDir());
+}
+
+function saveUpdateState(patch) {
+  if (!app.isPackaged) return updatePersist;
+  updatePersist = updateState.writeState(updateStateDir(), Object.assign({}, updatePersist, patch || {}));
+  return updatePersist;
+}
+
+function sendUpdateStage(payload) {
+  const data = Object.assign({}, payload || {});
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(UPDATE_STAGE_CHANNEL, data);
+  } catch (_) {}
+  if (data.stage !== 'downloading') clog('updater', 'stage → ' + JSON.stringify(data));
+}
+
+function updateNotesCachePath() {
+  return path.join(updateStateDir(), 'update-notes.json');
+}
+
+function readCachedUpdateNotes() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(updateNotesCachePath(), 'utf8'));
+    if (!raw || typeof raw !== 'object') return null;
+    return updateState.normalizeNotes(raw.version, raw.notes || raw);
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeCachedUpdateNotes(notes) {
+  if (!notes) return;
+  try { fs.writeFileSync(updateNotesCachePath(), JSON.stringify(notes), 'utf8'); } catch (_) {}
+}
+
+// 打包时可以把 update-notes.json 放进 resources，用来给没有 Release 正文的更新源补说明。
+function readBundledUpdateNotes(version) {
+  const candidates = [
+    process.resourcesPath ? path.join(process.resourcesPath, 'update-notes.json') : '',
+    // 安装包会把 ../static 同步到 Resources/backend/static，更新说明顺手从那里读。
+    process.resourcesPath ? path.join(process.resourcesPath, 'backend', 'static', 'update-notes.json') : '',
+    path.join(__dirname, 'update-notes.json'),
+    path.join(__dirname, '..', 'static', 'update-notes.json'),
+    path.join(__dirname, '..', 'update-notes.json'),
+  ].filter(Boolean);
+  for (let i = 0; i < candidates.length; i += 1) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(candidates[i], 'utf8'));
+      const list = Array.isArray(raw) ? raw : [raw];
+      for (let j = 0; j < list.length; j += 1) {
+        const notes = updateState.normalizeNotes(version, list[j]);
+        if (notes) return notes;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+function resolveUpdateNotes(version, info) {
+  const ver = String(version || '');
+  if (!ver) return null;
+  const cached = readCachedUpdateNotes();
+  if (cached && updateState.versionEquals(cached.version, ver)) return cached;
+  const bundled = readBundledUpdateNotes(ver);
+  if (bundled) { writeCachedUpdateNotes(bundled); return bundled; }
+  const fromInfo = updateState.normalizeNotes(ver, info && info.releaseNotes);
+  if (fromInfo) { writeCachedUpdateNotes(fromInfo); return fromInfo; }
+  return null;
+}
+
+function notifyUpdateDownloaded(version) {
+  const label = 'v' + String(version || '');
+  const body = label + ' 已下载完成，退出应用后会自动安装；回到窗口点「立即重启」可以马上装。';
+  try {
+    if (Notification && typeof Notification.isSupported === 'function' && Notification.isSupported()) {
+      const notice = new Notification({ title: 'NOVAI 更新已就绪', body: body });
+      notice.on('click', () => { showMainWindow(); });
+      notice.show();
+      clog('updater', '窗口不可见，已发送系统通知提示下载完成');
+      return;
+    }
+  } catch (err) {
+    clog('updater', '系统通知失败（忽略）: ' + (err && err.message || err));
+  }
+  try {
+    if (tray && process.platform === 'win32' && typeof tray.displayBalloon === 'function') {
+      tray.displayBalloon({ title: 'NOVAI 更新已就绪', content: body });
+    }
+  } catch (_) {}
+}
+
+// 下载完成后的空闲时段备份旧版关键文件：回滚只认 app.asar + 可执行文件（打包后 js 都在 asar 里）。
+async function createUpdateBackup(version) {
+  if (!app.isPackaged) return false;
+  const plan = updateState.backupPlan({
+    platform: process.platform,
+    resourcesPath: process.resourcesPath,
+    exePath: process.execPath,
+  });
+  if (!plan.length) return false;
+  const dir = path.join(updateStateDir(), 'update-backup');
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    let copied = 0;
+    for (let i = 0; i < plan.length; i += 1) {
+      const item = plan[i];
+      try {
+        if (!fs.existsSync(item.live)) continue;
+        await fs.promises.copyFile(item.live, path.join(dir, item.name));
+        copied += 1;
+      } catch (err) {
+        clog('updater', '备份 ' + item.name + ' 失败（不影响更新）: ' + (err && err.message || err));
+      }
+    }
+    if (!copied) return false;
+    // 备份的是「现在正在跑的旧版本」，回滚判定要靠它和新版本号区分。
+    saveUpdateState({ backupDir: dir, backupVersion: app.getVersion() });
+    clog('updater', '已备份当前版本关键文件到 ' + dir + '（' + copied + ' 个）');
+    return true;
+  } catch (err) {
+    clog('updater', '更新备份失败（不影响更新）: ' + (err && err.message || err));
+    return false;
+  }
+}
+
+// 启动自检失败：把备份拷回原位后重启；全都拷不回去才提示用户手动下载。
+async function performUpdateRollback() {
+  const backupDir = String(updatePersist.backupDir || '');
+  const backupVersion = String(updatePersist.backupVersion || '');
+  const plan = updateState.backupPlan({
+    platform: process.platform,
+    resourcesPath: process.resourcesPath,
+    exePath: process.execPath,
+  });
+  const errors = [];
+  let copied = 0;
+  for (let i = 0; i < plan.length; i += 1) {
+    const item = plan[i];
+    const source = path.join(backupDir, item.name);
+    try {
+      if (!backupDir || !fs.existsSync(source)) { errors.push(item.name + ' 备份缺失'); continue; }
+      fs.copyFileSync(source, item.live);
+      copied += 1;
+    } catch (err) {
+      errors.push(item.name + ': ' + (err && err.message || err));
+    }
+  }
+  if (errors.length) clog('updater', '回滚时部分文件没还原: ' + errors.join('；'));
+  if (!errors.length && copied > 0) {
+    saveRollbackState(backupVersion);
+    clog('updater', '启动自检失败，已从备份回滚到 v' + (backupVersion || '旧版') + '，重启应用');
+    try { await stopBackendForUpdate(5000); } catch (_) {}
+    try { app.relaunch(); } catch (_) {}
+    app.exit(0);
+    return;
+  }
+  // Windows 上运行中的 exe/asar 常被占用，直接覆盖会失败；改成等进程退出后再还原并重启。
+  if (errors.length && spawnUpdateRollbackScript(backupDir, plan)) {
+    saveRollbackState(backupVersion);
+    clog('updater', '回滚文件被占用，已交给分离脚本在退出后还原并重启');
+    try { await stopBackendForUpdate(5000); } catch (_) {}
+    app.exit(0);
+    return;
+  }
+  const message = '自动回滚没有成功（备份不可用）。请到发布页手动下载安装包覆盖安装，用户数据不会丢失。';
+  saveUpdateState({ bootAttempts: 0, pendingVersion: '', lastInstallError: message });
+  clog('updater', '回滚失败: ' + (errors.join('；') || '没有可用的备份'));
+  try {
+    dialog.showErrorBox('更新回滚失败', message + (errors.length ? String.fromCharCode(10) + String.fromCharCode(10) + errors.join(String.fromCharCode(10)) : ''));
+  } catch (_) {}
+}
+
+function saveRollbackState(backupVersion) {
+  saveUpdateState({
+    bootAttempts: 0,
+    pendingVersion: '',
+    rolledBackFrom: app.getVersion(),
+    lastRunVersion: backupVersion,
+    installAttempts: 0,
+    lastInstallError: '',
+    backupDir: '',
+    backupVersion: '',
+  });
+}
+
+function spawnUpdateRollbackScript(backupDir, plan) {
+  if (!backupDir) return false;
+  const quoteSh = (value) => "'" + String(value).replace(/'/g, "'\\''") + "'";
+  const quotePs = (value) => "'" + String(value).replace(/'/g, "''") + "'";
+  try {
+    if (process.platform === 'win32') {
+      const scriptPath = path.join(updateStateDir(), 'update-rollback.ps1');
+      const lines = [
+        '$ErrorActionPreference = "SilentlyContinue"',
+        'for ($i = 0; $i -lt 180; $i++) {',
+        '  if (-not (Get-Process -Id ' + process.pid + ' -ErrorAction SilentlyContinue)) { break }',
+        '  Start-Sleep -Milliseconds 500',
+        '}',
+      ];
+      plan.forEach((item) => {
+        lines.push('Copy-Item -LiteralPath ' + quotePs(path.join(backupDir, item.name)) + ' -Destination ' + quotePs(item.live) + ' -Force');
+      });
+      lines.push('Start-Process -FilePath ' + quotePs(process.execPath));
+      fs.writeFileSync(scriptPath, lines.join('\r\n'), 'utf8');
+      const child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath], { detached: true, stdio: 'ignore' });
+      child.unref();
+      return true;
+    }
+    const scriptPath = path.join(updateStateDir(), 'update-rollback.sh');
+    const lines = [
+      '#!/bin/sh',
+      'for i in $(seq 1 180); do',
+      '  if ! kill -0 ' + process.pid + ' 2>/dev/null; then break; fi',
+      '  sleep 0.5',
+      'done',
+    ];
+    plan.forEach((item) => {
+      lines.push('cp -f ' + quoteSh(path.join(backupDir, item.name)) + ' ' + quoteSh(item.live) + ' 2>/dev/null');
+    });
+    const macApp = process.platform === 'darwin' ? macUpdater.appBundleFromExe(process.execPath) : '';
+    lines.push(macApp ? 'open ' + quoteSh(macApp) : quoteSh(process.execPath) + ' >/dev/null 2>&1 &');
+    fs.writeFileSync(scriptPath, lines.join('\n'), { encoding: 'utf8', mode: 0o755 });
+    try { fs.chmodSync(scriptPath, 0o755); } catch (_) {}
+    const child = spawn('/bin/sh', [scriptPath], { detached: true, stdio: 'ignore' });
+    child.unref();
+    return true;
+  } catch (err) {
+    clog('updater', '启动回滚脚本失败: ' + (err && err.message || err));
+    return false;
+  }
+}
+
+function beginUpdateBoot() {
+  if (!app.isPackaged) {
+    updatePersist = updateState.defaultState();
+    return { applied: false, rollback: false, pendingStale: false, previousVersion: '' };
+  }
+  const boot = updateState.beginBoot(readUpdateState(), app.getVersion());
+  updatePersist = updateState.writeState(updateStateDir(), boot.state);
+  if (boot.applied) {
+    const notes = resolveUpdateNotes(app.getVersion(), null);
+    appliedStage = { stage: 'applied', version: app.getVersion(), previousVersion: boot.previousVersion };
+    if (notes) appliedStage.notes = notes;
+    clog('updater', '检测到升级完成: v' + boot.previousVersion + ' → v' + app.getVersion());
+  }
+  if (boot.pendingStale) {
+    pendingReinstallWanted = true;
+    clog('updater', '上次退出时更新没装成（pending=' + updatePersist.pendingVersion + '），本次启动继续补装');
+  }
+  if (boot.giveUp) {
+    installFailureNotice = String(updatePersist.lastInstallError || '自动安装多次未成功，请到发布页手动下载安装包覆盖安装（用户数据不会丢失）。');
+    saveUpdateState({ pendingVersion: '' });
+    clog('updater', '自动安装重试次数已用完，本次启动不再自动安装');
+  }
+  return boot;
+}
+
+function markBootSuccess() {
+  if (bootSettled) return;
+  bootSettled = true;
+  if (!app.isPackaged) return;
+  saveUpdateState({ bootAttempts: 0, lastRunVersion: app.getVersion() });
+  clog('updater', '主界面已加载，启动自检通过（bootAttempts 清零）');
+  if (pendingReinstallWanted) schedulePendingReinstall();
+}
+
+function flushAppliedStage() {
+  if (!appliedStage) return;
+  const payload = appliedStage;
+  appliedStage = null;
+  sendUpdateStage(payload);
+}
+
+// 上次关机打断安装：本次启动静默重查一次，重新下好包，下次退出时自动装。
+function schedulePendingReinstall() {
+  if (!app.isPackaged || !pendingReinstallWanted || pendingReinstallTimer) return;
+  pendingReinstallTimer = setTimeout(() => {
+    pendingReinstallTimer = null;
+    if (!updaterSupported() || updateStage !== 'idle') return;
+    clog('updater', '后台重查未完成的更新（pending=' + String(updatePersist.pendingVersion || '') + '）');
+    manualUpdateCheck = false;
+    updateStage = 'checking';
+    try {
+      const task = autoUpdater.checkForUpdates();
+      if (task && typeof task.catch === 'function') task.catch(() => {});
+    } catch (_) {
+      updateStage = 'idle';
+    }
+  }, 20000);
+}
+
+function flushInstallFailureNotice() {
+  if (!installFailureNotice) return;
+  const message = installFailureNotice;
+  installFailureNotice = '';
+  sendUpdateStage({ stage: 'error', phase: 'install', message: message });
+}
+
+function onMainWindowLoaded() {
+  markBootSuccess();
+  if (appliedStage) setTimeout(flushAppliedStage, 1200);
+  setTimeout(flushInstallFailureNotice, 1400);
+  setTimeout(maybeSimulateUpdateEvent, 1500);
+}
+
+function updateInstallBlockedDir() {
+  // AppImage 的 execPath 在只读挂载点里，真正要写的是 $APPIMAGE 文件本身所在目录。
+  if (process.platform === 'linux' && process.env.APPIMAGE) {
+    const appImageDir = path.dirname(process.env.APPIMAGE);
+    try { fs.accessSync(appImageDir, fs.constants.W_OK); } catch (_) { return appImageDir; }
+    return '';
+  }
+  const dirs = [];
+  try { dirs.push(path.dirname(process.execPath)); } catch (_) {}
+  if (process.resourcesPath) dirs.push(process.resourcesPath);
+  for (let i = 0; i < dirs.length; i += 1) {
+    try {
+      fs.accessSync(dirs[i], fs.constants.W_OK);
+    } catch (_) {
+      return dirs[i];
+    }
+  }
+  return '';
+}
+
+// 下载完成：更新状态文件、推 downloaded、必要时系统通知一次、空闲时备份旧版。
+async function onUpdatePackageReady(version, info) {
+  const ver = String(version || stageVersion || '');
+  if (!ver) return;
+  stopDownloadProgressTicker();
+  stageVersion = ver;
+  updateStage = 'downloaded';
+  pendingNotes = resolveUpdateNotes(ver, info);
+  saveUpdateState({ pendingVersion: ver, lastInstallError: '' });
+  const payload = { stage: 'downloaded', version: ver };
+  if (pendingNotes) payload.notes = pendingNotes;
+  sendUpdateStage(payload);
+  const hidden = !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized();
+  if (hidden && notifiedDownloadVersion !== ver) {
+    notifiedDownloadVersion = ver;
+    notifyUpdateDownloaded(ver);
+  }
+  setTimeout(() => { createUpdateBackup(ver).catch(() => {}); }, 2000);
+}
+
+async function applyUpdateNow() {
+  if (!app.isPackaged) return { ok: false, supported: false, phase: 'install', reason: 'dev' };
+  if (process.platform === 'darwin') {
+    if (macPreparedUpdate) return await installMacPreparedUpdate(macPreparedUpdate, { quitAfter: true });
+    if (pendingUpdateInfo) return await startMacSelfUpdate(pendingUpdateInfo, true);
+    return { ok: false, supported: true, phase: 'install', reason: 'not-ready' };
+  }
+  if (updateStage !== 'downloaded') return { ok: false, supported: true, phase: 'install', reason: 'not-ready', stage: updateStage };
+  const blocked = updateInstallBlockedDir();
+  if (blocked) {
+    const message = '安装目录不可写，无法自动安装：' + blocked;
+    saveUpdateState({ lastInstallError: message, installAttempts: (Number(updatePersist.installAttempts) || 0) + 1 });
+    sendUpdateStage({ stage: 'error', phase: 'install', message: message });
+    return { ok: false, supported: true, phase: 'install', reason: message };
+  }
+  const version = String(updatePersist.pendingVersion || stageVersion || (pendingUpdateInfo && pendingUpdateInfo.version) || '');
+  stopDownloadProgressTicker();
+  updateStage = 'installing';
+  quitInstallTriggered = true;
+  saveUpdateState({ installAttempts: (Number(updatePersist.installAttempts) || 0) + 1 });
+  sendUpdateStage({ stage: 'installing', version: version });
+  try {
+    await stopBackendForUpdate();
+  } catch (err) {
+    clog('updater', '安装前停止后端失败（继续安装）: ' + (err && err.message || err));
+  }
+  try {
+    if (process.platform === 'win32') autoUpdater.quitAndInstall(true, true);
+    else autoUpdater.quitAndInstall();
+    return { ok: true, supported: true, phase: 'install', stage: 'installing' };
+  } catch (err) {
+    const message = String(err && err.message || err);
+    saveUpdateState({ lastInstallError: message });
+    sendUpdateStage({ stage: 'error', phase: 'install', message: message });
+    return { ok: false, supported: true, phase: 'install', reason: message };
+  }
+}
+
+// 退出时收敛更新状态：mac 启动自替换脚本，Win/Linux 交给 electron-updater 的退出安装。
+function convergeUpdateOnQuit() {
+  if (!app.isPackaged || quitInstallTriggered) return;
+  const current = app.getVersion();
+  if (updatePersist.pendingVersion && updatePersist.pendingVersion === current) {
+    saveUpdateState({ pendingVersion: '' });
+    return;
+  }
+  if (!updateState.shouldInstallOnQuit(updatePersist, current)) return;
+  stopDownloadProgressTicker();
+  if (process.platform === 'darwin') {
+    if (!macPreparedUpdate) return;
+    quitInstallTriggered = true;
+    saveUpdateState({ installAttempts: (Number(updatePersist.installAttempts) || 0) + 1 });
+    sendUpdateStage({ stage: 'installing', version: String(macPreparedUpdate.version || updatePersist.pendingVersion) });
+    installMacPreparedUpdate(macPreparedUpdate, { quitAfter: false }).catch((err) => {
+      clog('updater', '退出时启动 mac 安装脚本失败: ' + (err && err.message || err));
+    });
+    return;
+  }
+  if (updateStage !== 'downloaded') return;
+  quitInstallTriggered = true;
+  saveUpdateState({ installAttempts: (Number(updatePersist.installAttempts) || 0) + 1 });
+  sendUpdateStage({ stage: 'installing', version: String(updatePersist.pendingVersion || stageVersion) });
+}
+
+// 调试开关：dev 模式设置 NOVAI_UPDATE_SIM=downloaded|applied|error 模拟对应事件，例如 NOVAI_UPDATE_SIM=applied npm run dev
+function maybeSimulateUpdateEvent() {
+  const sim = String(process.env.NOVAI_UPDATE_SIM || '').trim();
+  if (!sim || !isDevMode() || updateSimDone) return;
+  updateSimDone = true;
+  const fake = '9.9.9';
+  if (sim === 'downloaded') {
+    const notes = updateState.normalizeNotes(fake, {
+      version: fake,
+      items: [
+        { type: 'feature', text: '模拟：右下角出现「新版本已下载」卡片' },
+        { type: 'fix', text: '模拟：退出应用时静默安装' },
+      ],
+    });
+    sendUpdateStage({ stage: 'downloaded', version: fake, notes: notes || undefined });
+    clog('updater', '[SIM] downloaded 已模拟（NOVAI_UPDATE_SIM=downloaded）');
+    return;
+  }
+  if (sim === 'applied') {
+    sendUpdateStage({ stage: 'applied', version: fake, previousVersion: app.getVersion() });
+    clog('updater', '[SIM] applied 已模拟（NOVAI_UPDATE_SIM=applied）');
+    return;
+  }
+  if (sim === 'error') {
+    sendUpdateStage({ stage: 'error', phase: 'download', message: '模拟下载失败（NOVAI_UPDATE_SIM=error）' });
+    clog('updater', '[SIM] error 已模拟（NOVAI_UPDATE_SIM=error）');
+    return;
+  }
+  clog('updater', '[SIM] 未知的 NOVAI_UPDATE_SIM 值: ' + sim);
+}
+
+// ---------- 启动动画 ----------
+let splashWindow = null;
+let splashReady = false;
+let splashClosed = false;
+let splashTimedOut = false;
+let splashStagePending = null;
+
+function setSplashStage(stage, percent) {
+  splashStagePending = { stage: stage, percent: percent };
+  if (!splashWindow || splashWindow.isDestroyed()) return;
+  flushSplashStage();
+}
+
+function flushSplashStage() {
+  if (!splashReady || !splashWindow || splashWindow.isDestroyed() || !splashStagePending) return;
+  const stage = JSON.stringify(String(splashStagePending.stage || ''));
+  const percent = Number(splashStagePending.percent) || 0;
+  try {
+    const task = splashWindow.webContents.executeJavaScript(
+      'window.__novaiSplash && window.__novaiSplash.setStage(' + stage + ',' + percent + ')'
+    );
+    if (task && typeof task.catch === 'function') task.catch(() => {});
+  } catch (_) {}
+}
+
+function closeSplash() {
+  splashClosed = true;
+  splashReady = false;
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    try { splashWindow.destroy(); } catch (_) {}
+  }
+  splashWindow = null;
+}
+
+function createSplashWindow(boot) {
+  if (isDevMode() || isSmokeMode() || splashWindow) return;
+  splashClosed = false;
+  splashTimedOut = false;
+  try {
+    splashWindow = new BrowserWindow({
+      width: 420,
+      height: 300,
+      frame: false,
+      transparent: true,
+      resizable: false,
+      movable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      hasShadow: false,
+      show: false,
+      // 窗口底色与 splash 品牌底色一致，避免窗口出现瞬间闪一下透明/黑。
+      backgroundColor: nativeTheme.shouldUseDarkColors ? '#0a0a0a' : '#fafafa',
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    });
+    splashWindow.loadFile(path.join(__dirname, 'splash.html')).catch(() => {});
+    splashWindow.webContents.on('did-finish-load', () => {
+      splashReady = true;
+      flushSplashStage();
+    });
+    splashWindow.once('ready-to-show', () => {
+      if (splashClosed || !splashWindow || splashWindow.isDestroyed()) return;
+      try { splashWindow.showInactive(); } catch (_) {
+        try { splashWindow.show(); } catch (_) {}
+      }
+    });
+    splashWindow.on('closed', () => {
+      splashWindow = null;
+      splashReady = false;
+    });
+    const title = boot && boot.applied ? '正在应用新版本' : (boot && boot.pendingStale ? '正在完成更新' : '正在启动');
+    setSplashStage(title, boot && boot.applied ? 16 : 8);
+    clog('splash', '启动动画已显示');
+    // 后端/界面一直没就绪也不能把用户卡在启动画面上。
+    setTimeout(() => {
+      if (splashClosed) return;
+      splashTimedOut = true;
+      clog('splash', '启动动画 15s 超时，直接进入界面');
+      closeSplash();
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try { mainWindow.show(); } catch (_) {}
+      }
+    }, 15000);
+  } catch (err) {
+    splashWindow = null;
+    clog('splash', '启动动画创建失败（忽略，直接进界面）: ' + (err && err.message || err));
+  }
+}
+
+function revealMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (isSmokeMode()) { closeSplash(); return; }
+  if (!splashWindow || splashWindow.isDestroyed()) {
+    try { mainWindow.show(); } catch (err) { clog('win', 'show error: ' + err.message); }
+    return;
+  }
+  setSplashStage('就绪', 100);
+  setTimeout(() => {
+    closeSplash();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try { mainWindow.show(); } catch (err) { clog('win', 'show error: ' + err.message); }
+    }
+  }, 260);
+}
 
 // 镜像更新地址：CI 把产物同步到 bllack/NOVAI-releases 模型仓库的 electron-release/ 目录。
 const UPDATE_MIRROR_URL = 'https://modelscope.cn/models/bllack/NOVAI-releases/resolve/master/electron-release';
@@ -2556,55 +3430,6 @@ function updaterSupported() {
   return !!(app.isPackaged && autoUpdater);
 }
 
-// 「发现新版本」确认框：确认后开始下载
-function showUpdateAvailablePrompt(info) {
-  const current = app.getVersion();
-  const next = info && info.version;
-  if (!next || next === current) return;
-  if (availablePromptOpen) return;
-  availablePromptOpen = true;
-  dialog.showMessageBox(mainWindow, {
-    type: 'info',
-    title: '发现新版本',
-    message: `NOVAI 有新版本可用：v${next}（当前 v${current}）`,
-    detail: '是否现在下载并安装？下载完成后需重启应用。',
-    buttons: ['立即更新', '稍后'],
-    defaultId: 0,
-    cancelId: 1,
-  }).then(({ response }) => {
-    availablePromptOpen = false;
-    if (response !== 0) return;
-    updateStage = 'downloading';
-    try { autoUpdater.downloadUpdate(); } catch (err) { clog('updater', '下载更新包失败: ' + (err && err.message || err)); }
-  }).catch(() => { availablePromptOpen = false; });
-}
-
-// 「更新已就绪」确认框：确认后先停后端再安装（Windows 安装程序要覆盖被占用的文件）
-function showUpdateInstallPrompt() {
-  if (installPromptOpen) return;
-  installPromptOpen = true;
-  dialog.showMessageBox(mainWindow, {
-    type: 'info',
-    title: '更新已就绪',
-    message: '新版本已下载完成，是否立即重启安装？',
-    buttons: ['立即重启', '稍后'],
-    defaultId: 0,
-    cancelId: 1,
-  }).then(({ response }) => {
-    installPromptOpen = false;
-    if (response === 0) {
-      sendUpdateProgress({ stage: 'installing', percent: 100, final: true });
-      stopBackendForUpdate().then(() => {
-        if (process.platform === 'win32') {
-          // Windows 一键安装包：静默覆盖并按 isForceRunAfter 自动拉起新版本，不再弹安装向导
-          autoUpdater.quitAndInstall(true, true);
-          return;
-        }
-        autoUpdater.quitAndInstall();
-      });
-    }
-  }).catch(() => { installPromptOpen = false; });
-}
 
 // ---------- macOS 自替换更新（不依赖 Developer ID） ----------
 // 检查更新仍走 electron-updater；发现新版本后自己下载 zip → 校验 sha512 → ditto 解压 →
@@ -2628,19 +3453,47 @@ function sendUpdateProgress(payload) {
   } catch (_) {}
 }
 
-function showMacUpdateFallback(title, detail) {
-  if (!mainWindow) return;
-  dialog.showMessageBox(mainWindow, {
-    type: 'info',
-    title: title || '自动替换未完成',
-    message: '本次自动更新没有完成，数据不受影响。',
-    detail: String(detail || '') + '\n可以到发布页手动下载安装包覆盖安装。',
-    buttons: ['打开发布页', '稍后'],
-    defaultId: 0,
-    cancelId: 1,
-  }).then(({ response }) => {
-    if (response === 0) shell.openExternal('https://github.com/invaders-2/NOVAI-Infinite-Canvas/releases/latest');
-  }).catch(() => {});
+function pushDownloadProgress(version, percent, transferred, total) {
+  lastDownloadProgress = {
+    version: String(version || stageVersion || ''),
+    percent: Math.max(0, Math.min(100, Math.round(Number(percent) || 0))),
+    transferred: Number(transferred) || 0,
+    total: Number(total) || 0,
+  };
+}
+
+function emitDownloadProgressStage() {
+  if (!lastDownloadProgress) return;
+  sendUpdateStage({
+    stage: 'downloading',
+    version: lastDownloadProgress.version,
+    percent: lastDownloadProgress.percent,
+    transferred: lastDownloadProgress.transferred,
+    total: lastDownloadProgress.total,
+  });
+}
+
+// 前端靠 500ms 内有进度判断下载还活着；electron-updater 原生回调间隔不固定，这里固定节拍补发。
+function startDownloadProgressTicker(version) {
+  pushDownloadProgress(version, 0, 0, 0);
+  emitDownloadProgressStage();
+  if (downloadProgressTimer) return;
+  downloadProgressTimer = setInterval(emitDownloadProgressStage, 400);
+}
+
+function stopDownloadProgressTicker() {
+  if (downloadProgressTimer) {
+    clearInterval(downloadProgressTimer);
+    downloadProgressTimer = null;
+  }
+  lastDownloadProgress = null;
+}
+
+// macOS 老链路（自己下 zip）的进度：旧通道给老前端，新通道由 ticker 统一按节拍发。
+function sendDownloadProgress(percent, transferred, total, extra) {
+  const payload = Object.assign({ stage: 'downloading', percent: percent, transferred: transferred, total: total }, extra || {});
+  sendUpdateProgress(payload);
+  pushDownloadProgress(macDownloadingVersion || stageVersion || String(updatePersist.pendingVersion || ''), percent, transferred, total);
 }
 
 function macZipSizeMb(info) {
@@ -2650,27 +3503,6 @@ function macZipSizeMb(info) {
     if (bytes > 0) return Math.max(1, Math.round(bytes / 1024 / 1024));
   } catch (_) {}
   return 210;
-}
-
-function showMacUpdateAvailablePrompt(info) {
-  if (availablePromptOpen) return;
-  const current = app.getVersion();
-  const next = String(info && info.version || '');
-  if (!next || next === current) return;
-  availablePromptOpen = true;
-  const sizeMb = macZipSizeMb(info);
-  dialog.showMessageBox(mainWindow, {
-    type: 'info',
-    title: '发现新版本',
-    message: '发现新版本 v' + next + '（当前 v' + current + '），下载约 ' + sizeMb + 'MB 的安装包并自动替换安装？',
-    detail: '下载完成后 NOVAI 会自动退出、替换当前应用并重新打开；用户数据不会丢失。',
-    buttons: ['立即更新', '稍后'],
-    defaultId: 0,
-    cancelId: 1,
-  }).then(({ response }) => {
-    availablePromptOpen = false;
-    if (response === 0) startMacSelfUpdate(info, true);
-  }).catch(() => { availablePromptOpen = false; });
 }
 
 function runCommand(command, args, timeoutMs) {
@@ -2717,7 +3549,7 @@ function downloadMacUpdateZip(url, dest, expectedSha512, expectedSize) {
       }
       const contentLength = Number(response.headers && response.headers['content-length']);
       if (contentLength > 0) total = contentLength;
-      sendUpdateProgress({ stage: 'downloading', percent: 0, transferred: 0, total: total });
+      sendDownloadProgress(0, 0, total);
       response.on('data', (chunk) => {
         if (settled) return;
         transferred += chunk.length;
@@ -2727,7 +3559,7 @@ function downloadMacUpdateZip(url, dest, expectedSha512, expectedSize) {
         if (now - lastSentAt >= 300) {
           lastSentAt = now;
           const percent = total > 0 ? Math.min(100, Math.round((transferred * 1000) / total) / 10) : 0;
-          sendUpdateProgress({ stage: 'downloading', percent: percent, transferred: transferred, total: total });
+          sendDownloadProgress(percent, transferred, total);
         }
       });
       response.on('error', fail);
@@ -2741,7 +3573,7 @@ function downloadMacUpdateZip(url, dest, expectedSha512, expectedSize) {
           }
           try { fs.renameSync(partPath, dest); } catch (err) { return fail(err); }
           settled = true;
-          sendUpdateProgress({ stage: 'downloading', percent: 100, transferred: transferred, total: total });
+          sendDownloadProgress(100, transferred, total);
           resolve(dest);
         });
       });
@@ -2890,7 +3722,7 @@ async function prepareMacZip(opts) {
     && (!expectedSha || await macUpdater.verifySha512(zipPath, expectedSha));
   if (cached) {
     clog('updater', '复用已下载的安装包（源=' + source + '）: ' + zipPath);
-    sendUpdateProgress({ stage: 'downloading', percent: 100, transferred: expectedSize, total: expectedSize, cached: true });
+    sendDownloadProgress(100, expectedSize, expectedSize, { cached: true });
     return zipPath;
   }
   updateStage = 'downloading';
@@ -2922,67 +3754,77 @@ async function prepareMacZip(opts) {
   return zipPath;
 }
 
-// 主流程：下载/复用缓存 → 解压 → 校验 .app → 生成安装脚本 → 启动脚本 → 停后端并退出。
-async function startMacSelfUpdate(info, skipPrompt) {
+// macOS 第一阶段：只把 zip 下好并校验，不退出应用，留给用户决定什么时候装。
+async function prepareMacUpdate(info) {
   if (process.platform !== 'darwin') return { ok: false, supported: false, reason: 'not-darwin' };
-  if (macUpdateRunning) return { ok: true, supported: true, stage: updateStage };
-  if (!skipPrompt && info) { showMacUpdateAvailablePrompt(info); return { ok: true, supported: true, stage: updateStage }; }
-  macUpdateRunning = true;
-  const updatesDir = macUpdatesDir();
-  let tmpDir = '';
-  let version = '';
-  try {
-    fs.mkdirSync(updatesDir, { recursive: true });
-    let zipPath = '';
-    if (MAC_UPDATE_ZIP_OVERRIDE) {
-      zipPath = MAC_UPDATE_ZIP_OVERRIDE;
-      if (!fs.existsSync(zipPath)) throw new Error('测试钩子指定的 zip 不存在: ' + zipPath);
-      version = process.env.NOVAI_UPDATE_VERSION || macUpdater.versionFromZipName(zipPath);
-    } else {
-      // 先试国内镜像（github.com 常被 reset），镜像任何一步失败都回退现有 GitHub 逻辑。
-      const prepared = await withMacUpdateSource(async () => {
-        const mirror = await resolveMirrorMacUpdate(app.getVersion());
-        if (!mirror.ok) return mirror;
-        const mirrorZip = await prepareMacZip({
-          source: 'mirror',
-          version: mirror.version,
-          zipUrl: mirror.url,
-          sha512: mirror.sha512,
-          size: mirror.size,
-        });
-        return { ok: true, source: 'mirror', version: mirror.version, zipPath: mirrorZip };
-      }, async () => {
-        if (!info) throw new Error('缺少更新信息');
-        const githubVersion = String(info.version || '');
-        const updateTag = info && info.tag;   // electron-updater 给的真实 Release tag，如 v2.0.03
-        const zipFile = macUpdater.pickMacZipFile(info && info.files);
-        if (!zipFile) throw new Error('更新信息里没有 zip 安装包');
-        const zipUrl = macUpdater.resolveMacZipUrl(zipFile.url, githubVersion, updateTag);
-        // 主地址用真实 tag；下载返回非 2xx 时，再用「版本号补零」的 tag 兜底试一次
-        const altUrls = [];
-        const altTag = macUpdater.releaseTagFromVersion(githubVersion);
-        if (altTag) {
-          const altUrl = macUpdater.resolveMacZipUrl(zipFile.url, githubVersion, altTag);
-          if (altUrl && altUrl !== zipUrl) altUrls.push(altUrl);
-        }
-        const githubZip = await prepareMacZip({
-          source: 'github',
-          version: githubVersion,
-          zipUrl: zipUrl,
-          altUrls: altUrls,
-          sha512: zipFile.sha512,
-          size: zipFile.size,
-        });
-        return { ok: true, source: 'github', version: githubVersion, zipPath: githubZip };
-      });
-      version = String(prepared.version || '');
-      zipPath = String(prepared.zipPath || '');
-      clog('updater', '本次 macOS 更新源=' + prepared.source + '，版本=' + (version || '') + '，安装包=' + zipPath);
+  fs.mkdirSync(macUpdatesDir(), { recursive: true });
+  if (MAC_UPDATE_ZIP_OVERRIDE) {
+    const overrideZip = MAC_UPDATE_ZIP_OVERRIDE;
+    if (!fs.existsSync(overrideZip)) throw new Error('测试钩子指定的 zip 不存在: ' + overrideZip);
+    return {
+      ok: true,
+      source: 'override',
+      version: process.env.NOVAI_UPDATE_VERSION || macUpdater.versionFromZipName(overrideZip),
+      zipPath: overrideZip,
+    };
+  }
+  // 先试国内镜像（github.com 常被 reset），镜像任何一步失败都回退现有 GitHub 逻辑。
+  const prepared = await withMacUpdateSource(async () => {
+    const mirror = await resolveMirrorMacUpdate(app.getVersion());
+    if (!mirror.ok) return mirror;
+    const mirrorZip = await prepareMacZip({
+      source: 'mirror',
+      version: mirror.version,
+      zipUrl: mirror.url,
+      sha512: mirror.sha512,
+      size: mirror.size,
+    });
+    return { ok: true, source: 'mirror', version: mirror.version, zipPath: mirrorZip };
+  }, async () => {
+    if (!info) throw new Error('缺少更新信息');
+    const githubVersion = String(info.version || '');
+    const updateTag = info && info.tag;   // electron-updater 给的真实 Release tag，如 v2.0.03
+    const zipFile = macUpdater.pickMacZipFile(info && info.files);
+    if (!zipFile) throw new Error('更新信息里没有 zip 安装包');
+    const zipUrl = macUpdater.resolveMacZipUrl(zipFile.url, githubVersion, updateTag);
+    // 主地址用真实 tag；下载返回非 2xx 时，再用「版本号补零」的 tag 兜底试一次
+    const altUrls = [];
+    const altTag = macUpdater.releaseTagFromVersion(githubVersion);
+    if (altTag) {
+      const altUrl = macUpdater.resolveMacZipUrl(zipFile.url, githubVersion, altTag);
+      if (altUrl && altUrl !== zipUrl) altUrls.push(altUrl);
     }
+    const githubZip = await prepareMacZip({
+      source: 'github',
+      version: githubVersion,
+      zipUrl: zipUrl,
+      altUrls: altUrls,
+      sha512: zipFile.sha512,
+      size: zipFile.size,
+    });
+    return { ok: true, source: 'github', version: githubVersion, zipPath: githubZip };
+  });
+  const version = String(prepared.version || '');
+  const zipPath = String(prepared.zipPath || '');
+  clog('updater', '本次 macOS 更新源=' + prepared.source + '，版本=' + (version || '') + '，安装包=' + zipPath);
+  return { ok: true, source: prepared.source, version: version, zipPath: zipPath };
+}
 
+// macOS 第二阶段：解压 → 校验 .app → 生成 install.sh → 分离脚本等本进程退出后替换。
+async function installMacPreparedUpdate(prepared, options) {
+  if (process.platform !== 'darwin') return { ok: false, supported: false, reason: 'not-darwin' };
+  const opts = options || {};
+  const updatesDir = macUpdatesDir();
+  const version = String(prepared && prepared.version || '');
+  const zipPath = String(prepared && prepared.zipPath || '');
+  let tmpDir = '';
+  try {
+    if (!zipPath || !fs.existsSync(zipPath)) throw new Error('安装包不存在: ' + zipPath);
+    fs.mkdirSync(updatesDir, { recursive: true });
+    stopDownloadProgressTicker();
     updateStage = 'installing';
     // 这里还不能算 install 已开始（后面解压/校验仍可能失败），final 等脚本真正启动再发。
-    sendUpdateProgress({ stage: 'installing', percent: 100 });
+    sendUpdateStage({ stage: 'installing', version: version || stageVersion });
     tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'novai-update-'));
     clog('updater', '解压更新包: ' + zipPath + ' → ' + tmpDir);
     await runCommand('ditto', ['-x', '-k', zipPath, tmpDir], 10 * 60 * 1000);
@@ -3018,100 +3860,206 @@ async function startMacSelfUpdate(info, skipPrompt) {
     const child = spawn('/bin/sh', [scriptPath], { detached: true, stdio: 'ignore' });
     child.unref();
     clog('updater', 'mac 自替换脚本已启动: ' + scriptPath + ' target=' + targetApp + ' version=' + (version || appCheck.version || ''));
-    sendUpdateProgress({ stage: 'installing', percent: 100, restarting: true, final: true });
+    sendUpdateStage({ stage: 'installing', version: version || appCheck.version || stageVersion });
     updateStage = 'installing';
-    // 先让后端收尾再退：直接 app.exit 会留下半截进程/端口，替换脚本也可能被占用。
-    setTimeout(() => {
-      stopBackendForUpdate().then(() => { app.quit(); });
-    }, 300);
-    return { ok: true, supported: true, stage: 'installing', version: version };
+    macPreparedUpdate = null;
+    quitInstallTriggered = true;
+    if (opts.quitAfter !== false) {
+      // 先让后端收尾再退：直接 app.exit 会留下半截进程/端口，替换脚本也可能被占用。
+      setTimeout(() => {
+        stopBackendForUpdate().then(() => { app.quit(); });
+      }, 300);
+    }
+    return { ok: true, supported: true, phase: 'install', stage: 'installing', version: version || appCheck.version };
   } catch (err) {
-    macUpdateRunning = false;
     try { if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
     updateStage = 'available';
     const reason = String(err && err.message || err);
     clog('updater', 'mac 自替换更新失败: ' + reason);
-    sendUpdateProgress({ stage: 'error', percent: 0, error: reason });
-    showMacUpdateFallback('自动替换未完成', reason);
-    return { ok: false, supported: true, reason: reason };
+    saveUpdateState({ lastInstallError: reason, installAttempts: (Number(updatePersist.installAttempts) || 0) + 1 });
+    sendUpdateStage({ stage: 'error', phase: 'install', message: reason });
+    return { ok: false, supported: true, phase: 'install', reason: reason };
   }
 }
 
-// 网页端「一键更新」在桌面版转交到这里：只复用 electron-updater 流程。
+// 显式安装（前端「一键更新」/托盘操作）：没有现成 zip 就先下载，再走替换。
+async function startMacSelfUpdate(info, skipPrompt) {
+  if (process.platform !== 'darwin') return { ok: false, supported: false, reason: 'not-darwin' };
+  if (macUpdateRunning) return { ok: true, supported: true, stage: updateStage };
+  macUpdateRunning = true;
+  try {
+    let prepared = macPreparedUpdate;
+    if (!prepared) {
+      startDownloadProgressTicker(String((info && info.version) || (pendingUpdateInfo && pendingUpdateInfo.version) || stageVersion || ''));
+      prepared = await prepareMacUpdate(info || pendingUpdateInfo);
+      if (!prepared.ok) throw new Error(prepared.reason || '下载更新包失败');
+      macPreparedUpdate = prepared;
+    }
+    if (info) pendingUpdateInfo = info;
+    return await installMacPreparedUpdate(prepared, { quitAfter: true });
+  } catch (err) {
+    updateStage = 'available';
+    const reason = String(err && err.message || err);
+    clog('updater', 'mac 自动更新失败: ' + reason);
+    saveUpdateState({ lastInstallError: reason });
+    sendUpdateStage({ stage: 'error', phase: 'download', message: reason });
+    return { ok: false, supported: true, phase: 'download', reason: reason };
+  } finally {
+    macUpdateRunning = false;
+  }
+}
+
+// 发现新版本后 macOS 也静默下载，下载完只发 downloaded，不打断用户。
+async function startMacSilentDownload(info) {
+  if (process.platform !== 'darwin' || macDownloadRunning || macUpdateRunning) return;
+  const version = String(info && info.version || '');
+  if (!version || version === app.getVersion()) return;
+  macDownloadRunning = true;
+  macDownloadingVersion = version;
+  stageVersion = version;
+  updateStage = 'downloading';
+  const totalBytes = macZipSizeMb(info) * 1024 * 1024;
+  startDownloadProgressTicker(version);
+  pushDownloadProgress(version, 0, 0, totalBytes);
+  emitDownloadProgressStage();
+  try {
+    const prepared = await prepareMacUpdate(info);
+    macPreparedUpdate = prepared;
+    macDownloadingVersion = '';
+    clog('updater', 'macOS 更新包已静默下载完成: v' + (prepared.version || version));
+    await onUpdatePackageReady(prepared.version || version, info);
+  } catch (err) {
+    macDownloadingVersion = '';
+    updateStage = 'available';
+    const reason = String(err && err.message || err);
+    clog('updater', 'macOS 静默下载更新失败: ' + reason);
+    saveUpdateState({ lastInstallError: reason });
+    sendUpdateStage({ stage: 'error', phase: 'download', message: reason });
+  } finally {
+    macDownloadRunning = false;
+  }
+}
+
+// 发现新版本后不弹窗，直接开始后台下载；Windows/Linux 与 macOS 各自走自己的下载链路。
+function startUpdateDownload(info) {
+  if (process.platform === 'darwin') {
+    startMacSilentDownload(info);
+    return;
+  }
+  const version = String(info && info.version || '');
+  if (version) stageVersion = version;
+  updateStage = 'downloading';
+  startDownloadProgressTicker(stageVersion);
+  try {
+    const task = autoUpdater.downloadUpdate();
+    if (task && typeof task.catch === 'function') task.catch(() => {});
+  } catch (err) {
+    updateStage = 'idle';
+    const message = String(err && err.message || err);
+    clog('updater', '下载更新包失败: ' + message);
+    sendUpdateStage({ stage: 'error', phase: 'download', message: message });
+  }
+}
+
+function sendDownloadedStageOnce() {
+  const version = String(updatePersist.pendingVersion || stageVersion || (pendingUpdateInfo && pendingUpdateInfo.version) || '');
+  if (!version) return;
+  if (!pendingNotes) pendingNotes = resolveUpdateNotes(version, pendingUpdateInfo);
+  const payload = { stage: 'downloaded', version: version };
+  if (pendingNotes) payload.notes = pendingNotes;
+  sendUpdateStage(payload);
+}
+
+function startManualUpdateCheck() {
+  stopDownloadProgressTicker();
+  manualUpdateCheck = true;
+  updateStage = 'checking';
+  try {
+    const task = autoUpdater.checkForUpdates();
+    if (task && typeof task.catch === 'function') task.catch(() => {});
+  } catch (err) {
+    manualUpdateCheck = false;
+    updateStage = 'idle';
+    return { ok: false, supported: true, phase: 'check', reason: String(err && err.message || err) };
+  }
+  return { ok: true, supported: true, phase: 'check', stage: 'checking' };
+}
+
+// 网页端「一键更新」在桌面版转交到这里：只复用桌面更新链路。
 // 绝不能回落到后端 /api/update-from-github——那会让后端自重启，主进程会当成后端崩溃弹窗。
 function registerUpdaterIpc() {
   ipcMain.handle('novai:update-check', async () => {
     if (!updaterSupported()) return { ok: false, supported: false, reason: 'unavailable' };
-    // 已经下好：只补一次「立即重启」确认，绝不再下一次
+    // 已经下好：把 downloaded 再推一次，绝不再下一次
     if (updateStage === 'downloaded') {
-      showUpdateInstallPrompt();
+      sendDownloadedStageOnce();
       return { ok: true, supported: true, stage: updateStage };
     }
-    if (updateStage === 'downloading') return { ok: true, supported: true, stage: updateStage };
-    if (updateStage === 'checking') return { ok: true, supported: true, stage: updateStage };
+    if (updateStage === 'downloading' || updateStage === 'installing' || updateStage === 'checking') {
+      return { ok: true, supported: true, stage: updateStage };
+    }
     if (updateStage === 'available') {
-      if (process.platform === 'darwin') showMacUpdateAvailablePrompt(pendingUpdateInfo);
-      else showUpdateAvailablePrompt(pendingUpdateInfo);
-      return { ok: true, supported: true, stage: updateStage };
+      startUpdateDownload(pendingUpdateInfo);
+      return { ok: true, supported: true, stage: 'downloading' };
     }
-    manualUpdateCheck = true;
-    updateStage = 'checking';
-    try {
-      autoUpdater.checkForUpdates();
-    } catch (err) {
-      manualUpdateCheck = false;
-      updateStage = 'idle';
-      return { ok: false, supported: true, reason: String(err && err.message || err) };
-    }
-    return { ok: true, supported: true, stage: 'checking' };
+    return startManualUpdateCheck();
   });
 
+  // 兼容旧前端「立即更新」按钮：有包就直接装，没有就先静默下载。
   ipcMain.handle('novai:update-install', async () => {
     if (!updaterSupported()) return { ok: false, supported: false, reason: 'unavailable' };
     if (process.platform === 'darwin') {
       // 测试钩子：直接拿本地 zip 走完解压/替换，不需要先 check 到新版本
       if (MAC_UPDATE_ZIP_OVERRIDE) return await startMacSelfUpdate(null, true);
+      if (updateStage === 'downloaded') return await applyUpdateNow();
       if (updateStage === 'downloading' || updateStage === 'installing') return { ok: true, supported: true, stage: updateStage };
-      if (updateStage === 'available') return await startMacSelfUpdate(pendingUpdateInfo, true);
-      manualUpdateCheck = true;
-      updateStage = 'checking';
-      try {
-        autoUpdater.checkForUpdates();
-      } catch (err) {
-        manualUpdateCheck = false;
-        updateStage = 'idle';
-        return { ok: false, supported: true, reason: String(err && err.message || err) };
+      if (updateStage === 'available') {
+        startUpdateDownload(pendingUpdateInfo);
+        return { ok: true, supported: true, stage: 'downloading' };
       }
-      return { ok: true, supported: true, stage: 'checking' };
+      return startManualUpdateCheck();
     }
-    if (updateStage === 'downloaded') {
-      showUpdateInstallPrompt();
+    if (updateStage === 'downloaded') return await applyUpdateNow();
+    if (updateStage === 'downloading' || updateStage === 'checking' || updateStage === 'installing') {
       return { ok: true, supported: true, stage: updateStage };
     }
-    if (updateStage === 'downloading') return { ok: true, supported: true, stage: updateStage };
-    if (updateStage === 'checking') return { ok: true, supported: true, stage: updateStage };
-    // 之前已经查到新版本（用户在原生弹窗里选了「稍后」）：这次点击就是确认，直接下载
     if (updateStage === 'available') {
-      updateStage = 'downloading';
-      try {
-        autoUpdater.downloadUpdate();
-      } catch (err) {
-        updateStage = 'available';
-        return { ok: false, supported: true, reason: String(err && err.message || err) };
-      }
+      startUpdateDownload(pendingUpdateInfo);
       return { ok: true, supported: true, stage: 'downloading' };
     }
-    // 还没查过：先检查，查到后走 update-available 的原生确认框，确认后下载
-    manualUpdateCheck = true;
-    updateStage = 'checking';
-    try {
-      autoUpdater.checkForUpdates();
-    } catch (err) {
-      manualUpdateCheck = false;
-      updateStage = 'idle';
-      return { ok: false, supported: true, reason: String(err && err.message || err) };
-    }
-    return { ok: true, supported: true, stage: 'checking' };
+    return startManualUpdateCheck();
+  });
+
+  ipcMain.handle('novai:update-restart', async () => {
+    if (!app.isPackaged) return { ok: false, supported: false, phase: 'install', reason: 'dev' };
+    return await applyUpdateNow();
+  });
+
+  ipcMain.handle('novai:update-later', async () => {
+    const version = String((pendingUpdateInfo && pendingUpdateInfo.version)
+      || updatePersist.pendingVersion || stageVersion || '');
+    const downloaded = updateStage === 'downloaded' || !!(process.platform === 'darwin' && macPreparedUpdate);
+    if (!version) return { ok: false, phase: 'install', reason: 'no-pending-version' };
+    if (!downloaded) return { ok: false, phase: 'download', reason: 'not-downloaded', version: version };
+    if (app.isPackaged) saveUpdateState({ pendingVersion: version });
+    return { ok: true, phase: 'install', version: version };
+  });
+
+  ipcMain.handle('novai:update-notes-seen', async (event, payload) => {
+    const version = String(typeof payload === 'string' ? payload : (payload && payload.version) || '');
+    if (version && app.isPackaged) saveUpdateState({ notesSeenVersion: version });
+    return { ok: true, version: version };
+  });
+
+  ipcMain.handle('novai:update-retry', async () => {
+    if (!updaterSupported()) return { ok: false, supported: false, phase: 'check', reason: 'unavailable' };
+    macPreparedUpdate = null;
+    pendingReinstallWanted = false;
+    saveUpdateState({ lastInstallError: '', installAttempts: 0 });
+    // 用户主动重试：重新允许退出时安装，否则 setupAutoUpdate 里放弃过的开关会继续拦着。
+    if (autoUpdater) autoUpdater.autoInstallOnAppQuit = true;
+    updateStage = 'idle';
+    return startManualUpdateCheck();
   });
 }
 
@@ -3164,13 +4112,19 @@ function setupAutoUpdate() {
     if (!autoUpdater) return;
   } catch (err) { clog('updater', 'electron-updater 初始化失败: ' + (err && err.message || err)); return; }
   autoUpdater.autoDownload = false;
+  // 下好的包等用户点「立即重启」，或者退出应用时静默装完（mac 走自替换脚本，见 convergeUpdateOnQuit）。
+  autoUpdater.autoInstallOnAppQuit = true;
+  if (updatePersist.installAttempts >= updateState.INSTALL_GIVE_UP) {
+    autoUpdater.autoInstallOnAppQuit = false;
+    saveUpdateState({ pendingVersion: '' });
+    clog('updater', '自动安装已连续失败 ' + updatePersist.installAttempts + ' 次，本次启动不再退出安装');
+  }
   updateStage = 'checking';
   // 测试版（版本号含 -，如 1.0.112-beta.1）允许接收 prerelease 更新；正式版只看正式 Release。
   autoUpdater.allowPrerelease = app.getVersion().includes('-');
   const feedOrder = updateFeedOrder(process.platform);
   const attemptedSources = new Set();
   let currentFeed = feedOrder[0];
-  let resumeDownloadAfterFeedSwitch = false;
   attemptedSources.add(currentFeed.source);
   try {
     applyUpdateFeed(currentFeed);
@@ -3180,7 +4134,16 @@ function setupAutoUpdate() {
   autoUpdater.on('checking-for-update', () => { updateStage = 'checking'; });
   autoUpdater.on('update-not-available', () => {
     updateStage = 'idle';
-    resumeDownloadAfterFeedSwitch = false;
+    stopDownloadProgressTicker();
+    // 远端已经没有待装版本（下架/回滚）→ 清掉本地 pending，避免每次启动/退出都重试。
+    const stalePending = String(updatePersist.pendingVersion || '');
+    if (pendingReinstallWanted) {
+      pendingReinstallWanted = false;
+      if (stalePending && stalePending !== app.getVersion()) {
+        saveUpdateState({ pendingVersion: '' });
+        clog('updater', '远端已没有 v' + stalePending + '，清除本地 pending');
+      }
+    }
     // 只有用户主动点「一键更新」才提示「已是最新版本」，启动时的自动检查保持安静
     if (!manualUpdateCheck) return;
     manualUpdateCheck = false;
@@ -3194,50 +4157,42 @@ function setupAutoUpdate() {
   autoUpdater.on('update-available', (info) => {
     manualUpdateCheck = false;
     const next = info && info.version;
-    // 版本号相同（镜像/缓存回放）不算更新，否则会一直停在 available 让「立即更新」重复下载
-    if (!next || next === app.getVersion()) { updateStage = 'idle'; resumeDownloadAfterFeedSwitch = false; return; }
+    // 版本号相同（镜像/缓存回放）不算更新，否则会一直停在 available 反复下载
+    if (!next || next === app.getVersion()) { updateStage = 'idle'; return; }
     updateStage = 'available';
     pendingUpdateInfo = info;
-    if (process.platform === 'darwin') { showMacUpdateAvailablePrompt(info); return; }
-    // 上一个源是在下载阶段失败的：切源后直接续下，不再让用户点一次「立即更新」
-    if (resumeDownloadAfterFeedSwitch) {
-      resumeDownloadAfterFeedSwitch = false;
-      updateStage = 'downloading';
-      clog('updater', '切换后的更新源已找到 v' + next + '，继续下载');
-      try { autoUpdater.downloadUpdate(); return; } catch (err) { clog('updater', '切换后继续下载失败: ' + (err && err.message || err)); }
-    }
-    showUpdateAvailablePrompt(info);
+    pendingReinstallWanted = false;
+    // 发现新版本不弹窗，直接后台静默下载；下载完成后再由前端卡片问用户是否重启。
+    startUpdateDownload(info);
   });
   autoUpdater.on('download-progress', (p) => {
     updateStage = 'downloading';
-    // macOS 走自替换链路，进度由 startMacSelfUpdate 自己发；Windows 需要在这里转发给界面
+    // macOS 走自替换链路，进度由下载函数自己发；Windows/Linux 在这里转发给界面
     if (process.platform === 'darwin') return;
     const info = p || {};
-    sendUpdateProgress({
-      stage: 'downloading',
-      percent: Math.round(info.percent || 0),
-      transferred: info.transferred || 0,
-      total: info.total || 0,
-    });
+    const percent = Math.round(info.percent || 0);
+    const transferred = info.transferred || 0;
+    const total = info.total || 0;
+    sendUpdateProgress({ stage: 'downloading', percent: percent, transferred: transferred, total: total });
+    pushDownloadProgress(stageVersion || String((pendingUpdateInfo && pendingUpdateInfo.version) || ''), percent, transferred, total);
   });
-  autoUpdater.on('update-downloaded', () => {
-    updateStage = 'downloaded';
+  autoUpdater.on('update-downloaded', (info) => {
     manualUpdateCheck = false;
-    // macOS 走自替换链路（见 startMacSelfUpdate），不再弹旧的「手动覆盖安装」对话框
-    if (process.platform === 'darwin') return;
-    sendUpdateProgress({ stage: 'installing', percent: 100 });
-    showUpdateInstallPrompt();
+    const version = String(info && info.version || stageVersion || '');
+    onUpdatePackageReady(version, info).catch((err) => {
+      clog('updater', '处理下载完成事件失败: ' + (err && err.message || err));
+    });
   });
   autoUpdater.on('error', (err) => {
     // 后面还要按失败阶段选文案，先把阶段存下来（错误处理里会复位状态）
     const failedStage = updateStage;
-    const stageLabel = { checking: '检查更新', available: '检查更新', downloading: '下载更新包', downloaded: '安装更新' }[failedStage] || '检查更新';
+    const stageLabel = { checking: '检查更新', available: '检查更新', downloading: '下载更新包', downloaded: '安装更新', installing: '安装更新' }[failedStage] || '检查更新';
+    const installPhase = failedStage === 'downloaded' || failedStage === 'installing';
     const rawError = String(err && err.message || err);
     clog('updater', '[' + stageLabel + '] 更新失败（源=' + currentFeed.label + '）: ' + rawError);
     // 当前源失败时切到下一个还没试过的源再试一次（每个源只切一次，避免死循环）；
     // 安装阶段失败时包已下好，重试下载没有意义。
-    if (failedStage !== 'downloaded') {
-      resumeDownloadAfterFeedSwitch = failedStage === 'downloading';
+    if (!installPhase) {
       const next = nextUntriedFeed(feedOrder, attemptedSources);
       if (next) {
         attemptedSources.add(next.source);
@@ -3246,50 +4201,33 @@ function setupAutoUpdate() {
           currentFeed = next;
           applyUpdateFeed(next);
           updateStage = 'checking';
-          autoUpdater.checkForUpdates();
+          const task = autoUpdater.checkForUpdates();
+          if (task && typeof task.catch === 'function') task.catch(() => {});
           return;
         } catch (e) {
           currentFeed = next;
           clog('updater', '切换更新源到 ' + next.label + ' 失败: ' + (e && e.message || e));
         }
-      } else {
-        clog('updater', '所有更新源均失败（已尝试: ' + Array.from(attemptedSources).join(', ') + '）');
       }
+      clog('updater', '所有更新源均失败（已尝试: ' + Array.from(attemptedSources).join(', ') + '）');
     }
-    resumeDownloadAfterFeedSwitch = false;
-    // 最终失败后允许用户再次触发检查/下载（安装阶段失败除外，包已下好）
-    if (failedStage !== 'downloaded') updateStage = 'idle';
     manualUpdateCheck = false;
-    // 所有源都失败，或 macOS 未签名构建无法自动安装（Squirrel 要求签名）→
-    // 引导手动下载覆盖安装，数据目录独立不受影响。
-    if (!mainWindow) return;
-    if (failedStage === 'downloaded') {
-      dialog.showMessageBox(mainWindow, {
-        type: 'info',
-        title: '自动更新未能安装',
-        message: '新版安装包已下载完成，但安装阶段失败',
-        detail: '原始错误：' + rawError + '\n可尝试以管理员身份运行 NOVAI 后重试自动更新，或到发布页手动下载安装包覆盖安装（用户数据不会丢失）。',
-        buttons: ['前往下载', '稍后'],
-        defaultId: 0,
-        cancelId: 1,
-      }).then(({ response }) => {
-        if (response === 0) shell.openExternal('https://gitee.com/invaders/novai/releases');
-      }).catch(() => {});
-      return;
-    }
-    dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: '自动更新不可用',
-      message: '新版本已发布，但自动更新未能完成',
-      detail: '可能是网络无法连接更新服务器，或 macOS 未签名构建不支持自动安装。可前往发布页手动下载最新安装包覆盖安装，数据不会丢失。\n原始错误：' + rawError,
-      buttons: ['前往下载', '稍后'],
-      defaultId: 0,
-      cancelId: 1,
-    }).then(({ response }) => {
-      if (response === 0) shell.openExternal('https://gitee.com/invaders/novai/releases');
-    }).catch(() => {});
+    stopDownloadProgressTicker();
+    // 安装阶段失败保持 downloaded：包还在，用户可以重试安装；其它阶段回到 idle 可重新检查。
+    updateStage = installPhase ? 'downloaded' : 'idle';
+    saveUpdateState({ lastInstallError: installPhase ? rawError : '' });
+    sendUpdateStage({
+      stage: 'error',
+      phase: installPhase ? 'install' : (failedStage === 'downloading' ? 'download' : 'check'),
+      message: rawError,
+    });
   });
-  setTimeout(() => { try { autoUpdater.checkForUpdates(); } catch (_) {} }, 8000);
+  setTimeout(() => {
+    try {
+      const task = autoUpdater.checkForUpdates();
+      if (task && typeof task.catch === 'function') task.catch(() => {});
+    } catch (_) {}
+  }, 8000);
 }
 
 // ---------- 内嵌 webview 安全策略 ----------
@@ -3373,21 +4311,104 @@ function startWindowDrag() {
 }
 
 // ---------- 窗口 ----------
+// 主窗口尺寸不能写死 1440x900：1366x768、1080p@125%/150% 等机器的工作区比它小，
+// 窗口会被系统摆到屏幕外，右侧窗口三键与右上工具栏看起来像“错位”。
+// workArea 用 Electron 的 screen（已是 DIP，高 DPI 自动换算），四周各留 20px 边距并居中。
+function computeWindowBounds(workArea) {
+  if (!workArea || !Number(workArea.width) || !Number(workArea.height)) {
+    // 拿不到工作区（screen 未就绪等）：退回原来的默认值，位置交给系统
+    return { width: 1440, height: 900, minWidth: 900, minHeight: 600 };
+  }
+  const area = workArea;
+  const areaW = Math.max(640, Math.round(Number(area.width) || 1440));
+  const areaH = Math.max(480, Math.round(Number(area.height) || 900));
+  const areaX = Math.round(Number(area.x) || 0);
+  const areaY = Math.round(Number(area.y) || 0);
+  const width = Math.max(320, Math.min(1440, areaW - 40));
+  const height = Math.max(240, Math.min(900, areaH - 40));
+  return {
+    width,
+    height,
+    minWidth: Math.max(320, Math.min(900, areaW)),
+    minHeight: Math.max(240, Math.min(600, areaH)),
+    x: Math.round(areaX + Math.max(0, (areaW - width) / 2)),
+    y: Math.round(areaY + Math.max(0, (areaH - height) / 2)),
+  };
+}
+
+// 平台窗口 chrome：标题栏样式 + macOS 原生红绿灯位置。抽成纯函数方便 node 单测。
+// mac 的网页标题栏 / 画布顶栏都按 52px 高设计（垂直中心 26px），launcher.py 把灯中心也对齐到 26：
+// Electron 的 trafficLightPosition 是按钮到窗口顶/左的 margin，y=20 + 12px 按钮高 ≈ 中心 26；
+// x=20 与 TapNow / launcher.py 的灯左缘一致（三灯右缘约 72，标题栏左让 80 / 画布 pill 84 都不会压到）。
+// 不设时 Electron 默认灯位更贴边（左缘约 12），Boss 对照 TapNow（左缘约 19.5）指出偏左。Windows/Linux 不传。
+function platformWindowChrome(platform) {
+  const isWindows = platform === 'win32';
+  const isMac = platform === 'darwin';
+  const chrome = {
+    // Windows 自绘标题栏走官方路径：titleBarStyle 'hidden' 下 -webkit-app-region: drag 才可靠，
+    // 且不画系统标题栏（frame:false 在部分 Windows 环境下 drag 区域会失效）。
+    titleBarStyle: isWindows ? 'hidden' : (isMac ? 'hiddenInset' : 'default'),
+  };
+  if (isMac) chrome.trafficLightPosition = { x: 20, y: 20 };
+  return chrome;
+}
+
+// Electron 默认菜单（尤其 macOS 的 View）带 Zoom In / Zoom Out / Actual Size 的 role；
+// 这些加速键由主进程菜单处理，不一定会触发 webContents 的 zoom-changed，页面缩放会被持久化。
+// app ready 后取默认菜单，递归移除这三个 role，其它菜单（Edit / Window / Help 等）原样保留。
+function menuTemplateWithoutZoom(menu) {
+  const zoomRoles = ['zoomin', 'zoomout', 'resetzoom'];
+  if (!menu || !Array.isArray(menu.items)) return [];
+  const out = [];
+  for (const item of menu.items) {
+    if (!item) continue;
+    const role = String(item.role || '').toLowerCase();
+    if (zoomRoles.includes(role)) continue;
+    if (item.submenu) {
+      const submenu = menuTemplateWithoutZoom(item.submenu);
+      if (submenu.length) out.push({ label: item.label, submenu });
+      continue;
+    }
+    if (item.type === 'separator') { out.push({ type: 'separator' }); continue; }
+    const entry = {};
+    if (item.label != null) entry.label = item.label;
+    if (item.role != null) entry.role = item.role;
+    if (item.type != null) entry.type = item.type;
+    if (item.accelerator != null) entry.accelerator = item.accelerator;
+    if (item.enabled === false) entry.enabled = false;
+    if (item.click) entry.click = item.click;
+    out.push(entry);
+  }
+  return out;
+}
+
+function installApplicationMenuWithoutZoom() {
+  try {
+    const current = Menu.getApplicationMenu();
+    if (!current) return false;
+    Menu.setApplicationMenu(Menu.buildFromTemplate(menuTemplateWithoutZoom(current)));
+    clog('menu', '应用菜单已移除 Zoom In/Out/Actual Size（页面缩放固定 100%）');
+    return true;
+  } catch (err) {
+    clog('menu', '移除缩放菜单失败: ' + (err && err.message || err));
+    return false;
+  }
+}
+
 function createWindow(url) {
   appBaseUrl = url;
   clog('win', '创建窗口，加载 ' + url);
-  const isWindows = process.platform === 'win32';
+  const chrome = platformWindowChrome(process.platform);
+  let workArea = null;
+  try { workArea = screen.getPrimaryDisplay().workArea; } catch (err) { clog('win', '读取屏幕工作区失败: ' + (err && err.message || err)); }
+  const bounds = computeWindowBounds(workArea);
+  clog('win', '主窗口尺寸 ' + bounds.width + 'x' + bounds.height + ' @(' + bounds.x + ',' + bounds.y + ') min ' + bounds.minWidth + 'x' + bounds.minHeight + ' workArea=' + JSON.stringify(workArea));
   mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 900,
-    minHeight: 600,
+    ...bounds,
     title: 'NOVAI — 无限画布',
     backgroundColor: '#0f1115',
     autoHideMenuBar: true,
-    // Windows 自绘标题栏走官方路径：titleBarStyle 'hidden' 下 -webkit-app-region: drag 才可靠，
-    // 且不画系统标题栏（frame:false 在部分 Windows 环境下 drag 区域会失效）。
-    titleBarStyle: isWindows ? 'hidden' : (process.platform === 'darwin' ? 'hiddenInset' : 'default'),
+    ...chrome,
     show: false,
     webPreferences: {
       contextIsolation: true,
@@ -3397,6 +4418,19 @@ function createWindow(url) {
       webviewTag: true,
     },
   });
+
+  // 应用自己已有「界面缩放」设置（StudioScale 手动档）；Chromium 的页面缩放（Cmd +/-、触控板 pinch）
+  // 会持久化到同一台机器，不同人看到 100%/110%/125% 不一，所以这里统一锁回 100%。
+  // 注意只管页面缩放，不碰 StudioScale 的 --studio-ui-scale。
+  const resetPageZoom = (reason) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try { mainWindow.webContents.setZoomFactor(1); } catch (err) { clog('zoom', '重置页面缩放倍率失败（' + reason + '）: ' + (err && err.message || err)); }
+    try { mainWindow.webContents.setZoomLevel(0); } catch (err) { clog('zoom', '重置页面缩放级别失败（' + reason + '）: ' + (err && err.message || err)); }
+  };
+  try {
+    const limiter = mainWindow.webContents.setVisualZoomLevelLimits(1, 1);
+    if (limiter && typeof limiter.catch === 'function') limiter.catch(() => {});
+  } catch (err) { clog('zoom', '禁用 pinch 缩放失败: ' + (err && err.message || err)); }
 
   mainWindow.webContents.setUserAgent(
     mainWindow.webContents.getUserAgent().replace('Electron', 'Electron pywebview')
@@ -3410,13 +4444,35 @@ function createWindow(url) {
     clog('win', 'loadURL failed: ' + (err && err.message || err));
   });
 
+  // 页面加载完成 / 用户按 Cmd +/- 或 pinch 时都立刻回到 100%，避免 Chromium 把缩放持久化
+  mainWindow.webContents.on('did-finish-load', () => {
+    resetPageZoom('did-finish-load');
+    onMainWindowLoaded();
+  });
+  mainWindow.webContents.on('zoom-changed', () => resetPageZoom('zoom-changed'));
+  // 菜单 role 已移除，但 Cmd/Ctrl +/-/0 的键盘快捷键仍可能绕过 zoom-changed（尤其数字键盘），
+  // 这里在按键进页面之前拦掉，并顺手复位，保证页面缩放永远 100%（不影响 StudioScale）。
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (!input || input.type !== 'keyDown') return;
+    const modifier = process.platform === 'darwin' ? input.meta : input.control;
+    if (!modifier || input.alt) return;
+    const key = String(input.key || '').toLowerCase();
+    const code = String(input.code || '');
+    const zoomKeys = ['+', '=', '-', '_', '0'];
+    const zoomCodes = ['Equal', 'Minus', 'Digit0', 'NumpadAdd', 'NumpadSubtract', 'Numpad0', 'NumpadEqual'];
+    if (!zoomKeys.includes(key) && !zoomCodes.includes(code)) return;
+    event.preventDefault();
+    resetPageZoom('before-input-event');
+  });
+
   mainWindow.webContents.once('ready-to-show', () => {
     if (isSmokeMode()) {
       clog('win', '冒烟模式：主窗口不显示');
+      closeSplash();
       return;
     }
-    clog('win', 'ready-to-show, 显示窗口');
-    try { mainWindow.show(); } catch (err) { clog('win', 'show error: ' + err.message); }
+    clog('win', 'ready-to-show, 界面已就绪');
+    revealMainWindow();
   });
 
   mainWindow.webContents.on('did-fail-load', (e, code, desc) => {
@@ -3427,6 +4483,18 @@ function createWindow(url) {
   mainWindow.on('hide', () => clog('win', '窗口已隐藏'));
   mainWindow.on('blur', stopWindowDrag);
   mainWindow.on('maximize', stopWindowDrag);
+  // 窗口尺寸变了就把已挂着的原生视图重新夹回内容区：画布若因为重载/切页没发新 bounds，
+  // 也不会留下一个越界（铺满）的视图把面板关闭按钮盖住。
+  mainWindow.on('resize', () => {
+    try {
+      if (!isSourceViewOpen() || !lastSourceViewRect) return;
+      const clamped = clampSourceViewRectToWindow(lastSourceViewRect, mainWindowContentSize());
+      if (!clamped) return;
+      if (clamped.x === lastSourceViewRect.x && clamped.y === lastSourceViewRect.y
+        && clamped.width === lastSourceViewRect.width && clamped.height === lastSourceViewRect.height) return;
+      applySourceViewBounds(clamped);
+    } catch (_) {}
+  });
 
   mainWindow.webContents.setWindowOpenHandler(({ url: target }) => {
     if (target && target.startsWith('http')) shell.openExternal(target);
@@ -3480,6 +4548,13 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     dataDir = resolveDataDir();
+    // 启动自检：升级后首启标记 applied、累加 bootAttempts、判断要不要回滚；新版起不来时先回滚再继续。
+    const boot = beginUpdateBoot();
+    if (boot && boot.rollback) await performUpdateRollback();
+    createSplashWindow(boot);
+    // 默认菜单里的 Zoom role 先移除：即使上次会话把页面缩放到 125%，新版本启动时
+    // did-finish-load 会复位到 100%，在线素材 native 视图 / API 弹窗按设计尺寸显示。
+    installApplicationMenuWithoutZoom();
     installWebviewSecurityPolicy();
     registerIpc();
     // 托盘不依赖窗口与后端：先建好，窗口创建失败/被关闭时用户仍能打开或退出应用。
@@ -3501,8 +4576,10 @@ if (!gotLock) {
     });
     if (target.source !== 'local') {
       clog('boot', '使用云端地址(' + target.source + '): ' + target.baseUrl + '，跳过本地后端');
+      setSplashStage('准备界面', 60);
       createWindow(target.baseUrl);
       setupAutoUpdate();
+      setSplashStage('检查更新', 85);
       app.on('activate', () => { showMainWindow(); });
       return;
     }
@@ -3522,16 +4599,22 @@ if (!gotLock) {
       if (reuseExisting) {
         backendPort = port;
         clog('boot', '端口 ' + port + ' 已有 NOVAI 后端运行，直接复用（不重复启动）');
+        setSplashStage('准备界面', 60);
         createWindow(baseUrl);
         setupAutoUpdate();
+        setSplashStage('检查更新', 85);
       } else {
         clog('boot', '开始启动后端, 端口 ' + port);
+        setSplashStage('正在预热', 30);
         await startBackend(port);
         clog('boot', '后端进程已启动');
+        setSplashStage('正在预热', 45);
         await waitForServer(baseUrl + '/');
         clog('boot', '后端服务就绪: ' + baseUrl);
+        setSplashStage('准备界面', 60);
         createWindow(baseUrl);
         setupAutoUpdate();
+        setSplashStage('检查更新', 85);
       }
     } catch (err) {
       clog('boot', '启动失败: ' + err.message);
@@ -3555,6 +4638,9 @@ if (!gotLock) {
 
   app.on('before-quit', () => {
     isQuitting = true;
+    closeSplash();
+    // 退出前收敛更新状态：已经下好的包装在退出时静默装掉，mac 先起替换脚本。
+    convergeUpdateOnQuit();
     destroySourceView();
     shutdownBackend();
   });

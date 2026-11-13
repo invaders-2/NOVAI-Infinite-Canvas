@@ -11,24 +11,25 @@ import { useCtl, useS } from "./ctx";
 import { Edges } from "./Edges";
 import { addMenu, blankMenu, nodeMenu, portMenu, onNodeAct } from "./menus";
 import { NodeView } from "./NodeView";
+import { isSplitNode } from "./SplitNode";
 import { ICON_PATHS } from "./Icon";
 import { placeItem, saveNodeToLibraryDrop } from "./Library";
 import { closePop } from "./overlay";
 import { dropSourceUrls } from "./sourceDrop";
 import { addToStack, hiddenIds, isStack, stackItems } from "../stack";
 import { addToTimeline, clipable } from "../playlist";
-import { memberIdsDeep, reconcileGroups } from "../groupFit";
+import { growGroupFrames, growOwnerFrames, memberIdsDeep, minGroupSize, reconcileGroups } from "../groupFit";
 import { bodyBox, snapToGuides, unionBox, type Box, type Guide } from "../snapGuides";
+import { edgePathD, edgeSideOf, inPoint, outPoint } from "../edgeGeometry";
 
 type Drag =
   | { kind: "pan"; sx: number; sy: number; vx: number; vy: number; moved: boolean }
   | { kind: "node"; start: { x: number; y: number }; moved: boolean; orig: Array<{ id: string; x: number; y: number }>; pos?: Map<string, { x: number; y: number }>; /** 指针进了助手面板：节点冻结回原位，只留跟随指针的 ghost */ frozen?: boolean; /** ⌥ / Alt 拖动：松手把副本落到拖到的位置，原节点不动 */ copy?: "plain" | "edges" }
-  | { kind: "resize"; id: string; sx: number; sy: number; w: number; h: number; ar: number; keepRatio: boolean }
+  | { kind: "resize"; id: string; sx: number; sy: number; w: number; h: number; ar: number; keepRatio: boolean; /** 拖动时允许的最小宽高（普通分组 = 成员包围盒 + GROUP_PAD） */ minW: number; minH: number }
   | { kind: "conn" }
   | { kind: "marq"; sx: number; sy: number; base: Set<string>; moved: boolean }
   | { kind: "asset"; id: string; sx: number; sy: number; orig: { x: number; y: number }; moved: boolean };
 
-const dragPath = (a: { x: number; y: number }, b: { x: number; y: number }) => { const dx = Math.max(60, Math.abs(b.x - a.x) * .5); return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`; };
 /** 按几何重写受影响的边（pos 传拖动态；不传则用文档里的位置还原） */
 function paintEdges(doc: CanvasDoc, ids: Set<string>, pos?: Map<string, { x: number; y: number }>) {
   const byId = new Map(doc.nodes.map((n) => [n.id, n]));
@@ -37,7 +38,10 @@ function paintEdges(doc: CanvasDoc, ids: Set<string>, pos?: Map<string, { x: num
     if (!ids.has(e.from) && !ids.has(e.to)) continue;
     const a0 = byId.get(e.from), b0 = byId.get(e.to); if (!a0 || !b0) continue;
     const a = pos?.get(e.from) || a0, b = pos?.get(e.to) || b0;
-    const p1 = { x: a.x + a0.w, y: a.y + 24 + a0.h / 2 }, p2 = { x: b.x, y: b.y + 24 + b0.h / 2 }, d = dragPath(p1, p2);
+    // 和 React 渲染用同一套几何（含出线侧），拖动过程中线不会先走一侧、松手再跳到另一侧
+    const an = { ...a0, x: a.x, y: a.y }, bn = { ...b0, x: b.x, y: b.y };
+    const side = edgeSideOf(an, bn);
+    const p1 = outPoint(an, side), p2 = inPoint(bn), d = edgePathD(p1, p2, side);
     svg?.querySelectorAll(`path[data-edge="${CSS.escape(e.id)}"]`).forEach((el) => el.setAttribute("d", d));
     const gradient = svg?.querySelector(`#${CSS.escape("cn-eg-" + e.id)}`);
     gradient?.setAttribute("x1", String(p1.x)); gradient?.setAttribute("y1", String(p1.y)); gradient?.setAttribute("x2", String(p2.x)); gradient?.setAttribute("y2", String(p2.y));
@@ -102,6 +106,17 @@ export function Viewport() {
   // 把一张图片节点拖到表格的图片单元格（首帧 / 尾帧 / 参考图列）上：松手后图填进单元格，节点回到原位
   const cellRef = useRef<HTMLElement | null>(null);
   const ghostRef = useRef<HTMLElement | null>(null); const assetOverRef = useRef(false); const assetFolderRef = useRef<string | null>(null); const assetFolderIdRef = useRef<string | null>(null);
+  /** 选中普通分组时顺手把「比组内成员还小」的旧框归一（只扩不缩；用户主动拉大的框不动） */
+  const groupNormKey = useRef("");
+  useEffect(() => {
+    const key = [...ui.sel].sort().join(",");
+    if (key === groupNormKey.current) return;
+    groupNormKey.current = key;
+    const ids = [...ui.sel].filter((id) => { const n = store.node(id); return !!n && n.kind === "group" && !isStack(n); });
+    if (!ids.length) return;
+    const next = growGroupFrames(store.state.doc, ids);
+    if (next !== store.state.doc) store.mutate(() => next, { history: false });
+  }, [ui.sel, store]);
   const clearAssetDrop = () => {
     vpRef.current?.closest(".cn-root")?.classList.remove("asset-drag");
     document.getElementById("drawer")?.classList.remove("asset-drop");
@@ -253,7 +268,23 @@ export function Viewport() {
     }
     if (nodeEl && st.ui.pick) { const target = st.ui.pick; const id = nodeEl.dataset.id!; if (id !== target) connect(store, id, target); store.setUI({ pick: target, sel: new Set([target]) }); return; }
     const rz = t.closest("[data-rz]");
-    if (rz && nodeEl) { const n = store.node(nodeEl.dataset.id)!; store.snapshot(); drag.current = { kind: "resize", id: n.id, sx: e.clientX, sy: e.clientY, w: n.w, h: n.h, ar: n.h / n.w, keepRatio: n.kind === "image" || n.kind === "video" }; vp.setPointerCapture(e.pointerId); return; }
+    if (rz && nodeEl) {
+      const n = store.node(nodeEl.dataset.id)!; store.snapshot();
+      // 普通分组不能比组内成员（递归）的包围盒 + GROUP_PAD 更小；旧文档/成员变大导致框已经太小时，一拖就先扩到最小尺寸
+      const group = n.kind === "group" && !isStack(n);
+      // 拆分结果节点是窗口：自由宽高（不锁图片比例），最小 560×420 才排得下工具条 + 图层栏 + 画板
+      const split = isSplitNode(n);
+      const content = group ? minGroupSize(store.state.doc, n.id) : { w: 0, h: 0 };
+      const minW = group ? Math.max(120, Math.round(content.w)) : split ? 560 : 120;
+      const minH = group ? Math.max(80, Math.round(content.h)) : split ? 420 : 80;
+      let w = n.w, h = n.h;
+      if (group && (w < minW || h < minH)) {
+        w = Math.max(w, minW); h = Math.max(h, minH);
+        store.updateNode(n.id, (x) => ({ ...x, w, h }));
+      }
+      drag.current = { kind: "resize", id: n.id, sx: e.clientX, sy: e.clientY, w, h, ar: h / Math.max(1, w), keepRatio: !split && (n.kind === "image" || n.kind === "video"), minW, minH };
+      vp.setPointerCapture(e.pointerId); return;
+    }
     const port = t.closest("[data-port]") as HTMLElement | null;
     if (st.ui.editText && !(nodeEl && nodeEl.dataset.id === st.ui.editText)) (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur();
     if (port && nodeEl) {
@@ -343,8 +374,9 @@ export function Viewport() {
       markCell(cellUnder(e.clientX, e.clientY, d.orig));
     } else if (d.kind === "resize") {
       const dx = (e.clientX - d.sx) / st.view.k, dy = (e.clientY - d.sy) / st.view.k;
-      // 拖动改尺寸不设硬上限（文本节点也要能拉大）；最小 120×80，媒体节点保持原比例
-      const minW = 120, minH = 80;
+      // 拖动改尺寸不设硬上限（文本节点也要能拉大）；普通分组的最小尺寸按组内成员算（见 pointerdown），
+      // 其它节点仍是最小 120×80，媒体节点保持原比例
+      const minW = d.minW, minH = d.minH;
       let w = Math.round(Math.max(minW, d.w + dx));
       let h = d.keepRatio ? Math.round(w * d.ar) : Math.round(Math.max(minH, d.h + dy));
       if (d.keepRatio && h < minH) { h = minH; w = Math.round(h / d.ar); }
@@ -378,6 +410,12 @@ export function Viewport() {
       return;
     }
     if (d.kind === "pan" && !d.moved) { if (st.ui.editText) (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur(); store.setUI({ sel: new Set(), edge: null, editCell: null }); }
+    // 调整组内节点大小后，只把所属普通分组扩到包住它（只扩不缩、x/y 不变）；移动组员仍走 reconcileGroups
+    if (d.kind === "resize") {
+      const next = growOwnerFrames(store.state.doc, [d.id]);
+      if (next !== store.state.doc) store.mutate(() => next, { history: false });
+      return;
+    }
     if (d.kind === "node") { markComposerDrop(null); clearNodeGhost(); }
     if (d.kind === "node" && d.moved && assetOverRef.current) {
       const id = d.orig[0].id; const folder = assetFolderRef.current; const folderId = assetFolderIdRef.current;
@@ -429,6 +467,27 @@ export function Viewport() {
     }
   }, [store, ctl]);
 
+  /** 一次 drop 的落点处理：素材库拖拽 → 文件 → 在线素材 URL。@vp 与下面的文档级兜底共用 */
+  const dropPayload = useCallback((e: { clientX: number; clientY: number; dataTransfer: DataTransfer | null }) => {
+    const at = ctl.toWorld(e.clientX, e.clientY);
+    const lib = (window as unknown as { __novaiLibDrag?: Parameters<typeof placeItem>[1] }).__novaiLibDrag;
+    if (lib) { delete (window as unknown as { __novaiLibDrag?: unknown }).__novaiLibDrag; void placeItem(ctl, lib, { x: e.clientX, y: e.clientY }); return; }
+    const files = [...(e.dataTransfer?.files || [])];
+    if (files.length) void addFiles(store, files, at); else void dropSourceUrls(store, at, e.dataTransfer);
+  }, [ctl, store]);
+
+  // 只有 #vp 标了落点：松手落在它上面的浮层（#sourceBrowserPanel 在线素材面板、左栏按钮、助手面板）时，
+  // dragover 没人 preventDefault，浏览器直接取消 drop——事件都不发，也就没有任何提示。
+  // 文档级补一层；React 里处理过的（#vp / 表格单元格 / 工作流弹窗）会先 preventDefault，这里就不插手。
+  useEffect(() => {
+    // 输入框 / 可编辑区上的拖放留给浏览器：拖一段文字或链接进去是默认插入，不该被当成素材导入
+    const editable = (target: EventTarget | null) => target instanceof Element && !!target.closest("input,textarea,[contenteditable='true'],[contenteditable='']");
+    const allow = (e: DragEvent) => { if (!e.defaultPrevented && !editable(e.target) && e.dataTransfer) e.preventDefault(); };
+    const onDrop = (e: DragEvent) => { if (e.defaultPrevented || editable(e.target) || !e.dataTransfer) return; e.preventDefault(); dropPayload(e); };
+    document.addEventListener("dragover", allow); document.addEventListener("drop", onDrop);
+    return () => { document.removeEventListener("dragover", allow); document.removeEventListener("drop", onDrop); };
+  }, [dropPayload]);
+
   // 滚轮分三种：触控板捏合 / 真鼠标滚轮 = 缩放，触控板双指滑动 = 平移（与老画布 ReactCanvas 同一套判据）
   useEffect(() => {
     const vp = vpRef.current!;
@@ -473,9 +532,10 @@ export function Viewport() {
   const renameInline = (id: string, el: HTMLElement) => {
     const n = store.node(id); if (!n) return;
     // 分组 / 堆叠：名字存在 node.text（起名「首帧」「尾帧」后连到文本节点，出表时按组名放图）
-    if (n.kind === "group") {
+    if (n.kind === "group" || isStack(n)) {
+      const fallback = isStack(n) ? "堆叠" : "分组";
       el.contentEditable = "true"; el.classList.add("rename"); el.focus(); const rg = document.createRange(); rg.selectNodeContents(el); const sl = getSelection()!; sl.removeAllRanges(); sl.addRange(rg);
-      const fin = (save: boolean) => { el.contentEditable = "false"; el.classList.remove("rename"); const v = (el.textContent || "").trim().slice(0, 40); if (save && v && v !== n.text) { store.updateNode(id, (x) => ({ ...x, text: v }), { history: true }); store.toast(`已重命名为「${v}」`); } else el.textContent = n.text || "分组"; };
+      const fin = (save: boolean) => { el.contentEditable = "false"; el.classList.remove("rename"); const v = (el.textContent || "").trim().slice(0, 40); if (save && v && v !== n.text) { store.updateNode(id, (x) => ({ ...x, text: v }), { history: true }); store.toast(`已重命名为「${v}」`); } else el.textContent = n.text || fallback; };
       el.onkeydown = (ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); el.onblur = null; fin(true); } if (ev.key === "Escape") { el.onblur = null; fin(false); } };
       el.onblur = () => fin(true); return;
     }
@@ -507,7 +567,7 @@ export function Viewport() {
       onPointerDown={onPointerDown} onPointerMove={(e) => { onPointerMove(e); onHover(e); if (store.state.collab.transport) window.dispatchEvent(new CustomEvent("cn:cursor", { detail: ctl.toWorld(e.clientX, e.clientY) })); }} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
       onPointerLeave={() => { if (store.state.collab.transport) window.dispatchEvent(new CustomEvent("cn:cursor", { detail: null })); }}
       onDoubleClick={onDouble} onContextMenu={onContext}
-      onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const at = ctl.toWorld(e.clientX, e.clientY); const lib = (window as unknown as { __novaiLibDrag?: Parameters<typeof placeItem>[1] }).__novaiLibDrag; if (lib) { delete (window as unknown as { __novaiLibDrag?: unknown }).__novaiLibDrag; void placeItem(ctl, lib, { x: e.clientX, y: e.clientY }); return; } const files = [...(e.dataTransfer?.files || [])]; if (files.length) void addFiles(store, files, at); else void dropSourceUrls(store, at, e.dataTransfer); }}>
+      onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); dropPayload(e); }}>
       <div id="world" ref={worldRef}>
         <Edges />
         {guides.map((g, i) => <div key={i} className={"snapguide " + g.axis} style={g.axis === "x" ? { left: g.at, top: g.from, height: g.to - g.from, width: zinvExact } : { top: g.at, left: g.from, width: g.to - g.from, height: zinvExact }} />)}

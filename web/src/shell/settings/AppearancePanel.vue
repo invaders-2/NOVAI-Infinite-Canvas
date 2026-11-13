@@ -15,7 +15,7 @@ const lang = computed({
 });
 // 界面缩放：theme.js 早就支持（studio_ui_scale_mode），旧外壳没有入口，这里补上
 const SCALES = ['auto', '80', '90', '100', '115', '125'];
-const scaleOptions = SCALES.map(v => ({ value: v, label: v === 'auto' ? '自动' : v + '%' }));
+const scaleOptions = SCALES.map(v => ({ value: v, label: v === 'auto' ? '自动（100%）' : v + '%' }));
 const scale = computed({
     get: () => { void state.scaleTick; return window.StudioScale ? window.StudioScale.getMode() : 'auto'; },
     set: v => { if (window.StudioScale && window.StudioScale.set) window.StudioScale.set(v); state.scaleTick = (state.scaleTick || 0) + 1; },
@@ -30,7 +30,7 @@ const scale = computed({
         <SetCard :title="t('common.language', '语言')" :desc="t('common.languageDesc', '切换界面显示语言。')">
             <SetRow label="界面语言"><NvPills v-model="lang" :options="[{ value: 'zh', label: '中文' }, { value: 'en', label: 'English' }]" label="语言" /></SetRow>
         </SetCard>
-        <SetCard title="界面缩放" desc="自动会按窗口大小缩放；也可以固定一个比例。">
+        <SetCard title="界面缩放" desc="自动 = 100%（按 1:1 显示，不再随窗口大小猜测）；想更大可以手动选 115% / 125%。">
             <SetRow label="缩放比例"><NvPills v-model="scale" :options="scaleOptions" label="界面缩放" /></SetRow>
         </SetCard>
     </div>

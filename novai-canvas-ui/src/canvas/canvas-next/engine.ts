@@ -8,15 +8,17 @@
  *   文本节点「输出：多维表格 / 分镜表」→ runTextToTable
  *   上游连着表格的生成节点 → runTableBatch（逐行批量）
  */
-import type { CanvasDoc, CanvasNode } from "../react-canvas/reactCanvasStore";
-import { GenError, type GenInput, type GenRequest } from "./backend/types";
-import { fitMediaBox, ratioOf } from "./mediaFit";
+import type { CanvasDoc, CanvasEdge, CanvasNode } from "../react-canvas/reactCanvasStore";
+import { GenError, type CanvasTask, type GenInput, type GenRequest } from "./backend/types";
+import { fitMediaBox, isAdaptiveRatio, ratioOf } from "./mediaFit";
+import { batchSourceSize, sourceBoxInDoc, sourceSizeForTier, wantedRatio } from "./originalRatio";
 import { applyElements, elementInputs } from "./elements";
 import { nodeError } from "./errorText";
-import { mentionedIds, plainPrompt, resolveMentions, selfRefOf, unmentionedInputs, type SentRef } from "./mentions";
+import { excludeSelfRefsFlag, filterSelfRefs } from "./agent/selfRefs";
+import { mentionedIds, plainPrompt, resolveMentions, selfSourceOf, unmentionedInputs, type SentRef } from "./mentions";
 import { autoVideoMode, clamp, cloneParams, draftRes, expandGroupInputs, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoMode, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
-import { batchOf, batchRows, channelIndexFromId, channelModesOf, CHANNEL_MODE_LABEL, groupInputs, groupNote, growRowsPrompt, keepMediaCells, padTableRows, parseListPlan, parseTableReply, perRowRowCount, plannedChannelMode, planPrompt, planTextOf, tableChannels, trimTableRows, withStoryboardMedia, emptyRunHint, fillTargetOf, planRow, repairPrompt, rowHasFirst, rowsToRun, STORYBOARD_COLUMNS, tableAutoSize, tableGenKindOf, tableOf, tablePrompt, withBatch, withTable, type BatchJournal, type BatchRow, type FillTarget, type InputGroupPlan, type ListPlan, type TableChannel, type TableData } from "./table";
+import { batchOf, batchRows, channelIndexFromId, channelModesOf, CHANNEL_MODE_LABEL, groupInputs, groupNote, growRowsPrompt, inferChannelModesFromRows, keepMediaCells, mergeInputGroups, ownRefCount, padTableRows, parseListPlan, parseTableReply, perRowRowCount, planRepairPrompt, plannedChannelMode, planPrompt, planTextOf, refOrderText, tableChannels, tableInputWarnings, trimTableRows, withStoryboardMedia, emptyRunHint, fillTargetOf, planRow, repairPrompt, rowHasFirst, rowsToRun, STORYBOARD_COLUMNS, tableAutoSize, tableGenKindOf, tableOf, tablePrompt, withBatch, withTable, type BatchJournal, type BatchRow, type ChannelMode, type FillTarget, type InputGroupPlan, type ListPlan, type TableChannel, type TableData } from "./table";
 
 /* ---------- 请求组装 ---------- */
 export function rolesFor(kind: GenKind, p: unknown, m: ModelSpec | undefined, ins: ReturnType<typeof inputsOf>) {
@@ -57,34 +59,78 @@ export function resolvePrompt(doc: CanvasDoc, node: CanvasNode, extra = "", sent
 }
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRow): GenRequest | null {
+export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRow, flags?: { excludeSelfRefs?: boolean }): GenRequest | null {
   if (!isGenKind(node.kind)) return null;
+  /** 这次生成是否剔除自产物（缺省 false = 既有行为：@ 本节点 / 自己的历史结果照常可以当参考） */
+  const excludeSelf = flags?.excludeSelfRefs === true;
   const doc = store.state.doc; const m = store.modelOf(node); if (!m) return null;
   const g = genOf(node);
-  // 表格的一行：时长 / 比例 / 首尾帧按行定（planRow），这一行自带图时生成节点自己连的图片不再发送
-  const plan = row ? planRow(node.kind, g.params, m, row) : null;
-  const eff = plan ? plan.params : g.params;
+  // 表格的一行：时长 / 比例 / 首尾帧按行定（planRow），这一行自带图时生成节点自己连的图片不再发送；
+  // 图片批量时生成节点自身连的图也会发送，必须先把名额留出来，否则「自身图 + 行素材」会超过模型 maxRefs。
+  const plan = row ? planRow(node.kind, g.params, m, row, ownRefCount(doc, node.id, node.kind)) : null;
+  let eff = plan ? plan.params : g.params;
+  // 原图比例（自适应）在批量行里拿不到源图：row.media 的图不是节点 doc 输入，wantedRatio 只能看出 1:1。
+  // 这里按「这一行第一张图的真实像素」算显式 WxH（再回落生成节点自己的上游图），写进该行 params.sourceSize/size。
+  // 只修图片批量：视频 batch 的行为保持不变（显式比例、视频原图比例路径都不动）
+  if (row && node.kind === "image" && isAdaptiveRatio((eff as { ratio?: string }).ratio)) {
+    const tier = String((eff as { resolution?: string }).resolution || "1K");
+    const sized = (row.media || []).map((item) => {
+      if (item.kind !== "image") return item;
+      const up = store.node(item.nodeId); const out = up ? outOf(up) : null;
+      return { ...item, w: out?.w, h: out?.h };
+    });
+    let explicit = batchSourceSize(sized, tier);
+    if (!explicit) {
+      const box = sourceBoxInDoc(doc, node, node.kind);
+      explicit = box ? sourceSizeForTier(box, tier) : "";
+    }
+    if (explicit) eff = { ...(eff as Record<string, unknown>), sourceSize: explicit, ...(node.kind === "image" ? { size: explicit } : {}) } as typeof eff;
+  }
   const allIns = inputsOf(doc, node.id);
   const skip = unmentionedInputs(node, allIns);
   const directIns = allIns.filter((x) => x.node.kind !== "table" && !skip.has(x.edge.id) && !(plan?.ownImages && x.node.kind === "image"));
   const expandedIns = node.kind === "text" ? directIns : expandGroupInputs(doc, directIns);
   const expandedSkip = unmentionedInputs(node, expandedIns, allIns);
-  const ins = expandedIns.filter((x) => !expandedSkip.has(x.edge.id));
+  // 标了 excludeSelfRefs：分组展开出来的自己 / 由它生成的结果节点都不进参考图；上游连线和用户手加的引用照旧
+  const ins = filterSelfRefs(expandedIns.filter((x) => !expandedSkip.has(x.edge.id)), node.id, excludeSelf);
   const { roles, ignored } = rolesFor(node.kind, eff, m, ins);
   const inputs: GenInput[] = ins.filter((x) => !ignored.has(x.edge.id)).map((x) => ({ nodeId: x.node.id, title: genOf(x.node).title, kind: x.node.kind as GenKind, order: x.order + 1, role: roles.get(x.edge.id) || "context", url: outOf(x.node)?.url || (x.node.kind === "video" ? outOf(x.node)?.frame : undefined), text: x.node.kind === "text" ? textOf(x.node) : undefined }));
   if (plan) plan.inputs.forEach((ri) => { if (!inputs.some((i) => i.nodeId === ri.nodeId)) inputs.push({ ...ri, order: inputs.length + 1 }); });
   // 元素（@名字）：参考图按模型剩余的参考名额加进来
   inputs.push(...elementInputs(g.prompt, node.kind, m, eff, inputs));
-  // @本节点：提示词里 @ 到自己、且自己有当前结果时，把这条结果当参考输入加在末尾（self 没有连线，直接 push）
-  const self = selfRefOf(node);
-  if (self && mentionedIds(g.prompt).has(node.id)) {
-    const role = selfInputRole(node.kind, eff, m, inputs.filter((x) => x.kind === "image").length);
-    if (role) inputs.push({ nodeId: node.id, title: genOf(node).title, kind: node.kind as GenKind, order: inputs.length + 1, role, url: outOf(node)?.url || (node.kind === "video" ? outOf(node)?.frame : undefined) });
+  // @本节点：提示词里 @ 到自己、且这一版有可用的自我参考源时，把那张图加在末尾（self 没有连线，直接 push）。
+  // 源图取值见 selfSourceOf：这一版 meta.selfSrc 优先（null = 生成这一版时就没发，重新生成也不补上一版结果），
+  // 旧数据没有记录才走原来的回退。实际发出去的是哪张（没有就是 null）随请求带给写回，写回时原样记到新版本上——
+  // 不再事后从节点当前结果推算，否则「第一版是生成图」的节点会在第二轮把自己的结果记成源图、从此永远喂回上一版。
+  // 标了 excludeSelfRefs：仍然发送「更早的源图」（meta.selfSrc 记录的那张 / 上传原图），
+  // 只剔除节点当前这一版结果、由它生成的结果节点、分组展开出的自己（输入层已经剔过）。
+  const selfMentionedRaw = (node.kind === "image" || node.kind === "video") && mentionedIds(g.prompt).has(node.id);
+  let selfSrc: string | null = null;
+  if (selfMentionedRaw) {
+    const src = selfSourceOf(node);
+    if (typeof src === "string" && src) {
+      const cur = outOf(node);
+      const curUrl = cur ? (cur.url || (node.kind === "video" ? cur.frame : undefined)) : undefined;
+      // selfSourceOf 返回的就是当前这一版结果本身（没有更早的源图）时才不发；有更早的源图照发并记录
+      const usable = !excludeSelf || src !== curUrl;
+      if (usable) {
+        const role = selfInputRole(node.kind, eff, m, inputs.filter((x) => x.kind === "image").length);
+        if (role) { inputs.push({ nodeId: node.id, title: genOf(node).title, kind: node.kind as GenKind, order: inputs.length + 1, role, url: src }); selfSrc = src; }
+      }
+    }
   }
   const vm = node.kind === "video" ? (eff as VideoParams).mode : undefined;
   // 草稿模式：按模型最低清晰度出片（请求预览里看到的就是实际发出的清晰度）
   const params = node.kind === "video" && (eff as VideoParams).draft ? { ...(eff as VideoParams), res: draftRes(eff as VideoParams, m) } : eff;
-  return { canvasId: store.state.canvasId, nodeId: node.id, kind: node.kind, model: m, prompt: g.prompt, resolvedPrompt: resolvePrompt(doc, node, row?.text || "", inputs.filter((x) => x.kind !== "text").map((x) => ({ nodeId: x.nodeId, kind: x.kind, role: x.role }))), params, inputs, ...(vm ? { videoMode: { name: vm, api: VMODES[vm].api } } : {}) };
+  // 表格行：按**最终真的发送的 inputs 顺序**（含生成节点自身连的图 / 元素图）编号，
+  // 不能从行素材第 1 张开始数，否则模型按「图 N」会拿错图。
+  const rowRefOrder = row ? refOrderText(inputs) : "";
+  // 普通图片生图：后端按 inputs 里「kind=image 且带 url」的顺序发 reference_images，
+  // 光说「图 N」模型不知道第 N 张是哪张，所以把清单放到提示词最前面；表格行已经在上面加过，别叠两遍。
+  const refOrder = !row && node.kind === "image" ? refOrderText(inputs.filter((x) => x.kind === "image" && x.url)) : "";
+  const extra = [row?.text || "", rowRefOrder].filter((s) => s.trim()).join("\n\n");
+  const resolved = resolvePrompt(doc, node, extra, inputs.filter((x) => x.kind !== "text").map((x) => ({ nodeId: x.nodeId, kind: x.kind, role: x.role })));
+  return { canvasId: store.state.canvasId, nodeId: node.id, kind: node.kind, model: m, prompt: g.prompt, resolvedPrompt: [refOrder, resolved].filter((s) => s.trim()).join("\n\n"), params, inputs, selfSrc, ...(vm ? { videoMode: { name: vm, api: VMODES[vm].api } } : {}) };
 }
 
 /**
@@ -110,9 +156,9 @@ const frozenOf = (node: CanvasNode) => (node.data as { frozen?: GenRequest } | u
  * 行节点带 frozen 时只沿用它的**输入快照**（这一行的表格素材行），提示词 / 参数 / 模型一律取节点当前值——
  * 否则用户改了提示词再点生成，发出去的还是上一次的旧请求。
  */
-export function requestForNode(store: CanvasStore, node: CanvasNode, row?: BatchRow): GenRequest | null {
+export function requestForNode(store: CanvasStore, node: CanvasNode, row?: BatchRow, flags?: { excludeSelfRefs?: boolean }): GenRequest | null {
   const frozen = frozenOf(node);
-  if (!frozen) return buildRequest(store, node, row);
+  if (!frozen) return buildRequest(store, node, row, flags);
   const g = genOf(node); const m = store.modelOf(node); if (!m) return null;
   const sent: SentRef[] = frozen.inputs.filter((x) => x.kind !== "text").map((x) => ({ nodeId: x.nodeId, kind: x.kind, role: x.role }));
   const mm = resolveMentions(g.prompt, store.state.doc, sent);
@@ -120,7 +166,9 @@ export function requestForNode(store: CanvasStore, node: CanvasNode, row?: Batch
   const rowText = String((node.data as { rowText?: string } | undefined)?.rowText || "").trim();
   const vm = node.kind === "video" ? (g.params as VideoParams).mode : undefined;
   const params = node.kind === "video" && (g.params as VideoParams).draft ? { ...(g.params as VideoParams), res: draftRes(g.params as VideoParams, m) } : g.params;
-  return { ...frozen, nodeId: node.id, model: m, prompt: g.prompt, params, resolvedPrompt: [...ctx, applyElements(mm.text), rowText].filter((s) => s.trim()).join("\n"), ...(vm ? { videoMode: { name: vm, api: VMODES[vm].api } } : {}) };
+  // 表格行节点：frozen 里记着这一行发送的输入，重新生成时清单照样附上
+  const refOrder = (node.data as { tableRow?: unknown } | undefined)?.tableRow != null ? refOrderText(frozen.inputs) : "";
+  return { ...frozen, nodeId: node.id, model: m, prompt: g.prompt, params, resolvedPrompt: [...ctx, applyElements(mm.text), rowText, refOrder].filter((s) => s.trim()).join("\n"), ...(vm ? { videoMode: { name: vm, api: VMODES[vm].api } } : {}) };
 }
 
 /** 历史记录里留的结果（不带版本元数据） */
@@ -156,7 +204,12 @@ export function spotRightOf(doc: CanvasDoc, src: CanvasNode, h: number) {
 }
 
 /* ---------- 单节点 ---------- */
-export type RunOpts = { chain?: boolean; inPlace?: boolean };
+export type RunOpts = {
+  chain?: boolean;
+  inPlace?: boolean;
+  /** 这次生成剔除节点自己的产物（后端 agentRun.excludeSelfRefs / agentPendingExcludeSelfRefs 标记；手动重跑不传 = 保持原有行为） */
+  excludeSelfRefs?: boolean;
+};
 
 export async function runNode(store: CanvasStore, id: string, opts: RunOpts = {}): Promise<boolean> {
   let node = store.node(id); if (!node || !isGenKind(node.kind)) return false;
@@ -166,10 +219,14 @@ export async function runNode(store: CanvasStore, id: string, opts: RunOpts = {}
   const m = store.modelOf(node);
   if (!m) { store.toast(`还没有可用的${node.kind === "text" ? "文本" : node.kind === "image" ? "图片" : node.kind === "video" ? "视频" : "音频"}模型，请在设置 › 模型里添加`); return false; }
   const g = genOf(node);
+  /** 后端标记（agentRun.excludeSelfRefs / agentPendingExcludeSelfRefs）：这次生成不拿自己的产物当参考图 */
+  const excludeSelfRefs = opts.excludeSelfRefs === true || excludeSelfRefsFlag(node.data);
   // 文本节点出表
   if (node.kind === "text" && ((g.params as TextParams).output === "table" || (g.params as TextParams).output === "storyboard")) return runTextToTable(store, id);
   // 上游有表格 → 逐行批量
   if (inputsOf(doc, id).some((x) => x.node.kind === "table") && !opts.inPlace) return runTableBatch(store, id);
+  // 节点上还记着一个没写完的后端任务（离开画布后回来点生成）：先接上它，别重复建任务再扣一次费
+  if (genOf(node).taskId && await adoptPendingTask(store, node)) return false;
   const frozen = frozenOf(node);
   const allIns = inputsOf(doc, id);
   const skipIns = unmentionedInputs(node, allIns);
@@ -207,14 +264,17 @@ export async function runNode(store: CanvasStore, id: string, opts: RunOpts = {}
       });
       if (result) {
         if (store.state.runtime[result.id]) return false;
-        node = result; id = result.id;
+        // 结果节点是「点生成的那个节点」派生的，提示词是复制过去的：它自己没有引用模式标记时沿用源节点的，
+        // 否则面板提示「没 @ 的不发送」，实际请求在结果节点上又把所有输入都发了。
+        if (genOf(node).refMode && !genOf(result).refMode) store.patchGen(result.id, { refMode: genOf(node).refMode });
+        node = store.node(result.id)!; id = result.id;
       } else {
         const box = want ? fitMediaBox(node.w, want, 1) : null;
         node = regenAsNew(store, node, box ? { w: box.w, h: box.h } : undefined); id = node.id;
       }
     }
   }
-  const req = requestForNode(store, node);
+  const req = requestForNode(store, node, undefined, { excludeSelfRefs });
   if (!req) return false;
   return execute(store, node, req);
 }
@@ -222,30 +282,30 @@ export async function runNode(store: CanvasStore, id: string, opts: RunOpts = {}
 /** 执行一次请求并写回（单节点 / 批量行共用） */
 async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, label?: string): Promise<boolean> {
   const id = node.id; const abort = new AbortController(); const t0 = performance.now();
+  // 表格批量行由 journal 续跑，不把 taskId 记到行节点上（否则回来接结果和 journal 会各写一遍）
+  const batchRow = !!(node.data as { batchOf?: unknown } | undefined)?.batchOf;
   store.patchGen(id, { err: undefined, errCode: undefined });
-  // 生成中的占位（加载动效）先按面板选的比例摆好，不要等结果回来才变形；自适应 / 没选比例的保持原样
+  // 生成中的占位（加载动效）先按面板选的比例摆好，不要等结果回来才变形；没选比例 / 拿不到原图尺寸的保持原样
+  // 原图比例（自适应）也要能摆正：按 params.sourceSize 的显式 WxH，或直接按源图真实像素
   // 用共享的最大盒等比缩放：9:16 这种高比例不会被单边夹扁
-  const want = ratioOf((req.params as { ratio?: string }).ratio);
+  const want = wantedRatio(store.state.doc, node, node.kind as GenKind, req.params);
   const wantBox = want && (node.kind === "image" || node.kind === "video") ? fitMediaBox(node.w, want, 1) : null;
   if (wantBox) store.updateNode(id, (n) => ({ ...n, w: wantBox.w, h: wantBox.h }));
   store.setRun(id, { status: "running", progress: .02, abort, startedAt: Date.now() });
   try {
     const res = await store.backend.generate(req, (e) => {
       if (e.type === "progress") store.patchRun(id, { progress: clamp(e.progress, .02, 1) });
-      else if (e.type === "started") store.patchRun(id, { runId: e.runId });
-      else if (e.type === "text") store.patchRun(id, { stream: e.text });
+      else if (e.type === "started") {
+        store.patchRun(id, { runId: e.runId });
+        // 任务 id 落进文档：离开画布 / 切到别的画布后回来靠它接上（完成 / 失败后清掉）
+        if (e.runId && !batchRow) store.patchGen(id, { taskId: e.runId });
+      } else if (e.type === "text") store.patchRun(id, { stream: e.text });
     }, abort.signal);
     // 生成期间节点被删除 / 撤销掉：结果无处可写，按「已停止」记录，不当成报错
     if (!store.node(id)) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
     const isDraft = req.kind === "video" && !!(req.params as VideoParams).draft;
-    const outs = (await persistOutputs(store, res.outputs, genOf(node).title)).map((o) => (isDraft ? { ...o, draft: true } : o));
-    if (!store.node(id)) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
-    // 后端没返回像素宽高时用真实文件兜底（失败 / 超时都只是原样返回，不阻塞写回）
-    const measured = await Promise.all(outs.map((o) => measureOutput(store, req.kind, o)));
-    applyOutputs(store, id, measured);
-    // 后端提示尺寸被收敛（如 GIF 每帧尺寸按拼版上限缩小）：写回成功后 toast 一次，别让用户以为「选了 2K 却拿到小图」
-    const sizeNotice = measured.map((o) => String(o.meta?.notice || "").trim()).find(Boolean) || "";
-    if (sizeNotice) store.toast(sizeNotice, 6000);
+    const measured = await applyRunResult(store, id, req.kind, res.outputs, { draft: isDraft, selfSrc: req.selfSrc });
+    store.patchGen(id, { taskId: undefined });
     store.setRun(id, null);
     const cur = store.node(id)!;
     store.logRun({ node: id, title: label || genOf(cur).title, type: cur.kind as GenKind, model: req.model.name, status: "done", secs: Math.round((performance.now() - t0) / 1000), thumb: outOf(cur)?.url && cur.kind === "image" ? outOf(cur)!.url : outOf(cur)?.frame, out: runOut(outOf(cur)), prompt: plainPrompt(req.prompt, store.state.doc) });
@@ -255,10 +315,35 @@ async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, la
     const stopped = err instanceof GenError && err.code === "STOPPED";
     // 主行只写人话；原始码留给 gen.errCode（弹层里以「代码：…」展示，便于排查）
     const { err: msg, errCode } = nodeError(err);
-    if (!stopped && store.node(id)) store.patchGen(id, { err: msg, errCode });
+    // 只有任务真的结束（失败 / 用户停止）才清 taskId；网络抖动 / 超时留着，下次进画布还能接上
+    if (store.node(id)) {
+      const patch: { err?: string; errCode?: string; taskId?: string } = {};
+      if (!stopped) { patch.err = msg; patch.errCode = errCode; }
+      if (stopped || errCode === "FAILED") patch.taskId = undefined;
+      if (Object.keys(patch).length) store.patchGen(id, patch);
+    }
     store.logRun({ node: id, title: label || genOf(node).title, type: node.kind as GenKind, model: req.model.name, status: stopped ? "stopped" : "error", secs: Math.round((performance.now() - t0) / 1000), error: errCode ? errCode + " " + msg : msg });
     return false;
   }
+}
+
+/** 结果的写回（首次生成 / 回到画布续跑共用）：落资源库 → 量真实尺寸 → 追加版本 */
+async function applyRunResult(store: CanvasStore, id: string, kind: GenKind, outputs: GenOutput[], opts: { draft?: boolean; /** 这次请求实际发出去的自我参考图（字符串 / 明确没有 = null）；缺失 = 旧请求快照，不写记录 */ selfSrc?: string | null } = {}): Promise<GenOutput[]> {
+  if (!store.node(id)) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
+  const before = store.node(id)!;
+  // 新版本记下这次请求实际发出去的「@ 本节点」源图（null = 没发），下次重新生成优先读它，
+  // 不拿这一版的结果再喂回去。旧请求快照没有这个字段时不写，读取时按旧数据回退。
+  const selfSrc = kind === "image" || kind === "video" ? opts.selfSrc : undefined;
+  const outs = (await persistOutputs(store, outputs, genOf(before).title)).map((o) => (opts.draft ? { ...o, draft: true } : o))
+    .map((o) => (selfSrc !== undefined ? { ...o, meta: { ...o.meta, selfSrc } } : o));
+  if (!store.node(id)) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
+  // 后端没返回像素宽高时用真实文件兜底（失败 / 超时都只是原样返回，不阻塞写回）
+  const measured = await Promise.all(outs.map((o) => measureOutput(store, kind, o)));
+  applyOutputs(store, id, measured);
+  // 后端提示尺寸被收敛（如 GIF 每帧尺寸按拼版上限缩小）：写回成功后 toast 一次，别让用户以为「选了 2K 却拿到小图」
+  const sizeNotice = measured.map((o) => String(o.meta?.notice || "").trim()).find(Boolean) || "";
+  if (sizeNotice) store.toast(sizeNotice, 6000);
+  return measured;
 }
 
 /** data URL 存进资源库，文档里只留引用（真后端）；模拟后端原样返回 */
@@ -369,7 +454,8 @@ export function regenAsNew(store: CanvasStore, n: CanvasNode, size?: { w: number
   const sibs = doc.nodes.filter((o) => { const t = isGenKind(o.kind) ? genOf(o).title : ""; return t === base || t.startsWith(base + " · "); }).length;
   const frozen = (n.data as { frozen?: unknown } | undefined)?.frozen; const rowText = (n.data as { rowText?: string } | undefined)?.rowText;
   // sourceNodeId 记着「点生成的那个节点」：全屏查看的「对比原图」靠它找到生成前的那张图
-  const c = withGen({ id: uid("n"), kind: n.kind, x, y, w: size?.w ?? n.w, h: size?.h ?? n.h, text: "", data: { ...(frozen ? { frozen, ...(rowText ? { rowText } : {}) } : {}), sourceNodeId: n.id } }, { title: `${base} · ${sibs + 1}`, prompt: g.prompt, params: JSON.parse(JSON.stringify(g.params)), hist: [], hi: 0, order: [] });
+  // 提示词复制过去，引用模式（refMode）也要一起复制：否则新节点不认 @ 过滤，已连接但没 @ 的图也会发出去
+  const c = withGen({ id: uid("n"), kind: n.kind, x, y, w: size?.w ?? n.w, h: size?.h ?? n.h, text: "", data: { ...(frozen ? { frozen, ...(rowText ? { rowText } : {}) } : {}), sourceNodeId: n.id } }, { title: `${base} · ${sibs + 1}`, prompt: g.prompt, params: JSON.parse(JSON.stringify(g.params)), hist: [], hi: 0, order: [], ...(g.refMode ? { refMode: g.refMode } : {}) });
   const edges = inputsOf(doc, n.id).map((x) => ({ id: uid("e"), from: x.node.id, to: c.id }));
   // 被点的这个图片 / 视频 / 音频节点自己也是新节点的输入（媒体当参考 / 来源）。三种情况不连：
   // 文本节点（文本本身是提示词，连过去只会变成上下文）、没有结果的节点（留下一条取不到东西的空边）、
@@ -390,8 +476,91 @@ export function regenAsNew(store: CanvasStore, n: CanvasNode, size?: { w: number
 }
 
 export function stopNode(store: CanvasStore, id: string) {
-  const r = store.state.runtime[id]; if (!r) return;
-  r.abort.abort(); store.toast("已停止生成");
+  if (!store.state.runtime[id]) return;
+  // 用户明确停止 = 任务不要了：后端任务一起取消（离开画布 / 切画布不走这里，任务留着回来续跑）
+  store.stopRun(id);
+  store.patchGen(id, { taskId: undefined });
+  store.toast("已停止生成");
+}
+
+/* ---------- 离开画布后回来续跑 ---------- */
+/**
+ * 回到画布后接上没写完的任务（store.load 完成后调）：还在跑就继续轮询，已经跑完就直接写回。
+ * 有 taskId 的按 taskId 找；没记上 taskId 的（保存还没来得及落盘就离开了）按 node_id + 节点还没结果认领（任务可能在离开期间跑完）。
+ * 全程不新建任务、不重发生成请求，所以不会重复扣费；已在文档里的结果不再写一遍。
+ */
+export async function resumeCanvasTasks(store: CanvasStore): Promise<void> {
+  const backend = store.backend;
+  if (!store.state.loaded || !backend.listCanvasTasks || !backend.resumeTask) return;
+  const tasks = await backend.listCanvasTasks(store.state.canvasId).catch(() => [] as CanvasTask[]);
+  if (!tasks.length) return;
+  const byId = new Map(tasks.map((task) => [task.taskId, task]));
+  for (const node of [...store.state.doc.nodes]) {
+    if (!isGenKind(node.kind) || store.state.runtime[node.id]) continue;
+    const taskId = genOf(node).taskId;
+    // 没记 taskId 时按 node_id 认领：节点还没有结果、任务不是失败态（成功也要认，结果可能是在离开期间跑完的）
+    const task = taskId ? byId.get(taskId) : tasks.find((t) => t.nodeId === node.id && t.status !== "failed" && !outOf(node));
+    if (!task) { if (taskId) store.patchGen(node.id, { taskId: undefined }); continue; }
+    // 任务已经写过一次（taskId 没清干净）：只清记录，不再追加一遍结果
+    if (genOf(node).hist.some((out) => out.meta?.runId === task.taskId)) { if (taskId) store.patchGen(node.id, { taskId: undefined }); continue; }
+    void resumeRun(store, node, task);
+  }
+}
+
+/** 再点生成时节点上还记着没写完的任务：在跑就接上并返回 true（别再建一个重复任务） */
+async function adoptPendingTask(store: CanvasStore, node: CanvasNode): Promise<boolean> {
+  const taskId = genOf(node).taskId; if (!taskId) return false;
+  const tasks = await store.backend.listCanvasTasks?.(store.state.canvasId).catch(() => undefined);
+  if (!tasks) return false;                                   // 老后端查不到任务：照旧新建
+  const fresh = store.node(node.id); if (!fresh || genOf(fresh).taskId !== taskId) return false;
+  const task = tasks.find((t) => t.taskId === taskId);
+  // 任务记录没了（服务重装 / 清过任务库）：清掉记录，按新任务走
+  if (!task || task.status === "failed") { store.patchGen(node.id, { taskId: undefined }); return false; }
+  if (task.status !== "succeeded") store.toast("这张还在生成中，等它出结果");
+  void resumeRun(store, fresh, task);
+  return true;
+}
+
+/**
+ * 接上一个后端任务：还在跑就继续等（进度照旧），已经跑完 / 失败的直接按结果收尾。
+ * 写回走 applyRunResult，和首次生成同一条路径。
+ */
+async function resumeRun(store: CanvasStore, node: CanvasNode, task: CanvasTask): Promise<boolean> {
+  const backend = store.backend;
+  if (!backend.resumeTask) return false;
+  const id = node.id; const kind = node.kind as GenKind;
+  const abort = new AbortController(); const t0 = performance.now();
+  store.patchGen(id, { err: undefined, errCode: undefined });
+  store.setRun(id, { status: "running", progress: .02, abort, startedAt: Date.now(), runId: task.taskId });
+  try {
+    const outputs = await backend.resumeTask(task, (e) => {
+      if (e.type === "progress") store.patchRun(id, { progress: clamp(e.progress, .02, .99) });
+    }, abort.signal);
+    const cur = store.node(id); if (!cur) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
+    const draft = cur.kind === "video" && !!(genOf(cur).params as VideoParams).draft;
+    // 续跑拿不到当初的请求对象：按同一条组装路径以节点当前状态重建（任务发起后结果还没写回，口径一致），
+    // 让新版本记录当初实际发出去的自我参考图，而不是等写回时从结果反推。
+    const selfSrc = requestForNode(store, cur)?.selfSrc;
+    await applyRunResult(store, id, kind, outputs, { draft, selfSrc });
+    store.patchGen(id, { taskId: undefined });
+    store.setRun(id, null);
+    const done = store.node(id)!;
+    store.logRun({ node: id, title: genOf(done).title, type: kind, model: store.modelOf(done)?.name || task.model || "", status: "done", secs: Math.round((performance.now() - t0) / 1000), thumb: outOf(done)?.url && kind === "image" ? outOf(done)!.url : outOf(done)?.frame, out: runOut(outOf(done)), prompt: plainPrompt(genOf(done).prompt, store.state.doc) });
+    store.toast(`「${genOf(done).title}」已经生成好了`);
+    return true;
+  } catch (err) {
+    store.setRun(id, null);
+    const stopped = err instanceof GenError && err.code === "STOPPED";
+    const { err: msg, errCode } = nodeError(err);
+    // 任务真的结束了（失败 / 取消 / 已完成但结果没法写回）才清 taskId；网络抖动留着，下次进画布还能接上
+    if (store.node(id) && !stopped) {
+      const patch: { err?: string; errCode?: string; taskId?: string } = { err: msg, errCode };
+      if (errCode === "FAILED" || task.status === "succeeded") patch.taskId = undefined;
+      store.patchGen(id, patch);
+    }
+    store.logRun({ node: id, title: genOf(node).title, type: kind, model: task.model || "", status: stopped ? "stopped" : "error", secs: Math.round((performance.now() - t0) / 1000), error: errCode ? errCode + " " + msg : msg });
+    return false;
+  }
 }
 
 export async function runChain(store: CanvasStore, id: string, dir: "up" | "down") {
@@ -415,14 +584,24 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
   const media = sources.reduce((n, ch) => n + ch.items.length, 0);
   const ctx = ins.filter((x) => x.node.kind === "text").map((x) => `【${genOf(x.node).title}】\n${textOf(x.node)}`).join("\n\n");
   const intent = mode === "storyboard" ? "video" : tableGenKindOf(g.prompt.trim() || ctx);
-  const groups = groupInputs(store.state.doc, id, intent);
+  // 分组的输入通道编号（= 提示词 / 表格列里的「输入 N」），让模型在每行里写对组号
+  const groupChannel = new Map(sources.map((ch, i) => [ch.sourceId, i + 1]));
+  const groups = groupInputs(store.state.doc, id, intent).map((gr) => ({ ...gr, channel: groupChannel.get(gr.groupId) }));
   const base0 = buildRequest(store, node); if (!base0) return false;
   const seeImages = !!m.vision && groups.some((x) => x.images.length);
   const groupRefs = seeImages ? groups.flatMap((gr) => gr.images.map((im, k) => ({ nodeId: im.nodeId, title: `${gr.name} 第 ${k + 1} 张`, kind: "image" as const, role: "reference" as const, url: im.url }))).slice(0, 24) : [];
   const base = { ...base0, inputs: [...base0.inputs, ...groupRefs.filter((r) => !base0.inputs.some((i) => i.nodeId === r.nodeId)).map((r, k) => ({ ...r, order: base0.inputs.length + k + 1 }))] };
   if (!g.prompt.trim() && !ins.length) { store.toast("LLM 表格工作流需要拆分任务的文字要求。"); return false; }
-  const task = [ctx, g.prompt, groupNote(groups, seeImages, intent)].filter(Boolean).join("\n\n");
-  const taskWithoutImages = [ctx, g.prompt, groupNote(groups, false, intent)].filter(Boolean).join("\n\n");
+  // 文本节点的提示词里 @ 到图片 / 分组时，不能把 @{节点id} 原样发给模型：
+  // 用这次真正附上的图片顺序展开成「图N」；分组展开成成员图号（没有成员图时回落组名）。
+  // 只做提示词展开，不改输入通道（通道仍然只看连线，@ 不会新增输入列）。
+  const sentRefs = base.inputs.filter((x) => x.kind === "image").map((x) => ({ nodeId: x.nodeId, kind: "image" as const }));
+  const opened = resolveMentions(g.prompt, store.state.doc, sentRefs);
+  const taskPrompt = opened.text;
+  // @ 到的文本节点正文已经内联进提示词，就不再作为上下文重复附一遍
+  const ctxForModel = ins.filter((x) => x.node.kind === "text" && !opened.usedText.has(x.node.id)).map((x) => `【${genOf(x.node).title}】\n${textOf(x.node)}`).join("\n\n");
+  const task = [ctxForModel, taskPrompt, groupNote(groups, seeImages, intent)].filter(Boolean).join("\n\n");
+  const taskWithoutImages = [ctxForModel, taskPrompt, groupNote(groups, false, intent)].filter(Boolean).join("\n\n");
   const abort = new AbortController(); const t0 = performance.now();
   store.patchGen(id, { err: undefined, errCode: undefined });
   store.setRun(id, { status: "running", progress: .02, abort, startedAt: Date.now() });
@@ -441,14 +620,19 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
   try {
     // 把每个素材来源（= 输入通道）连同张数告诉模型
     const sourceBrief = sources.map((ch) => ({ name: ch.title, count: ch.items.length }));
-    // 规划遍（旧版 buildListPlanPrompt）：先单独要一份「每组怎么用」，失败/解析不出来就退回单遍（模式回落沿用）
+    // 规划遍（旧版 buildListPlanPrompt）：先单独要一份「每组怎么用」；解析失败 / 请求失败都重试一次（只要 JSON），
+    // 还不行才退回单遍出表（通道模式交给行文本证据推断）
     let plan: ListPlan | null = null;
     if (sources.length) {
-      try {
-        const planRaw = await call(planPrompt(task, mode, sourceBrief), planPrompt(taskWithoutImages, mode, sourceBrief));
-        plan = parseListPlan(planRaw);
-        if (!plan) store.patchRun(id, { stream: "规划没解析出来，按单遍出表…" });
-      } catch { plan = null; store.patchRun(id, { stream: "规划请求失败，按单遍出表…" }); }
+      const askPlan = async (prompt: string, withoutImagesPrompt: string) => parseListPlan(await call(prompt, withoutImagesPrompt));
+      try { plan = await askPlan(planPrompt(task, mode, sourceBrief), planPrompt(taskWithoutImages, mode, sourceBrief)); }
+      catch { plan = null; }
+      if (!plan && !abort.signal.aborted) {
+        store.patchRun(id, { stream: "规划没解析出来，重试一次…" });
+        try { plan = await askPlan(planRepairPrompt(task, mode, sourceBrief), planRepairPrompt(taskWithoutImages, mode, sourceBrief)); }
+        catch { plan = null; }
+      }
+      if (!plan) store.patchRun(id, { stream: "规划没拿到，按单遍出表…" });
     }
     const planText = plan ? planTextOf(plan, sourceBrief) : "";
     const askPrompt = tablePrompt(task, mode, media, sourceBrief, planText);
@@ -459,20 +643,19 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
     try {
       const reply = parseReply(raw);
       t = reply.table;
-      // 生成遍回报的 inputGroups 优先（旧版也是这样），没有就用规划遍的
-      if (reply.inputGroups.length) plans = reply.inputGroups;
+      // 两遍 inputGroups 按 group 合并：生成遍优先、缺的保留规划遍（整体替换会丢掉规划遍对其它组的判断）
+      plans = mergeInputGroups(reply.inputGroups, plans);
     } catch {
       store.patchRun(id, { stream: "表格格式校验未通过，正在修复…" });
       raw = await call(repairPrompt(raw));
       const reply = parseReply(raw);
       t = reply.table;
-      if (reply.inputGroups.length) plans = reply.inputGroups;
+      plans = mergeInputGroups(reply.inputGroups, plans);
     }
     const doc = store.state.doc;
     const existing = doc.nodes.find((n) => n.kind === "table" && tableOf(n).sourceId === id);
-    // 通道最终模式：只有模型在 inputGroups 里声明了才写（per-row→逐行、every-row→全部）；
-    // 没声明就是「沿用」——旧版 channelModeFor 的默认值，不按图片/视频意图猜
-    const wanted = new Map(sources.map((ch, i) => [ch.sourceId, plannedChannelMode(i + 1, plans)]));
+    const existingTable = existing ? tableOf(existing) : null;
+    const sourceIds = new Set(sources.map((ch) => ch.sourceId));
     // 每个素材来源直接连到表格（旧版 materializeLlmTable 的「素材 --toPort--> 表格」），文本节点那条边保留
     const ensureSourceEdges = (tableId: string) => {
       const have = new Set(store.state.doc.edges.filter((e) => e.to === tableId).map((e) => e.from));
@@ -480,13 +663,51 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
       if (add.length) store.addNodes([], add);
     };
     if (existing) ensureSourceEdges(existing.id);
-    // 每条通道写完模式后真正生效的值：行数、节点高度都按它算。
-    // 来自素材来源的通道每次出表重写（声明了什么就是什么，没声明回落沿用）；用户手连的通道保留自己存的值。
-    const finalChannels: TableChannel[] = (existing ? tableChannels(store.state.doc, existing.id) : sources)
-      .map((ch) => (wanted.has(ch.sourceId) ? { ...ch, mode: wanted.get(ch.sourceId) || "shared" } : ch));
-    // 行数只由「逐行(per-row)」组决定（这些组的最大张数）；every-row 每行带整组、不增加行数。
-    // 分镜表的行数 = 镜头数，由提示词定，永远不补不裁。
-    const need = perRowRowCount(sources, plans);
+    // 通道编号 = 提示词组号：把表格的 gen.order 固定成「文本节点 → 各素材来源」的边顺序。
+    // 表格上多出来的旧通道不删边（用户可能手连），按 inputsOf 的规则排在最后，由常驻告警说明。
+    const pinSourceOrder = (tableId: string) => {
+      const d = store.state.doc;
+      const tn = d.nodes.find((n) => n.id === tableId); if (!tn) return;
+      const edgeTo = (fromId: string) => d.edges.find((e) => e.to === tableId && e.from === fromId);
+      const textEdge = edgeTo(id);
+      const srcEdges = sources.map((ch) => edgeTo(ch.sourceId)).filter((e): e is CanvasEdge => !!e);
+      const order = [...(textEdge ? [textEdge.id] : []), ...srcEdges.map((e) => e.id)];
+      const cur = genOf(tn).order;
+      if (order.length && (order.length !== cur.length || order.some((x, i) => cur[i] !== x))) store.updateNode(tableId, (n) => withGen(n, { order }));
+    };
+    if (existing) pinSourceOrder(existing.id);
+    const baseChannels: TableChannel[] = existing ? tableChannels(store.state.doc, existing.id) : sources;
+    // 通道模式**逐通道**解析：声明（模型/规划遍）> 行文本「输入 N 整组 / 第 k 张」推断 > 缺省沿用。
+    // 有声明不代表其它通道不用推断：真实模型只回报 group1 时，2-4 组必须继续从行文本推断。
+    // 用户手点表头改过的模式（不在 inputModesAuto 里）永远优先，重新出表不覆盖。
+    const inferredModes: Record<string, ChannelMode> = mode === "table" ? inferChannelModesFromRows(t, baseChannels) : {};
+    const sourceGroup = new Map(sources.map((ch, i) => [ch.sourceId, i + 1]));
+    const wanted = new Map<string, ChannelMode>();
+    baseChannels.forEach((ch) => {
+      if (!sourceIds.has(ch.sourceId)) return;
+      const declared = plannedChannelMode(sourceGroup.get(ch.sourceId) || 0, plans);
+      const wantMode = declared || inferredModes[ch.id];
+      if (wantMode) wanted.set(ch.sourceId, wantMode);
+    });
+    const inputModes = channelModesOf(existingTable?.inputModes);
+    // 迁移口径：inputModesAuto 缺失 = 旧版本写的文档，里面的模式是旧系统自动写的 → 本次出表允许按规划/推断覆盖，
+    // 并补写 inputModesAuto；字段存在（哪怕是空数组）= 新格式，列表外的模式算用户手点，保护起来。
+    // 旧版本本来就是每次出表覆盖所有声明通道，所以把 legacy 当 auto 不会吃掉用户手设（用户手设只能来自本版本的表头点击）。
+    const legacyModes = !!existingTable && !Array.isArray(existingTable.inputModesAuto);
+    const autoModes = new Set<string>(legacyModes ? Object.keys(inputModes) : (existingTable?.inputModesAuto || []));
+    for (const ch of baseChannels) {
+      if (!sourceIds.has(ch.sourceId)) continue;                          // 用户手连的额外通道：模式不动
+      if (!legacyModes && inputModes[ch.id] && !autoModes.has(ch.id)) continue; // 新格式里列表外 = 用户手设：不覆盖
+      const wantMode = wanted.get(ch.sourceId);
+      if (wantMode) { inputModes[ch.id] = wantMode; autoModes.add(ch.id); }
+      else { delete inputModes[ch.id]; autoModes.delete(ch.id); }
+    }
+    const legacyMode = existingTable?.inputMode;
+    const finalChannels: TableChannel[] = baseChannels.map((ch) => ({ ...ch, mode: inputModes[ch.id] || (ch.id === "input-1" && legacyMode === "sequence" ? "sequence" : "shared") }));
+    // 行数只由「逐行」的输入通道决定（这些通道的最大张数）；「全部」每行带整组、不增加行数。
+    // 用户手连的额外通道沿用旧口径（不算进行数）。分镜表的行数 = 镜头数，由提示词定，永远不补不裁。
+    const needChannels = finalChannels.filter((ch) => sourceIds.has(ch.sourceId));
+    const need = perRowRowCount(needChannels, needChannels.flatMap((ch, i) => (ch.mode === "sequence" ? [{ group: i + 1, rowMode: "per-row" as const }] : [])));
     let paddedRows = 0; let trimmed = false;
     if (mode === "table" && need > 0) {
       if (t.rows.length > need) { t = trimTableRows(t, need); trimmed = true; }
@@ -503,24 +724,20 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
     if (mode === "storyboard") t = withStoryboardMedia({ ...t, columns: t.columns.length ? t.columns : STORYBOARD_COLUMNS });
     const title = mode === "storyboard" ? "分镜表" : "多维表格";
     // 重新出表：手动放进首帧 / 尾帧等图片列的图按行保留（列名相同才算）；组里的图不进数据列，只走输入通道
-    const base: TableData = keepMediaCells({ ...t, title: existing ? tableOf(existing).title : title, sourceId: id }, existing ? tableOf(existing) : null);
-    const inputModes = channelModesOf(existing ? tableOf(existing).inputModes : undefined);
-    const withModes = (): TableData => ({ ...base, ...(Object.keys(inputModes).length ? { inputModes } : {}) });
-    // 声明的模式才写进 inputModes；没声明的删掉旧值，读出来自然回落「沿用」（默认值不会被旧数据锁死）
-    finalChannels.forEach((ch) => {
-      if (!wanted.has(ch.sourceId)) return;   // 用户手连的通道：不动它存的模式
-      const declared = wanted.get(ch.sourceId);
-      if (declared) inputModes[ch.id] = declared; else delete inputModes[ch.id];
-    });
+    const channelIds = new Set(baseChannels.map((ch) => ch.id));
+    const autoList = [...autoModes].filter((x) => channelIds.has(x) && inputModes[x]);
+    // 一律写 inputModesAuto（空数组也算）：标成新格式，下次出表才能区分「系统写」和「用户手点」
+    const modesData = { ...(Object.keys(inputModes).length ? { inputModes } : {}), inputModesAuto: autoList };
+    const base: TableData = keepMediaCells({ ...t, title: existingTable ? existingTable.title : title, sourceId: id, ...modesData }, existingTable);
     let tableId: string; let table: TableData;
     if (existing) {
-      table = withModes();
+      table = base;
       // 高度按「写完模式后」每行真正取到的素材数算：全部模式的整组会占更多行高
       const size = tableAutoSize(table, finalChannels);
       store.updateNode(existing.id, (n) => ({ ...withTable(n, table), w: Math.max(n.w, size.w), h: size.h }), { history: true });
       tableId = existing.id;
     } else {
-      table = withModes();
+      table = base;
       const size = tableAutoSize(table, finalChannels);
       const pos = spotRightOf(doc, node, size.h);
       const tn: CanvasNode = withTable({ id: uid("t"), kind: "table", x: pos.x, y: pos.y, w: size.w, h: size.h, text: title }, table);
@@ -533,6 +750,8 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
     const notes: string[] = [];
     if (paddedRows) notes.push(`已按素材补到 ${need} 行，空的提示词列请手动补`);
     if (trimmed) notes.push(`按素材把行数对齐到 ${need} 行`);
+    // 「输入 N」编号对不上 / 多出来的旧通道：常驻告警（表格节点和批量面板也会显示），并写进历史与 toast
+    notes.push(...tableInputWarnings(store.state.doc, tableId, channels));
     const alignNote = notes.join("；");
     const summary = `已生成${title}：${table.rows.length} 行 × ${table.columns.length} 列\n列：${table.columns.join("、")}` + (placed ? `\n输入列：${placed}` : "") + (alignNote ? `\n${alignNote}` : "");
     const hist = [...genOf(store.node(id)!).hist, { text: summary, meta: { model: m.name, at: Date.now() } }];
@@ -552,7 +771,7 @@ export async function runTextToTable(store: CanvasStore, id: string): Promise<bo
 }
 
 /* ---------- 表格 → 逐行批量生成 ---------- */
-export async function runTableBatch(store: CanvasStore, id: string): Promise<boolean> {
+export async function runTableBatch(store: CanvasStore, id: string, opts: RunOpts = {}): Promise<boolean> {
   const gen = store.node(id)!; const g = genOf(gen); const m = store.modelOf(gen)!;
   const { settings, journal } = batchOf(gen);
   // 图片批量回填（分镜「首帧图」）：自动选中的列第一次运行时记下来，重跑仍填同一列
@@ -569,7 +788,10 @@ export async function runTableBatch(store: CanvasStore, id: string): Promise<boo
   if (!pending.length) { store.updateNode(id, (n) => withBatch(n, { journal: null })); return runTableBatch(store, id); }
   const conc = chain ? 1 : Math.min(settings.concurrency, pending.length);
   // 每行的参数（时长 / 比例 / 方式）和要提醒的地方，开跑前算一遍
-  const plans = new Map(todo.map((r) => [r.row, planRow(gen.kind as GenKind, g.params, m, r)]));
+  const reservedRefs = ownRefCount(store.state.doc, id, gen.kind as GenKind);
+  const plans = new Map(todo.map((r) => [r.row, planRow(gen.kind as GenKind, g.params, m, r, reservedRefs)]));
+  // 每行的提醒（参考图超上限被截 / 降级）落进 journal，跑完还能在批量面板复查，不只靠 toast
+  jr.rows = jr.rows.map((x) => { const w = plans.get(x.row)?.warnings; return w && w.length ? { ...x, warn: w.join("；") } : x; });
   const notes = new Map<string, number[]>();
   for (const r of pending) for (const w of plans.get(r.row)?.warnings || []) notes.set(w, [...(notes.get(w) || []), r.row]);
   const noteText = [...notes].slice(0, 2).map(([w, rs]) => `第 ${rs.slice(0, 6).join("、")}${rs.length > 6 ? " 等" : ""} 行：${w}`).join("；");
@@ -590,7 +812,8 @@ export async function runTableBatch(store: CanvasStore, id: string): Promise<boo
     if (reused) { r.nodeId = reused.id; continue; }
     const row = todo.find((t) => t.row === r.row)!; const params = plans.get(r.row)?.params || g.params; const box = boxOf((params as { ratio?: string }).ratio);
     const rowW = box ? box.w : gen.w; const rowH = box ? box.h : gen.h;
-    const c = withGen({ id: uid("n"), kind: gen.kind, x: colX, y, w: rowW, h: rowH, text: "", data: { batchOf: id, tableRow: r.row, ...(row.text ? { rowText: row.text } : {}) } }, { title: `${g.title} · ${row.label || "行" + r.row}`, prompt: g.prompt, params: JSON.parse(JSON.stringify(params)), hist: [], hi: 0, order: [] });
+    const rowPlanWarn = plans.get(r.row)?.warnings;
+    const c = withGen({ id: uid("n"), kind: gen.kind, x: colX, y, w: rowW, h: rowH, text: "", data: { batchOf: id, tableRow: r.row, ...(row.text ? { rowText: row.text } : {}), ...(rowPlanWarn && rowPlanWarn.length ? { rowWarn: rowPlanWarn.join("；") } : {}) } }, { title: `${g.title} · ${row.label || "行" + r.row}`, prompt: g.prompt, params: JSON.parse(JSON.stringify(params)), hist: [], hi: 0, order: [] });
     y += rowH + 24 + 40; r.nodeId = c.id; created.push(c); edges.push({ id: uid("e"), from: id, to: c.id });
   }
   if (created.length) store.addNodes(created, edges);
@@ -605,10 +828,16 @@ export async function runTableBatch(store: CanvasStore, id: string): Promise<boo
       setRow(jrow.row, { status: "running" });
       // 镜头串联：这一行没有首帧时，接上一行（已完成）视频的最后一帧
       if (chain && !rowHasFirst(row)) { const tail = await chainFrame(store, jr, todo, row.row); if (tail) row = { ...row, media: [...row.media, tail] }; }
-      const req = buildRequest(store, gen, row); if (!req) { setRow(jrow.row, { status: "failed", error: "无法组装请求" }); continue; }
+      // 原图比例但这一行没有可量尺寸的图：在 journal 里留一句提醒（不静默按 1:1 生成）
+      if (gen.kind === "image" && isAdaptiveRatio((plans.get(row.row)?.params as { ratio?: string; }).ratio)) {
+        const rowImage = (row.media || []).find((x) => x.kind === "image");
+        const upstreamBox = sourceBoxInDoc(store.state.doc, gen, gen.kind);
+        if (!rowImage && !upstreamBox) setRow(jrow.row, { warn: "这一行没有参考图，原图比例按 1:1 生成" });
+      }
+      const req = buildRequest(store, gen, row, { excludeSelfRefs: opts.excludeSelfRefs }); if (!req) { setRow(jrow.row, { status: "failed", error: "无法组装请求" }); continue; }
       const rowReq = { ...req, nodeId: target.id };
       store.updateNode(target.id, (n) => ({ ...n, data: { ...(n.data as object), frozen: rowReq } }));
-      const onParentAbort = () => store.state.runtime[target.id]?.abort.abort(); abort.signal.addEventListener("abort", onParentAbort);
+      const onParentAbort = () => store.stopRun(target.id); abort.signal.addEventListener("abort", onParentAbort);
       const ok = await execute(store, store.node(target.id)!, rowReq, `${g.title} · ${row.label || "行" + jrow.row}`);
       abort.signal.removeEventListener("abort", onParentAbort);
       done++; store.patchRun(id, { progress: done / pending.length, batch: { done, total: pending.length } });
@@ -741,5 +970,5 @@ export async function runGroup(store: CanvasStore, plan: GroupPlan, meta: { key?
 export function stopGroup(store: CanvasStore, key: string) {
   const b = store.state.batches[key]; if (!b) return;
   store.patchBatch(key, { stopped: true });
-  for (const id of b.queued) store.state.runtime[id]?.abort.abort();
+  for (const id of b.queued) store.stopRun(id);
 }

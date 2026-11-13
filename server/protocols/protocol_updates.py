@@ -54,7 +54,7 @@ CAPS_INT_LIST_FIELDS = ("durations", "batch")
 CAPS_INT_FIELDS = ("n_max", "max_long_edge", "max_pixels", "min_pixels", "ref_max",
                    "video_ref_max", "audio_ref_max")
 CAPS_BOOL_FIELDS = ("exact_size", "mask_url", "base64_refs", "official_fallback", "send_resolution",
-                    "thinking_mode", "prompt_only")
+                    "thinking_mode", "prompt_only", "native_background")
 CAPS_STR_FIELDS = ("fixed_resolution", "size_field", "response_version")
 CAPS_FIELDS = CAPS_LIST_FIELDS + CAPS_INT_FIELDS + CAPS_BOOL_FIELDS + CAPS_STR_FIELDS
 CAPS_KINDS = ("image", "video")

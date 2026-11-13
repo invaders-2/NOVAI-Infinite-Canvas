@@ -5,6 +5,7 @@
     image_urls 支持 URL 与 base64 混填，mask_url 可用；official.md 同档位但参考图只收公网 URL。
   * seedream-4.5：明确「不支持 1K」，只有 2K/4K。
   * seedream-5-0-lite：2K/3K/4K，且不支持 9:21。
+  * seedream-5.5：1K/1.5K/2K，auto + 10 个比例，n 只能 1，参考图 0–10 张，输出 png/jpeg。
   * imagen-4.0-apimart：只有 1:1/4:3/3:4/16:9/9:16，列表外比例回退 16:9。
   * gemini-3.1-flash：完整版 0.5K/1K/2K/4K；Lite 只支持 1K（传更高档会静默降成 1K）。
   * gemini-2.5-flash（Nano Banana / -ext）：只支持 1K。
@@ -26,6 +27,7 @@ class ApimartImageCapsTableTests(unittest.TestCase):
             "gemini-3-1-flash-lite-image", "gemini-nano-banana-2-1", "gemini-nano-banana-2-1-ext",
             "imagen-4-0-apimart", "mai-image-2-6", "qwen-image-2-0", "qwen-image-3-0",
             "seedream-4-0", "seedream-4-5", "seedream-5-0-flash", "seedream-5-0-pro", "seedream-5-0-lite",
+            "seedream-5-5",
             "flux-2", "flux-3-image", "flux-3-image-klein", "flux-kontext", "hy-image-v3-5-preview",
             "grok-imagine-2-0", "grok-imagine-image", "grok-imagine-image-quality", "grok-imagine-image-2-0",
             "wan2-7-image", "z-image-turbo",
@@ -53,6 +55,20 @@ class ApimartImageCapsTableTests(unittest.TestCase):
         self.assertEqual(main.APIMART_IMAGE_MODEL_CAPS["imagen-4-0-apimart"]["ratios"],
                          ("1:1", "4:3", "3:4", "16:9", "9:16"))
 
+    def test_seedream_5_5_caps_match_docs(self):
+        # 文档：size 支持 auto + 10 个比例（无 9:21），resolution 只有 1K/1.5K/2K，n 只能 1，
+        # 参考图 0–10 张且 URL/data:image base64 都收，output_format 为 png（默认）/jpeg。
+        caps = main.APIMART_IMAGE_MODEL_CAPS["seedream-5-5"]
+        self.assertEqual(caps["ratios"],
+                         ("auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "2:1", "1:2", "21:9"))
+        self.assertEqual(len(caps["ratios"]), 11)
+        self.assertEqual(caps["resolutions"], ("1K", "1.5K", "2K"))
+        self.assertEqual(caps["n_max"], 1)
+        self.assertEqual(caps["ref_max"], 10)
+        self.assertIs(caps["base64_refs"], True)
+        self.assertIs(caps["mask_url"], False)
+        self.assertEqual(caps["output_formats"], ("png", "jpeg"))
+
     def test_gpt_image_2_6_output_formats(self):
         caps = main.model_caps_for({"id": "apimart", "protocol": "apimart"}, "gpt-image-2.6-sunburst", "image")
         self.assertEqual(caps["output_formats"], ["png", "jpeg", "webp", "svg", "gif"])
@@ -65,6 +81,39 @@ class ApimartImageCapsTableTests(unittest.TestCase):
         self.assertEqual(main.apimart_image_model_caps("nano-banana-pro"),
                          main.APIMART_IMAGE_MODEL_CAPS["nano-banana-pro"])
         self.assertEqual(main.apimart_image_model_caps("cogview-4"), None)
+
+
+class ApimartNativeBackgroundTests(unittest.TestCase):
+    """原生透明背景：只有文档确证支持 background 参数的模型才声明，前端据此显隐入口。"""
+
+    PROVIDER = {"id": "apimart", "protocol": "apimart", "base_url": "https://api.apimart.ai"}
+
+    def test_native_background_flags_match_docs(self):
+        # 文档确证 background 可选 auto/transparent/opaque（2.6 非 SVG 输出只允许 png/webp）
+        for key in ("seedream-5-5", "gpt-image-2-6-flare", "gpt-image-2-6-sunburst",
+                    "gpt-image-2-5", "gpt-image-1"):
+            self.assertIs(main.APIMART_IMAGE_MODEL_CAPS[key].get("native_background"), True, key)
+        # 文档没有 background 参数（ext 系列传入不报错但不生效，基础版 2 没有该参数）；
+        # seedream-5-0 只在「图生图 + 恰好 1 张自带 alpha 的输入图 + png」时可用，不是通用选项
+        for key in ("gpt-image-2-6-ext", "gpt-image-2-5-ext", "gpt-image-2",
+                    "seedream-5-0-pro", "seedream-5-0-flash", "seedream-5-0-lite"):
+            self.assertFalse(main.APIMART_IMAGE_MODEL_CAPS[key].get("native_background"), key)
+
+    def test_support_check_reads_caps_not_model_name(self):
+        self.assertIs(main.image_supports_native_transparent_background(self.PROVIDER, "seedream-5-5"), True)
+        self.assertIs(main.image_supports_native_transparent_background(self.PROVIDER, "seedream-5.5"), True)
+        self.assertIs(main.image_supports_native_transparent_background(self.PROVIDER, "seedream-5-0-pro"), False)
+        self.assertIs(main.image_supports_native_transparent_background(self.PROVIDER, "gpt-image-2.6-flare"), True)
+        self.assertIs(main.image_supports_native_transparent_background(self.PROVIDER, "gpt-image-2.6-ext"), False)
+
+    def test_caps_payload_declares_native_background_only_when_supported(self):
+        caps_55 = main.model_caps_for(self.PROVIDER, "seedream-5-5", "image")
+        self.assertIs(caps_55.get("native_background"), True)
+        for model in ("gpt-image-2.6-flare", "gpt-image-2.6-sunburst"):
+            self.assertIs(main.model_caps_for(self.PROVIDER, model, "image").get("native_background"), True, model)
+        # 不支持的模型连字段都不下发（与 n_max / thinking_mode 一样「有才下发」）
+        for model in ("seedream-5-0-pro", "gpt-image-2.6-ext", "gpt-image-2.5-ext"):
+            self.assertIsNone(main.model_caps_for(self.PROVIDER, model, "image").get("native_background"), model)
 
 
 class ApimartImageResolutionClampTests(unittest.TestCase):
@@ -86,6 +135,11 @@ class ApimartImageResolutionClampTests(unittest.TestCase):
         self.assertEqual(main.apimart_image_resolution_for_model("flux-3-image-klein", "768sq"), "768SQ")
         self.assertEqual(main.apimart_image_resolution_for_model("flux-3-image-klein", "1.5K"), "1.5K")
         self.assertEqual(main.apimart_image_resolution_for_model("grok-imagine-2.0-ext", "4K"), "quality")
+
+    def test_seedream_5_5_clamps_4k_to_2k(self):
+        self.assertEqual(main.apimart_image_resolution_for_model("seedream-5-5", "4K"), "2K")
+        # 点号写法由 apimart_image_caps_key 归一成同一个 key，1.5K 档位原样保留
+        self.assertEqual(main.apimart_image_resolution_for_model("seedream-5.5", "1.5K"), "1.5K")
 
     def test_special_resolution_levels_survive_pixel_mapping(self):
         self.assertEqual(main.apimart_image_resolution_from_size_for_model("768x768", "flux-3-image-klein"), "768SQ")

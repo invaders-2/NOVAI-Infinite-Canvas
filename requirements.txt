@@ -10,6 +10,7 @@ pillow>=9.0
 pystray>=0.19
 qrcode>=7.4
 opencv-python-headless>=4.9
+scipy>=1.11
 onnxruntime>=1.17
 jsonschema>=4.0
 openpyxl>=3.1

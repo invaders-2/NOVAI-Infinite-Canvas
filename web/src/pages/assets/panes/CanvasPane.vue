@@ -23,14 +23,27 @@ const models = computed(() => K.modelOptions());
 const modelOpts = computed(() => [{ value: '', label: '全部模型' }, ...models.value.map(([m, n]) => ({ value: m, label: `${m}（${n}）` })), { value: '__none__', label: '非生成素材（上传 / 导入）', sep: true }]);
 const key = () => [K.activeCat().id, C.canvasId, C.query, C.sort, C.model, C.date, S.kind].join('|');
 const ktabs = computed(() => K.kindTabs());
+const dateLabel = computed(() => (K.DATES.find(d => d[0] === C.date) || K.DATES[0])[1]);
+const modelLabel = computed(() => (!C.model ? '全部模型' : C.model === '__none__' ? '非生成素材' : C.model));
+const filterLine = computed(() => `当前筛选：${dateLabel.value} · ${modelLabel.value}`);
 const emptyText = computed(() => {
+    const canvas = K.activeCanvas();
+    const scope = canvas ? `画布「${canvas.title || '未命名画布'}」` : '当前画布分类';
     if (S.kind) {
         const name = assetKindName(S.kind);
         if (C.query.trim()) return `没有找到匹配的${name}素材，可以换个关键词或切回「全部」。`;
-        if (C.model || C.date) return `当前筛选下没有${name}素材，可以换时间范围或模型，或点「清除筛选」。`;
-        return `当前画布分类下没有${name}素材。`;
+        if (C.model || C.date) {
+            const n = K.filteredOutCount();
+            return n ? `${filterLine.value}（共 ${n} 个${name}素材被筛掉），点「清除筛选」查看全部。` : `${filterLine.value}，${scope}下没有${name}素材。`;
+        }
+        return `${scope}下没有${name}素材。`;
     }
-    return C.model || C.date ? '没有符合筛选条件的素材，可以换个时间范围或模型，或点「清除筛选」。' : '当前分类没有可下载的画布资产。可以点击“刷新资源”，或在画布中生成/导入图片、视频、音频后再查看。';
+    if (C.model || C.date) {
+        const n = K.filteredOutCount();
+        return n ? `${filterLine.value}（共 ${n} 个素材被筛掉），点「清除筛选」查看全部。` : `${filterLine.value}，${scope}下没有素材。`;
+    }
+    if (canvas) return `${scope}里还没有可下载的素材。可以点击“刷新资源”，或在画布中生成/导入图片、视频、音频后再查看。`;
+    return '当前分类没有可下载的画布资产。可以点击“刷新资源”，或在画布中生成/导入图片、视频、音频后再查看。';
 });
 const progFlat = useProgressive(() => (flat.value ? items.value : []), key, () => C.sel);
 const progGroups = useProgressive(() => (flat.value ? [] : groups.value), key, () => '', g => (g.items || []).length || 1);

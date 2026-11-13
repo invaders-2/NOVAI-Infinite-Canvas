@@ -55,6 +55,24 @@ export function selfRefOf(node: CanvasNode): InputRef | null {
   return { edge: { id: "self:" + node.id, from: node.id, to: node.id }, node, order: -1 };
 }
 
+/**
+ * 「@ 本节点」这一版能发出去的那张图 / 视频（三态，调用方必须区分）：
+ *   string    —— 生成这一版时实际发出去的那张源图，重新生成继续用它；
+ *   null      —— 生成这一版时明确没有自我参考图（节点当时还没有结果 / 模型不收），重新生成也不要补上一版结果；
+ *   undefined —— 旧数据（这次改动之前生成的版本，meta 里没有 selfSrc），维持原来的回退：
+ *                上传的图被原地覆盖过时退回最初上传的那张（hist[0]），其余用当前这一版的结果。
+ * 不拿新生成的结果再喂回去，否则原地重新生成（画布助手审查后改提示词重跑）会越改越偏、永远改不掉。
+ * 用户把版本切回没有记录的那一版（比如最初上传的图）时，按上面的旧回退发那一版。
+ */
+export function selfSourceOf(node: CanvasNode): string | null | undefined {
+  const cur = outOf(node); if (!cur) return undefined;
+  const own = cur.url || (node.kind === "video" ? cur.frame : undefined);
+  if (cur.meta && cur.meta.selfSrc !== undefined) return cur.meta.selfSrc || null;
+  const g = genOf(node);
+  if (g.uploaded && g.hi > 0 && g.hist[0]?.url) return g.hist[0].url;
+  return own;
+}
+
 /** 引用模式下没被 @ 的输入（不发送）；分组被整体 @ 时保留全部组员，只 @ 组员时保留该组员。 */
 export function unmentionedInputs(node: CanvasNode, ins: InputRef[], directIns: InputRef[] = ins): Set<string> {
   const g = genOf(node); const out = new Set<string>();

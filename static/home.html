@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NOVAI - 首页</title>
     <script>(function(){try{var t=localStorage.getItem('studio_theme')||localStorage.getItem('canvas_theme')||'light';if(t==='dark'){document.documentElement.classList.add('studio-theme-dark');document.documentElement.classList.add('theme-dark');}}catch(e){}})();</script>
-    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=2.0.05.1789606971">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.05.1793785603">
-    <link rel="stylesheet" href="/static/css/nv-beam.css?v=2.0.05.1790240038">
+    <link rel="stylesheet" href="/static/vendor/css/fonts.css?v=2.0.07.1789606971">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.07.1793785603">
+    <link rel="stylesheet" href="/static/css/nv-beam.css?v=2.0.07.1794475911">
     <style>
         /* ═══ 首页 · 创作台 —— 沿用 V4 磨砂玻璃设计语言：无描边、柔和底色 + 文字强调表达选中 ═══ */
         :root {
@@ -1382,7 +1382,7 @@
             return fetch('/api/canvases', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: String(title || '').slice(0, 60) || timeTitle('智能画布'), icon: 'layers', kind: 'smart', project: 'default' })
+                body: JSON.stringify({ title: String(title || '').slice(0, 60) || timeTitle('智能画布'), icon: '🧩', kind: 'classic', project: 'default' })
             }).then(function (r) {
                 if (!r.ok) throw new Error('HTTP ' + r.status);
                 return r.json();
@@ -1762,7 +1762,7 @@
                             ? '<img src="' + esc(mediaPreviewUrl(c.thumbnail, 480)) + '" data-orig="' + esc(c.thumbnail) + '" width="480" height="300" loading="lazy" decoding="async" fetchpriority="low" alt="" onerror="if(this.dataset.fb){this.remove();}else{this.dataset.fb=\'1\';this.src=this.dataset.orig;}">'
                             : icon('layers');
                         html += '<div class="hp-card" role="link" tabindex="0" data-recent="' + i + '">' +
-                            '<div class="hp-thumb">' + thumb + '<span class="hp-kind">' + (c.kind === 'smart' ? '智能画布' : '智能画布BEAT') + '</span></div>' +
+                            '<div class="hp-thumb">' + thumb + '<span class="hp-kind">' + (c.kind === 'smart' ? '旧版' : '智能画布') + '</span></div>' +
                             '<div class="hp-meta"><b>' + esc(c.title || c.name || '未命名画布') + '</b><span>更新于 ' + esc(formatUpdateTime(c.updated_at || c.lastOpened)) + '</span></div></div>';
                     });
                     grid.innerHTML = html;
@@ -1790,8 +1790,6 @@
         /* ───────── 更多工具 ───────── */
         function initTools() {
             var tools = [
-                { route: 'online', icon: 'globe', title: '在线生图', desc: '文生图、图生图，多平台多模型' },
-                { route: 'gpt-chat', icon: 'chat', title: 'GPT 对话', desc: '构思创意、优化提示词' },
                 { route: 'asset-manager', icon: 'library', title: '素材库', desc: '管理生成作品、上传素材与提示词' }
             ];
             $('hpTools').innerHTML = tools.map(function (t) {

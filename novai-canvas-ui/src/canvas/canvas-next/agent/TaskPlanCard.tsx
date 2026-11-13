@@ -12,6 +12,7 @@ import { Progress } from "@/components/hexta/progress";
 import {
   countOptions,
   durationOptions,
+  findExplicitPlanModel,
   findPlanModel,
   imageRatioOptions,
   imageResolutionOptions,
@@ -27,6 +28,7 @@ import {
   type PlanStep,
   type PlanStepPatch,
 } from "./planParams";
+import { PlanListField, PlanModelField, PlanRatioField } from "./PlanParamPickers";
 import "./message-cards.css";
 
 /**
@@ -97,6 +99,7 @@ export function TaskPlanCard({ plan, models, busy, onApprove, onDiscard }: {
         <div className="plan-roadmap-hd">{"整体方案 · " + roadmap.length + " 个阶段" + (totalGen ? " · 约 " + totalGen + " 次生成" : "")}</div>
         <ol className="plan-roadmap-list">{roadmap.map((item, i) => <li key={i} className={i === 0 ? "is-now" : ""}>
           <b>{item.stage}</b>{item.detail ? <span>{item.detail}</span> : null}
+          {item.acceptance ? <small className="plan-accept">验收：{item.acceptance}</small> : null}
         </li>)}</ol>
         <div className="plan-roadmap-hd">第一阶段的具体步骤</div>
       </div> : null}
@@ -104,16 +107,19 @@ export function TaskPlanCard({ plan, models, busy, onApprove, onDiscard }: {
         {steps.map((step, index) => {
           const kind = planStepKind(step, models);
           const params = kind ? readPlanParams(step, kind, models) : null;
-          const spec = kind ? findPlanModel(models, kind, params?.provider || "", params?.model || "") : undefined;
+          // 只有步骤 args 里显式写了模型才选中它；没写就显示「跟随助手默认」，不拿列表第一个冒充
+          const explicitSpec = kind ? findExplicitPlanModel(step, kind, models) : undefined;
+          // 选项仍可用默认 spec 算（比例/分辨率/张数），但不把默认模型名显示出来
+          const optionSpec = kind ? (explicitSpec || models.find((m) => m.kind === kind)) : undefined;
           const kindModels = kind ? models.filter((m) => m.kind === kind) : [];
           const rows = Array.isArray((step.args || {}).rows) ? ((step.args as Record<string, unknown>).rows as unknown[]).length : 0;
-          const modelName = spec ? (spec.vendor || splitModelId(spec.id).provider) + " · " + spec.name : "跟随助手默认";
-          const ratioOpts = kind ? (kind === "image" ? imageRatioOptions(spec, params?.ratio || "") : videoRatioOptions(spec, params?.ratio || "")) : [];
-          const resOpts = kind === "image" ? imageResolutionOptions(spec, params?.resolution || "") : [];
-          const countOpts = kind === "image" && step.tool !== "batch_generate" ? countOptions(spec, params?.count || 1) : [];
-          const durOpts = kind === "video" ? durationOptions(spec, params?.duration || 5) : [];
-          const vResOpts = kind === "video" && planStepScope(step) === "settings" ? videoResOptions(spec, params?.resolution || "") : [];
-          const modeOpts = kind === "video" && step.tool === "generate_video" ? videoModeOptions(spec) : [];
+          const modelName = explicitSpec ? (explicitSpec.vendor || splitModelId(explicitSpec.id).provider) + " · " + explicitSpec.name : "跟随助手默认";
+          const ratioOpts = kind ? (kind === "image" ? imageRatioOptions(optionSpec, params?.ratio || "") : videoRatioOptions(optionSpec, params?.ratio || "")) : [];
+          const resOpts = kind === "image" ? imageResolutionOptions(optionSpec, params?.resolution || "") : [];
+          const countOpts = kind === "image" && step.tool !== "batch_generate" ? countOptions(optionSpec, params?.count || 1) : [];
+          const durOpts = kind === "video" ? durationOptions(optionSpec, params?.duration || 5) : [];
+          const vResOpts = kind === "video" && planStepScope(step) === "settings" ? videoResOptions(optionSpec, params?.resolution || "") : [];
+          const modeOpts = kind === "video" && step.tool === "generate_video" ? videoModeOptions(optionSpec) : [];
           const resolutionOpts = kind === "image" ? resOpts : vResOpts;
           const included = !excluded.has(index);
           return <Item className={"plan-step" + (included ? "" : " is-off")} key={index} size="xs">
@@ -122,49 +128,25 @@ export function TaskPlanCard({ plan, models, busy, onApprove, onDiscard }: {
             <ItemContent className="plan-step-body">
               <div className="plan-step-head"><b>{step.description || step.tool}</b></div>
               {kind && params ? <div className="plan-params">
-                <label className="pr"><span>模型</span>
-                  <select value={spec?.id || ""} title={modelName} disabled={busy || !kindModels.length}
-                    onChange={(e) => change(index, { modelConfigId: e.target.value || undefined })}>
-                    {!spec ? <option value="">{"跟随助手默认（" + modelName + "）"}</option> : null}
-                    {kindModels.map((m) => <option key={m.id} value={m.id}>{(m.vendor || splitModelId(m.id).provider) + " · " + m.name}</option>)}
-                  </select>
-                </label>
-                {modeOpts.length ? <label className="pr"><span>生成方式</span>
-                  <select value={params.mode} disabled={busy}
-                    onChange={(e) => change(index, { mode: e.target.value })}>
-                    <option value="">自动选择</option>
-                    {modeOpts.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                  </select>
-                </label> : null}
-                {resolutionOpts.length ? <label className="pr"><span>分辨率</span>
-                  <select value={params.resolution} disabled={busy}
-                    onChange={(e) => change(index, { resolution: e.target.value })}>
-                    {resolutionOpts.map((res) => <option key={res} value={res}>{res}</option>)}
-                  </select>
-                </label> : null}
-                {ratioOpts.length ? <label className="pr"><span>比例</span>
-                  <select value={params.ratio} disabled={busy}
-                    onChange={(e) => change(index, { ratio: e.target.value })}>
-                    {ratioOpts.map((ratio) => <option key={ratio} value={ratio}>{ratioDisplayLabel(ratio)}</option>)}
-                  </select>
-                </label> : null}
-                {countOpts.length ? <label className="pr"><span>张数</span>
-                  <select value={String(params.count)} disabled={busy}
-                    onChange={(e) => change(index, { count: Number(e.target.value) })}>
-                    {countOpts.map((n) => <option key={n} value={n}>{n + " 张"}</option>)}
-                  </select>
-                </label> : null}
-                {durOpts.length ? <label className="pr"><span>时长</span>
-                  <select value={String(params.duration)} disabled={busy}
-                    onChange={(e) => change(index, { duration: Number(e.target.value) })}>
-                    {durOpts.map((n) => <option key={n} value={n}>{n + "s"}</option>)}
-                  </select>
-                </label> : null}
+                <PlanModelField models={kindModels} value={explicitSpec?.id || ""} busy={busy} onChange={(id) => change(index, { modelConfigId: id })} />
+                {modeOpts.length ? <PlanListField label="生成方式" busy={busy} current={params.mode}
+                  options={[{ value: "", label: "自动选择" }, ...modeOpts.map((item) => ({ value: item.value, label: item.label }))]}
+                  onChange={(value) => change(index, { mode: value })} /> : null}
+                {resolutionOpts.length ? <PlanListField label="分辨率" busy={busy} current={params.resolution}
+                  options={resolutionOpts.map((res) => ({ value: res, label: res }))}
+                  onChange={(value) => change(index, { resolution: value })} /> : null}
+                {ratioOpts.length ? <PlanRatioField options={ratioOpts} current={params.ratio} busy={busy} onChange={(value) => change(index, { ratio: value })} /> : null}
+                {countOpts.length ? <PlanListField label="张数" busy={busy} current={String(params.count)}
+                  options={countOpts.map((n) => ({ value: String(n), label: n + " 张" }))}
+                  onChange={(value) => change(index, { count: Number(value) })} /> : null}
+                {durOpts.length ? <PlanListField label="时长" busy={busy} current={String(params.duration)}
+                  options={durOpts.map((n) => ({ value: String(n), label: n + "s" }))}
+                  onChange={(value) => change(index, { duration: Number(value) })} /> : null}
                 {step.tool === "batch_generate" ? <div className="pnote">{"张数 = 表格 " + rows + " 行"}</div> : null}
-                {kind === "image" && step.tool !== "batch_generate" && spec?.batchUnknown ? <div className="pnote">上限未知，以实际为准</div> : null}
+                {kind === "image" && step.tool !== "batch_generate" && optionSpec?.batchUnknown ? <div className="pnote">上限未知，以实际为准</div> : null}
                 {kind === "video" && !modeOpts.length ? <div className="pnote">生成方式：自动选择</div> : null}
                 {!kindModels.length ? <div className="pnote">当前没有可用的{kind === "video" ? "视频" : "图片"}模型，沿用助手默认</div> : null}
-                {kindModels.length && spec?.specSource !== "spec" ? <div className="pnote">该模型未提供规格，比例/分辨率为推断</div> : null}
+                {explicitSpec && explicitSpec.specSource !== "spec" ? <div className="pnote">该模型未提供规格，比例/分辨率为推断</div> : null}
               </div> : null}
             </ItemContent>
           </Item>;

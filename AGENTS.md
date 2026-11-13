@@ -23,12 +23,13 @@ AI 创作工具：无限画布 + 多模型调用（OpenAI API、ComfyUI、火山
 - 传统回退页的缩放/平移由 `viewport` 对象（x, y, scale）驱动，改动需同步 `applyViewport()` 与 `renderLinks()`；NOVAI 画布使用自己的 `view`（x, y, k）与 store。
 - 旧前端页面是原生 HTML/JS，无构建步骤；`index.html` 用 iframe 加载子页面，页面切换靠 `switchUI()`，跨页面通信用 `postMessage`。`web/`、`canvas-ui/` 与 `novai-canvas-ui/` 三个微应用分别有构建流程。
 - **NOVAI 2.0 新前端（逐页替换中）**：源码在 `web/`（Vue 3 + Vite），`cd web && npm install && npm run build` 输出到 `static/v2/`（构建产物要一起提交，桌面包不跑 Node）；后端默认入口 `/` 返回它（`/v2` 同样可用；新版未构建时 `/` 自动回退旧外壳），旧外壳保留在 `/legacy` 作为回退（设置 → 关于 →「旧版界面」可切换）。
-  - 已用 Vue 重写：外壳（侧栏 / 标题栏 / 设置弹窗全部 6 页：通用、API 设置、工作流设置、数据备份、外观、关于 / 更新弹窗 / 欢迎页）、画布列表（`web/src/pages/canvas/CanvasListPage.vue`）、在线生图 / Z-Image（`pages/online/`）、GPT 对话（`pages/chat/`）、素材库（`pages/assets/`）。首页仍保留旧 `static/home.html`；传统画布由 `novai-canvas-ui` 提供，智能画布仍用 `smart-canvas.html`。
+  - 已用 Vue 重写：外壳（侧栏 / 标题栏 / 设置弹窗全部 6 页：通用、API 设置、工作流设置、数据备份、外观、关于 / 更新弹窗 / 欢迎页）、画布列表（`web/src/pages/canvas/CanvasListPage.vue`）、素材库（`pages/assets/`）。首页仍保留旧 `static/home.html`；传统画布由 `novai-canvas-ui` 提供，智能画布仍用 `smart-canvas.html`。
   - 用户要求：首页继续用旧 `static/home.html`（iframe），左侧导航保持旧外壳的样式与交互（`web/src/shell/Sidebar.vue` 是旧 index.html 侧栏的移植）。进度与约定见 `web/REWRITE.md`。
   - 画布页是 native + frame：没打开画布时显示 Vue 列表；`openCanvasUrl()` 把 `frame-canvas` 指到旧编辑器，编辑器点「返回画布列表」会把 iframe 指回 `canvas-list.html`，LegacyStage 在 load 时识别到就调 `closeCanvas()` 切回 Vue 列表（旧 canvas-list.html 仍保留给旧外壳 `/` 用）。其余页面仍是旧 HTML，新外壳用 `frame-<id>` iframe 承载，消息协议与旧 `index.html` 完全一致（见 `web/src/lib/bridge.js` 顶部注释）。
   - 页面注册表在 `web/src/lib/store.js` 的 `PAGES`：重写完一页就把它的 `legacy` 换成 `native` 组件。
   - 设计系统 tokens / 组件样式在 `web/src/styles/ds.css`（与画布效果图同源），图标在 `web/src/lib/icons.js`（线性 1.5）。
 - 缩进 4 空格；JS 用 IIFE 隔离模块；CSS 走 CSS 变量 + Tailwind CDN（另有 `vendor/` 本地资源）。
+- **重建静态资源后要刷新缓存号**：`npm run build`（web / canvas-ui / novai-canvas-ui）会改产物 mtime，`static/*.html` 里的 `?v=` 仍是旧值，同版本号下老用户会继续吃缓存。跑 `python3 tools/refresh_static_versions.py --write`（默认 dry-run，幂等，只改 `?v=`），再确认 dry-run 为 0 处。发版时 `tools/bump_version.py --write` 会自动做这一步。
 
 ## 设计约束（UI，硬规则）
 
@@ -41,7 +42,20 @@ AI 创作工具：无限画布 + 多模型调用（OpenAI API、ComfyUI、火山
 - **图标一律保持线性（描边）风格**：下拉三角、比例/画幅图标、播放三角、缩放把手、端口 ⊕、对勾、spinner 这些是「图形/图标」，用描边（border / currentColor 笔画 / lucide 线性图标）画，**不要**改成实心填充、也不要去掉它们的笔画。改 UI 时这部分原样保留。
   图标动效由三端共用的 static/css/nv-icons.css 提供（vite 构建用 @import 引入），图标数据由 tools/icons/gen.mjs 从 lucide 生成到 web/src/lib/icons.js 与 tools/icons/canonical.json，改图标先改生成器再重跑，别手改产物；React 画布端对应 novai-canvas-ui/src/canvas/canvas-next/ui/iconData.ts（改了 nv-icons.css 要通知重建 static/novai-canvas）。
 - **select 的自绘下拉箭头统一用线性人字**：`background-image: var(--select-caret)`（变量定义在 `marvis-shared.css`，亮/暗各一条 SVG data URI，跟 lucide chevron-down 同款描边），位置 `calc(100% - 8px) 50%`、大小 10px、`padding-right:24px`。**不要**再用两条 `linear-gradient` 拼的实心三角。
-- **另一个明确例外：`.nv-beam` / `.nv-beam-wrap` 的动态光束边框**（home / online / gpt-chat 三页的「开始创作」「生成」按钮用的 border-beam 动效，实现在 `static/css/nv-beam.css` 与三页的内联副本里）。它是产品要的效果，用 `mask-composite` 收成 2px 环、**不要**改成模糊外发光，清扫线框时跳过它。
+- **另一个明确例外：`.nv-beam` / `.nv-beam-wrap` 的动态光束边框**（home 页的「开始创作」「生成」按钮用的 border-beam 动效，实现在 `static/css/nv-beam.css` 与该页的内联副本里）。它是产品要的效果，用 `mask-composite` 收成 2px 环、**不要**改成模糊外发光，清扫线框时跳过它。
+
+## 更新流程（固定规范，2026-11 用户定，动更新相关代码前必读）
+
+用户的固定要求：更新不许打断使用。凡是涉及自动更新、发版、更新提示的改动都按这套来，不许退回"弹窗问要不要更新"的老做法。
+
+- **发现新版本不弹窗**：后台静默下载（`desktop/main.js` 的 `startUpdateDownload`），下载完成才通过 `novai:update-stage` 通知前端；不许再出现"发现新版本，是否现在下载"这类原生对话框。
+- **下载完成只出一张右下角卡片**（`web/src/shell/UpdateReminder.vue`）：立即重启 / 稍后。点「稍后」必须在 `desktop/update-state.js` 落 `pendingVersion`，退出时静默装完（`convergeUpdateOnQuit` + `autoInstallOnAppQuit`）；不许出现"点了稍后就永远不装"。
+- **下次启动先播启动动画**（`desktop/splash.html`），logo + 进度条，后端就绪再显示主窗口，不许白屏干等。
+- **升级后首次启动必须弹更新说明**（`web/src/shell/UpdateDone.vue` + 主进程 applied 事件）：逐条列改动，每条可带 `media`（image/gif/video）做动态演示，没素材时退回纯文字。
+- **失败必须能兜住**：`bootAttempts` 达阈值自动回滚到备份；安装目录不可写要发 `error(phase:'install')`；关机打断留在 `pendingVersion` 下次重试。不许出现"装一半打不开"。
+- **发版素材走固定管线**：更新说明写根 `update-notes.json`（changes 每项可带 media）→ `python3 tools/sync_update_notes.py` 生成 `static/update-notes.json` → 上传三源。占位动图用 `python3 tools/make_update_placeholder_gif.py <版本>`。素材规范与上传步骤见 `README.md`「更新说明与素材（发版流程）」。
+- **改完更新链路必须跑**：`cd desktop && npm run test:update`，以及 `node --test tests/test_desktop_{update_bridge,win_update,mac_updater}.js`。这三个回归测试断言的就是新流程，产品行为改了要同步改断言，**不许删断言换绿灯**。
+- 设计依据与验收记录见 `_verification-update-flow/evidence.md`；这条链路还没做过真机安装包升级实测（2026-11 当时的遗留项），发版前必须补一次真机升级验证。
 
 ## 文档（按需读，不要预先全读）
 

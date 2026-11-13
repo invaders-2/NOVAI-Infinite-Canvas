@@ -51,6 +51,48 @@ export function dropNestedIds(doc: CanvasDoc, ids: string[]): string[] {
   });
 }
 
+/** 普通分组的最小尺寸：递归组内成员的包围盒 + GROUP_PAD（frameOf 口径）；堆叠 / 非分组 / 空组返回 0 */
+export function minGroupSize(doc: CanvasDoc, id: string): { w: number; h: number } {
+  const byId = new Map(doc.nodes.map((n) => [n.id, n]));
+  const g = byId.get(id);
+  if (!g || g.kind !== "group" || isStack(g)) return { w: 0, h: 0 };
+  const members = [...memberIdsDeep(doc, [id])].map((x) => byId.get(x)).filter((n): n is CanvasNode => !!n);
+  if (!members.length) return { w: 0, h: 0 };
+  const f = frameOf(members);
+  return { w: f.w, h: f.h };
+}
+
+/** 只把给定的普通分组框扩到包住内容（只扩不缩，x/y 不变）；没有变化返回原文档 */
+export function growGroupFrames(doc: CanvasDoc, ids: Iterable<string>): CanvasDoc {
+  const byId = new Map(doc.nodes.map((n) => [n.id, n]));
+  const grown = new Map<string, CanvasNode>();
+  for (const id of ids) {
+    const g = byId.get(id);
+    if (!g || g.kind !== "group" || isStack(g)) continue;
+    const min = minGroupSize(doc, id);
+    if (min.w <= g.w && min.h <= g.h) continue;
+    grown.set(id, { ...g, w: Math.max(g.w, Math.round(min.w)), h: Math.max(g.h, Math.round(min.h)) });
+  }
+  return grown.size ? { ...doc, nodes: doc.nodes.map((n) => grown.get(n.id) || n) } : doc;
+}
+
+/**
+ * 组内节点变大后，把它所属的普通分组（含嵌套的父组）扩到包住它：只扩不缩、x/y 不变。
+ * 逐层向上传，最多 8 层，避免异常数据成环时死循环。
+ */
+export function growOwnerFrames(doc: CanvasDoc, ids: Iterable<string>): CanvasDoc {
+  let current = doc; let targets = new Set(ids);
+  for (let pass = 0; pass < 8; pass++) {
+    const owners = new Set<string>();
+    for (const id of targets) { const owner = ownerOf(current, id); if (owner) owners.add(owner); }
+    if (!owners.size) break;
+    const next = growGroupFrames(current, owners);
+    if (next === current) break;
+    current = next; targets = owners;
+  }
+  return current;
+}
+
 /** 选中的节点 → 分组框（与 groupSelection 原来的算法一致） */
 export function frameOf(ns: CanvasNode[]): Box {
   const pad = GROUP_PAD;

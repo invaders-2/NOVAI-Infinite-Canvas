@@ -10,8 +10,11 @@ import { readMigratedKey, removeMigratedKey } from "../../novaiStorage";
 import { useSyncExternalStore } from "react";
 import type { CanvasDoc, CanvasEdge, CanvasNode } from "../react-canvas/reactCanvasStore";
 import type { CanvasBackend } from "./backend/types";
+import { resolveModelForParams } from "./agent/modelResolve";
 import { genOf, isGenKind, newNode, outOf, pinMissingModelIds, uid, withGen, type AnyParams, type GenData, type GenKind, type ModelSpec } from "./model";
-import { fitMediaBox, ratioOf } from "./mediaFit";
+import { resumeCanvasTasks } from "./engine";
+import { fitMediaBox } from "./mediaFit";
+import { declaredRatio, wantedRatio } from "./originalRatio";
 
 export type View = { x: number; y: number; k: number };
 export type RunState = { status: "running"; progress: number; runId?: string; stream?: string; abort: AbortController; startedAt: number; batch?: { done: number; total: number } };
@@ -25,7 +28,7 @@ export type RunLog = {
 /** 存本机前去掉大的 data URL（结果本身在资源库里，历史只留引用） */
 const small = (u?: string) => (u && (!u.startsWith("data:") || u.length < 4000) ? u : undefined);
 export const compactRun = (x: RunLog): RunLog => ({ ...x, thumb: small(x.thumb), out: x.out ? { ...x.out, url: small(x.out.url), frame: small(x.out.frame), text: x.out.text?.slice(0, 2000) } : undefined, prompt: x.prompt?.slice(0, 500) });
-export type Toast = { id: number; html: string; out?: boolean };
+export type Toast = { id: number; html: string; out?: boolean; /** 可点动作（例如点开面板）；只存在内存里 */ action?: () => void };
 export type Conn = { id: string; rev: boolean; a: { x: number; y: number }; p: { x: number; y: number }; sx: number; sy: number; over: string | null };
 
 export type UIState = {
@@ -90,13 +93,19 @@ const OPTIMIZE_MODEL_KEY = "novai:canvas:optimize-model";
 
 /**
  * 空状态节点（还没有结果）的宽高跟着面板里选的比例走，改比例就立刻摆正，不用等生成。
+ * 「原图比例」按源图算（面板写下的 params.sourceSize，或上游 / 自己的源图真实像素），拿不到尺寸就不动，不猜 1:1。
  * 只认比例的**取值**有没有变：清晰度、张数、风格这类参数改动不能把用户手动拖过的尺寸弹回去；
- * 有结果的节点保持真实结果比例，自适应没有已知比例也不动。x / y 不参与，节点位置不受影响。
+ * 源图比例第一次变得可用（备忘从空到有）会摆正一次，之后同比例不再动。有结果的节点保持真实结果比例。
+ * 比例取值只从节点参数里读（declaredRatio），不读源图回退——源图是「现在能拿到什么」，不是「上次摆成什么样」。
+ * x / y 不参与，节点位置不受影响。
  */
-function fitEmptyRatio(prev: CanvasNode, next: CanvasNode): CanvasNode {
+function fitEmptyRatio(prev: CanvasNode, next: CanvasNode, doc: CanvasDoc): CanvasNode {
   if (prev === next || (next.kind !== "image" && next.kind !== "video") || outOf(next)) return next;
-  const want = ratioOf((genOf(next).params as { ratio?: string }).ratio);
-  if (!want || want === ratioOf((genOf(prev).params as { ratio?: string }).ratio)) return next;
+  const kind = next.kind as GenKind;
+  const want = wantedRatio(doc, next, kind);
+  if (!want) return next;
+  const have = declaredRatio(genOf(prev).params);
+  if (have != null && Math.abs(have - want) <= Math.max(have, want) * .001) return next;
   const box = fitMediaBox(next.w, want, 1);
   return box ? { ...next, w: box.w, h: box.h } : next;
 }
@@ -154,6 +163,8 @@ export class CanvasStore {
     this.migrateMissingModelIds();
     if (loaded.error) this.toast(`画布已从本机副本打开（${loaded.error}）`);
     if (loaded.migrated) this.toast("这张画布来自旧版本，已按新格式打开；原始内容保留了备份");
+    // 离开画布时后端任务可能还在跑：载入后按节点上记着的 taskId 接上（后台跑，不挡首屏）
+    void resumeCanvasTasks(this).catch(() => undefined);
   }
   /** 设置页增删 / 启停模型后，后端作废缓存并通知；这里只重拉下拉用的 models，文档与撤销栈不动。 */
   private watchModelDirectory() {
@@ -271,12 +282,21 @@ export class CanvasStore {
   undo() { const u = this.state.undo; if (!u.length) return this.toast("没有可撤销的操作"); this.state = { ...this.state, doc: u[u.length - 1], undo: u.slice(0, -1), redo: [...this.state.redo, this.state.doc] }; this.cleanSel(); this.stopOrphanRuns(); this.emit(); this.scheduleSave(); }
   redo() { const r = this.state.redo; if (!r.length) return this.toast("没有可重做的操作"); this.state = { ...this.state, doc: r[r.length - 1], redo: r.slice(0, -1), undo: [...this.state.undo, this.state.doc] }; this.cleanSel(); this.stopOrphanRuns(); this.emit(); this.scheduleSave(); }
   /** 撤销 / 重做 / 远端改动让正在生成的节点消失时，停掉它的生成（否则继续计费，结果也无处可写） */
-  private stopOrphanRuns() { const ids = new Set(this.state.doc.nodes.map((n) => n.id)); for (const [id, r] of Object.entries(this.state.runtime)) if (!ids.has(id)) r.abort.abort(); }
+  private stopOrphanRuns() { const ids = new Set(this.state.doc.nodes.map((n) => n.id)); for (const id of Object.keys(this.state.runtime)) if (!ids.has(id)) this.stopRun(id); }
+  /**
+   * 停掉一个正在跑的生成：用户点停止 / 删节点 / 撤销都走这里，后端任务一起取消。
+   * 页面卸载 / 切画布不走这里——任务留着，回到画布由 resumeCanvasTasks 接上。
+   */
+  stopRun(id: string) {
+    const r = this.state.runtime[id]; if (!r) return;
+    r.abort.abort();
+    if (r.runId && this.backend.cancelTask) void this.backend.cancelTask(r.runId).catch(() => undefined);
+  }
   private cleanSel() { const ids = new Set(this.state.doc.nodes.map((n) => n.id)); const sel = new Set([...this.state.ui.sel].filter((x) => ids.has(x))); this.state = { ...this.state, ui: { ...this.state.ui, sel } }; }
 
   node = (id: string | null | undefined) => (id ? this.state.doc.nodes.find((n) => n.id === id) : undefined);
   updateNode(id: string, fn: (n: CanvasNode) => CanvasNode, opts: { history?: boolean } = {}) {
-    this.mutate((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === id ? fitEmptyRatio(n, fn(n)) : n)) }), opts);
+    this.mutate((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === id ? fitEmptyRatio(n, fn(n), d) : n)) }), opts);
   }
   patchGen(id: string, patch: Partial<GenData> | ((g: GenData) => Partial<GenData>), opts: { history?: boolean } = {}) {
     this.updateNode(id, (n) => withGen(n, typeof patch === "function" ? patch(genOf(n)) : patch), opts);
@@ -304,7 +324,7 @@ export class CanvasStore {
   }
   newNode(kind: GenKind, x: number, y: number, extra: Parameters<typeof newNode>[3] = {}) { return newNode(kind, x, y, extra, this.defaultModel(kind)); }
   removeNodes(ids: string[]) {
-    const set = new Set(ids); ids.forEach((id) => this.state.runtime[id]?.abort.abort());
+    const set = new Set(ids); ids.forEach((id) => this.stopRun(id));
     this.mutate((d) => ({ ...d, nodes: d.nodes.filter((n) => !set.has(n.id)), edges: d.edges.filter((e) => !set.has(e.from) && !set.has(e.to)) }), { history: true });
     this.setUI({ sel: new Set([...this.state.ui.sel].filter((x) => !set.has(x))) });
   }
@@ -352,9 +372,9 @@ export class CanvasStore {
    */
   modelOf(node: CanvasNode): ModelSpec | undefined {
     if (!isGenKind(node.kind)) return undefined;
-    const p = genOf(node).params as { model?: string };
-    const id = String(p.model || "");
-    return id ? this.modelsOf(node.kind).find((m) => m.id === id) : undefined;
+    // 兼容短 id：params.model 可能是 agnes-image-2.0-flash，而 models[].id 是 provider::model；
+    // 助手队列 / 旧数据都会写短 id，统一交给 resolveModelForParams 解析（完整 id 优先，避免误配）。
+    return resolveModelForParams(this.modelsOf(node.kind), node.kind, genOf(node).params as { model?: unknown; provider?: unknown });
   }
 
   /* ---------- 运行态 ---------- */
@@ -369,9 +389,9 @@ export class CanvasStore {
   }
 
   /* ---------- 提示 ---------- */
-  toast(html: string, ms = 2600) {
+  toast(html: string, ms = 2600, action?: () => void) {
     if (this.disposed) return;
-    const id = ++this.toastSeq; this.set({ toasts: [...this.state.toasts, { id, html }] });
+    const id = ++this.toastSeq; this.set({ toasts: [...this.state.toasts, { id, html, action }] });
     const first = setTimeout(() => {
       this.toastTimers.delete(first);
       if (this.disposed) return;

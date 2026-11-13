@@ -9,8 +9,6 @@
 | 首页 | ↩︎ 按用户要求继续用原先的 home.html（iframe）；Vue 版 pages/home 保留未挂载 |
 | 画布列表（含新建选择器、回收站、撤销删除） | ✅ Vue（第 19 轮） |
 | 智能画布 / 经典画布编辑器 | ✅ 用户确认「保留引擎，统一外观」：结构与交互不动，`static/css/nv2-skin.css` 统一配色 token、状态色（只留 danger 一种彩色）、字重 400/500、底色与外壳一致（第 23 轮） |
-| 在线生图 / Z-Image | ✅ Vue（第 22 轮，pages/online/） |
-| GPT 对话 | ✅ Vue（第 22 轮，pages/chat/） |
 | 素材库 | ✅ Vue（第 22 轮，pages/assets/） |
 | 设置：API 设置 / 工作流设置 | ✅ Vue（第 20 轮，shell/settings/ApiSettingsPanel.vue + api/、WorkflowSettingsPanel.vue + workflow/） |
 

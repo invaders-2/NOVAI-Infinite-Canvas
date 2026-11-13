@@ -390,11 +390,76 @@ async function resourceCommand(input: Row): Promise<Row> {
     return memory ? { ok: true, text: String(memory.content || "") } : { ok: false, error: "记忆不存在" };
   }
   if (type === "resource/create") {
-    const made = await request("/api/memories", json({ content: String(input.content || ""), scope: input.memorySubtype === "project-memory" ? "conversation" : "global", conversation_id: input.attributes?.canvasId || "" }));
-    return { ok: true, resourceRef: made.memory.id };
+    // L1：面板里说「记住：…」也走这里。canvas_id / thread_id 交给后端把这条记忆并进画布记忆
+    // （索引 + 项目档案 prefs）并把这一轮对话写进线程；user_text 是面板里原话。
+    const attrs = input.attributes && typeof input.attributes === "object" ? input.attributes as Row : {};
+    const made = await request("/api/memories", json({
+      content: String(input.content || ""),
+      scope: input.memorySubtype === "project-memory" ? "conversation" : "global",
+      conversation_id: String(attrs.canvasId || ""),
+      canvas_id: String(attrs.canvasId || ""),
+      thread_id: String(attrs.threadId || ""),
+      user_text: String(attrs.userText || ""),
+      reply_text: String(attrs.replyText || ""),
+    }));
+    return { ok: true, resourceRef: made.memory.id, deduplicated: made.deduplicated === true, reply: String(made.reply || "") };
   }
   if (type === "resource/delete") return commandOf(`/api/memories/${encodeURIComponent(String(input.resourceRef || ""))}`, { method: "DELETE" });
   return { ok: false, error: "NOT_SUPPORTED" };
+}
+
+/* Agent 运行把 run_id 放在响应头 X-NOVAI-Run-Id 里。头被中间层（代理 / 安全软件 / 老后端）吞掉时不能直接报错：
+   流的首帧 run_start 里也带 run_id，读它一次即可；限定等待时长，拿不到就让面板立刻失败，不能挂住。 */
+const RUN_ID_HEADER = "X-NOVAI-Run-Id";
+const RUN_START_WAIT_MS = 2000;
+
+function runIdFromSseFrame(frame: string): string {
+  let event = "";
+  const dataLines: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+  }
+  if (event !== "run_start" || !dataLines.length) return "";
+  try {
+    const data = JSON.parse(dataLines.join("\n"));
+    return typeof data?.run_id === "string" ? data.run_id.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+async function readRunIdFromStream(response: Response, waitMs = RUN_START_WAIT_MS): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timedOut = new Promise<string>((resolve) => { timer = setTimeout(() => resolve(""), waitMs); });
+  const reading = (async () => {
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) return "";
+        // 先拼再规范化换行：\r\n 可能正好落在两个 chunk 的边界上
+        buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n");
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() || "";
+        for (const frame of frames) {
+          const runId = runIdFromSseFrame(frame);
+          if (runId) return runId;
+        }
+      }
+    } catch {
+      return "";
+    }
+  })();
+  try {
+    return await Promise.race([reading, timedOut]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    void reader.cancel().catch(() => undefined);
+  }
 }
 
 async function taskCommand(input: Row): Promise<Row> {
@@ -447,14 +512,23 @@ async function taskCommand(input: Row): Promise<Row> {
       },
       history: [],
     }));
-    // 成功时是一条持续到运行结束的 SSE 流：只读响应头拿 run id，别等正文（等正文会一直卡到整个任务跑完，面板收不到进度）
+    // 成功时是一条持续到运行结束的 SSE 流：优先只读响应头拿 run id，别等正文（等正文会一直卡到整个任务跑完，面板收不到进度）
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
       throw new Error(typeof data.detail === "string" ? data.detail : data.detail?.message || data.error || `HTTP ${response.status}`);
     }
-    const taskId = String(response.headers.get("X-NOVAI-Run-Id") || "");
-    if (!taskId) throw new Error("Agent 运行没有返回任务 ID");
-    if (response.body) void response.body.cancel().catch(() => undefined);
+    let taskId = String(response.headers.get(RUN_ID_HEADER) || "").trim();
+    if (taskId) {
+      if (response.body) void response.body.cancel().catch(() => undefined);
+    } else {
+      // 200 但读不到头：跨源未 expose / 代理删头 / 升级后没重启的老后端都会这样，改从首帧 run_start 里取
+      taskId = await readRunIdFromStream(response);
+    }
+    if (!taskId) {
+      // 带上 Content-Type 给支持侧判断：整页 HTML 常见于代理/安全软件的拦截页，而不是后端的 SSE
+      const contentType = response.headers.get("Content-Type") || "unknown";
+      throw new Error(`Agent 运行没有返回任务 ID（HTTP ${response.status}，Content-Type: ${contentType}）：服务端可能是旧版本或请求被代理改写，请重启应用；仍失败请更新到最新版本`);
+    }
     return { ok: true, taskId, status: "RUNNING" };
   }
   if (type === "task/regenerate") {

@@ -19,7 +19,7 @@ export type ElementAttrs = Partial<Record<ElementAttrKey, string>>;
 export const ELEMENT_ATTR_KEYS: ElementAttrKey[] = [...ELEMENT_ATTR_FIELDS.map(([k]) => k), ...ELEMENT_FREE_FIELDS.map(([k]) => k)];
 /** 左栏时代分类（attrs.era 的取值） */
 export const ELEMENT_ERAS = ["古代历史", "近代历史", "当代现实", "科幻未来", "架空幻想"] as const;
-export type CanvasElement = { id: string; name: string; kind: ElementKind; desc: string; refs: string[]; at: number; /** 资产库里对应的角色条目 id（已同步） */ remoteId?: string; /** 角色属性（可选，老数据没有也能用） */ attrs?: ElementAttrs };
+export type CanvasElement = { id: string; name: string; kind: ElementKind; desc: string; refs: string[]; at: number; /** 资产库里对应的角色条目 id（已同步） */ remoteId?: string; /** 角色属性（可选，老数据没有也能用） */ attrs?: ElementAttrs; /** 已收藏（可选，只存本机） */ fav?: boolean };
 
 export const ELEMENT_KINDS: Array<[ElementKind, string]> = [["character", "角色"], ["product", "产品"], ["scene", "场景"], ["style", "风格"], ["other", "其他"]];
 export const ELEMENT_MAX_REFS = 4;
@@ -64,10 +64,15 @@ export function saveElement(e: Omit<CanvasElement, "id" | "at"> & { id?: string 
   const err = nameError(e.name, list, e.id); if (err) throw new Error(err);
   const prev = e.id ? list.find((x) => x.id === e.id) : undefined;
   const attrs = normalizeAttrs(e.attrs);
-  const item: CanvasElement = { id: e.id || "el_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: e.name.trim(), kind: e.kind, desc: e.desc.trim().slice(0, 300), refs: e.refs.filter(Boolean).slice(0, ELEMENT_MAX_REFS), at: Date.now(), ...(prev?.remoteId ? { remoteId: prev.remoteId } : {}), ...(attrs ? { attrs } : {}) };
+  const item: CanvasElement = { id: e.id || "el_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name: e.name.trim(), kind: e.kind, desc: e.desc.trim().slice(0, 300), refs: e.refs.filter(Boolean).slice(0, ELEMENT_MAX_REFS), at: Date.now(), ...(prev?.remoteId ? { remoteId: prev.remoteId } : {}), ...(attrs ? { attrs } : {}), ...(prev?.fav ? { fav: true } : {}) };
   persist([item, ...list.filter((x) => x.id !== item.id)]);
   void pushElement(item);
   return item;
+}
+export function setElementFav(id: string, fav: boolean) {
+  const list = listElements();
+  if (!list.some((x) => x.id === id)) return;
+  persist(list.map((x) => (x.id === id ? { ...x, fav } : x)));
 }
 export function deleteElement(id: string) {
   const e = listElements().find((x) => x.id === id);
@@ -119,7 +124,7 @@ export async function syncElements(): Promise<boolean> {
     const mine = local.find((l) => l.remoteId === String(c.id));
     const kind = (String(c.prompt || "").match(KIND_TAG)?.[1] || mine?.kind || "character") as ElementKind;
     const attrs = attrsOfPrompt(c.prompt) || mine?.attrs;
-    return { id: mine?.id || "el_" + String(c.id), remoteId: String(c.id), name: String(c.name || ""), kind: ELEMENT_KINDS.some(([k]) => k === kind) ? kind : "other", desc: String(c.description || ""), refs: (Array.isArray(c.referenceUrls) ? c.referenceUrls : []).slice(0, ELEMENT_MAX_REFS), at: Number(c.updatedAt || c.createdAt || 0), ...(attrs ? { attrs } : {}) };
+    return { id: mine?.id || "el_" + String(c.id), remoteId: String(c.id), name: String(c.name || ""), kind: ELEMENT_KINDS.some(([k]) => k === kind) ? kind : "other", desc: String(c.description || ""), refs: (Array.isArray(c.referenceUrls) ? c.referenceUrls : []).slice(0, ELEMENT_MAX_REFS), at: Number(c.updatedAt || c.createdAt || 0), ...(attrs ? { attrs } : {}), ...(mine?.fav ? { fav: true } : {}) };
   }).filter((e: CanvasElement) => e.name);
   const pending = local.filter((l) => !l.remoteId);
   persist([...pending, ...remote].sort((a, b) => b.at - a.at));

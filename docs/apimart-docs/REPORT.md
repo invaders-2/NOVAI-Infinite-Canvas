@@ -425,7 +425,7 @@ Suno 版本/限制（**原文** L70320–L70357）：public version 仅 `v6` / `
 1. **`veo3.1` 定价脏 ID**：`server/credits/apimart_pricing.json` 里视频模型存在 `veo3.1-fast-ext（veo3.1-fast）`、`veo3.1-quality-ext（veo3.1-quality）`、`veo3.1-lite-ext（veo3.1-lite）` 三个带全角括号的 ID，`alias_map` 里只有 `veo3.1-fast-ext` 等，**没有** `veo3.1-fast` / `veo3.1-quality` / `veo3.1-lite` 的正向映射。而文档明确写"model 可用 `veo3.1-fast` 或别名 `veo3.1-fast-ext`"。→ 用户填 `veo3.1-fast` 可能匹配不到价格/能力。
 2. **`/api/model-caps` 不含 chat**：`main.py:20531` 的循环只跑 `image`/`video`，所以 `think` 只能从 `/api/config` 的 `api_providers[].model_caps` 拿（契约 2 写的位置是对的，但这个端点容易误用）。
 3. **调研期间后端（task-2）正在并行重构这块**：我第一次 grep 时 `think_level` 只有 `lovart_chat_mode` 一个消费者；收尾时 `main.py` 已出现 `chat_think_fields` / `post_chat_with_think` / `chat_stream_with_think`，真值源迁到 `server/protocols/thinking.py`。**本报告对项目现值的描述以 2026-11-06 15:20 左右的工作树为准**，backend 再改同类文件后请以代码为准、别以本报告为准。
-4. 前端 `web/src/pages/chat/thought.js:26-32` 的 `THINK_LEVELS` 与后端 `THINK_LEVELS_FULL` 一致（low/mid/high/xhigh/max）；但 `legacyThinkLevels()`（前端兜底正则）与后端 `server/protocols/thinking.py` 的新规则**结构上不同步**：前端是"命中就给 5 档"，后端已经引入 documented/inferred 分级与 anthropic/gemini 族的排除。后端定稿后，前端兜底建议直接删掉、只信 `model_caps`，否则会出现"后端说没有、前端还显示"的假入口。
+4. 前端「已删除的对话页」thought 模块（原 thought.js:26-32）的 `THINK_LEVELS` 与后端 `THINK_LEVELS_FULL` 一致（low/mid/high/xhigh/max）；但 `legacyThinkLevels()`（前端兜底正则）与后端 `server/protocols/thinking.py` 的新规则**结构上不同步**：前端是"命中就给 5 档"，后端已经引入 documented/inferred 分级与 anthropic/gemini 族的排除。后端定稿后，前端兜底建议直接删掉、只信 `model_caps`，否则会出现"后端说没有、前端还显示"的假入口。
 5. 文档没有给任何具体速率数字（RPM/TPM/并发），也没有"请求体最大字节数"这一项——只有按模型的图片大小限制。若要做限流，只能靠 `429` + `Retry-After` 自适应。
 
 ## E.1 对后端已实现方案（`server/protocols/thinking.py`）的逐项核对

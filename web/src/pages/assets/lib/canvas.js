@@ -1,4 +1,4 @@
-// 「画布里的」区域：智能 / 普通画布分类 → 各画布，排序（画布名称时按画布分组）、时间 / 模型筛选、
+// 「画布里的」区域：智能画布 / 旧版智能画布分类 → 各画布，排序（画布名称时按画布分组）、时间 / 模型筛选、
 // 批量下载、生成信息、在画布中定位、用在 N 个画布
 import { reactive } from 'vue';
 import { S, setStatus, fail, setCanvasData, openPreview } from './state.js';
@@ -6,7 +6,9 @@ import { apiJson, assetKind, canvasAssetKindLabel, canvasKindLabel, formatDate, 
 import { openCanvasUrl } from '../../../lib/bridge.js';
 
 export const C = reactive({
-    cat: 'smart', canvasId: '', sel: '', ids: new Set(), query: '', sort: 'canvas_asc', model: '', date: '', manage: false,
+    // 空串 = 还没选过：进页面时由 afterLoad() 按「有资产 / 有画布」挑默认分类。
+    // 不能写死 'smart'：智能画布的 kind 是 classic，写死会让只用智能画布的用户一进来看到空列表。
+    cat: '', canvasId: '', sel: '', ids: new Set(), query: '', sort: 'canvas_asc', model: '', date: '', manage: false,
 });
 export const SORTS = [
     { value: 'canvas_asc', label: '画布名称' },
@@ -33,14 +35,26 @@ export function categories() {
     const d = S.canvasData;
     if (Array.isArray(d.categories) && d.categories.length) return d.categories.filter(c => ['smart', 'classic'].includes(c.id));
     return [
-        { id: 'smart', name: '智能画布', count: (d.items || []).filter(i => i.canvas_kind === 'smart').length, canvas_count: (d.canvases || []).filter(i => i.kind === 'smart').length },
-        { id: 'classic', name: '普通画布', count: (d.items || []).filter(i => i.canvas_kind !== 'smart').length, canvas_count: (d.canvases || []).filter(i => i.kind !== 'smart').length },
+        { id: 'smart', name: '旧版智能画布', count: (d.items || []).filter(i => i.canvas_kind === 'smart').length, canvas_count: (d.canvases || []).filter(i => i.kind === 'smart').length },
+        { id: 'classic', name: '智能画布', count: (d.items || []).filter(i => i.canvas_kind !== 'smart').length, canvas_count: (d.canvases || []).filter(i => i.kind !== 'smart').length },
     ];
 }
-function defaultCat() { const cats = categories(); return cats.find(c => Number(c.canvas_count || 0) > 0)?.id || cats[0]?.id || 'smart'; }
+// 默认分类：优先「真的有资产」的分类；两个分类都有资产时优先智能画布（classic），
+// 不能默认落到空的旧版分类，否则用户会觉得智能画布生成的图在素材库里消失了。
+function defaultCat() {
+    const cats = categories();
+    const withAssets = cats.filter(c => Number(c.count || 0) > 0);
+    if (withAssets.length) {
+        const classic = withAssets.find(c => c.id === 'classic');
+        return (classic || withAssets[0]).id;
+    }
+    const withCanvases = cats.filter(c => Number(c.canvas_count || 0) > 0);
+    const classicCanvas = withCanvases.find(c => c.id === 'classic');
+    return (classicCanvas || withCanvases[0] || cats[0] || { id: 'classic' }).id;
+}
 export function activeCat() {
     const cats = categories();
-    return cats.find(c => c.id === C.cat) || cats.find(c => c.id === defaultCat()) || { id: 'smart', name: '智能画布', count: 0, canvas_count: 0 };
+    return cats.find(c => c.id === C.cat) || cats.find(c => c.id === defaultCat()) || { id: 'classic', name: '智能画布', count: 0, canvas_count: 0 };
 }
 export function canvasesFor(catId) {
     return (S.canvasData.canvases || []).filter(c => (c.kind || 'classic') === catId).sort((a, b) => zhCompare(a.title, b.title));
@@ -94,11 +108,17 @@ export function baseItems() {
     return list;
 }
 export function currentItems() { return baseItems().filter(item => matchesKind(item, S.kind)); }
-// 类型页签的数量 = 当前画布分类下的全部资产（没有音频就不显示音频，与来源页签的计法一致）
-export function kindTotals() {
+// 当前分类 / 画布范围内的全部资产（不含搜索 / 时间 / 模型 / 类型筛选）
+export function scopeItems() {
     const cat = activeCat().id;
-    return countKinds(uniqueItems().filter(item => (item.canvas_kind || 'classic') === cat));
+    const canvasId = activeCanvas() ? C.canvasId : '';
+    return uniqueItems().filter(item => (item.canvas_kind || 'classic') === cat && (!canvasId || item.canvas_id === canvasId));
 }
+// 类型页签的数量跟列表同一口径：选中某个画布时只算这个画布的资产，没选画布时才算整个分类，
+// 否则会出现「画布只有 100 张图，页签却写着 872 / 视频 5，点视频还是一片空」的错觉。
+export function kindTotals() { return countKinds(scopeItems()); }
+// 搜索 / 时间 / 模型筛掉了多少个当前类型下本应能看到的素材（空状态文案里点名用）
+export function filteredOutCount() { return Math.max(0, scopeItems().filter(item => matchesKind(item, S.kind)).length - currentItems().length); }
 export function kindTabs() { return buildKindTabs(kindTotals(), S.kind); }
 // 按「画布名称」排序时按画布分组，其它排序平铺
 export function groupItems(list) {
@@ -118,17 +138,24 @@ export function groupItems(list) {
 }
 export function selectedItem(list) { return list.find(i => i.id === C.sel) || list[0] || null; }
 
-export function selectCat(id) { C.cat = id || defaultCat(); C.canvasId = ''; C.sel = ''; C.ids.clear(); }
-export function selectCanvas(catId, id) { C.cat = catId || C.cat; C.canvasId = id || ''; C.sel = ''; C.ids.clear(); }
+// 切分类 / 画布时清掉时间、模型、搜索：上一轮留下的「今天」会把新画布的资产全滤掉，
+// 看起来就像「点了画布不显示素材」。清完列表按新选择重算，侧栏角标和标题才对得上。
+export function resetFilters() { C.date = ''; C.model = ''; C.query = ''; C.sel = ''; }
+export function selectCat(id) { C.cat = id || defaultCat(); C.canvasId = ''; C.ids.clear(); resetFilters(); }
+export function selectCanvas(catId, id) { C.cat = catId || C.cat; C.canvasId = id || ''; C.ids.clear(); resetFilters(); }
 export function toggleSelect(id) { if (C.ids.has(id)) { C.ids.delete(id); if (C.sel === id) C.sel = ''; } else { C.ids.add(id); C.sel = id; } }
 export function clickCard(id) { if (C.manage) toggleSelect(id); else C.sel = id; }
 export function toggleManage() { C.manage = !C.manage; if (!C.manage) C.ids.clear(); }
 export function selectAll() { currentItems().forEach(i => C.ids.add(i.id)); }
 export function setFilter(kind, value) { C[kind] = value || ''; C.sel = ''; }
-export function clearFilters() { C.date = ''; C.model = ''; C.sel = ''; }
+export function clearFilters() { C.date = ''; C.model = ''; C.query = ''; C.sel = ''; }
+let entered = false;
 // 刷新后修正失效的分类 / 画布（旧 normalizeCanvasAssetState）
 export function afterLoad() {
-    if (!categories().some(c => c.id === C.cat)) C.cat = defaultCat();
+    // 首次进素材库（页面挂载后的第一次数据加载）把上一轮留下的时间 / 模型还原成「全部」，
+    // 否则打开页面就是一片空，看着像素材丢了
+    if (!entered) { entered = true; C.date = ''; C.model = ''; }
+    if (!C.cat || !categories().some(c => c.id === C.cat)) C.cat = defaultCat();
     if (C.canvasId && !activeCanvas()) C.canvasId = '';
     C.ids = new Set([...C.ids].filter(id => findItem(id)));
 }

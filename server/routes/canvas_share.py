@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import hashlib
+import ipaddress
 import os
 import re
 import secrets
@@ -414,6 +415,32 @@ def _share_lan_token(share_url: str) -> str:
     return str(value or "")
 
 
+def _url_token(url: str) -> str:
+    """素材地址自己带的口令（分享者把对方口令原样拼在了 ?token= 上）。"""
+    try:
+        query = urllib.parse.urlsplit(str(url or "")).query
+    except ValueError:
+        return ""
+    return str((urllib.parse.parse_qs(query).get("token", [""])[0]) or "")
+
+
+def _media_download_token(url: str, share_token: str = "", local_token: str = "") -> str:
+    """下载对方素材该带的口令：地址自带的优先，其次分享链接里的；
+    只有目标就是本机（自己 /output 的旧绝对地址）时才用本机口令，绝不把自己的口令发给别的机器。"""
+    own = _url_token(url)
+    if own:
+        return own
+    if share_token:
+        return str(share_token)
+    try:
+        host = str(urllib.parse.urlsplit(str(url or "")).hostname or "").lower()
+    except ValueError:
+        host = ""
+    if local_token and host in _local_host_names():
+        return str(local_token)
+    return ""
+
+
 def _local_host_names() -> set:
     names = {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
     ip = _lan_ip()
@@ -503,6 +530,39 @@ def _rewrite_media(value: Any, mapping: Dict[str, str]) -> Any:
     if isinstance(value, list):
         return [_rewrite_media(item, mapping) for item in value]
     return value
+
+
+def _mark_missing_media(nodes: Any, failed_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """克隆失败时把「素材缺失」标到对应节点的 data.mediaMissing 上，并返回清单（节点 / 素材 / 原因）。"""
+    wanted: Dict[str, Dict[str, Any]] = {}
+    for item in failed_items or []:
+        url = str(item.get("url") or "")
+        if url:
+            wanted[_canonical_media_url(url)] = item
+    marked: List[Dict[str, Any]] = []
+    if not isinstance(nodes, list):
+        return marked
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        hits: List[Dict[str, str]] = []
+        for url in _node_media_urls(node):
+            info = wanted.get(_canonical_media_url(url))
+            if info:
+                hits.append({"url": str(info.get("url") or url), "error": str(info.get("error") or "")})
+        if not hits:
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else None
+        if data is None:
+            node["data"] = {"mediaMissing": hits}
+        else:
+            data["mediaMissing"] = hits
+        marked.append({
+            "node_id": str(node.get("id") or ""),
+            "node_title": str(((data or {}).get("gen") or {}).get("title") or node.get("title") or "")[:40],
+            "items": hits,
+        })
+    return marked
 
 
 def _media_fail(url: str, error: str) -> Dict[str, Any]:
@@ -604,8 +664,10 @@ async def _download_media(client: "httpx.AsyncClient", url: str, token: str,
     headers = {"X-NOVAI-Token": token} if token else {}
     try:
         async with client.stream("GET", target, headers=headers, follow_redirects=True) as response:
-            if response.status_code == 401:
-                return False, b"", "", "对方口令失效"
+            if response.status_code in (401, 403):
+                return False, b"", "", "对方分享口令失效，请让对方重新分享"
+            if response.status_code == 404:
+                return False, b"", "", "对方素材已不存在（HTTP 404）"
             if response.status_code >= 400:
                 return False, b"", "", "对方资源不可用（HTTP %s）" % response.status_code
             length = 0
@@ -645,9 +707,9 @@ def _local_lan_token() -> str:
 async def localize_media_urls(urls: List[str], share_url: str = "", request: Optional[Request] = None,
                               lan_token: str = "") -> Dict[str, Any]:
     """把一组远端媒体地址复制到本机，返回逐条结果与 copied/failed/skipped 计数。"""
-    token = _share_lan_token(share_url) or str(lan_token or "")
+    share_token = _share_lan_token(share_url)
     results: List[Dict[str, Any]] = []
-    pending: List[str] = []
+    pending: List[Tuple[str, str]] = []
     seen = set()
     skipped = 0
     for raw in (urls or [])[:MEDIA_MAX_URLS]:
@@ -670,7 +732,7 @@ async def localize_media_urls(urls: List[str], share_url: str = "", request: Opt
         if cached_local:
             results.append({"url": url, "local": cached_local, "ok": True, "error": "", "size": 0, "cached": True})
         else:
-            pending.append(url)
+            pending.append((url, _media_download_token(url, share_token, str(lan_token or ""))))
 
     if pending:
         ssl_context = deps.get("_SSL_CONTEXT", True)
@@ -679,7 +741,7 @@ async def localize_media_urls(urls: List[str], share_url: str = "", request: Opt
         semaphore = asyncio.Semaphore(MEDIA_CONCURRENCY)
         budget = {"bytes": 0}
 
-        async def handle(url: str) -> Dict[str, Any]:
+        async def handle(url: str, token: str) -> Dict[str, Any]:
             async with semaphore:
                 remaining = MEDIA_MAX_TOTAL_BYTES - budget["bytes"]
                 if remaining <= 0:
@@ -700,7 +762,7 @@ async def localize_media_urls(urls: List[str], share_url: str = "", request: Opt
                     return _media_fail(url, store_error or "本机落盘失败")
                 return {"url": url, "local": local, "ok": True, "error": "", "size": len(content), "cached": False}
 
-        tasks = [asyncio.create_task(handle(url)) for url in pending]
+        tasks = [asyncio.create_task(handle(url, token)) for url, token in pending]
         done, still = await asyncio.wait(tasks, timeout=MEDIA_BUDGET_SECONDS)
         for task in still:
             task.cancel()
@@ -711,7 +773,7 @@ async def localize_media_urls(urls: List[str], share_url: str = "", request: Opt
             except Exception:
                 continue
             by_url[item["url"]] = item
-        for task, url in zip(tasks, pending):
+        for task, (url, _token) in zip(tasks, pending):
             item = by_url.get(url)
             if item is None:
                 item = _media_fail(url, "超出 60 秒总预算，未完成")
@@ -722,6 +784,112 @@ async def localize_media_urls(urls: List[str], share_url: str = "", request: Opt
     copied = sum(1 for item in results if item.get("ok"))
     failed = sum(1 for item in results if not item.get("ok"))
     return {"items": results, "copied": copied, "failed": failed, "skipped": skipped}
+
+
+# ---------------------------------------------------------------- 生成侧兜底：私网参考素材
+
+def _private_host(host: str) -> bool:
+    """上游拉不到的地址：本机 / 回环 / 链路本地 / RFC1918 / *.local。"""
+    value = str(host or "").strip().lower().strip("[]")
+    if not value:
+        return False
+    if value in ("localhost", "0.0.0.0", "::1") or value.endswith(".local"):
+        return True
+    lan_ip = _lan_ip()
+    if lan_ip and value == str(lan_ip).lower():
+        return True
+    try:
+        ip = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return bool(ip.is_private or ip.is_loopback or ip.is_link_local)
+
+
+def is_private_media_url(url: str) -> bool:
+    """是不是「公网上游一定拉不到」的素材地址（含对方电脑的局域网地址）。"""
+    if not _is_http_url(url):
+        return False
+    try:
+        host = urllib.parse.urlsplit(str(url or "")).hostname or ""
+    except ValueError:
+        return False
+    return _private_host(host)
+
+
+def _private_media_error(url: str, error: str) -> str:
+    try:
+        host = str(urllib.parse.urlsplit(str(url or "")).hostname or "")
+    except ValueError:
+        host = ""
+    target = ("（%s）" % host) if host else ""
+    text = str(error or "")
+    if "口令" in text or "401" in text or "403" in text:
+        return "参考素材在对方电脑上%s，对方的分享口令已失效，请让对方重新分享画布后再克隆。" % target
+    if "超时" in text or "下载失败" in text or "不在线" in text:
+        return ("参考素材在对方电脑上%s，现在连不上（对方电脑可能不在线或不在同一局域网），"
+                "请让对方开着 NOVAI 后重试。" % target)
+    return "参考素材在对方电脑上%s，取不到：%s。请让对方重新分享画布后再克隆。" % (target, text or "未知原因")
+
+
+_PRIVATE_MEDIA_CACHE: Dict[str, str] = {}
+_PRIVATE_MEDIA_LOCK = threading.Lock()
+
+
+def _private_media_cached(url: str) -> str:
+    canonical = _canonical_media_url(url)
+    with _PRIVATE_MEDIA_LOCK:
+        cached = _PRIVATE_MEDIA_CACHE.get(canonical) or ""
+    if cached:
+        return cached
+    on_disk = _cached_media_local(url)
+    if on_disk:
+        with _PRIVATE_MEDIA_LOCK:
+            _PRIVATE_MEDIA_CACHE[canonical] = on_disk
+    return on_disk
+
+
+async def localize_private_media_url(url: str) -> str:
+    """把私网素材地址下载到本机 /assets/uploads 并返回本机地址（带内存 + 落盘缓存）。
+    只处理 http(s) 私网地址；本机相对地址 / data URL / 公网地址原样返回。
+    失败抛 HTTPException，文案直接给用户看，绝不把私网地址放过去。"""
+    text = str(url or "").strip()
+    if not is_private_media_url(text):
+        return url
+    cached = _private_media_cached(text)
+    if cached:
+        return cached
+    ssl_context = deps.get("_SSL_CONTEXT", True)
+    trust_env = bool(deps.get("_TRUST_ENV", False))
+    timeout = httpx.Timeout(MEDIA_TIMEOUT_SECONDS, connect=MEDIA_TIMEOUT_SECONDS)
+    try:
+        async with httpx.AsyncClient(http2=False, verify=ssl_context, trust_env=trust_env, timeout=timeout) as client:
+            status, content, content_type, error = await asyncio.wait_for(
+                _download_media(client, text, _url_token(text)), MEDIA_TIMEOUT_SECONDS + 2)
+    except asyncio.TimeoutError:
+        status, content, content_type, error = False, b"", "", "下载超时（超过 10 秒）"
+    except Exception:
+        status, content, content_type, error = False, b"", "", "下载失败"
+    if not status:
+        raise HTTPException(status_code=502, detail=_private_media_error(text, error))
+    stored, local, store_error = _store_media(text, content, content_type)
+    if not stored:
+        raise HTTPException(status_code=502, detail="参考素材已取到但本机落盘失败：%s" % (store_error or "未知原因"))
+    with _PRIVATE_MEDIA_LOCK:
+        _PRIVATE_MEDIA_CACHE[_canonical_media_url(text)] = local
+    return local
+
+
+async def localize_private_reference_urls(refs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """生成前统一兜底：参考素材里的私网地址先落到本机，再走后续上传 / 公网化链路。"""
+    out: List[Dict[str, Any]] = []
+    for ref in refs or []:
+        item: Any = dict(ref) if isinstance(ref, dict) else ref
+        if isinstance(item, dict):
+            url = str(item.get("url") or "").strip()
+            if url:
+                item["url"] = await localize_private_media_url(url)
+        out.append(item)
+    return out
 
 
 # ---------------------------------------------------------------- 接口
@@ -845,16 +1013,29 @@ async def clone_shared_canvas(token: str, request: Request) -> Dict[str, Any]:
     clone["created_at"] = now_ms()
     clone.pop("deleted_at", None)
     clone.pop("owner_id", None)
-    nodes = clone.get("nodes") if isinstance(clone.get("nodes"), list) else []
-    media = await localize_media_urls(_node_media_urls(nodes), share_url="", request=request, lan_token=_local_lan_token())
+    # 整份快照都扫一遍（nodes / settings / comments 里的媒体字段都算），不只看 nodes
+    media = await localize_media_urls(_node_media_urls(clone), share_url="", request=request,
+                                      lan_token=_local_lan_token())
     mapping = {item["url"]: item["local"] for item in media.get("items", []) if item.get("ok") and item.get("local")}
     if mapping:
-        clone["nodes"] = _rewrite_media(clone.get("nodes"), mapping)
+        clone = _rewrite_media(clone, mapping)
+    failed_items = [{"url": str(item.get("url") or ""), "error": str(item.get("error") or "")}
+                    for item in (media.get("items") or []) if not item.get("ok")]
+    marked = _mark_missing_media(clone.get("nodes"), failed_items) if failed_items else []
     save_canvas(clone)
-    return {
+    result: Dict[str, Any] = {
         "canvas_id": str(clone["id"]),
         "title": clone["title"],
         "copied": int(media.get("copied") or 0),
         "failed": int(media.get("failed") or 0),
         "skipped": int(media.get("skipped") or 0),
     }
+    if failed_items:
+        first = marked[0] if marked else {}
+        where = ("节点「%s」" % first.get("node_title")) if first.get("node_title") else (
+            ("节点 %s" % first.get("node_id")) if first.get("node_id") else "画布")
+        result["failed_items"] = failed_items
+        result["missing"] = marked
+        result["warning"] = ("有 %d 个素材没取到，已标成素材缺失（%s 等）：%s；请让对方重新分享后再克隆。"
+                             % (len(failed_items), where, failed_items[0].get("error") or "未知原因"))
+    return result

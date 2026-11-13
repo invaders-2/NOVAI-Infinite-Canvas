@@ -5,7 +5,7 @@ export const PAGES = [
     // 首页：2026-11 重做为 Vue 版（pages/home/HomePage.vue）；旧 home.html 保留作回退，不再挂载
     { id: 'home', label: '首页', i18n: 'nav.home', icon: 'home', native: true },
     // 画布：列表已用 Vue 重写（native），打开某张画布时仍用 iframe 承载旧编辑器（frame）
-    { id: 'canvas', label: '智能画布BEAT', i18n: 'nav.canvas', icon: 'workflow', native: true, frame: true },
+    { id: 'canvas', label: '智能画布', i18n: 'nav.canvas', icon: 'workflow', native: true, frame: true },
     { id: 'asset-manager', label: '素材库', i18n: 'nav.assetManager', icon: 'library', native: true },
     // 应用市场：2026-11 按原型重做（pages/market/MarketPage.vue），数据走 /api/store/* + /api/skills + MCP
     { id: 'store', label: '应用市场', i18n: 'nav.store', icon: 'bag', native: true },
@@ -19,16 +19,16 @@ export const PAGES = [
 export const PAGE_IDS = PAGES.map(p => p.id);
 export const DEFAULT_PAGE = 'home';
 
+// 只记录会话内切页（rememberActive），启动不再读它恢复上次停留页
 const ACTIVE_KEY = 'studio_active_page';
 const PINNED_KEY = 'studio_sidebar_pinned';
 
 function read(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
 function write(key, v) { try { localStorage.setItem(key, v); } catch (e) {} }
 
-const saved = read(ACTIVE_KEY);
-
 export const state = reactive({
-    active: PAGE_IDS.includes(saved) ? saved : DEFAULT_PAGE,
+    // 启动一律回首页：用户要求关掉重开后回到首页，不再恢复上次停留页
+    active: DEFAULT_PAGE,
     visited: {},            // 已经加载过的 legacy 页面（iframe 懒加载）
     frameSrc: {},           // 某页 iframe 被指到别的地址（例如直接打开某张画布）
     canvasOpen: false,      // 画布页当前是否打开了某张画布（否则显示 Vue 画布列表）

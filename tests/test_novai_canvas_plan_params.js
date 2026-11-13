@@ -107,6 +107,22 @@ assert.strictEqual(batchImg2.args.settings.resolution, '2k', 'settings 作用域
 assert.strictEqual(batchImg2.args.settings.size, '2048x2048');
 assert.strictEqual('count' in batchImg2.args.settings, false);
 
+// ---- 2c. 没显式给模型：不拿 models[0] 冒充，改成「跟随助手默认」 ----
+const noModelStep = step('generate_image', { canvas_id: 'c', prompt: '鞋', ratio: '1:1', count: 1 });
+assert.deepStrictEqual(p.planStepModelSource(noModelStep), { provider: '', model: '' }, '没写模型 → 来源为空，不兜底');
+assert.strictEqual(p.findExplicitPlanModel(noModelStep, 'image', models), undefined, '没写模型 → 没有显式模型');
+assert.strictEqual(p.findExplicitPlanModel(img, 'image', models).id, 'p1::m1', '显式写了才取模型');
+assert.deepStrictEqual(p.planStepModelSource(step('generate_image', { model: 'p1::m1' })), { provider: 'p1', model: 'm1' }, '完整 id 写进 model 也能拆出 provider');
+const noModelPatched = p.patchPlanStep(noModelStep, 'image', models, { ratio: '1:1' });
+assert.strictEqual('provider' in noModelPatched.args, false, '只改比例不能把 models[0] 的 provider 写进步骤');
+assert.strictEqual('model' in noModelPatched.args, false, '只改比例不能把 models[0] 的 model 写进步骤');
+assert.ok(p.planParamsSummary([noModelStep], models).startsWith('用 跟随助手默认'), '摘要显示「跟随助手默认」而不是第一个模型：' + p.planParamsSummary([noModelStep], models));
+const cleared = p.patchPlanStep(img, 'image', models, { modelConfigId: '' });
+assert.strictEqual('model' in cleared.args, false, '选回「跟随助手默认」会清掉步骤里的模型');
+assert.strictEqual('provider' in cleared.args, false);
+const keepModel = p.patchPlanStep(img, 'image', models, { ratio: '1:1' });
+assert.deepStrictEqual([keepModel.args.provider, keepModel.args.model], ['p1', 'm1'], '显式模型在只改参数时保留');
+
 // ---- 3. 摘要 ----
 const summaryImg = p.planParamsSummary([img2], models);
 assert.strictEqual(summaryImg, '用 APIMart · gemini-3-pro-image 出 2 张 3:4 4K');
@@ -128,6 +144,10 @@ assert.ok(panel.includes('onApprovePlan={(steps) => void approvePlan(m, steps)}'
 assert.ok(panel.includes('imageProvider, imageModel') && bridge.includes('image_provider: String(context.imageProvider || "")') && bridge.includes('image_model: String(context.imageModel || "")'), 'task/run 把当前图片模型传给后端');
 assert.ok(types.includes('assumptions?: string[] | string') && types.includes('reason?: string') && card.includes('plan.assumptions') && card.includes('plan.reason'), 'assumptions / reason 透出到方案卡');
 assert.ok(card.includes('planParamsSummary(steps, models)') && card.includes('plan-params'), '卡片渲染参数区与摘要');
-assert.ok(card.includes('videoModeOptions(spec)') && card.includes('自动选择') && card.includes('change(index, { mode:'), '方案卡视频方式下拉来自 ModelSpec，并写回 args.mode');
+assert.ok(card.includes('findExplicitPlanModel(') && card.includes('value={explicitSpec?.id || ""}'), '卡片只在步骤显式给模型时才选中（没给 select 值为空）');
+assert.ok(card.includes('跟随助手默认') && !card.includes('跟随助手默认（'), '首项文案就是「跟随助手默认」，不拼具体模型名');
+// 原生 select 已换成 #pop 模型选择器（PlanModelField）：写回仍然走 patchPlanStep 的 modelConfigId
+assert.ok(card.includes('modelConfigId: id') && card.includes('PlanModelField'), '选了模型 / 选回默认都写回步骤');
+assert.ok(card.includes('videoModeOptions(optionSpec)') && card.includes('自动选择') && card.includes('change(index, { mode:'), '方案卡视频方式下拉来自 ModelSpec（显式模型或默认 spec），并写回 args.mode');
 
 console.log('[PASS] 方案卡参数：尺寸换算 / 回写 steps / 摘要 / 模型透传（' + '共 4 组' + '）');

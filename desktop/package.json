@@ -1,6 +1,6 @@
 {
   "name": "novai-desktop",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "NOVAI 无限画布 AI 创作平台 — 桌面客户端 (Electron)",
   "main": "main.js",
   "homepage": "https://github.com/invaders-2/NOVAI",
@@ -18,7 +18,8 @@
     "dist:mac": "node scripts/sync-version.js && electron-builder --mac",
     "dist:win": "node scripts/sync-version.js && electron-builder --win",
     "dist:linux": "node scripts/sync-version.js && electron-builder --linux",
-    "dist:publish": "electron-builder --publish always"
+    "dist:publish": "electron-builder --publish always",
+    "test:update": "node --test __tests__/test_update_state.js"
   },
   "dependencies": {
     "electron-updater": "^6.8.9"
@@ -36,6 +37,8 @@
       "cloud-config.js",
       "preload.js",
       "source-drag-preload.js",
+      "update-state.js",
+      "splash.html",
       "package.json"
     ],
     "afterPack": "scripts/adhoc-sign.js",
@@ -51,6 +54,14 @@
       {
         "from": "icons/icon.ico",
         "to": "icons/icon.ico"
+      },
+      {
+        "from": "icons/menubarTemplate.png",
+        "to": "icons/menubarTemplate.png"
+      },
+      {
+        "from": "icons/menubarTemplate@2x.png",
+        "to": "icons/menubarTemplate@2x.png"
       },
       {
         "from": "resources/backend",
@@ -128,14 +139,18 @@
       ]
     },
     "nsis": {
-      "oneClick": true,
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
       "perMachine": false,
+      "allowElevation": false,
       "createDesktopShortcut": true,
-      "shortcutName": "NOVAI"
+      "shortcutName": "NOVAI",
+      "include": "scripts/nsis-data-preserve.nsh"
     },
     "linux": {
       "icon": "icons/icon.png",
       "category": "Graphics",
+      "description": "NOVAI 无限画布 AI 创作平台（可写安装目录默认在安装目录存数据；AppImage / deb / snap 等只读安装回落到 ~/NOVAI）",
       "target": [
         "AppImage",
         "deb"

@@ -24,11 +24,12 @@ function replyViewport(source) {
 // 画布编辑器里外壳没有标题栏，画布要知道顶部让出多少：mac 让开原生红绿灯，Windows 让开右上悬浮三键
 // Windows 下发 112 = 三键组 104 + 组间距 8：画布侧 #tr 是 right:max(16px, calc(16px + var))，会自己再加 16 的窗口边距，
 // 合起来正好 128 = 16 + 104 + 8，画布五颗的右边缘落在三键左边 8px
-// top 是画布工具行的上边距绝对值：mac 红绿灯中心在窗口顶约 20px，工具行 40 高要落在 top 6（中心 26）才和首页标题栏那排一致；
+// top 是画布工具行的上边距绝对值：mac 对照 TapNow 量出 pill 距窗口顶约 12px（40 高 → 中心 32，TapNow 约 31.75），
+// 红绿灯中心约 26，比顶栏高 6px 与 TapNow 的 ~4px 接近；left 84 让开红绿灯（灯右缘约 72）。
 // Windows 让开右上三键，保持 16（三键中心 y=36 与画布工具行同一水平线）
 function canvasChromeInsets() {
     if (state.desktop === 'windows') return { left: 0, right: 112, top: 16 };
-    if (state.desktop === 'mac') return { left: 84, right: 0, top: 6 };
+    if (state.desktop === 'mac') return { left: 84, right: 0, top: 12 };
     return { left: 0, right: 0, top: 16 };
 }
 function replyCanvasChrome(source) {

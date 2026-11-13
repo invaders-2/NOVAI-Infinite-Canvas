@@ -1,5 +1,5 @@
 // 设置 · 记忆：长期记忆库（/api/memories）的读取与增删改。
-// 接口与作用域口径与 GPT 对话页记忆库（pages/chat/library.js）完全一致：
+// 接口与作用域口径与原 GPT 对话页记忆库完全一致（页面已下线，接口保留）：
 //   global 全局 / conversation 本对话；每条带 enabled 启用开关（默认开），由服务端自动注入 system prompt。
 // 后端没有「记忆总开关」字段，批量启停直接逐条 PATCH 每条自己的 enabled，不新造字段。
 import { reactive } from 'vue';

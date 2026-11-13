@@ -68,7 +68,7 @@ export function GroupTools({ node, show }: { node: CanvasNode; show: boolean }) 
       <FloatMenuButton icon="play" label="一键运行" primary disabled={!count} data={{ "data-gt": "run" }}
         title={count ? `按依赖顺序运行组内 ${count} 个生成节点（${keyHint("run")}）` : "组里没有可运行的生成节点"}
         onClick={(e) => { stop(e); runNodes(ctl, [node]); }} />
-      <FloatMenuButton icon="grid" label="布局" title="组内排版" data={{ "data-gt": "layout" }} onClick={(e) => { stop(e); openPop(e.currentTarget, (close) => <>
+      <FloatMenuButton icon="layoutgrid" label="布局" title="组内排版" data={{ "data-gt": "layout" }} onClick={(e) => { stop(e); openPop(e.currentTarget, (close) => <>
         <div className="mh">组内排版 {kids} 个节点</div>
         <button className="mi" data-glayout="grid" onClick={() => { close(); layoutGroupMembers(store, node.id, "grid"); }}><Icon name="grid" size="s" />宫格布局</button>
         <button className="mi" data-glayout="horizontal" onClick={() => { close(); layoutGroupMembers(store, node.id, "horizontal"); }}><Icon name="right" size="s" />水平流布局</button>

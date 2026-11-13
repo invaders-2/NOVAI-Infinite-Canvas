@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-# 档位键与前端 web/src/pages/chat/thought.js、main.py THINK_LEVELS_FULL 保持一致，不要改名。
+# 档位键与 main.py THINK_LEVELS_FULL 保持一致，不要改名。
 THINK_LEVELS: Tuple[str, ...] = ("low", "mid", "high", "xhigh", "max")
 THINK_LEVEL_RANK: Dict[str, int] = {level: index for index, level in enumerate(THINK_LEVELS)}
 THINK_LEVEL_LABELS: Dict[str, str] = {

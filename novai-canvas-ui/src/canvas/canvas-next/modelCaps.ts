@@ -20,6 +20,10 @@ export type ModelCapsItem = {
   n_max?: unknown;
   maxRefs?: unknown;
   max_refs?: unknown;
+  /** 后端 _caps_payload 的参考图上限（main.py：图片 ref_max、视频 ref_max/video_ref_max、音频 audio_ref_max） */
+  ref_max?: unknown;
+  video_ref_max?: unknown;
+  audio_ref_max?: unknown;
   durations?: unknown;
   modes?: unknown;
   /** 质量档（后端能力表声明的接口值，如 low / medium / high）；没声明 = 不下发 */
@@ -30,6 +34,8 @@ export type ModelCapsItem = {
   output_formats?: unknown;
   /** GIF 帧参数 { min, max, default, durationDefault }；旧后端没这个字段 → 前端用兜底 */
   gif_frames?: unknown;
+  /** 透明背景能力（只有支持的模型才有这个字段，且只有 true 才算）；缺省 = 不支持 */
+  native_background?: unknown;
   /** 只返回提示词、不产视频（如 MiniMax-H3-Context-IR）：true 时面板不给视频参数 */
   prompt_only?: unknown;
   /** Midjourney 专属参数：{ versions, speeds, hd }（后端只给这几个数组） */
@@ -112,7 +118,7 @@ function ratios(value: unknown): string[] {
   return [...new Set(strings(value).map(normalizeCapsRatio))];
 }
 
-function resolutions(value: unknown, kind: "image" | "video"): string[] {
+function resolutions(value: unknown, kind: "image" | "video" | "audio"): string[] {
   const list = strings(value);
   return [...new Set(list.map((item) => (kind === "video" ? item.toLowerCase() : item.toUpperCase())))];
 }
@@ -127,7 +133,7 @@ export function normalizeCapsModes(value: unknown): string[] {
 }
 
 /** 一个 caps item → specFor 认的 ui；没有任何可用字段返回 null（不要伪造空规格） */
-export function modelCapsUi(kind: "image" | "video", item: ModelCapsItem | null | undefined): Record<string, unknown> | null {
+export function modelCapsUi(kind: "image" | "video" | "audio", item: ModelCapsItem | null | undefined): Record<string, unknown> | null {
   if (!item || typeof item !== "object") return null;
   if (item.kind && String(item.kind) !== kind) return null;
   const ui: Record<string, unknown> = {};
@@ -137,6 +143,15 @@ export function modelCapsUi(kind: "image" | "video", item: ModelCapsItem | null 
   if (mj) ui.mj = mj;
   // 字段存在但数组为空：这是后端明确说「没有」，不能把它当成缺字段再补默认值
   if (Array.isArray(item.ratios)) ui.ratios = ratios(item.ratios);
+  // 参考图上限的权威字段是后端 caps 的 ref_max（视频还有 video_ref_max、音频 audio_ref_max）；没有才回落旧字段。
+  // 视频的 maxRefs 在前端统计的是图片参考（engine.rolesFor / table.planRow 的 refs 都是 image），
+  // 后端视频表里 ref_max 才是图片参考上限（video_ref_max 是视频参考上限），所以视频也优先 ref_max、缺了才兜底。
+  const firstField = (...values: unknown[]): unknown => values.find((v) => v !== undefined && v !== null && !(typeof v === "string" && !v.trim()));
+  const refCap = kind === "image" ? firstField(item.ref_max, item.maxRefs, item.max_refs)
+    : kind === "video" ? firstField(item.ref_max, item.video_ref_max, item.maxRefs, item.max_refs)
+    : firstField(item.audio_ref_max, item.maxRefs, item.max_refs);
+  const maxRefs = Number(refCap);
+  if (Number.isFinite(maxRefs) && maxRefs >= 0) ui.maxRefs = Math.floor(maxRefs);
   if (kind === "image") {
     if (Array.isArray(item.resolutions)) ui.sizes = resolutions(item.resolutions, kind);
     // 后端也直接下发 sizes（如 midjourney 只声明 2K）：resolutions 为空时用它，别把尺寸档丢掉
@@ -154,11 +169,11 @@ export function modelCapsUi(kind: "image" | "video", item: ModelCapsItem | null 
       // 后端说「不掌握上限」：张数只保留 1，并让面板提示未知，而不是补一个假上限
       ui.batchUnknown = true;
     }
-    const maxRefs = Number(item.maxRefs ?? item.max_refs);
-    if (Number.isFinite(maxRefs) && maxRefs >= 0) ui.maxRefs = Math.floor(maxRefs);
     // 质量档 / 先思考：后端声明什么就是什么（空数组 / 缺字段 = 不给入口，前端不按模型名猜）
     if (Array.isArray(item.qualities)) ui.qualities = strings(item.qualities);
     if (item.thinking_mode === true) ui.thinkingMode = true;
+    // 透明背景：只有明确 true 才算（缺字段 / 其它值一律当不支持，面板不给入口）
+    if (item.native_background === true) ui.nativeBackground = true;
     // 输出格式：空数组也保留（后端明确没有动图/矢量能力），面板据此不给入口
     if (Array.isArray(item.output_formats)) {
       ui.outputFormats = [...new Set(strings(item.output_formats).map((value) => value.toLowerCase()))];
@@ -181,7 +196,7 @@ export function modelCapsUi(kind: "image" | "video", item: ModelCapsItem | null 
  * 参考图是「可选能力」，缺字段不等于不支持：沿用原有官方 ui / 按名字预设里的 maxRefs/i2i，
  * 避免一上权威参数就把所有模型的参考图入口误关掉。caps 明确给值时仍以 caps 为准。
  */
-export function mergeCapsReferenceCapability(kind: "image" | "video", ui: Record<string, unknown> | null, fallback: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+export function mergeCapsReferenceCapability(kind: "image" | "video" | "audio", ui: Record<string, unknown> | null, fallback: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
   if (!ui || !fallback) return ui;
   const out = { ...ui };
   for (const key of kind === "image" ? ["maxRefs", "i2i", "refNote"] : ["maxRefs", "refNote"]) {

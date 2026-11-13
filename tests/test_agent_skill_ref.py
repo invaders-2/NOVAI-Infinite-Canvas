@@ -6,7 +6,7 @@
 
 覆盖：
   1. skill_ref 命中：系统提示末尾出现【技能执行手册】与正文；instruction 本身不塞正文；
-  2. 超长正文（61627 字）截断到 30000 并标注「（已截断）」；
+  2. 超长正文（> 30000 字）截断到 30000 并标注「（已截断）」；
   3. 未知 / 畸形 ref 一律忽略（不报错），系统提示与不带 ref 时逐字相同；
   4. name / activation_skill 两种 id 都能找到正文；
   5. 请求模型：instruction 仍是 4000 上限，skill_ref 上限 128；
@@ -43,8 +43,29 @@ from server.routes import store
 # 历史 skill_ref 前缀（旧画布种子 / 旧请求里还带着）：不直接写出品牌词，避免仓库里残留
 LEGACY_PREFIX = "tap" + "now:"
 
+# 技能正文夹具：不读写 server/store_data 的真实市场条目，改用 tests/fixtures/skill_store/
+FIXTURE_STORE = Path(__file__).resolve().parent / "fixtures" / "skill_store"
+LONG_SKILL = "fixture-long-skill"                 # 正文超过 SKILL_BODY_MAX_CHARS
+SHORT_SKILL = "fixture-short-skill"
+ALIAS_SKILL = "fixture-alias-skill"               # catalog 里 activation_skill = ALIAS_ACTIVATION
+ALIAS_ACTIVATION = "fixture-alias-activation"
+GENERATED_SKILL = "fixture-generated-skill"       # generated/ 下的整理稿
+LONG_MARKER = "FIXTURE-LONG-MANUAL"
+
+_STORE_DIR_PATCH = None
+
+
+def setUpModule():
+    global _STORE_DIR_PATCH
+    _STORE_DIR_PATCH = patch.object(store, "store_dir", lambda: str(FIXTURE_STORE))
+    _STORE_DIR_PATCH.start()
+
 
 def tearDownModule():
+    global _STORE_DIR_PATCH
+    if _STORE_DIR_PATCH is not None:
+        _STORE_DIR_PATCH.stop()
+        _STORE_DIR_PATCH = None
     shutil.rmtree(_TMP_DATA, ignore_errors=True)
 
 
@@ -65,77 +86,77 @@ class SkillRefPromptTests(unittest.TestCase):
 
     def test_skill_ref_appends_manual_to_system_prompt(self):
         baseline = build_prompt("")
-        with_manual = build_prompt("store:primordia-art-director")
+        with_manual = build_prompt("store:%s" % LONG_SKILL)
         self.assertTrue(with_manual.startswith(baseline))            # 既有提示词不动，只在末尾追加
         self.assertIn("【技能执行手册】", with_manual)
         self.assertNotIn("【技能执行手册】", baseline)
         self.assertGreater(len(with_manual), len(baseline))
-        self.assertIn("Primordia", with_manual)                       # 正文真的进来了
+        self.assertIn(LONG_MARKER, with_manual)                       # 正文真的进来了
 
     def test_long_body_is_truncated(self):
-        prompt = build_prompt("store:primordia-art-director")
+        prompt = build_prompt("store:%s" % LONG_SKILL)
         manual = prompt.split("【技能执行手册】", 1)[1]
         self.assertIn(store.SKILL_BODY_TRUNCATED_NOTE, manual)
         body = manual.split("\n", 1)[1].strip()
         self.assertEqual(len(body), store.SKILL_BODY_MAX_CHARS + len(store.SKILL_BODY_TRUNCATED_NOTE))
 
     def test_short_body_not_truncated(self):
-        body = store.skill_body_by_id("3d-scene-director")
+        body = store.skill_body_by_id(SHORT_SKILL)
         self.assertTrue(body)
         self.assertLessEqual(len(body), store.SKILL_BODY_MAX_CHARS)
-        prompt = build_prompt("store:3d-scene-director")
+        prompt = build_prompt("store:%s" % SHORT_SKILL)
         self.assertIn("【技能执行手册】", prompt)
         self.assertNotIn(store.SKILL_BODY_TRUNCATED_NOTE, prompt)
         self.assertIn(body.strip()[:60], prompt)
 
     def test_unknown_and_malformed_refs_are_ignored(self):
         baseline = build_prompt("")
-        for ref in ("", "   ", "store:", "store:no-such-skill", "skill:skrull",
-                    LEGACY_PREFIX.upper() + "nope", "store:skrull:extra", "nonsense"):
+        for ref in ("", "   ", "store:", "store:no-such-skill", "skill:%s" % ALIAS_SKILL,
+                    LEGACY_PREFIX.upper() + "nope", "store:%s:extra" % ALIAS_SKILL, "nonsense"):
             with self.subTest(ref=ref):
                 self.assertEqual(build_prompt(ref), baseline)
 
     def test_store_prefix_works_and_empty_id_ignored(self):
-        manual = main._agent_store_skill_manual("store:skrull")
+        manual = main._agent_store_skill_manual("store:%s" % ALIAS_SKILL)
         self.assertTrue(manual.startswith("【技能执行手册】"))
         self.assertEqual(main._agent_store_skill_manual("store:"), "")
         self.assertEqual(main._agent_store_skill_manual("store:no-such-skill"), "")
 
     def test_legacy_prefix_still_resolves(self):
-        legacy = main._agent_store_skill_manual(LEGACY_PREFIX + "primordia-art-director")
-        current = main._agent_store_skill_manual("store:primordia-art-director")
+        legacy = main._agent_store_skill_manual(LEGACY_PREFIX + LONG_SKILL)
+        current = main._agent_store_skill_manual("store:%s" % LONG_SKILL)
         self.assertIn("【技能执行手册】", legacy)
         self.assertEqual(legacy, current)
-        self.assertEqual(build_prompt(LEGACY_PREFIX + "primordia-art-director"),
-                         build_prompt("store:primordia-art-director"))
+        self.assertEqual(build_prompt(LEGACY_PREFIX + LONG_SKILL),
+                         build_prompt("store:%s" % LONG_SKILL))
         # 旧前缀大小写不一致也认
-        self.assertTrue(main._agent_store_skill_manual(LEGACY_PREFIX.upper() + "skrull"))
+        self.assertTrue(main._agent_store_skill_manual(LEGACY_PREFIX.upper() + ALIAS_SKILL))
 
     def test_name_and_activation_ids_both_resolve(self):
-        # character-asset-pack 的 activation_skill 是 primordia-character-asset-pack
-        by_name = main._agent_store_skill_manual("store:character-asset-pack")
-        by_activation = main._agent_store_skill_manual("store:primordia-character-asset-pack")
+        # 夹具里 ALIAS_SKILL 的 activation_skill 是 ALIAS_ACTIVATION
+        by_name = main._agent_store_skill_manual("store:%s" % ALIAS_SKILL)
+        by_activation = main._agent_store_skill_manual("store:%s" % ALIAS_ACTIVATION)
         self.assertIn("【技能执行手册】", by_name)
         self.assertEqual(by_name, by_activation)
 
     def test_generated_manual_is_injected_with_disclaimer(self):
-        # 3d-studio 没有上游原文，用的是 generated 整理稿；注入时必须带「非原文」声明
-        manual = main._agent_store_skill_manual("store:3d-studio")
+        # GENERATED_SKILL 没有上游原文，用的是 generated 整理稿；注入时必须带「非原文」声明
+        manual = main._agent_store_skill_manual("store:%s" % GENERATED_SKILL)
         self.assertIn("【技能执行手册】", manual)
         self.assertIn("原始执行手册未随客户端下发", manual)
-        prompt = build_prompt("store:3d-studio")
+        prompt = build_prompt("store:%s" % GENERATED_SKILL)
         self.assertIn("原始执行手册未随客户端下发", prompt)
 
     def test_other_prefix_is_ignored(self):
-        self.assertEqual(main._agent_store_skill_manual("novai:advantage-money"), "")
-        self.assertEqual(main._agent_store_skill_manual("manual:skrull"), "")
+        self.assertEqual(main._agent_store_skill_manual("novai:%s" % LONG_SKILL), "")
+        self.assertEqual(main._agent_store_skill_manual("manual:%s" % ALIAS_SKILL), "")
 
 
 class SkillRefRequestTests(unittest.TestCase):
 
     def test_instruction_limit_stays_4000(self):
         main.AgentRunRequest(canvas_id="c1", instruction="字" * 4000,
-                             skill_ref="store:primordia-art-director")
+                             skill_ref="store:%s" % LONG_SKILL)
         with self.assertRaises(ValidationError):
             main.AgentRunRequest(canvas_id="c1", instruction="字" * 4001)
 
@@ -146,8 +167,8 @@ class SkillRefRequestTests(unittest.TestCase):
         self.assertEqual(main.AgentRunRequest(canvas_id="c1", instruction="x").skill_ref, "")
 
     def test_context_stores_skill_ref(self):
-        ctx = main._CanvasRunContext({"canvas_id": "c1", "skill_ref": "  store:skrull  "})
-        self.assertEqual(ctx.skill_ref, "store:skrull")
+        ctx = main._CanvasRunContext({"canvas_id": "c1", "skill_ref": "  store:%s  " % ALIAS_SKILL})
+        self.assertEqual(ctx.skill_ref, "store:%s" % ALIAS_SKILL)
         self.assertEqual(main._CanvasRunContext({"canvas_id": "c1"}).skill_ref, "")
 
 
@@ -189,10 +210,10 @@ class SkillRefProducerTests(unittest.TestCase):
         return captured.get("system", "")
 
     def test_system_prompt_contains_manual_when_ref_present(self):
-        system = self._run("store:primordia-art-director")
+        system = self._run("store:%s" % LONG_SKILL)
         self.assertIn("【技能执行手册】", system)
-        self.assertIn("（已截断）", system)          # 61627 字 > 30000
-        self.assertIn("Primordia", system)
+        self.assertIn("（已截断）", system)          # 夹具长正文 > 30000
+        self.assertIn(LONG_MARKER, system)
 
     def test_system_prompt_clean_without_ref(self):
         system = self._run("")

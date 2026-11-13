@@ -66,9 +66,10 @@ function visible(ctl: Ctl, node: CanvasNode): boolean {
 }
 
 function focusAdded(ctl: Ctl, ids: Set<string>): void {
-  if (typeof document !== "undefined" && document.hidden) return;
   const nodes = [...ids].map((id) => ctl.store.node(id)).filter((node): node is CanvasNode => !!node);
   if (!nodes.length) return;
+  ctl.store.setUI({ sel: new Set(nodes.map((node) => node.id)) });
+  if (typeof document !== "undefined" && document.hidden) return;
   if (nodes.every((node) => visible(ctl, node))) return;
   ctl.fitTo(nodes, nodes.length > 1 ? MULTI_PAD : SINGLE_PAD, 1);
 }

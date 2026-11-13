@@ -6,22 +6,22 @@
     <link rel="icon" href="/static/images/logo.png" type="image/png">
     <title>画布工作台</title>
     <script>(function(){try{var t=localStorage.getItem("studio_theme")||localStorage.getItem("canvas_theme")||"light";if(t==="dark"){document.documentElement.classList.add("studio-theme-dark");document.documentElement.classList.add("theme-dark");}}catch(e){}})();</script>
-    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2.0.05.1789606971"></script>
-    <script defer src="/static/vendor/js/lucide-subset.js?v=2.0.05.1794194019"></script>
-    <script defer src="/static/js/shared/icons.js?v=2.0.05.1793785599"></script>
-    <script src="/static/js/theme.js?v=2.0.05.1792474521"></script>
-    <script src="/static/js/shared/utils.js?v=2.0.05.1790560477"></script>
-    <script src="/static/js/shared/viewport.js?v=2.0.05.1789606971"></script>
-    <script defer src="/static/js/touch-mouse.js?v=2.0.05.1789606971"></script>
-    <script src="/static/js/i18n.js?v=2.0.05.1790130330"></script>
-    <script defer src="/static/js/credits.js?v=2.0.05.1792848048"></script>
-    <script src="/static/js/user-menu.js?v=2.0.05.1793785628" defer></script>
-    <script src="/static/js/shared/morph-button.js?v=2.0.05.1789845865"></script>
-    <link rel="stylesheet" href="/static/css/canvas-list.css?v=2.0.05.1790560477">
-    <link rel="stylesheet" href="/static/css/theme.css?v=2.0.05.1790560477">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.05.1793785603">
-    <link rel="stylesheet" href="/static/css/canvas-perms.css?v=2.0.05.1792747657">
-    <script defer src="/static/js/canvas-perms.js?v=2.0.05.1792738024"></script>
+    <script src="/static/vendor/js/tailwindcss-cdn.js?v=2.0.07.1789606971"></script>
+    <script defer src="/static/vendor/js/lucide-subset.js?v=2.0.07.1794194019"></script>
+    <script defer src="/static/js/shared/icons.js?v=2.0.07.1793785599"></script>
+    <script src="/static/js/theme.js?v=2.0.07.1794279814"></script>
+    <script src="/static/js/shared/utils.js?v=2.0.07.1790560477"></script>
+    <script src="/static/js/shared/viewport.js?v=2.0.07.1789606971"></script>
+    <script defer src="/static/js/touch-mouse.js?v=2.0.07.1789606971"></script>
+    <script src="/static/js/i18n.js?v=2.0.07.1790130330"></script>
+    <script defer src="/static/js/credits.js?v=2.0.07.1792848048"></script>
+    <script src="/static/js/user-menu.js?v=2.0.07.1793785628" defer></script>
+    <script src="/static/js/shared/morph-button.js?v=2.0.07.1789845865"></script>
+    <link rel="stylesheet" href="/static/css/canvas-list.css?v=2.0.07.1790560477">
+    <link rel="stylesheet" href="/static/css/theme.css?v=2.0.07.1790560477">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.07.1793785603">
+    <link rel="stylesheet" href="/static/css/canvas-perms.css?v=2.0.07.1792747657">
+    <script defer src="/static/js/canvas-perms.js?v=2.0.07.1792738024"></script>
 
     <style>
         /* ═══ V4 Apple-style Glassmorphism Design System ═══ */
@@ -794,7 +794,7 @@
         <!-- ═══ HERO ═══ -->
         <section class="hero">
             <div class="hero-left">
-                <h1 class="hero-title">智能画布BEAT</h1>
+                <h1 class="hero-title">智能画布</h1>
                 <p class="hero-desc">
                     自由布局的 AI 创作空间。在无限画布上串联图像、视频、对话节点，构建你的创意工作流。
                 </p>
@@ -891,45 +891,6 @@
                 查看更多
             </button>
         </section>
-    </div>
-
-    <!-- ═══ CANVAS PICKER OVERLAY ═══ -->
-    <div class="picker-overlay" id="canvasPickerOverlay">
-        <div class="picker-panel" onclick="event.stopPropagation()">
-            <div class="picker-header">
-                <span class="picker-title">新建画布</span>
-                <button class="picker-close" id="pickerCloseBtn" aria-label="关闭">
-                    <svg data-icon="x" class="nv-i nv-i-x" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-                </button>
-            </div>
-            <div class="picker-options">
-                <button class="picker-option" id="pickerNormal">
-                    <div class="picker-option-icon">
-                        <svg data-icon="grid" class="nv-i nv-i-grid" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-                            <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-                        </svg>
-                    </div>
-                    <div class="picker-option-text">
-                        <div class="picker-option-name">智能画布BEAT</div>
-                        <div class="picker-option-desc">NOVAI 无限画布，自由拖拽布局图像与节点</div>
-                    </div>
-                    <svg data-icon="chevr" class="picker-option-arrow nv-i nv-i-chevr" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
-                </button>
-                <button class="picker-option" id="pickerSmart">
-                    <div class="picker-option-icon">
-                        <svg data-icon="bolt" class="nv-i nv-i-bolt" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
-                        </svg>
-                    </div>
-                    <div class="picker-option-text">
-                        <div class="picker-option-name">智能画布</div>
-                        <div class="picker-option-desc">AI 驱动的智能工作流，自动编排生成管线</div>
-                    </div>
-                    <svg data-icon="chevr" class="picker-option-arrow nv-i nv-i-chevr" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
-                </button>
-            </div>
-        </div>
     </div>
 
     <!-- ═══ TRASH OVERLAY ═══ -->
@@ -1054,26 +1015,13 @@
                 });
             });
 
-            // ═══ CANVAS PICKER ═══
-            const pickerOverlay = document.getElementById('canvasPickerOverlay');
+            // ═══ 新建画布：只有一个入口，直接建智能画布（旧智能画布不再提供新建） ═══
 
-            function openCanvasPicker() {
-                if (pickerOverlay) pickerOverlay.classList.add('active');
-            }
-            function closeCanvasPicker() {
-                if (pickerOverlay) pickerOverlay.classList.remove('active');
-            }
-
-            document.getElementById('btnStartCreate').addEventListener('click', openCanvasPicker);
-            document.getElementById('btnNewProject').addEventListener('click', openCanvasPicker);
-
-            pickerOverlay.addEventListener('click', function(e) {
-                if (e.target === pickerOverlay) closeCanvasPicker();
-            });
-            document.getElementById('pickerCloseBtn').addEventListener('click', closeCanvasPicker);
+            document.getElementById('btnStartCreate').addEventListener('click', createCanvasFromPicker);
+            document.getElementById('btnNewProject').addEventListener('click', createCanvasFromPicker);
 
             document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') { closeCanvasPicker(); closeTrashOverlay(); closePurgeConfirm(); closeAllCardMenus(); }
+                if (e.key === 'Escape') { closeTrashOverlay(); closePurgeConfirm(); closeAllCardMenus(); }
             });
 
             // ═══ TRASH OVERLAY ═══
@@ -1251,7 +1199,7 @@
                     previewHTML = `<div class="card-preview-empty"><svg data-icon="grid" class="nv-i nv-i-grid" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" style="width:32px;height:32px;opacity:.4"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></div>`;
                 }
 
-                const kindBadge = isSmart ? `<span class="card-preview-count" style="background:var(--accent);color:var(--text-on-accent)">智能</span>` : `<span class="card-preview-count">BEAT</span>`;
+                const kindBadge = isSmart ? `<span class="card-preview-count" style="background:var(--accent);color:var(--text-on-accent)">旧版</span>` : `<span class="card-preview-count">智能画布</span>`;
                 const accessRole = c.access_role || '';
                 const shareTag = accessRole === 'viewer'
                     ? '<span class="card-share-badge viewer">只读</span>'
@@ -1399,10 +1347,8 @@
                 } catch(e) { console.error(e); alert('删除失败'); refreshAll(); }
             }
 
-            async function createCanvasFromPicker(kind) {
-                closeCanvasPicker();
-                const isSmart = kind === 'smart';
-                const baseName = isSmart ? '智能画布' : '智能画布BEAT';
+            async function createCanvasFromPicker() {
+                const baseName = '智能画布';
                 const name = `${baseName} ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
 
                 try {
@@ -1411,8 +1357,8 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             title: name,
-                            icon: isSmart ? 'sparkles' : '🧩',
-                            kind: isSmart ? 'smart' : 'classic',
+                            icon: '🧩',
+                            kind: 'classic',
                             project: 'default',
                             board_x: 40,
                             board_y: 40
@@ -1435,8 +1381,6 @@
                 } catch(e) { console.error(e); alert('创建失败'); }
             }
 
-            document.getElementById('pickerNormal').addEventListener('click', () => createCanvasFromPicker('classic'));
-            document.getElementById('pickerSmart').addEventListener('click', () => createCanvasFromPicker('smart'));
 
             // ═══ 继续上次 ═══
             document.getElementById('btnContinueLast').addEventListener('click', function() {
@@ -1450,7 +1394,7 @@
                         ? `/static/smart-canvas.html?id=${enc}&project=${project}&t=1786289367`
                         : `/static/canvas.html?id=${enc}&project=${project}&t=1786289367`;
                 } else {
-                    openCanvasPicker();
+                    createCanvasFromPicker();
                 }
             });
 

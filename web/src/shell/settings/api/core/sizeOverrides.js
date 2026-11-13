@@ -1,7 +1,7 @@
 // 能力覆盖（provider.size_overrides）在设置页用到的选项与规整。
-// 比例 / 档位词表直接取在线生图页的同一份官方集合（15 + 4 个官方比例、6 个档位），
-// 不在设置页再抄一份；写盘用官方比例标签（SIZE_OVERRIDES.md 同时接受标签与画布内部 key）。
-import { RATIOS, EXTRA_RATIOS, RES_LEVELS } from '../../../../pages/online/onlineSizes.js';
+// 比例 / 档位词表取公共尺寸词表（15 + 4 个官方比例、6 个档位），不在设置页再抄一份；
+// 写盘用官方比例标签（SIZE_OVERRIDES.md 同时接受标签与画布内部 key）。
+import { RATIOS, EXTRA_RATIOS, RES_LEVELS } from '../../../../lib/sizeCatalog.js';
 
 // RATIOS 的 label 形如 "16:9 宽屏"：空格前就是官方比例标签，后面是给人看的说明
 export const SIZE_RATIOS = [...RATIOS, ...EXTRA_RATIOS].map(option => ({

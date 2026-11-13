@@ -1,0 +1,150 @@
+/* 全屏查看器里的图片评论标注：颜色全部走主题 token（浅色/深色自动跟随），
+   容器用加厚磨砂底 + 柔和投影，不画发丝线 */
+.cn-root .cmm-surface {
+  position: fixed;
+  z-index: 6;
+  touch-action: none;
+  line-height: 0;
+}
+.cn-root .cmm-surface[data-tool="point"],
+.cn-root .cmm-surface[data-tool="rect"] {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24'%3E%3Cpath d='M11 3h2v8h8v2h-8v8h-2v-8H3v-2h8z' fill='%23161618'/%3E%3C/svg%3E") 9 9, crosshair;
+}
+.cn-root .cmm-surface[data-tool="lasso"] {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24'%3E%3Cpath d='M17 3a2.8 2.8 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5z' fill='%23161618'/%3E%3C/svg%3E") 2 17, crosshair;
+}
+.cn-root .cmm-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.cn-root .cmm-svg path { fill: none; stroke: #161618; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; filter: drop-shadow(0 0 2px rgba(255,255,255,.85)); }
+.cn-root .cmm-rect { position: absolute; border: 1.5px dashed rgba(22,22,24,.8); border-radius: 2px; pointer-events: none; }
+.cn-root .cmm-rect i { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #f5f5f7; box-shadow: 0 0 0 1.5px rgba(22,22,24,.8), 0 2px 6px rgba(0,0,0,.2); }
+.cn-root .cmm-rect i:nth-child(1) { left: -4px; top: -4px; }
+.cn-root .cmm-rect i:nth-child(2) { right: -4px; top: -4px; }
+.cn-root .cmm-rect i:nth-child(3) { left: -4px; bottom: -4px; }
+.cn-root .cmm-rect i:nth-child(4) { right: -4px; bottom: -4px; }
+.cn-root .cmm-live { position: absolute; border: 1.5px dashed rgba(22,22,24,.8); border-radius: 2px; background: rgba(22,22,24,.05); pointer-events: none; }
+.cn-root .cmm-pin { position: absolute; width: 34px; height: 38px; padding: 0; border: 0; background: none; pointer-events: auto; cursor: pointer; transform: translate(-9px,-37px); transform-origin: 9px 37px; transition: transform .16s var(--e-std); filter: drop-shadow(0 6px 14px rgba(0,0,0,.35)); }
+.cn-root .cmm-pin:hover, .cn-root .cmm-pin.sel { transform: translate(-9px,-37px) scale(1.07); }
+.cn-root .cmm-pin svg { display: block; }
+.cn-root .cmm-pin .n { position: absolute; left: 0; right: 0; top: 0; height: 29px; display: grid; place-items: center; font-size: 13px; font-weight: 600; line-height: 1; color: #fff; }
+
+/* 「添加描述」浮标：盖在图片上，按主题切换底色；加厚底 + 柔和投影保证任何画面上都读得清 */
+.cn-root .cmm-pill {
+  position: absolute;
+  pointer-events: auto;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  color: var(--fg);
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 12px 30px rgba(0,0,0,.32);
+  transform: translate(0,-50%);
+  border: 0;
+  cursor: pointer;
+}
+.cn-root .cmm-pill:hover { background: color-mix(in srgb, var(--fg) 8%, var(--card)); }
+.cn-root .cmm-pill.flip { transform: translate(-100%,-50%); }
+
+/* 子工具条：浮在全屏查看器底栏正上方，颜色跟随主题 */
+.cn-root .cmm-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 106px;
+  transform: translateX(-50%);
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.06);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: none;
+  animation: cmmBarIn .18s var(--e-std);
+}
+.cn-root[data-theme=light] .cmm-bar { background: rgba(0,0,0,.045); }
+@keyframes cmmBarIn { from { opacity: 0; transform: translate(-50%, 6px); } }
+.cn-root .cmm-tool { height: 36px; padding: 0 11px; border-radius: 10px; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: rgba(255,255,255,.72); border: 0; background: none; cursor: pointer; white-space: nowrap; transition: background .16s var(--e-std), color .16s var(--e-std); }
+.cn-root .cmm-tool:hover { background: rgba(255,255,255,.09); color: #fff; }
+.cn-root .cmm-tool.on { background: rgba(255,255,255,.12); color: #fff; }
+.cn-root[data-theme=light] .cmm-tool { color: rgba(0,0,0,.62); }
+.cn-root[data-theme=light] .cmm-tool:hover { background: rgba(0,0,0,.06); color: #000; }
+.cn-root[data-theme=light] .cmm-tool.on { background: rgba(0,0,0,.08); color: #000; }
+.cn-root .cmm-sep { width: 6px; height: 18px; background: none; margin: 0; }
+
+.cn-root .cmm-toast { position: fixed; left: 50%; bottom: 170px; z-index: 9; transform: translate(-50%, 8px); padding: 8px 14px; border-radius: 10px; background: var(--s3); color: var(--fg); font-size: 12.5px; box-shadow: 0 14px 40px rgba(0,0,0,.35); opacity: 0; pointer-events: none; transition: opacity .18s var(--e-std), transform .18s var(--e-std); white-space: nowrap; max-width: 90vw; overflow: hidden; text-overflow: ellipsis; }
+.cn-root .cmm-toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+.cn-root .cmm-card {
+  position: fixed;
+  z-index: 8;
+  width: min(400px,calc(100vw - 32px));
+  padding: 16px 16px 14px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+  color: var(--fg);
+}
+.cn-root .cmm-card .hd { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.cn-root .cmm-label { height: 34px; padding: 0 9px; border-radius: 10px; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--fg); border: 0; background: none; cursor: pointer; }
+.cn-root .cmm-label:hover { background: var(--hover); }
+.cn-root .cmm-card .sp { flex: 1; }
+.cn-root .cmm-iconbtn { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; color: var(--fg3); border: 0; background: none; cursor: pointer; }
+.cn-root .cmm-iconbtn:hover { background: var(--hover); color: var(--fg); }
+.cn-root .cmm-card textarea { display: block; width: 100%; min-height: 76px; max-height: 160px; padding: 4px 2px 10px; border: 0; outline: 0; resize: none; background: none; color: var(--fg); font: 14px/1.7 var(--font,-apple-system,system-ui,sans-serif); }
+.cn-root .cmm-card textarea::placeholder { color: var(--fg3); }
+.cn-root .cmm-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+.cn-root .cmm-btn { height: 34px; padding: 0 16px; border-radius: 10px; font-size: 13px; display: inline-flex; align-items: center; border: 0; cursor: pointer; transition: background .16s, color .16s, opacity .16s; }
+.cn-root .cmm-btn.ghost { color: var(--fg2); background: var(--sunken); }
+.cn-root .cmm-btn.ghost:hover { background: var(--hover); color: var(--fg); }
+.cn-root .cmm-btn.primary { background: var(--solid); color: var(--on-solid); font-weight: 500; }
+.cn-root .cmm-btn.primary:hover { background: color-mix(in srgb, var(--solid) 88%, transparent); }
+.cn-root .cmm-btn:disabled { opacity: .32; cursor: default; }
+.cn-root .cmm-menu { position: absolute; left: 14px; top: 58px; width: calc(100% - 28px); padding: 12px; border-radius: 14px; background: color-mix(in srgb, var(--card) 98%, transparent); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); box-shadow: var(--glass-shadow); z-index: 2; }
+.cn-root .cmm-menu .mt { padding: 2px 10px 10px; font-size: 12px; color: var(--fg3); }
+.cn-root .cmm-opt { display: flex; align-items: center; gap: 12px; width: 100%; height: 42px; padding: 0 10px; border-radius: 9px; font-size: 13.5px; color: var(--fg); border: 0; background: none; cursor: pointer; }
+.cn-root .cmm-opt:hover { background: var(--hover); }
+.cn-root .cmm-opt .th { flex: none; width: 26px; height: 26px; border-radius: 6px; background: #f8f3f0; display: grid; place-items: center; }
+.cn-root .cmm-opt .th i { width: 60%; height: 3px; border-radius: 1px; background: #0f3fb0; }
+.cn-root .cmm-opt .ck { margin-left: auto; opacity: 0; }
+.cn-root .cmm-opt.on .ck { opacity: 1; }
+.cn-root .cmm-menu input { display: block; width: 100%; height: 38px; margin-top: 10px; padding: 0 12px; border: 0; outline: 0; border-radius: 10px; background: var(--sunken); color: var(--fg); font-size: 13px; }
+.cn-root .cmm-menu input::placeholder { color: var(--fg3); }
+
+.cn-root .cmm-all { position: fixed; left: 50%; bottom: 170px; transform: translateX(-50%); z-index: 8; width: min(340px,calc(100vw - 32px)); max-height: min(420px,60vh); overflow: auto; padding: 12px; border-radius: 16px; background: color-mix(in srgb, var(--card) 96%, transparent); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); box-shadow: var(--glass-shadow); }
+.cn-root .cmm-all .hd { padding: 2px 10px 10px; font-size: 12px; color: var(--fg3); }
+.cn-root .cmm-row { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 10px; border-radius: 10px; text-align: left; border: 0; background: none; cursor: pointer; }
+.cn-root .cmm-row:hover { background: var(--hover); }
+.cn-root .cmm-row .no { flex: none; width: 22px; height: 22px; border-radius: 7px; background: var(--solid); color: var(--on-solid); font-size: 11px; font-weight: 600; line-height: 22px; text-align: center; margin-top: 1px; }
+.cn-root .cmm-row .th { flex: none; width: 38px; height: 38px; border-radius: 8px; background: #f8f3f0; display: grid; place-items: center; }
+.cn-root .cmm-row .th i { width: 58%; height: 4px; border-radius: 1px; background: #0f3fb0; }
+.cn-root .cmm-row .tx { min-width: 0; }
+.cn-root .cmm-row b { display: block; font-size: 12.5px; font-weight: 500; color: var(--fg); }
+.cn-root .cmm-row small { display: block; font-size: 11.5px; color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+.cn-root .cmm-empty { padding: 20px 12px; text-align: center; font-size: 12.5px; line-height: 1.7; color: var(--fg3); }
+
+/* 评论时收起会挡到画面的信息栏 / 缩略图条 / 对比按钮 */
+.cn-root .lightbox.commenting .lb-thumbs,
+.cn-root .lightbox.commenting .lb-info,
+.cn-root .lightbox.commenting .lb-cmp-btn { display: none; }
+@media (max-width: 600px) {
+  .cn-root .cmm-bar { bottom: 98px; gap: 0; padding: 3px; }
+  .cn-root .cmm-tool { padding: 0 8px; font-size: 12px; }
+  .cn-root .cmm-card { left: 12px !important; right: 12px; width: auto !important; top: auto !important; bottom: 158px; }
+  .cn-root .cmm-all { bottom: 158px; }
+}
+
+/* 评论态下工具栏正上方是子工具条，图标气泡提示会和它叠在一起：评论态里先不放 tip */
+.cn-root .lightbox.commenting [data-tip]:hover:after { opacity: 0; visibility: hidden; }
+

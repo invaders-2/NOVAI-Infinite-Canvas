@@ -7,8 +7,10 @@ export const MEDIA_TABS = ['assets', 'canvas-assets', 'local'];
 const LAST_MEDIA_TAB_KEY = 'asset_manager_media_source_v1';
 const LOCAL_CAPTION_SETTINGS_KEY = 'asset_manager_local_caption_settings_v1';
 
+// 没选过时的默认来源：「画布里的」。画布生成出来的图片/视频都在这里，
+// 默认落到「资产库」的话，没手动保存过的生成物会让整页看起来是空的。
 export function lastMediaTab() {
-    try { const v = localStorage.getItem(LAST_MEDIA_TAB_KEY); return MEDIA_TABS.includes(v) ? v : 'assets'; } catch (e) { return 'assets'; }
+    try { const v = localStorage.getItem(LAST_MEDIA_TAB_KEY); return MEDIA_TABS.includes(v) ? v : 'canvas-assets'; } catch (e) { return 'canvas-assets'; }
 }
 function readCaptionSettings() {
     try { const d = JSON.parse(localStorage.getItem(LOCAL_CAPTION_SETTINGS_KEY) || '{}'); return d && typeof d === 'object' ? d : {}; } catch (e) { return {}; }
@@ -26,6 +28,8 @@ export const S = reactive({
     providers: [],
     canvasData: { categories: [], canvases: [], items: [] },
     localAssets: [],
+    // 「画布生成」只读生成物（根视图不返回，进文件夹时懒加载，见 local.js loadGeneratedAssets）
+    localGeneratedItems: [],
     localTree: null,
     // 反推 / 智能分类的平台、模型、提示词（本机记忆，key 与旧版一致）
     caption: {

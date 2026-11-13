@@ -68,8 +68,6 @@ smart-canvas.js.bak
 _self_restart.bat
 
 # 测试/调试截图和临时文件
-gpt-chat-*.png
-gpt-chat-*.yml
 test-*.png
 tmp_*.png
 *.bak

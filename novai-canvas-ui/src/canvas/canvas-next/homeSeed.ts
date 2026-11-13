@@ -7,6 +7,7 @@
  */
 import type { CanvasNode } from "../react-canvas/reactCanvasStore";
 import { connect } from "./actions";
+import { fitSourceBox } from "./mediaFit";
 import { frameOf } from "./groupFit";
 import { defaultParams, uid, type ImageParams, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
@@ -43,7 +44,7 @@ const TEXT_W = 320;
 const TEXT_H = 240;
 const LABEL_W = 240;
 const LABEL_H = 120;
-const TABLE_W = 420;
+const TABLE_W = 650;
 const TABLE_H = 220;
 const ROW_GAP = 48;
 const COL_GAP = 140;
@@ -109,8 +110,8 @@ async function imageNodes(store: CanvasStore, spec: SeedNode): Promise<CanvasNod
     const made: CanvasNode[] = [];
     for (const image of images) {
         const [w, h] = await probeSize(image.url);
-        const height = w > 0 && h > 0 ? Math.round(Math.max(100, Math.min(520, IMAGE_W * h / w))) : FALLBACK_H;
-        made.push(store.newNode("image", 0, 0, { title: image.name || spec.title || "参考图", uploaded: true, hist: [{ url: image.url, w, h }], w: IMAGE_W, h: height }));
+        const box = fitSourceBox(w, h, { baseW: IMAGE_W });
+        made.push(store.newNode("image", 0, 0, { title: image.name || spec.title || "参考图", uploaded: true, hist: [{ url: image.url, w, h }], w: box?.w || IMAGE_W, h: box?.h || FALLBACK_H }));
     }
     return made;
 }

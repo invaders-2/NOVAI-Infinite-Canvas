@@ -111,6 +111,23 @@ function normalizedModelId(provider: string, model: string): string {
   return provider && model ? provider + "::" + model : "";
 }
 
+/** 步骤里**显式写过**的 provider / model（settings 或 args），没写就是空串；不要拿 models[0] 兜底 */
+export function planStepModelSource(step: PlanStep): { provider: string; model: string } {
+  const source = readSource(step);
+  const args = (step?.args || {}) as Record<string, any>;
+  let provider = String(source.provider || args.provider || "");
+  let model = String(source.model || args.model || "");
+  // 兼容把完整 id 写进 model 的情况：p::m 拆成 provider / model
+  if (!provider && model.includes("::")) ({ provider, model } = splitModelId(model));
+  return { provider, model };
+}
+
+/** 步骤显式指定的模型；没写 / 列表里没有就返回 undefined（方案卡据此显示「跟随助手默认」） */
+export function findExplicitPlanModel(step: PlanStep, kind: PlanKind, models: ModelSpec[] = []): ModelSpec | undefined {
+  const { provider, model } = planStepModelSource(step);
+  return findPlanModel(models, kind, provider, model);
+}
+
 export function findPlanModel(models: ModelSpec[], kind: PlanKind, provider: string, model: string): ModelSpec | undefined {
   const list = (models || []).filter((m) => m.kind === kind);
   const wanted = normalizedModelId(provider, model);
@@ -237,9 +254,9 @@ export function readPlanParams(step: PlanStep, kind: PlanKind, models: ModelSpec
     ? (String(source.resolution || "").toUpperCase() || resolutionFromSize(String(source.size || ""), ratio) || "1K")
     : String(source.resolution || (chosen?.res && chosen.res[0]) || "");
   const rows = Array.isArray(args.rows) ? args.rows.length : 0;
-  let count = Math.max(1, Number(source.count) || (step?.tool === "batch_generate" ? rows || 1 : 1));
-  if (spec?.batchUnknown) count = 1;
-  else if (spec && Array.isArray(spec.batch) && spec.batch.length && !spec.batch.includes(count)) count = spec.batch[0];
+  // 不再静默回落到 spec.batch[0]：这里只保留「用户要几张」，
+  // 模型一次最多 N 张时由 countPlan()/expandGenerationSteps() 拆成多次执行（见文件末尾）。
+  const count = Math.max(1, Math.round(Number(source.count) || (step?.tool === "batch_generate" ? rows || 1 : 1)));
   const duration = Math.max(1, Number(source.duration) || 5);
   let mode = kind === "video" ? videoModeApi(source.mode) : "";
   if (kind === "video" && spec && Array.isArray(spec.modes) && mode) {
@@ -260,13 +277,113 @@ export function readPlanParams(step: PlanStep, kind: PlanKind, models: ModelSpec
   };
 }
 
+/** 该模型一次最多能出几张：batch 声明的最大合法值；没有声明 / 批量未知按 1 张处理 */
+export function maxBatchOf(spec: ModelSpec | undefined): number {
+  const declared = spec && Array.isArray(spec.batch) ? spec.batch.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 1) : [];
+  return declared.length ? Math.max(...declared) : 1;
+}
+
+export type CountPlan = {
+  requested: number;
+  /** 每次最多几张（模型 batch 的最大合法值；未知时 1） */
+  perGroup: number;
+  groups: number;
+  /** 每次实际生成几张（尾组可能不足 perGroup；不在模型合法档位的尾数会补到最近一档） */
+  sizes: number[];
+  /** 模型明确声明了 batchUnknown（批量上限未知） */
+  batchUnknown: boolean;
+  /** 没有声明 batch（旧数据 / 未知） */
+  unknownBatch: boolean;
+  /** 尾组被补到合法档位（总数会略多于用户要求） */
+  bumped: boolean;
+};
+
+/**
+ * 「要 X 张、这个模型一次最多 N 张」→ 分几次、每次几张。
+ *   4 + batch=[1]     → 4 次，每次 1
+ *   4 + batch=[1,2]   → 2 次，每次 2
+ *   4 + batch=[1,2,4] → 1 次，4 张
+ *   1                 → 1 次，1 张
+ * 批量未知（batchUnknown / 没声明）→ 按一次 1 张，卡片上明确提示。
+ */
+export function countPlan(spec: ModelSpec | undefined, requested: number): CountPlan {
+  const want = Math.max(1, Math.round(Number(requested) || 1));
+  const declared = spec && Array.isArray(spec.batch) ? spec.batch.map((n) => Number(n)).filter((n) => Number.isInteger(n) && n >= 1) : [];
+  const perGroup = declared.length ? Math.max(...declared) : 1;
+  const sizeCount = Math.ceil(want / perGroup);
+  const sizes: number[] = [];
+  let left = want;
+  for (let i = 0; i < sizeCount; i += 1) { const take = Math.min(perGroup, left); sizes.push(take); left -= take; }
+  let bumped = false;
+  if (declared.length) {
+    for (let i = 0; i < sizes.length; i += 1) {
+      if (declared.includes(sizes[i])) continue;
+      const fix = declared.filter((n) => n >= sizes[i]).sort((a, b) => a - b)[0];
+      if (fix) { sizes[i] = fix; bumped = true; }
+    }
+  }
+  return { requested: want, perGroup, groups: sizes.length, sizes, batchUnknown: !!spec && spec.batchUnknown === true, unknownBatch: !declared.length, bumped };
+}
+
+/** 把批准给后端的步骤按「模型一次最多 N 张」拆成多次 run_generation（总数等于用户要的；尾组按合法档位补） */
+export function expandGenerationSteps(steps: PlanStep[], models: ModelSpec[] = []): PlanStep[] {
+  const out: PlanStep[] = [];
+  for (const step of steps) {
+    const kind = planStepKind(step, models);
+    if (!kind) { out.push(step); continue; }
+    const source = planStepModelSource(step);
+    const spec = findPlanModel(models, kind, source.provider, source.model);
+    const requested = Math.max(1, Math.round(Number(readSource(step).count) || 1));
+    const plan = countPlan(spec, requested);
+    if (plan.groups <= 1) { out.push(step); continue; }
+    for (let i = 0; i < plan.sizes.length; i += 1) {
+      const copy = JSON.parse(JSON.stringify(step)) as PlanStep;
+      const args = (copy.args || {}) as Record<string, any>;
+      if (planStepScope(step) === "settings") {
+        const settings = (args.settings && typeof args.settings === "object" ? args.settings : {}) as Record<string, any>;
+        settings.count = plan.sizes[i];
+        args.settings = settings;
+      } else {
+        args.count = plan.sizes[i];
+      }
+      copy.args = args;
+      // 明确标记：同节点的多次执行要按顺序串行（画布 autorun 靠它建队列，不按节点去重吞掉）
+      args.countGroup = { index: i + 1, total: plan.sizes.length };
+      copy.description = (step.description || "生成") + "（第 " + (i + 1) + "/" + plan.sizes.length + " 次）";
+      out.push(copy);
+    }
+  }
+  return out;
+}
+
+/** 从批准步骤里取出「同节点按顺序执行」的队列（带 countGroup 标记的步骤；旧路径没有标记返回空 = 保持原去重行为） */
+export type CountGroupItem = { nodeId: string; index: number; total: number; settings: Record<string, unknown> };
+export function countGroupQueue(steps: PlanStep[]): Map<string, CountGroupItem[]> {
+  const queues = new Map<string, CountGroupItem[]>();
+  for (const step of steps || []) {
+    const args = (step?.args || {}) as Record<string, any>;
+    const group = args.countGroup as { index?: number; total?: number } | undefined;
+    const nodeId = String(args.node_id || "");
+    if (!group || !nodeId) continue;
+    const settings = { ...((args.settings && typeof args.settings === "object" ? args.settings : {}) as Record<string, unknown>) };
+    // 卡片里模型可能是短 id（agnes-image-2.0-flash）：队列统一存完整 provider::model，执行时 modelOf 才能解析
+    if (settings.model && !String(settings.model).includes("::") && settings.provider) settings.model = String(settings.provider) + "::" + String(settings.model);
+    const item: CountGroupItem = { nodeId, index: Math.max(1, Number(group.index) || 1), total: Math.max(1, Number(group.total) || 1), settings };
+    const list = queues.get(nodeId) || [];
+    list.push(item);
+    queues.set(nodeId, list);
+  }
+  for (const [nodeId, list] of queues) queues.set(nodeId, list.sort((a, b) => a.index - b.index));
+  return queues;
+}
+
 function writePlanParams(step: PlanStep, params: PlanParams): PlanStep {
   const copy = JSON.parse(JSON.stringify(step || {})) as PlanStep;
   const args = (copy.args || {}) as Record<string, any>;
   if (params.scope === "settings") {
     const settings = (args.settings && typeof args.settings === "object" ? args.settings : {}) as Record<string, any>;
-    settings.provider = params.provider;
-    settings.model = params.model;
+    if (params.provider) settings.provider = params.provider; else delete settings.provider;
+    if (params.model) settings.model = params.model; else delete settings.model;
     settings.ratio = params.ratio;
     if (params.kind === "image") {
       settings.resolution = params.resolution.toLowerCase();
@@ -278,8 +395,8 @@ function writePlanParams(step: PlanStep, params: PlanParams): PlanStep {
     }
     args.settings = settings;
   } else {
-    args.provider = params.provider;
-    args.model = params.model;
+    if (params.provider) args.provider = params.provider; else delete args.provider;
+    if (params.model) args.model = params.model; else delete args.model;
     args.ratio = params.ratio;
     if (params.kind === "image") {
       if (params.size) args.size = params.size; else delete args.size;
@@ -298,32 +415,38 @@ function writePlanParams(step: PlanStep, params: PlanParams): PlanStep {
 
 export function patchPlanStep(step: PlanStep, kind: PlanKind, models: ModelSpec[], patch: PlanStepPatch): PlanStep {
   const current = readPlanParams(step, kind, models);
-  let spec = findPlanModel(models, kind, current.provider, current.model);
-  let provider = current.provider, model = current.model;
+  // 只有步骤显式写了模型（或这次明确选了模型）才写回 provider/model；不要用 readPlanParams 的兜底模型
+  const source = planStepModelSource(step);
+  let provider = source.provider, model = source.model;
+  let spec = findPlanModel(models, kind, provider, model);
   if (patch.modelConfigId) {
     const picked = models.find((m) => m.id === patch.modelConfigId && m.kind === kind);
     if (picked) { provider = splitModelId(picked.id).provider; model = splitModelId(picked.id).model; spec = picked; }
+  } else if (patch.modelConfigId === "") {
+    // 选回「跟随助手默认」：清掉步骤里的模型，交给运行上下文
+    provider = ""; model = ""; spec = undefined;
   }
+  // 没显式模型时，比例/分辨率/张数用默认 spec 收敛选项，但绝不写回模型
+  const optionSpec = spec || (models || []).find((m) => m.kind === kind);
   let ratio = patch.ratio !== undefined ? patch.ratio : current.ratio;
   let resolution = patch.resolution !== undefined ? patch.resolution : current.resolution;
   let count = patch.count !== undefined ? Math.max(1, Math.round(patch.count)) : current.count;
   let duration = patch.duration !== undefined ? Math.max(1, Math.round(patch.duration)) : current.duration;
   let mode = patch.mode !== undefined ? videoModeApi(patch.mode) : current.mode;
-  if (spec) {
-    const ratios = kind === "image" ? imageRatioOptions(spec) : videoRatioOptions(spec);
+  if (optionSpec) {
+    const ratios = kind === "image" ? imageRatioOptions(optionSpec) : videoRatioOptions(optionSpec);
     if (ratios.length && !ratios.includes(ratio)) ratio = ratios[0];
     if (kind === "image") {
-      const sizes = imageResolutionOptions(spec);
+      const sizes = imageResolutionOptions(optionSpec);
       if (sizes.length && !sizes.includes(resolution)) resolution = sizes[0];
-      // 纠正用模型声明的 batch，而不是把当前值塞回选项里（否则 4 张会带进只支持 1/2 张的模型）
-      const counts = (spec.batch || []).map((x) => Number(x)).filter((x) => Number.isInteger(x) && x >= 1);
-      if (counts.length && !counts.includes(count)) count = counts[0];
+      // 张数不在这里夹回 batch[0]：用户要几张就保留几张，批量收敛交给 expandGenerationSteps 拆组执行。
+      // （其余参数仍按模型支持的选项纠正；只有「要几张」不能被吞，否则批准转录里就只剩 1 张。）
     } else {
-      const durs = durationOptions(spec, duration);
+      const durs = durationOptions(optionSpec, duration);
       if (durs.length && !durs.includes(duration)) duration = durs[0];
-      const resList = videoResOptions(spec);
+      const resList = videoResOptions(optionSpec);
       if (resList.length && !resList.includes(resolution)) resolution = resList[0];
-      const modes = videoModeOptions(spec).map((x) => x.value);
+      const modes = videoModeOptions(optionSpec).map((x) => x.value);
       if (mode && !modes.includes(mode)) mode = modes[0] || "";
     }
   }
@@ -345,8 +468,11 @@ export function planParamsSummary(steps: PlanStep[], models: ModelSpec[] = []): 
     const kind = planStepKind(step, models);
     if (!kind) return;
     const params = readPlanParams(step, kind, models);
-    const spec = findPlanModel(models, kind, params.provider, params.model);
-    const label = modelLabel(spec, params.provider, params.model);
+    const src = planStepModelSource(step);
+    const explicit = findPlanModel(models, kind, src.provider, src.model);
+    // 没有显式模型就不要把 models[0] 写进摘要（执行时用的是运行上下文默认模型）
+    const raw = src.provider && src.model ? src.provider + " · " + src.model : (src.model || src.provider);
+    const label = explicit ? modelLabel(explicit, "", "") : raw || "跟随助手默认";
     const tool = String(step.tool || "").toLowerCase();
     if (tool === "batch_generate") {
       const rows = Array.isArray((step.args || {}).rows) ? (step.args as Record<string, any>).rows.length : params.count;
@@ -360,4 +486,55 @@ export function planParamsSummary(steps: PlanStep[], models: ModelSpec[] = []): 
     else parts.push("用 " + label + " 出 " + params.count + " 张 " + ratioDisplayLabel(params.ratio) + " " + params.resolution);
   });
   return parts.join("；");
+}
+
+/** 待生成卡片里一行参数（L6）：「执行生成」按它把模型 / 比例 / 张数写进执行步骤 */
+export type ApproveRow = {
+  on: boolean;
+  modelId: string;
+  ratio: string;
+  resolution: string;
+  count: number;
+  duration: number;
+  mode: string;
+  prompt: string;
+};
+export type ApproveNode = { node_id: string; title: string; prompt?: string };
+
+/** 「执行生成」能不能点：至少勾一个节点，图片 / 视频节点都必须选了模型 */
+export function generationReady(rows: ApproveRow[], kinds: Array<PlanKind | "audio" | null>): boolean {
+  const picked = rows.filter((r) => r.on).length;
+  if (!picked) return false;
+  return !rows.some((r, i) => r.on && (kinds[i] === "image" || kinds[i] === "video") && !r.modelId);
+}
+
+/** 点「执行生成」时真正交给后端的步骤（L6）：改过的提示词先写回节点，再按行里选的模型 / 参数生成；
+ *  一次生成不完的按模型批量上限拆成多次。选了模型后必须能产出可执行的 run_generation。 */
+export function buildGenerationApproveSteps(steps: PlanStep[], rows: ApproveRow[],
+  models: ModelSpec[], nodes: ApproveNode[]): AgentTaskPlan["steps"] {
+  const out: AgentTaskPlan["steps"] = [];
+  const infoOf = (step: PlanStep) => nodes.find((n) => n.node_id === (step.args || {}).node_id);
+  steps.forEach((step, index) => {
+    const type = String((step.args || {}).type || "").toLowerCase();
+    const kind: PlanKind | "audio" | null = type === "image" || type === "video" ? type : type === "audio" ? "audio" : null;
+    const row = rows[index];
+    if (!row?.on) return;
+    const args = (step.args || {}) as Record<string, any>;
+    const info = infoOf(step);
+    if (info && row.prompt.trim() && row.prompt.trim() !== (info.prompt || "").trim()) {
+      out.push({ tool: "update_node", args: { canvas_id: args.canvas_id, node_id: args.node_id, prompt: row.prompt.trim() }, description: "改「" + info.title + "」的提示词" });
+    }
+    if (kind !== "image" && kind !== "video") { out.push(step); return; }
+    const patched = patchPlanStep(step, kind, models, {
+      modelConfigId: row.modelId, ratio: row.ratio, resolution: row.resolution,
+      ...(kind === "image" ? { count: row.count } : { duration: row.duration }),
+    });
+    const settings = ((patched.args || {}) as Record<string, any>).settings;
+    if (settings && typeof settings === "object") {
+      delete settings.size;   // 画布节点参数用档位（1k/2k/4k），像素尺寸不往后端写
+      if (kind === "video") { if (row.mode) settings.mode = row.mode; else delete settings.mode; }
+    }
+    out.push(...expandGenerationSteps([patched], models));
+  });
+  return out;
 }

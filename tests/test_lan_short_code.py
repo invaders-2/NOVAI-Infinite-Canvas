@@ -8,6 +8,8 @@ UDP 广播本身不在这里起真 socket：启动 / 幂等用替身循环验证
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import re
@@ -241,6 +243,78 @@ def main() -> int:
     check("broadcast_targets 含全局广播", lan.DISCOVERY_BROADCAST in targets, str(targets))
     check("broadcast_targets 不含回环地址", not any(item.startswith("127.") for item in targets), str(targets))
     check("broadcast_targets 无重复", len(targets) == len(set(targets)), str(targets))
+
+    # 9b. 非 /24 网段（/23）：写死 /24 会打到不存在的普通主机，对端永远发现不了本机
+    check("_mask_prefix 解析 /23", lan._mask_prefix("255.255.254.0") == 23, str(lan._mask_prefix("255.255.254.0")))
+    check("_mask_prefix 拒绝非连续掩码", lan._mask_prefix("255.0.255.0") is None)
+    guessed = lan._directed_broadcasts("172.18.2.143")
+    check("无掩码时 /23 广播正确（172.18.3.255）", "172.18.3.255" in guessed, str(guessed))
+    check("无掩码时保留原 /24 结果", "172.18.2.255" in guessed, str(guessed))
+    check("无掩码时覆盖 /20 与 /16",
+          "172.18.15.255" in guessed and "172.18.255.255" in guessed, str(guessed))
+    check("无掩码时结果无重复", len(guessed) == len(set(guessed)), str(guessed))
+    real = lan._directed_broadcasts("172.18.2.143", "255.255.254.0")
+    check("真实掩码 /23 算出 172.18.3.255", "172.18.3.255" in real, str(real))
+    check("真实掩码 /23 仍带原 /24 结果（兼容旧行为）", "172.18.2.255" in real, str(real))
+    check("真实掩码 /25 只发本子网广播",
+          lan._directed_broadcasts("10.0.0.60", "255.255.255.128") == ["10.0.0.127"],
+          str(lan._directed_broadcasts("10.0.0.60", "255.255.255.128")))
+    check("掩码非法时退回候选前缀",
+          "172.18.3.255" in lan._directed_broadcasts("172.18.2.143", "255.0.255.0"),
+          str(lan._directed_broadcasts("172.18.2.143", "255.0.255.0")))
+    check("/32 没有定向广播", lan._directed_broadcasts("10.0.0.1", "255.255.255.255") == [],
+          str(lan._directed_broadcasts("10.0.0.1", "255.255.255.255")))
+    check("10.25.1.143 仍含 10.25.1.255", "10.25.1.255" in lan._directed_broadcasts("10.25.1.143"))
+
+    masks = lan._iface_netmasks()
+    check("网卡掩码表是 dict", isinstance(masks, dict), str(masks))
+    check("网卡掩码不含回环", not any(ip.startswith("127.") for ip in masks), str(masks))
+    check("网卡掩码全部合法", all(lan._mask_prefix(value) for value in masks.values()), str(masks))
+
+    os.environ["NOVAI_LAN_IP"] = "172.18.2.143"
+    try:
+        targets23 = lan.broadcast_targets()
+    finally:
+        os.environ["NOVAI_LAN_IP"] = "10.25.1.8"
+    check("/23 网段 broadcast_targets 含 172.18.3.255", "172.18.3.255" in targets23, str(targets23))
+    check("/23 网段仍含 /24 与全局广播",
+          "172.18.2.255" in targets23 and lan.DISCOVERY_BROADCAST in targets23, str(targets23))
+    check("/23 网段目标无重复", len(targets23) == len(set(targets23)), str(targets23))
+
+    # 10. 广播发送：单条目标失败按预期忽略，只有全部失败才提示一次（新候选不能变日志噪音）
+    class FakeSock:
+        def __init__(self, fail_count: int = 0) -> None:
+            self.calls = []
+            self.fail_count = fail_count
+
+        def sendto(self, data, target):
+            self.calls.append(target[0])
+            if len(self.calls) <= self.fail_count:
+                raise OSError(64, "Host is down")
+
+    real_targets = lan.broadcast_targets
+    lan.broadcast_targets = lambda: ["172.18.2.255", "172.18.3.255", "255.255.255.255"]
+    try:
+        sock = FakeSock(fail_count=1)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            warned = lan._broadcast_once(sock, False)
+        check("单条目标失败不中断后续候选",
+              sock.calls == ["172.18.2.255", "172.18.3.255", "255.255.255.255"], str(sock.calls))
+        check("单条失败不算整体失败", warned is False, str(warned))
+        check("单条失败不刷日志", buf.getvalue() == "", repr(buf.getvalue()))
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            warned = lan._broadcast_once(FakeSock(fail_count=99), False)
+        check("全部失败才提示一次", warned is True and buf.getvalue().count("[LAN]") == 1,
+              repr(buf.getvalue()))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            warned = lan._broadcast_once(FakeSock(fail_count=99), True)
+        check("已提示过不再重复刷日志", warned is True and buf.getvalue() == "", repr(buf.getvalue()))
+    finally:
+        lan.broadcast_targets = real_targets
 
     shutil.rmtree(data_dir, ignore_errors=True)
     print("")

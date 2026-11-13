@@ -3,7 +3,7 @@
  * 视觉语言照 HextaUI Image Studio block：批次不套卡、方形图块 12px 圆角 8px 间距、
  * hover 底部渐变 + 左下深色玻璃动作按钮、全屏磨砂灯箱 + 底部玻璃信息条。
  */
-import { useEffect, type ReactNode } from "react";
+import { useEffect, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "../ui/Icon";
 import { ThumbImg } from "../ui/thumb";
@@ -124,6 +124,12 @@ export function StudioLightbox({ items, index, onIndex, onClose, label = "查看
   const root = portalRoot();
   if (!root || !item) return null;
   const step = (dir: number) => onIndex((index + dir + items.length) % items.length);
+  // 点空白（遮罩 / 舞台空处）关闭；图片、视频、信息栏与按钮本体点了不关
+  const closeOnBlank = (event: MouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("img, video, canvas, a, button, .studio-lb-bar")) return;
+    onClose();
+  };
   return createPortal(
     <div
       aria-label={label}
@@ -132,17 +138,16 @@ export function StudioLightbox({ items, index, onIndex, onClose, label = "查看
       data-studio-lightbox
       role="dialog"
       {...dataProps(data)}
-      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      onClick={closeOnBlank}
     >
-      <button aria-label="关闭" className="studio-lb-close" onClick={onClose} title="关闭" type="button"><Icon name="x" size="s" /></button>
-      <div className="studio-lb-stage" onClick={(event) => event.stopPropagation()}>{item.media}</div>
+      <div className="studio-lb-stage">{item.media}</div>
       {items.length > 1 ? <>
         <button aria-label="上一张" className="studio-lb-nav prev" onClick={(event) => { event.stopPropagation(); step(-1); }} title="上一张" type="button"><Icon name="left" size="s" /></button>
         <button aria-label="下一张" className="studio-lb-nav next" onClick={(event) => { event.stopPropagation(); step(1); }} title="下一张" type="button"><Icon name="right" size="s" /></button>
       </> : null}
-      <div className="studio-lb-bar" onClick={(event) => event.stopPropagation()}>
+      <div className="studio-lb-bar">
         <div className="studio-lb-info">{item.info}</div>
-        <div className="studio-lb-hint"><span className="studio-lb-count tnum">{index + 1} / {items.length}</span> · ← / → 切换 · Esc 或点遮罩关闭</div>
+        <div className="studio-lb-hint"><span className="studio-lb-count tnum">{index + 1} / {items.length}</span> · ← / → 切换 · Esc 或点空白处关闭</div>
       </div>
     </div>,
     root,

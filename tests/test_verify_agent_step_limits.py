@@ -371,6 +371,7 @@ class ClassicAutoWaitTests(unittest.TestCase):
         done = done_event(events)
         self.assertIn("失败记录", done["message"])
         self.assertIn("上游 400：提示词违规", done["message"])
+        self.assertTrue(any("上游 400：提示词违规" in str(item) for item in done["failures"]), done["failures"])
         self.assertIn("生成结果", calls[1])
         self.assertIn("上游 400：提示词违规", calls[1])
 
@@ -393,6 +394,7 @@ class ClassicAutoWaitTests(unittest.TestCase):
                           execute=execute, task_get=task_get)
         done = done_event(events)
         self.assertIn("找不到了", done["message"])
+        self.assertTrue(any("找不到了" in str(item) for item in done["failures"]), done["failures"])
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ import main
 # n_max / modes 现在是「缺失 = 后端不掌握」（不再下发 null / 空占位），所以是可选字段
 REQUIRED_KEYS = {"provider", "model", "kind", "ratios", "resolutions", "durations", "qualities"}
 # max_long_edge / max_pixels / min_pixels：精确像素生成模型（GPT-Image 家族）的像素上限，前端据此钳尺寸
-OPTIONAL_KEYS = {"n_max", "modes", "max_long_edge", "max_pixels", "min_pixels"}
+OPTIONAL_KEYS = {"n_max", "modes", "max_long_edge", "max_pixels", "min_pixels", "native_background"}
 
 
 def provider(pid, protocol, base_url="", image_models=(), video_models=(), enabled=True, image_model=""):

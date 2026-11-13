@@ -146,6 +146,8 @@
   flex-direction: column;
   gap: 12px;
   padding: 18px 2px 8px;
+  /* 空态会被 .hello 的 margin-top:auto 压到底：留一档呼吸位，别贴着输入框 */
+  margin-bottom: clamp(44px, 6.5vh, 88px);
 }
 .cn-root #agent.ap2-agent .ap2-hi { display: flex; align-items: center; gap: 9px; }
 .cn-root #agent.ap2-agent .ap2-logo2 {
@@ -1243,4 +1245,751 @@
 /* 全屏助手仍是 inset:0，用内边距把内容推到 64，不把整块往下挪露出画布 */
 .cn-root.has-win-controls #agent.ap2-agent.full {
   padding-top: calc(var(--cn-chrome-top, 16px) + 48px);
+}
+
+/* ── 全屏查看器带回来的图片标注：输入区上方的胶囊 ───────────────── */
+.cn-root #agent.ap2-agent .ap2-annrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 2px 2px 0;
+}
+.cn-root #agent.ap2-agent .ap2-ann {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  max-width: 100%;
+  padding: 0 5px 0 4px;
+  border-radius: 10px;
+  background: var(--sunken);
+  color: var(--fg2);
+  font-size: 12px;
+}
+.cn-root #agent.ap2-agent .ap2-ann-n {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: #f5f5f7;
+  color: #000;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+.cn-root #agent.ap2-agent .ap2-ann-t {
+  min-width: 0;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+
+/* ── 上下文占用：真实分层弹层（后端 context_usage 带 layers 时才有） ─────────
+   弹层本身沿用 #pop 已有的磨砂玻璃配方，这里只补宽窄与行间距；
+   分层用「堆叠条 + 每行绝对值」，条长按各层占比，不按猜出来的窗口比例。 */
+.cn-root #pop.ctx-pop {
+  min-width: 252px;
+}
+.cn-root #pop.ctx-pop .ap2-ctxbar {
+  margin: 6px 10px 10px;
+}
+.cn-root #pop.ctx-pop .ap2-ctxrow .tnum {
+  color: var(--fg2);
+}
+.cn-root #pop.ctx-pop .ap2-ctxunknown {
+  color: var(--fg3);
+  font-weight: 400;
+}
+.cn-root #pop.ctx-pop .ap2-ctxacts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+
+/* 「已整理上下文」：消息流里的一行，停留够看完就淡出；高度一起收掉，不留空壳、不挤动下面的内容 */
+.cn-root #agent.ap2-agent .ap2-ctxnote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-height: 30px;
+  margin: 2px 0 6px;
+  overflow: hidden;
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 20px;
+  opacity: 1;
+  transition: opacity .8s ease, max-height .8s ease, margin .8s ease;
+}
+.cn-root #agent.ap2-agent .ap2-ctxnote svg {
+  flex: none;
+}
+.cn-root #agent.ap2-agent .ap2-ctxnote span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.cn-root #agent.ap2-agent .ap2-ctxnote.is-gone {
+  max-height: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cn-root #agent.ap2-agent .ap2-ctxnote {
+    transition: none;
+  }
+}
+
+/* ── 搜索历史（阶段二 recall）：入口在 #aMore 菜单里，弹层复用 #modal 的磨砂玻璃 ──
+   层级只用软底 / 间距 / 字重表达，不画描边和发丝线；高亮是半透明软底 + 加粗，深色浅色都走 token。 */
+.cn-root #modal .ap2-recall {
+  padding-top: 2px;
+}
+.cn-root #modal .ap2-recall-in {
+  margin: 2px 0 8px;
+}
+.cn-root #modal .ap2-recall-scope {
+  padding-left: 0;
+  padding-right: 0;
+}
+.cn-root #modal .ap2-recall-body {
+  min-height: 132px;
+  max-height: min(52vh, 420px);
+  overflow: auto;
+}
+.cn-root #modal .ap2-recall-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 2px;
+  color: var(--fg3);
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.cn-root #modal .ap2-recall-note.is-loading {
+  color: var(--fg2);
+}
+.cn-root #modal .ap2-recall-count {
+  padding: 2px 2px 8px;
+  color: var(--fg3);
+  font-size: 11px;
+}
+.cn-root #modal .ap2-recall-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cn-root #modal .ap2-recall-hit {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--sunken);
+}
+.cn-root #modal .ap2-recall-text {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--fg1);
+  font-size: 13px;
+  line-height: 1.65;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.cn-root #modal .ap2-recall-mark {
+  padding: 0 2px;
+  border-radius: 4px;
+  background: rgba(var(--ink), .16);
+  color: var(--fg);
+  font-weight: 600;
+}
+.cn-root #modal .ap2-recall-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--fg3);
+  font-size: 11px;
+}
+.cn-root #modal .ap2-recall-kind {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(var(--ink), .08);
+  color: var(--fg2);
+}
+.cn-root #modal .ap2-recall-state {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--s0);
+  color: var(--fg2);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.cn-root #modal .ap2-recall-state svg {
+  flex: none;
+  margin-top: 2px;
+}
+.cn-root #modal .ap2-recall-state b {
+  color: var(--fg);
+  font-weight: 500;
+}
+.cn-root #modal .ap2-recall-state p {
+  margin: 4px 0 0;
+  color: var(--fg3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.cn-root #modal .ap2-recall-state.is-warn {
+  background: #ffd60a14;
+}
+.cn-root #modal .ap2-recall-state.is-warn b {
+  color: var(--warn-fg);
+}
+
+/* ── 记忆候选卡（阶段二·3）：逐条勾选 + 范围徽标 + 依据，复用 message-card 体系 ── */
+.cn-root .mem-cand-card[class] .mem-cand-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 9px;
+  border-radius: 10px;
+  background: var(--sunken);
+  cursor: pointer;
+}
+.cn-root .mem-cand-card[class] .mem-cand-row:hover {
+  background: var(--hover);
+}
+.cn-root .mem-cand-card[class] .mem-cand-row input {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  accent-color: var(--solid);
+  cursor: pointer;
+}
+.cn-root .mem-cand-card[class] .mem-cand-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.cn-root .mem-cand-card[class] .mem-cand-text {
+  color: var(--fg1);
+  font-size: 12.5px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+.cn-root .mem-cand-card[class] .mem-cand-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg3);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.cn-root .mem-cand-card[class] .mem-cand-scope {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(var(--ink), .08);
+  color: var(--fg2);
+  font-size: 10.5px;
+}
+
+/* ── 记忆弹窗：记忆策略开关 + 这张画布的项目档案（阶段二收口） ───────── */
+.cn-root #modal .ap2-mem-h {
+  padding: 12px 0 4px;
+}
+.cn-root #modal .ap2-mem-note {
+  margin: 4px 0 8px;
+  color: var(--fg3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.cn-root #modal .ap2-mem-row {
+  align-items: flex-start;
+  gap: 12px;
+  padding: 7px 0;
+}
+.cn-root #modal .ap2-mem-row > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--fg);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.cn-root #modal .ap2-mem-row small {
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.cn-root #modal .ap2-mem-row .sw {
+  margin-top: 3px;
+}
+.cn-root #modal .ap2-prof-text {
+  margin: 0 0 8px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--sunken);
+  color: var(--fg1);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cn-root #modal .ap2-prof-acts {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.cn-root #modal .ap2-prof-count {
+  margin-right: auto;
+  color: var(--fg3);
+  font-size: 11px;
+}
+.cn-root #modal .ap2-prof-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 8px;
+  color: var(--fg2);
+  font-size: 12px;
+}
+.cn-root #modal .ap2-prof-form textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--sunken);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.55;
+  resize: vertical;
+}
+.cn-root #modal .ap2-prof-form .ap2-prof-acts {
+  margin-top: 2px;
+}
+.cn-root #modal .ap2-prof-empty {
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--s0);
+}
+.cn-root #modal .ap2-prof-empty b {
+  display: block;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 500;
+}
+.cn-root #modal .ap2-prof-empty p {
+  margin: 4px 0 10px;
+  color: var(--fg3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ── 阶段三流式：原生推理（reasoning_delta）逐字区 + 很轻的 shimmer ──────────
+   shimmer 只作用在「正在思考」和运行中的推理文字上：浅到不抢正文，prefers-reduced-motion 关掉。 */
+.cn-root #agent.ap2-agent .ap2-shimmer {
+  background-image: linear-gradient(100deg, currentColor 0%, currentColor 36%, color-mix(in srgb, currentColor 42%, transparent) 50%, currentColor 64%, currentColor 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ap2-shimmer 2s linear infinite;
+}
+.cn-root #agent.ap2-agent .ap2-think-reason {
+  max-height: 168px;
+  overflow: auto;
+  padding: 2px 2px 4px 22px;
+  color: var(--fg2);
+  font-size: 11.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cn-root #agent.ap2-agent .ap2-think-reason.is-live {
+  color: var(--fg3);
+  background-image: linear-gradient(100deg, currentColor 0%, currentColor 36%, color-mix(in srgb, currentColor 42%, transparent) 50%, currentColor 64%, currentColor 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: ap2-shimmer 2.2s linear infinite;
+}
+@keyframes ap2-shimmer {
+  from { background-position: 120% 0; }
+  to { background-position: -120% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cn-root #agent.ap2-agent .ap2-shimmer,
+  .cn-root #agent.ap2-agent .ap2-think-reason.is-live {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
+/* ── 阶段三·3：完成前自检一行 + 反思徽标 + 方案卡验收标准 ─────────────── */
+.cn-root #agent.ap2-agent .ap2-selfcheck {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 8px 0 6px;
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.cn-root #agent.ap2-agent .ap2-selfcheck.is-fail {
+  color: var(--warn-fg);
+}
+.cn-root #agent.ap2-agent .ap2-selfcheck.is-pending {
+  color: var(--fg2);
+}
+.cn-root #agent.ap2-agent .ap2-selfcheck-pending {
+  margin-left: 6px;
+  color: var(--fg3);
+}
+.cn-root #agent.ap2-agent .ap2-selfcheck .linkbtn {
+  margin-left: 2px;
+}
+.cn-root #agent.ap2-agent .ap2-selfcheck-list {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  padding: 7px 10px 7px 24px;
+  border-radius: 10px;
+  background: var(--s0);
+  color: var(--fg2);
+  font-size: 11.5px;
+  line-height: 1.65;
+  list-style: disc;
+}
+.cn-root #agent.ap2-agent .ap2-reflect {
+  margin-right: 5px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(var(--ink), .1);
+  color: var(--fg2);
+  font-size: 10px;
+  line-height: 15px;
+  display: inline-block;
+  vertical-align: 1px;
+}
+.cn-root .message-card[class] .plan-accept {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg3);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* ── 阶段四：托管授权卡（磨砂玻璃、无描边、按钮右对齐） ─────────────── */
+.cn-root #agent.ap2-agent .ap2-auth {
+  margin: 8px 10px 6px;
+  padding: 12px 14px 10px;
+  border-radius: 16px;
+  border: 0;
+  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .10), 0 1px 0 rgba(255, 255, 255, .25) inset;
+  color: var(--fg);
+}
+.cn-root #agent.ap2-agent .ap2-auth-hd {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.cn-root #agent.ap2-agent .ap2-auth-hd .sp { flex: 1; }
+.cn-root #agent.ap2-agent .ap2-auth-sub {
+  margin-top: 4px;
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.cn-root #agent.ap2-agent .ap2-auth-usage {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--s0);
+  color: var(--fg2);
+  font-size: 11.5px;
+}
+.cn-root #agent.ap2-agent .ap2-auth-req {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 8px;
+  color: var(--fg2);
+  font-size: 11.5px;
+}
+.cn-root #agent.ap2-agent .ap2-auth-rows { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.cn-root #agent.ap2-agent .ap2-auth-row { display: flex; gap: 10px; align-items: flex-start; }
+.cn-root #agent.ap2-agent .ap2-auth-k {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 52px;
+  padding-top: 3px;
+  color: var(--fg2);
+  font-size: 11.5px;
+  flex: none;
+}
+.cn-root #agent.ap2-agent .ap2-auth-picks { flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.cn-root #agent.ap2-agent .ap2-auth-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.cn-root #agent.ap2-agent .ap2-auth-chip {
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--s0);
+  color: var(--fg2);
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.cn-root #agent.ap2-agent .ap2-auth-chip:hover { background: var(--hover); color: var(--fg); }
+.cn-root #agent.ap2-agent .ap2-auth-chip.on { background: color-mix(in srgb, var(--solid) 88%, transparent); color: var(--bg); }
+.cn-root #agent.ap2-agent .ap2-auth-empty { color: var(--fg3); font-size: 11px; }
+.cn-root #agent.ap2-agent .ap2-auth-limit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--fg2);
+  font-size: 11.5px;
+}
+.cn-root #agent.ap2-agent .ap2-auth-num {
+  width: 62px;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--s0);
+  color: var(--fg);
+  font-size: 12px;
+  outline: none;
+}
+.cn-root #agent.ap2-agent .ap2-auth-ft {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+.cn-root #agent.ap2-agent .ap2-auth-btn {
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--s0);
+  color: var(--fg2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.cn-root #agent.ap2-agent .ap2-auth-btn:hover { background: var(--hover); color: var(--fg); }
+.cn-root #agent.ap2-agent .ap2-auth-btn.primary { background: var(--solid); color: var(--bg); font-weight: 600; }
+.cn-root #agent.ap2-agent .ap2-auth-btn[disabled] { opacity: .6; cursor: default; }
+
+/* 模型多的平台（如视频 30+ 个）不要把卡片撑爆：模型行限高滚动 */
+.cn-root #agent.ap2-agent .ap2-auth-picks .ap2-auth-chips:nth-child(2) {
+  max-height: 62px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.cn-root #agent.ap2-agent .ap2-auth { max-height: min(62vh, 520px); overflow-y: auto; }
+
+.cn-root #agent.ap2-agent .ap2-auth-picks .ap2-auth-chips:nth-child(2) {
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 12px), transparent);
+  mask-image: linear-gradient(#000 calc(100% - 12px), transparent);
+}
+
+/* ── 阶段四：建议芯片 / 主动消息标记 / 可点 Toast / 每模态上限 ─────────────── */
+.cn-root #agent.ap2-agent .ap2-sugs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 2px;
+  padding-left: 2px;
+}
+.cn-root #agent.ap2-agent .ap2-sug {
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--s0);
+  color: var(--fg2);
+  font-size: 11.5px;
+  line-height: 1.5;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(3px);
+  animation: ap2-sug-in .32s ease forwards;
+  transition: background .15s ease, color .15s ease;
+}
+.cn-root #agent.ap2-agent .ap2-sug:hover { background: var(--hover); color: var(--fg); }
+@keyframes ap2-sug-in { to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .cn-root #agent.ap2-agent .ap2-sug { animation: none; opacity: 1; transform: none; }
+}
+.cn-root #agent.ap2-agent .ap2-proactive {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 4px;
+  color: var(--fg3);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.cn-root #agent.ap2-agent .ap2-proactive span { letter-spacing: .02em; }
+.cn-root .ap2-auth-max { display: flex; align-items: center; gap: 5px; flex: none; padding-top: 1px; color: var(--fg3); font-size: 11px; }
+.cn-root .ap2-auth-max .ap2-auth-num { width: 48px; height: 24px; }
+.cn-root #toasts .toast.is-action { cursor: pointer; }
+
+.cn-root #agent.ap2-agent .ap2-sugs { align-items: flex-start; }
+.cn-root #agent.ap2-agent .ap2-sug { display: inline-flex; align-items: center; width: auto; flex: 0 0 auto; }
+
+/* 下一步建议只用文字（用户 2026-11 明确）：不做按钮、不可点、没有底色 */
+.cn-root #agent.ap2-agent .ap2-sugs.ap2-sugs-text { display: block; margin: 6px 0 2px; padding: 0; }
+.cn-root #agent.ap2-agent .ap2-sugs-hd {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--fg3);
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: .02em;
+}
+.cn-root #agent.ap2-agent .ap2-sug-text {
+  position: relative;
+  margin: 2px 0;
+  padding-left: 11px;
+  color: var(--fg2);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+.cn-root #agent.ap2-agent .ap2-sug-text::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: .62em;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--fg3);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   menu-check 修复：消息区卡片弹层（#pop.agent-pop / param-pop / combo-pop / gen-pop）
+   · 小弹层底色加厚：浅 rgba(255,255,255,.96) / 深 rgba(24,24,24,.95)（保留 blur(44px) saturate(190%)）
+   · 去掉 1px 环状投影，只留两层柔和投影
+   · 高度收到 min(420px, 55vh)，配合 placement 的 capHeight 选空间大的一侧
+   · 标题 .mh 提到 --fg2（辅助字 ≥3:1，正文 ≥4.5:1）
+   ═══════════════════════════════════════════════════════════════════════ */
+.cn-root #pop.agent-pop.agent-pop.agent-pop,
+.cn-root #pop.param-pop.param-pop.param-pop,
+.cn-root #pop.combo-pop.combo-pop.combo-pop,
+.cn-root #pop.gen-pop.gen-pop.gen-pop,
+.cn-root #pop.model-pop.model-pop.model-pop {
+  border: 0;
+  background: rgba(24, 24, 24, .95);
+  -webkit-backdrop-filter: blur(44px) saturate(190%);
+  backdrop-filter: blur(44px) saturate(190%);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .32), 0 8px 20px rgba(0, 0, 0, .18);
+  max-height: min(420px, 55vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.cn-root[data-theme=light] #pop.agent-pop.agent-pop.agent-pop,
+.cn-root[data-theme=light] #pop.param-pop.param-pop.param-pop,
+.cn-root[data-theme=light] #pop.combo-pop.combo-pop.combo-pop,
+.cn-root[data-theme=light] #pop.gen-pop.gen-pop.gen-pop,
+.cn-root[data-theme=light] #pop.model-pop.model-pop.model-pop {
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .16), 0 8px 20px rgba(0, 0, 0, .10);
+}
+/* 标题 / 分组标题：辅助字用 --fg2（浅 #6e6e73 / 深 #98989d），透明度不变 */
+.cn-root #pop.agent-pop.agent-pop .mh,
+.cn-root #pop.param-pop.param-pop .mh,
+.cn-root #pop.combo-pop.combo-pop .mh,
+.cn-root #pop.gen-pop.gen-pop .mh,
+.cn-root #pop.model-pop.model-pop .mh {
+  color: var(--fg2);
+}
+/* 滚动到底时用一层很淡的渐隐收尾，避免最后一行被切成半行 */
+.cn-root #pop.agent-pop.agent-pop::after {
+  content: "";
+  position: sticky;
+  bottom: 0;
+  display: block;
+  height: 12px;
+  margin: 0 -6px -6px;
+  pointer-events: none;
+  background: linear-gradient(rgba(24, 24, 24, 0), rgba(24, 24, 24, .96));
+}
+.cn-root[data-theme=light] #pop.agent-pop.agent-pop::after {
+  background: linear-gradient(rgba(255, 255, 255, 0), rgba(255, 255, 255, .97));
+}
+
+/* 模型列表 flyout（#pop 的二级层）：同样加厚、去环、限高 */
+.cn-root .model-flyout.model-flyout {
+  border: 0;
+  background: rgba(24, 24, 24, .95);
+  -webkit-backdrop-filter: blur(44px) saturate(190%);
+  backdrop-filter: blur(44px) saturate(190%);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .32), 0 8px 20px rgba(0, 0, 0, .18);
+  max-height: min(420px, 55vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.cn-root[data-theme=light] .model-flyout.model-flyout {
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, .16), 0 8px 20px rgba(0, 0, 0, .10);
+}
+
+/* 长任务心跳：一行轻状态（软底、无描边、不抢镜）；类名避开面板头部按钮的 .ap2-hb */
+.cn-root #agent.ap2-agent .ap2-hb-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 6px 0 4px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--s0);
+  color: var(--fg2);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  align-self: flex-start;
+  flex: 0 0 auto;
+}
+.cn-root #agent.ap2-agent .ap2-hb-line .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fg3);
+  animation: ap2-hb-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ap2-hb-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .cn-root #agent.ap2-agent .ap2-hb-line .dot { animation: none; opacity: .8; }
 }

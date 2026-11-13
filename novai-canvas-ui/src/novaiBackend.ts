@@ -1,5 +1,5 @@
 import { hostRoot } from "./novaiBridgeRoot";
-import type { CanvasBackend, ChatMessage, EditRequest, GenEvent, GenRequest, GenResult, LoadedDoc, MattingModelStatus, SavedDoc, UpscaleResult, UpscaleRuntimeStatus } from "./canvas/canvas-next/backend/types";
+import type { CanvasBackend, CanvasTask, ChatMessage, EditRequest, GenEvent, GenRequest, GenResult, LoadedDoc, MattingModelStatus, SavedDoc, UpscaleResult, UpscaleRuntimeStatus } from "./canvas/canvas-next/backend/types";
 import { GenError } from "./canvas/canvas-next/backend/types";
 import { defaultParams, gifFrameFieldsForRequest, outputFormatForRequest, qualityForRequest, ratioWH, specFor, thinkingForRequest, withGen, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./canvas/canvas-next/model";
 import { emptyDoc, hasContent, readDoc, sanitizeDoc, type CanvasDoc, type CanvasNode, type NodeKind } from "./canvas/react-canvas/reactCanvasStore";
@@ -257,10 +257,9 @@ async function pollTask(taskId: string, path: "image" | "video", signal: AbortSi
   // 视频（seedance 等）常常要 10 分钟以上：只要后端任务还在处理就继续等，视频最多 40 分钟
   const limitMs = (path === "image" ? 10 : 40) * 60 * 1000;
   while (Date.now() - started < limitMs) {
-    if (signal.aborted) {
-      await request(`/api/tasks/${encodeURIComponent(taskId)}/cancel`, jsonBody({})).catch(() => null);
-      throw new GenError("STOPPED", "已停止");
-    }
+    // 中止只代表本端不再等：用户点停止由调用方显式取消（stopRun），页面卸载 / 切画布不取消，
+    // 任务留在后端继续跑，回来按节点上记着的 taskId 接上
+    if (signal.aborted) throw new GenError("STOPPED", "已停止");
     const data = await request(path === "image" ? `/api/canvas-image-tasks/${encodeURIComponent(taskId)}` : `/api/tasks/${encodeURIComponent(taskId)}`);
     onEvent({ type: "progress", progress: Math.min(.95, (Date.now() - started) / (estimate * 1000)) });
     if (data.status === "succeeded") return data.result || {};
@@ -270,14 +269,29 @@ async function pollTask(taskId: string, path: "image" | "video", signal: AbortSi
   throw new GenError("TIMEOUT", `生成超时（${Math.round(limitMs / 60000)} 分钟）`);
 }
 
+/** 后端任务结果 → 画布版本。首次生成和回到画布续跑共用这一套字段映射（两边口径必须一致） */
+export function outputsFromTaskResult(kind: "image" | "video", taskId: string, result: Row, meta: { model?: string; ratio?: string; size?: string; dur?: number; res?: string }): GenOutput[] {
+  const at = Date.now();
+  if (kind === "image") {
+    // 后端把「尺寸被收敛」的说明放在任务结果的 size_notice（如 GIF 每帧尺寸缩小），挂到 meta 上让引擎 toast 一次
+    const notice = String(result?.size_notice || "").trim();
+    const rows = Array.isArray(result?.images) ? result.images : [];
+    return rows.map((row: any) => ({ url: urlOf(row), w: Number(row?.width) || undefined, h: Number(row?.height) || undefined, meta: { model: meta.model || "", ratio: meta.ratio, size: meta.size, at, runId: taskId, ...(notice ? { notice } : {}) } })).filter((output: GenOutput) => output.url);
+  }
+  const rows = Array.isArray(result?.videos) ? result.videos : [];
+  return rows.map((row: any) => ({ url: urlOf(row), frame: row?.poster || row?.thumbnail || undefined, dur: Number(row?.duration) || meta.dur, res: meta.res, meta: { model: meta.model || "", at, runId: taskId } })).filter((output: GenOutput) => output.url);
+}
+
 async function createImageTask(req: GenRequest | EditRequest, prompt: string, params: ImageParams, references: Row[], signal: AbortSignal, onEvent: (event: GenEvent) => void, sizeOverride?: string): Promise<GenOutput[]> {
   const selected = splitModel(req.model?.id || "");
   // 质量档 / 先思考：只有用户在面板上明确选了才下发；不传 = 跟随上游默认
   const quality = qualityForRequest(params.quality);
   const thinking = thinkingForRequest(params.thinking);
-  const outputFormat = outputFormatForRequest(params.outputFormat);
+  // 透明背景：只有用户明确开了才下发（服务端会把 output_format 强制成 png，这边也不再发 GIF / SVG 的格式与帧参数）
+  const transparent = params.background === "transparent";
+  const outputFormat = transparent ? "" : outputFormatForRequest(params.outputFormat);
   // GIF 帧参数只在 outputFormat=gif 时下发（后端 0/缺省 = 9 帧 / 200ms；这里先按 caps 夹成合法值）
-  const gifFrameFields = gifFrameFieldsForRequest(params, req.model);
+  const gifFrameFields = transparent ? {} : gifFrameFieldsForRequest(params, req.model);
   // Midjourney 的版本 / HD 是独立字段（后端 OnlineImageRequest 只认这两个，速度与风格化走提示词 flag）
   const isMidjourneyModel = !!req.model?.mj;
   const mjVersion = isMidjourneyModel ? String(params.mj?.version || "").trim() : "";
@@ -292,18 +306,19 @@ async function createImageTask(req: GenRequest | EditRequest, prompt: string, pa
     ...(quality ? { quality } : {}),
     ...(thinking === undefined ? {} : { thinking_mode: thinking }),
     ...(outputFormat ? { output_format: outputFormat } : {}),
+    ...(transparent ? { background: "transparent" } : {}),
     ...gifFrameFields,
     ...(mjVersion ? { midjourney_version: mjVersion } : {}),
     ...(mjHd ? { midjourney_hd: true } : {}),
+    // 任务和画布节点绑定：离开画布回来按 node_id 接上（后端存进任务记录）
+    ...(req.canvasId ? { canvas_id: req.canvasId } : {}),
+    ...(req.nodeId ? { node_id: req.nodeId } : {}),
   };
   const task = await request("/api/canvas-image-tasks", { ...jsonBody(body), signal });
   if (!task.task_id) throw new GenError("NO_TASK", "生成任务没有返回任务 ID");
   onEvent({ type: "started", runId: String(task.task_id) });
   const result = await pollTask(String(task.task_id), "image", signal, onEvent, req.model?.secs || 20);
-  const rows = Array.isArray(result.images) ? result.images : [];
-  // 后端把「尺寸被收敛」的说明放在任务结果的 size_notice（如 GIF 每帧尺寸缩小），挂到 meta 上让引擎 toast 一次
-  const notice = String(result.size_notice || "").trim();
-  const outputs = rows.map((row: any) => ({ url: urlOf(row), w: Number(row?.width) || undefined, h: Number(row?.height) || undefined, meta: { model: req.model?.name || selected.model, ratio: params.ratio, size: params.size, at: Date.now(), runId: String(task.task_id), ...(notice ? { notice } : {}) } })).filter((output: GenOutput) => output.url);
+  const outputs = outputsFromTaskResult("image", String(task.task_id), result, { model: req.model?.name || selected.model, ratio: params.ratio, size: params.size });
   if (!outputs.length) throw new GenError("NO_OUTPUT", "生成结果缺少图片地址");
   return outputs;
 }
@@ -627,10 +642,13 @@ export function createNovaiBackend(): CanvasBackend {
               const id = modelId(providerId, name);
               if (!name || seen.has(id)) continue;
               seen.add(id);
-              const capsItem = kind === "image" || kind === "video" ? caps.get(modelCapsKey(providerId, name)) : undefined;
-              let capsUi = kind === "image" || kind === "video" ? modelCapsUi(kind, capsItem) : null;
+              // 音频也要接 audio_ref_max：caps 里 kind=audio 的条目前端同样要翻成 maxRefs
+              const hasCaps = kind === "image" || kind === "video" || kind === "audio";
+              const capsItem = hasCaps ? caps.get(modelCapsKey(providerId, name)) : undefined;
+              // 音频单独分支：caps 的 audio_ref_max 也要落到 maxRefs（此前 audio 走 null，字段没接线）
+              let capsUi = kind === "image" || kind === "video" ? modelCapsUi(kind, capsItem) : kind === "audio" ? modelCapsUi("audio", capsItem) : null;
               const vendor = String(provider.name || providerId);
-              if (capsUi && (kind === "image" || kind === "video")) {
+              if (capsUi && hasCaps) {
                 // caps 只给参数；参考图能力沿用官方/预设，避免权威参数一上就把所有模型的参考图入口误关
                 const official = kind === "image" ? officialImageUi(name) : null;
                 const guessed = specFor({ configId: id, label: name, vendor, kind, ui: null });
@@ -735,13 +753,15 @@ export function createNovaiBackend(): CanvasBackend {
           videos: refs.filter((ref) => ref.kind === "video").map((ref) => ({ url: ref.url, role: ref.role })),
           audios: refs.filter((ref) => ref.kind === "audio").map((ref) => ref.url),
           generate_audio: !!params.sound,
+          // 任务和画布节点绑定：离开画布回来按 node_id 接上
+          ...(req.canvasId ? { canvas_id: req.canvasId } : {}),
+          ...(req.nodeId ? { node_id: req.nodeId } : {}),
         };
         const task = await request("/api/canvas-video?async=1", { ...jsonBody(body), signal });
         if (!task.task_id) throw new GenError("NO_TASK", "视频任务没有返回任务 ID");
         onEvent({ type: "started", runId: String(task.task_id) });
         const result = await pollTask(String(task.task_id), "video", signal, onEvent, req.model.secs || 120);
-        const rows = Array.isArray(result.videos) ? result.videos : [];
-        const outputs = rows.map((row: any) => ({ url: urlOf(row), frame: row?.poster || row?.thumbnail || undefined, dur: Number(row?.duration) || params.dur, res: params.res, meta: { model: req.model.name, at: Date.now(), runId: String(task.task_id) } })).filter((output: GenOutput) => output.url);
+        const outputs = outputsFromTaskResult("video", String(task.task_id), result, { model: req.model.name, dur: params.dur, res: params.res });
         if (!outputs.length) {
           // 只出提示词的模型（如 Context-IR）：后端把结构化提示词放在 result.prompt，没有视频。
           // 明确报错并带上提示词，节点不会卡在「生成中」，用户也能把结果喂回 H3。
@@ -764,6 +784,37 @@ export function createNovaiBackend(): CanvasBackend {
       const outputs = (Array.isArray(result.audios) ? result.audios : []).map((row: any) => ({ url: urlOf(row), dur: Number(row?.duration) || undefined, meta: { model: req.model.name, at: Date.now() } })).filter((output: GenOutput) => output.url);
       if (!outputs.length) throw new GenError("NO_OUTPUT", "生成结果缺少音频地址");
       return { outputs };
+    },
+    async listCanvasTasks(canvasId: string): Promise<CanvasTask[]> {
+      const data = await request(`/api/canvas-tasks?canvas_id=${encodeURIComponent(canvasId)}`);
+      const items = Array.isArray(data?.items) ? data.items : [];
+      return items.map((row: Row): CanvasTask => ({
+        taskId: String(row?.task_id || ""),
+        nodeId: String(row?.node_id || ""),
+        kind: String(row?.kind || "") === "video" ? "video" : "image",
+        status: (["queued", "running", "succeeded", "failed"].includes(String(row?.status)) ? String(row?.status) : "queued") as CanvasTask["status"],
+        model: String(row?.model || ""),
+        result: row?.result && typeof row.result === "object" ? row.result : null,
+        error: String(row?.error || ""),
+        createdAt: Number(row?.created_at) || 0,
+        updatedAt: Number(row?.updated_at) || 0,
+      })).filter((task: CanvasTask) => task.taskId);
+    },
+    async resumeTask(task: CanvasTask, onEvent, signal): Promise<GenOutput[]> {
+      if (!task.taskId) throw new GenError("NO_TASK", "生成任务没有任务 ID");
+      const kind = task.kind === "video" ? "video" : "image";
+      // 已经跑完的任务别再等（结果就在列表里），还在跑的接着轮询同一个任务
+      const result = task.status === "succeeded" ? (task.result || {}) : await pollTask(task.taskId, kind, signal, onEvent, kind === "image" ? 30 : 120);
+      const outputs = outputsFromTaskResult(kind, task.taskId, result, { model: task.model });
+      if (!outputs.length) {
+        // 只出提示词的视频模型（如 Context-IR）：把提示词带回去，别让节点卡在「生成中」
+        const promptText = kind === "video" ? String(result?.prompt ?? result?.text ?? result?.prompt_text ?? "").trim() : "";
+        throw new GenError("NO_OUTPUT", promptText ? "该模型只返回提示词，不会出视频：" + promptText.slice(0, 600) : "生成结果缺少地址");
+      }
+      return outputs;
+    },
+    async cancelTask(taskId: string) {
+      await request(`/api/tasks/${encodeURIComponent(taskId)}/cancel`, jsonBody({}));
     },
     async editImage(req, onEvent, signal) {
       // 抠图改成本地 RMBG，不走生图模型；接口不存在的旧后端退回原来的在线抠图
@@ -804,6 +855,15 @@ export function createNovaiBackend(): CanvasBackend {
       if (!command) return { ok: false, error: "TASK_UNAVAILABLE" };
       const result = await command({ type: "task/run", payload: { goal: req.goal, canvasContext: req.context } }).catch(() => null);
       return result ? { ok: result.ok === true, taskId: typeof result.taskId === "string" ? result.taskId : undefined, status: typeof result.status === "string" ? result.status : undefined, error: typeof result.error === "string" ? result.error : undefined } : { ok: false, error: "TASK_UNAVAILABLE" };
+    },
+    async postAgentBudget(runId, budget) {
+      // 阶段四托管授权：POST /api/agent/runs/{run_id}/budget（没有这个接口的旧后端如实返回错误）
+      try {
+        await request("/api/agent/runs/" + encodeURIComponent(runId) + "/budget", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(budget) });
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : "预算提交失败" };
+      }
     },
     watchAgentTask(taskId, onSnapshot) {
       let active = true; let reading = false; let queued = false;

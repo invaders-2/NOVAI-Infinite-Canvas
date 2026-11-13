@@ -1,9 +1,9 @@
 <script setup>
 // 首页（2026-11 重做）：标题打字机 → 输入框（参考素材 / 技能 / 插件 / 素材库）→ 快速开始 → 模板库（点卡片先预览）。
 // 建画布与种子协议沿用旧 home.html：POST /api/canvases 建空白画布，再把种子写进 localStorage
-// （novai_canvas_seed:<画布 id>），画布侧读一次即删。改种子字段要同步智能画布BEAT 的种子翻译（canvas-next）。
-// 首页所有入口（输入框发送 / 快速开始 / 模板 / 最近项目）都进「智能画布BEAT」（kind=classic → /static/canvas.html）：
-// 种子规格两边一致，由 BEAT 侧翻译成节点；旧智能画布（/static/smart-canvas.html）只剩旧页面与外链在用。
+// （novai_canvas_seed:<画布 id>），画布侧读一次即删。改种子字段要同步智能画布的种子翻译（canvas-next）。
+// 首页所有入口（输入框发送 / 快速开始 / 模板 / 最近项目）都进「智能画布」（kind=classic → /static/canvas.html）：
+// 种子规格两边一致，由画布侧翻译成节点；旧智能画布（/static/smart-canvas.html）只剩历史画布与外链在用。
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import NvVeilBg from '../../components/NvVeilBg.vue';
@@ -126,12 +126,11 @@ function canvasUrl(c, opts = {}) {
     return (beat ? '/static/canvas.html' : '/static/smart-canvas.html') + '?id=' + enc + '&project=' + project;
 }
 function timeTitle(prefix) { return prefix + ' ' + new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); }
-async function createCanvas(title, opts = {}) {
-    const beat = opts.ctx === 'beat';
+async function createCanvas(title) {
     const r = await fetch('/api/canvases', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: String(title || '').slice(0, 60) || timeTitle('智能画布'), icon: beat ? '🧩' : 'layers', kind: beat ? 'classic' : 'smart', project: 'default' }),
+        body: JSON.stringify({ title: String(title || '').slice(0, 60) || timeTitle('智能画布'), icon: '🧩', kind: 'classic', project: 'default' }),
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
@@ -142,7 +141,7 @@ async function launch(title, seed, opts) {
     if (busy.value) return false;
     busy.value = true;
     try {
-        const c = await createCanvas(title, opts);
+        const c = await createCanvas(title);
         if (seed) { try { localStorage.setItem(SEED_PREFIX + c.id, JSON.stringify(seed)); } catch (e) {} }
         clearEditor(); refs.value = []; skill.value = null;
         nextTick(autoGrow);
@@ -255,7 +254,7 @@ async function loadRecent() {
 }
 function coverOf(c) { const u = (c.thumbnails || []).filter(Boolean)[0]; return u ? thumbUrl(u) : ''; }
 function onCoverError(c) { c.thumbnails = (c.thumbnails || []).slice(1); }
-function openProject(c) { openCanvasUrl(canvasUrl(c, { ctx: 'beat' })); }
+function openProject(c) { openCanvasUrl(canvasUrl(c)); }
 function allProjects() { navigate('canvas'); }
 function onPageFocus(e) { if (e.detail && e.detail.id === 'home') { loadRecent(); loadPlugins(); loadDefaultModel(); } }
 // 在设置 / 应用市场里改了插件或技能，回到首页时同步
@@ -1088,7 +1087,7 @@ onBeforeUnmount(() => {
 .hp-caret.typing { animation: none; }
 @keyframes hpBlink { 50% { opacity: 0; } }
 
-/* 输入框：BEAT 助手 composer 放大版，磨砂浮卡 */
+/* 输入框：画布助手 composer 放大版，磨砂浮卡 */
 .hp-composer { position: relative; z-index: 10; width: 100%; max-width: 780px; border-radius: 20px; background: var(--hp-panel); backdrop-filter: var(--material-thick); -webkit-backdrop-filter: var(--material-thick);
     box-shadow: var(--shadow-lift); padding: 14px 14px 12px; transition: box-shadow var(--duration-fast) var(--ease-out); }
 .hp-composer.drag { box-shadow: var(--shadow-lift), 0 0 0 2px var(--ink-4); }

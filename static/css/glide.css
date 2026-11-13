@@ -1,7 +1,7 @@
 /* NOVAI 通用「滑块高亮」视觉层（配合 shared/glide.js）。
 
    滑块接管高亮之后，选项自己的 hover/选中底色必须让位，不然两层底色叠在一起就是重影。
-   压制选择器写成 (0,3,0)：比 gpt-chat.html 里那批 `background: var(--nav-hover-bg) !important`
+   压制选择器写成 (0,3,0)：比旧对话页里那批 `background: var(--nav-hover-bg) !important`
    的 (0,2,0) 高一级 —— 两边都是 !important 时比的就是权重；权重打平的那条
    （.upload-btn.attach-btn:hover 也是 0,3,0）只能靠「本文件排在那些 <style> 之后」取胜，
    所以每个页面都必须把 glide.css 放在其它样式表之后。

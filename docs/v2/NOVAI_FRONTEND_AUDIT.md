@@ -23,8 +23,8 @@ index.html  (AI Studio 壳：侧边栏 + 设置弹窗 + 舞台区，5272 行)
 ├─ frame-enhance       → enhance.html         Z-IMAGE 增强
 ├─ frame-klein         → klein.html           Flux Klein
 ├─ frame-angle         → angle.html           3D 视角重塑
-├─ frame-online        → online.html          在线生图
-├─ frame-gpt-chat      → gpt-chat.html        GPT 对话（独立聊天页，含会话持久化）
+├─ frame-online        → （已下线删除）       在线生图（2026-11 移除）
+├─ frame-chat          → （已下线删除）       旧对话页（2026-11 移除）
 ├─ frame-canvas        → canvas-list.html     画布工作台（项目网格 + 回收站）
 │                          └─ 二级 iframe 加载 canvas.html（传统画布）/ smart-canvas.html（智能画布）
 ├─ frame-asset-manager → asset-manager.html   素材库管理（6 个 tab）
@@ -49,8 +49,8 @@ index.html  (AI Studio 壳：侧边栏 + 设置弹窗 + 舞台区，5272 行)
 | canvas-list.html | 画布工作台 | 项目/画布网格、回收站、新建（普通/智能） | canvas-list.js（1094 行） |
 | canvas.html | 无限画布 | 传统画布：image/llm/generator/output 四类节点 | canvas.js（16,742 行） |
 | smart-canvas.html | （无 title 标签） | 智能画布：smart-image/prompt/loop/group 节点 + 对话助手 | smart-canvas.js（18,092 行） |
-| online.html | 在线生图 | 单张生图页 | 内联 |
-| gpt-chat.html | GPT 对话 | 独立对话页（/api/chat、会话持久化、附件） | 内联 |
+| 旧在线生图页 | 在线生图 | 已下线删除（2026-11 移除；设置页尺寸词表迁 `src/lib/sizeCatalog.js`） | — |
+| 旧对话页 | GPT 对话 | 已下线删除（2026-11 移除；含会话持久化与附件的独立对话页） | — |
 | asset-manager.html | 素材库管理 | 资产/工作流/提示词/画布资产/共享文件夹/本地素材 6 tab | asset-manager.js（4,766 行） |
 | api-settings.html | API 设置 | 多 provider 管理 | api-settings.js（4,106 行） |
 | comfyui-settings.html | 工作流设置 | ComfyUI 实例与工作流 | comfyui-settings.js（1,415 行） |
