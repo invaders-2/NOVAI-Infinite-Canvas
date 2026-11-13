@@ -31,7 +31,7 @@ export function rolesFor(kind: GenKind, p: unknown, m: ModelSpec | undefined, in
     if (kind === "audio") { ignored.add(x.edge.id); continue; }
     const mode = (p as VideoParams).mode; const i = imgs.indexOf(x);
     if (x.node.kind === "image") {
-      const r: GenInput["role"] | null = mode === "首帧" ? (i === 0 ? "first_frame" : null) : mode === "首尾帧" ? (i === 0 ? "first_frame" : i === 1 ? "last_frame" : null) : mode === "参考生视频" || mode === "视频编辑" ? (i < (m?.maxRefs ?? 0) ? "reference" : null) : mode === "数字人" ? (i === 0 ? "portrait" : null) : null;
+      const r: GenInput["role"] | null = mode === "首帧" ? (i === 0 ? "first_frame" : null) : mode === "首尾帧" ? (i === 0 ? "first_frame" : i === 1 ? "last_frame" : null) : mode === "参考生视频" || mode === "视频编辑" || mode === "参考视频生视频" ? (i < (m?.maxRefs ?? 0) ? "reference" : null) : mode === "数字人" ? (i === 0 ? "portrait" : null) : null;
       r ? roles.set(x.edge.id, r) : ignored.add(x.edge.id);
     } else if (x.node.kind === "video") {
       ["视频编辑", "视频延长", "参考视频生视频"].includes(mode) && ins.filter((y) => y.node.kind === "video")[0] === x ? roles.set(x.edge.id, mode === "参考视频生视频" ? "reference_video" : "source_video") : ignored.add(x.edge.id);
