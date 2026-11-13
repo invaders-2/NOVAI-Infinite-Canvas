@@ -170,6 +170,21 @@ def split_health():
     }
 
 
+@router.get("/split/fonts")
+def split_fonts():
+    try:
+        from server.split_engine import fonts as font_engine
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("字体索引加载失败")
+        return _error("ENGINE_FAILED", "字体索引不可用：%s" % exc, 500)
+    try:
+        items = font_engine.families()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("字体索引读取失败")
+        return _error("ENGINE_FAILED", "字体索引读取失败：%s" % exc, 500)
+    return {"ok": True, "fonts": items}
+
+
 @router.post("/split")
 def split_layers(payload: SplitRequest, request: Request):
     started = time.perf_counter()

@@ -15189,6 +15189,18 @@ APIMART_IMAGE_MODEL_CAPS = {
         "resolutions": ("1K", "1.5K", "2K"), "n_max": 1, "mask_url": False, "base64_refs": True,
         "ref_max": 10, "output_formats": ("png", "jpeg"), "native_background": True, "official_fallback": False,
     },
+    # MiniMax-H3-Image（APIMart 文档 2026-11-13 确证，minimax-h3-image / -highspeed 共用同一套参数）：
+    # size 收 auto / 任意整数比例（1:3~3:1）/ 精确像素；resolution 1K 约 1MP、2K 约 4.2MP、4K 约 16MP，
+    # **不传默认 4K（约 3 倍价钱）→ 编辑器必须显式给档位**；n 1~10；参考图 ≤16 张（URL 或 data:image base64）；
+    # 输出 jpeg（默认）/png/webp；quality / style / seed / mask_url 上游明确忽略，不给这些入口。
+    # 不开 exact_size：精确像素分支会同时下发 resolution，而文档要求二者互斥（同传 400），
+    # 与 seedream-5-5 的处理一致，先只走「档位 + 比例」。
+    "minimax-h3-image": {
+        "ratios": ("auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9"),
+        "resolutions": ("1K", "2K", "4K"), "n_max": 10, "mask_url": False,
+        "base64_refs": True, "ref_max": 16,
+        "output_formats": ("png", "jpeg", "webp"), "official_fallback": False,
+    },
     "flux-2": {
         "ratios": ("auto", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "9:21"),
         "resolutions": ("1K", "2K", "4K"), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": False,
@@ -19687,6 +19699,56 @@ async def video_concat(payload: VideoConcatRequest):
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+class DepthCaptureRequest(BaseModel):
+    url: str = ""                 # 画布里的本地视频地址（/output/... 或 /assets/...）
+    keep_audio: bool = True       # 深度视频保留原音轨，便于当参考视频时对齐节奏
+
+
+@app.get("/api/video/depth-capture/status")
+async def video_depth_capture_status():
+    """本机深度能力自检：模型和推理组件就绪才允许点。"""
+    from server.split_engine import depth_capture
+    ready, reason = depth_capture.available(ffmpeg_binary())
+    return {"ready": ready, "message": reason}
+
+
+@app.post("/api/video/depth-capture")
+async def video_depth_capture(payload: DepthCaptureRequest):
+    """把画布里的视频逐帧转成深度视频：本机推理，不上传、不花额度。
+
+    输出是灰度视频（越近越亮），直接当参考视频连到视频生成节点用；分辨率对齐源片，
+    时长上限 30 秒（和即梦一致），超过就让人先裁。
+    """
+    raw_url = (payload.url or "").strip()
+    if not raw_url:
+        raise HTTPException(status_code=400, detail="缺少视频 URL")
+    src = output_file_from_url(raw_url)
+    if not src or not os.path.isfile(src):
+        raise HTTPException(status_code=404, detail="视频文件不存在（只支持画布里的本地视频）")
+    from server.split_engine import depth_capture
+    ffmpeg = ffmpeg_binary()
+    ready, reason = depth_capture.available(ffmpeg)
+    if not ready:
+        raise HTTPException(status_code=400, detail=reason)
+    filename = f"depth_capture_{uuid.uuid4().hex[:12]}.mp4"
+    output_path = output_path_for(filename, "output")
+    result, error = await asyncio.to_thread(
+        depth_capture.capture_video, ffmpeg, src, output_path, keep_audio=bool(payload.keep_audio),
+    )
+    if error or not result:
+        raise HTTPException(status_code=500, detail=error or "深度视频生成失败")
+    return {
+        "url": output_url_for(filename, "output"),
+        "name": filename,
+        "kind": "video",
+        "width": result.get("width", 0),
+        "height": result.get("height", 0),
+        "frames": result.get("frames", 0),
+        "duration": result.get("duration", 0),
+        "seconds": result.get("elapsed", 0),
+    }
+
+
 class TimelineRenderClip(BaseModel):
     id: str = ""
     url: str = ""
@@ -22463,6 +22525,11 @@ def apimart_video_modes(model, table):
     没有能力表（table 为空）时返回 None（= 不掌握，字段直接不下发，前端回退到自己的预设）。"""
     if not isinstance(table, dict):
         return None
+    # 能力表里显式写了 modes 就以它为准：新统一入口的模型（kling-v4 / zoe / omni-1.2）支持哪些方式
+    # 由文档逐条写死，靠标记位推会把首尾帧、视频延长推错（kling-v4-flash 首帧只收 1 张、也不收尾帧）。
+    pinned = [value for value in _caps_list(table.get("modes")) if value in VIDEO_MODE_VALUES]
+    if pinned:
+        return pinned
     name = re.sub(r"[^a-z0-9]+", "-", str(model or "").strip().lower()).strip("-")
     edit_only = "videoedit" in name or "video-edit" in name
     modes = []
@@ -26224,6 +26291,92 @@ APIMART_VIDEO_MODEL_CAPS = {
         "generate_audio": False, "watermark": False, "seed": False,
         "image_with_roles": False, "video_urls": True, "audio_urls": False,
     },
+    # ── 2026-11-13 文档新增：统一入口 /v1/videos/generations + omni_reference_task_type ──────────
+    # apimart-zoe：480p/720p/1080p/2k/4k（普通生成默认 720p，草稿只认 480p），比例含 adaptive，
+    # 时长 4–30 或 -1（模型自选），自带音轨、seed 可传；参考上限「图 30 / 视频 10 / 音频 10」，
+    # 但本机通用分支只上传前 9 张图、3 段视频、3 段音频（见下方 image_limit / video_payload[:3]），
+    # 所以参考上限按实际下发能力写（9 / 3 / 3），别让编辑器允许拖进来的数量被静默截断。
+    # 编辑/参考走 omni_reference_task_type（auto 省略、reference/edit/extend），zoe 不支持 extend。
+    "apimart-zoe": {
+        "durations": (-1,) + tuple(range(4, 31)), "ratio_key": "aspect_ratio",
+        "ratios": ("21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"),
+        "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p", "2k", "4k"),
+        "generate_audio": True, "watermark": False, "seed": True,
+        "image_with_roles": True, "video_urls": True, "audio_urls": True,
+        "omni_task_type": True, "ref_max": 9, "video_ref_max": 3, "audio_ref_max": 3,
+        "modes": ("text_to_video", "image_to_video", "start_end_to_video", "reference_to_video",
+                  "video_edit", "reference_video_to_video"),
+    },
+    # kling-v4：3–30 秒；720p / 1080p（V4 用 resolution，**不再有 mode**）；比例 16:9/9:16/1:1/21:9
+    # （参考生视频才认 auto）；首帧方式不接受 aspect_ratio（跟随首帧，见 ratio_follows_first_frame）；
+    # 文档参考上限 图 10 / 视频 5（合计 30 秒）/ 音频 3（每段 5–30 秒），实际下发按通用分支的 9 / 3 / 3；
+    # 参考音只有 v4 收，flash 不收。
+    "kling-v4": {
+        "duration": (3, 30), "ratio_key": "aspect_ratio",
+        "ratios": ("16:9", "9:16", "1:1", "21:9", "auto"),
+        "resolution_key": "resolution", "resolutions": ("720p", "1080p"),
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": True, "video_urls": True, "audio_urls": True,
+        "omni_task_type": True, "ratio_follows_first_frame": True,
+        "ref_max": 9, "video_ref_max": 3, "audio_ref_max": 3,
+        "modes": ("text_to_video", "image_to_video", "start_end_to_video", "reference_to_video",
+                  "video_edit", "video_extend", "reference_video_to_video"),
+    },
+    # kling-v4-flash：3–20 秒；只有 720p（1080p 直接 400）；比例同上但首帧方式同样不能带 aspect_ratio；
+    # 首帧只收 1 张（不收尾帧/中间帧）；参考视频 ≤5 段（合计 20 秒）；不收参考音频。
+    "kling-v4-flash": {
+        "duration": (3, 20), "ratio_key": "aspect_ratio",
+        "ratios": ("16:9", "9:16", "1:1", "21:9", "auto"),
+        "resolution_key": "resolution", "resolutions": ("720p",),
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": True, "video_urls": True, "audio_urls": False,
+        "omni_task_type": True, "ratio_follows_first_frame": True,
+        "ref_max": 9, "video_ref_max": 3,
+        "modes": ("text_to_video", "image_to_video", "reference_to_video",
+                  "video_edit", "video_extend", "reference_video_to_video"),
+    },
+    # gemini-omni-1.2-flash（官方 max 档）与 -ext：360p/720p/1080p/4k（默认 720p，2160p 等同 4k），
+    # 时长 3–15（首尾帧/延长只到 10），比例只有 16:9 / 9:16；参考图 ≤10 张（只收公网 URL，不收 base64），
+    # 视频输入 1 段（≤15 秒）；编辑/延长靠 omni_reference_task_type。
+    "gemini-omni-1-2-flash": {
+        "duration": (3, 15), "ratio_key": "aspect_ratio", "ratios": ("16:9", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("360p", "720p", "1080p", "4k"),
+        "resolution_aliases": {"2160p": "4k"},
+        "generate_audio": True, "watermark": False, "seed": False,
+        "image_with_roles": True, "video_urls": True, "audio_urls": False,
+        "omni_task_type": True, "ref_max": 9, "video_ref_max": 1,
+        "modes": ("text_to_video", "image_to_video", "start_end_to_video", "reference_to_video",
+                  "video_edit", "video_extend"),
+    },
+    "gemini-omni-1-2-flash-ext": {
+        "duration": (3, 15), "ratio_key": "aspect_ratio", "ratios": ("16:9", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("360p", "720p", "1080p", "4k"),
+        "resolution_aliases": {"2160p": "4k"},
+        "generate_audio": True, "watermark": False, "seed": False,
+        "image_with_roles": True, "video_urls": True, "audio_urls": False,
+        "omni_task_type": True, "ref_max": 9, "video_ref_max": 1,
+        "modes": ("text_to_video", "image_to_video", "start_end_to_video", "reference_to_video",
+                  "video_edit", "video_extend"),
+    },
+    # VEO 3.1：ext 档（veo3.1-fast / -quality / -lite 及其 -ext 别名）时长固定 8 秒；
+    # 比例只有 16:9 / 9:16；分辨率 720p（默认）/1080p/4k；lite 不收图片，quality 不支持 reference 模式。
+    # 官方档（veo3.1-*-official，720p/1080p + 4/6/8 秒）暂不建表：apimart_veo31_model() 只认
+    # fast/quality/lite，官方档名字会被归一到 ext 档，给它们建条目只会让编辑器发出 8 秒以外的时长被上游拒。
+    "veo3-1": {
+        "durations": (8,), "ratio_key": "aspect_ratio", "ratios": ("16:9", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("720p", "1080p", "4k"),
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+        "ref_max": 3,
+        "modes": ("text_to_video", "image_to_video", "start_end_to_video", "reference_to_video"),
+    },
+    "veo3-1-lite": {
+        "durations": (8,), "ratio_key": "aspect_ratio", "ratios": ("16:9", "9:16"),
+        "resolution_key": "resolution", "resolutions": ("720p", "1080p", "4k"),
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+        "refs_none": True, "modes": ("text_to_video",),
+    },
 }
 
 # 真机 /v1/models 里该模型的 id 是文档目录名 Omni-Flash-Ext（不是文档示例的 gemini-omni-1.1-flash-ext），
@@ -27237,13 +27390,28 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                         apimart_seedance_model, payload.duration,
                         payload.aspect_ratio or payload.size, payload.resolution)
                     body = {"prompt": payload.prompt, "model": apimart_seedance_model}
+                    # 首帧 / 首尾帧方式：部分模型（kling-v4、kling-v4-flash）文档明确「不接受
+                    # aspect_ratio/size，画幅跟随首帧」，带比例字段上游直接 400 → 这些方式下整段不发。
+                    apimart_first_frame_mode = explicit_mode in ("image_to_video", "start_end_to_video") or (
+                        not explicit_mode and any(str(item.get("role") or "") in {"first_frame", "last_frame"}
+                                                  for item in image_with_roles))
+                    apimart_omit_ratio = bool((apimart_video_caps or {}).get("ratio_follows_first_frame")
+                                              and apimart_first_frame_mode)
                     if video_params.get("duration") is not None:
                         body["duration"] = video_params["duration"]
-                    if video_params.get("ratio_key"):
+                    if video_params.get("ratio_key") and not apimart_omit_ratio:
                         body[video_params["ratio_key"]] = video_params["ratio_value"]
                     if video_params.get("resolution_key") and video_params.get("resolution_value"):
                         body[video_params["resolution_key"]] = video_params["resolution_value"]
-                    if image_with_roles and video_payload:
+                    # omni_reference_task_type：新的统一视频入口靠它区分参考生成 / 视频编辑 / 视频延长
+                    # （auto 等价省略，改动向/参考视频之外的情况都不用发）
+                    apimart_omni_task = {"reference_to_video": "reference", "video_edit": "edit",
+                                         "video_extend": "extend"}.get(explicit_mode or "")
+                    if apimart_omni_task and (apimart_video_caps or {}).get("omni_task_type"):
+                        body["omni_reference_task_type"] = apimart_omni_task
+                    # Seedance 系上游不认「角色化图片 + 参考视频」同时出现；新统一入口（omni_task_type）
+                    # 文档明确支持 image_with_roles + video_urls 一起做参考生成，所以只对老模型拦。
+                    if image_with_roles and video_payload and not (apimart_video_caps or {}).get("omni_task_type"):
                         raise HTTPException(status_code=400, detail="APIMart Seedance 的 image_with_roles 不能和 video_urls 同时使用，请只保留图片首尾帧或参考视频其中一种。")
                     if image_with_roles:
                         body["image_with_roles"] = image_with_roles
@@ -27252,12 +27420,14 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                     if video_payload:
                         if int(payload.duration or 0) == -1:
                             body["duration"] = -1
-                        if str(payload.aspect_ratio or "").strip().lower() == "adaptive" and video_params.get("ratio_key"):
+                        if (str(payload.aspect_ratio or "").strip().lower() == "adaptive"
+                                and video_params.get("ratio_key") and not apimart_omit_ratio):
                             body[video_params["ratio_key"]] = "adaptive"
                         body["video_urls"] = video_payload
                     # 首尾帧输出跟随首帧比例。能力表未登记 adaptive 时，body_params 会先吸附成 1:1，
                     # 这里按上游 first_frame/last_frame 契约恢复 adaptive，不能再改成固定画幅。
                     if (str(payload.aspect_ratio or "").strip().lower() == "adaptive" and video_params.get("ratio_key")
+                            and not apimart_omit_ratio
                             and any(str(item.get("role") or "") in {"first_frame", "last_frame"} for item in image_with_roles)):
                         body[video_params["ratio_key"]] = "adaptive"
                     audio_payload = []

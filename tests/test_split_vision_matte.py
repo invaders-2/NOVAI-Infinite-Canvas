@@ -116,8 +116,8 @@ def fake_matte(monkeypatch, loaded):
     return rgba
 
 
-def _by_name(drafts, name):
-    return next(draft for draft in drafts if draft.name == name)
+def _by_role(drafts, role):
+    return next(draft for draft in drafts if draft.role == role)
 
 
 def _alpha(draft):
@@ -135,11 +135,10 @@ def test_object_layer_is_transparent_and_block_stays_rect(upstream, loaded, fake
     assert engine == "vision"
     # 背景层必须排最前（z 最低），即使模型把它放在最后
     assert drafts[0].role == "background"
-    assert drafts[0].name == "background"
+    assert drafts[0].name == "背景"
 
-    model = _by_name(drafts, "model")
+    model = _by_role(drafts, "subject")
     alpha = _alpha(model)
-    assert model.role == "object"
     assert model.png.size == (W, H)
     assert int((alpha == 0).sum()) > 0                              # 主体之外真透明
     assert int(((alpha > 0) & (alpha < 255)).sum()) > 0             # 边缘保留半透明
@@ -148,16 +147,14 @@ def test_object_layer_is_transparent_and_block_stays_rect(upstream, loaded, fake
     assert alpha[100, 170] == 255                                   # 框外但同一主体 → 补全，不锯断
     assert model.bbox == (MATTE_BOX[0], MATTE_BOX[1], MATTE_BOX[2], MATTE_BOX[3])
 
-    panel = _by_name(drafts, "panel")
+    panel = _by_role(drafts, "decoration")
     panel_alpha = _alpha(panel)
-    assert panel.role == "block"
     assert int((panel_alpha[50:110, 180:220] == 255).sum()) == 40 * 60   # 矩形整块不透明
     assert int((panel_alpha == 255).sum()) == 40 * 60
     assert panel.bbox == (180, 50, 40, 60)
 
-    background = _by_name(drafts, "background")
+    background = _by_role(drafts, "background")
     bg_alpha = _alpha(background)
-    assert background.role == "background"
     assert background.png.size == (W, H)
     assert bg_alpha[120, 150] == 0                                  # 主体位置挖成洞
     assert bg_alpha[10, 10] == 255                                  # 主体之外仍是不透明底图
@@ -171,8 +168,8 @@ def test_background_hole_makes_stack_equal_to_original(upstream, loaded, fake_ma
         {"name": "model", "type": "image", "role": "object", "bbox": OBJECT_BBOX},
     ]
     drafts, _warnings, _engine = vision.split(loaded, "auto", None, None, 16)
-    background = _by_name(drafts, "background")
-    model = _by_name(drafts, "model")
+    background = _by_role(drafts, "background")
+    model = _by_role(drafts, "subject")
     bg = np.asarray(background.png)
     obj = np.asarray(model.png)
 
@@ -196,21 +193,20 @@ def test_role_defaults_by_name(upstream, loaded, fake_matte, name):
     ]
     drafts, _warnings, _engine = vision.split(loaded, "auto", None, None, 16)
 
-    layer = _by_name(drafts, name)
-    assert layer.role == "object"
+    layer = _by_role(drafts, "subject")
     assert int((_alpha(layer) == 0).sum()) > 0
-    assert int((_alpha(_by_name(drafts, "background")) == 0).sum()) > 0
+    assert int((_alpha(_by_role(drafts, "background")) == 0).sum()) > 0
 
 
-def test_missing_role_without_keyword_is_block(upstream, loaded, fake_matte):
+def test_missing_role_without_keyword_is_decoration(upstream, loaded, fake_matte):
     upstream.layers = [
         {"name": "background", "type": "image", "role": "background", "bbox": [0, 0, W, H]},
         {"name": "side card", "type": "image", "bbox": [180, 50, 40, 60]},
     ]
     drafts, _warnings, _engine = vision.split(loaded, "auto", None, None, 16)
 
-    assert _by_name(drafts, "side card").role == "block"
-    assert int((_alpha(_by_name(drafts, "side card")) == 255).sum()) == 40 * 60
+    card = _by_role(drafts, "decoration")
+    assert int((_alpha(card) == 255).sum()) == 40 * 60
 
 
 def test_matte_unavailable_falls_back_to_rect_with_warning(upstream, loaded, monkeypatch):
@@ -223,13 +219,12 @@ def test_matte_unavailable_falls_back_to_rect_with_warning(upstream, loaded, mon
     drafts, warnings, engine = vision.split(loaded, "auto", None, None, 16)
 
     assert engine == "vision"
-    model = _by_name(drafts, "model")
-    assert model.role == "object"
+    model = _by_role(drafts, "subject")
     assert model.bbox == tuple(OBJECT_BBOX)
     alpha = _alpha(model)
     assert int((alpha[60:260, 80:160] == 255).sum()) == 80 * 200     # 退回矩形层
     assert int((alpha == 255).sum()) == 80 * 200
-    assert int((_alpha(_by_name(drafts, "background")) == 255).sum()) == W * H   # 背景仍不透明
+    assert int((_alpha(_by_role(drafts, "background")) == 255).sum()) == W * H   # 背景仍不透明
     assert any("本地抠图模型不可用" in line and reason in line for line in warnings)
 
 
@@ -241,10 +236,10 @@ def test_no_object_layer_discards_speculative_matte(upstream, loaded, monkeypatc
     ]
     drafts, warnings, _engine = vision.split(loaded, "auto", None, None, 16)
 
-    assert [draft.role for draft in drafts] == ["background", "block"]
-    assert int((_alpha(_by_name(drafts, "background")) == 255).sum()) == W * H
-    assert int((_alpha(_by_name(drafts, "card")) == 255).sum()) == 60 * 40
-    assert not any("抠图" in line for line in warnings)
+    assert [draft.role for draft in drafts] == ["background", "decoration"]
+    assert int((_alpha(_by_role(drafts, "background")) == 255).sum()) == W * H
+    assert int((_alpha(_by_role(drafts, "decoration")) == 255).sum()) == 60 * 40
+    assert not any("本地抠图" in line for line in warnings)
 
 
 def test_matte_thread_error_falls_back_to_rect(upstream, loaded, monkeypatch):
@@ -259,7 +254,7 @@ def test_matte_thread_error_falls_back_to_rect(upstream, loaded, monkeypatch):
     drafts, warnings, engine = vision.split(loaded, "auto", None, None, 16)
 
     assert engine == "vision"
-    model = _by_name(drafts, "model")
+    model = _by_role(drafts, "subject")
     assert model.bbox == tuple(OBJECT_BBOX)
     assert int((_alpha(model) == 255).sum()) == 80 * 200
     assert any("本地抠图模型不可用" in line and "模拟推理崩溃" in line for line in warnings)

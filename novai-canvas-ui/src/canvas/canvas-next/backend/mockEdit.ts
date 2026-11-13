@@ -23,6 +23,18 @@ export async function mockEdit(req) {
   } else if (req.op === "relight") { return { url: await relit(req.sourceUrl, p.lx ?? .25, p.ly ?? .3, p.intensity ?? 70, p.temp ?? 40), w: W, h: H }; }
   else if (req.op === "outpaint") { c = cv(W * 1.4, H * 1.4); const g = c.getContext("2d"); g.filter = "blur(30px) brightness(.95)"; g.drawImage(im, -W * .1, -H * .1, W * 1.6, H * 1.6); g.filter = "none"; g.drawImage(im, W * .2, H * .2); }
   else if (req.op === "enhance") { const s = Math.min(2, 1800 / Math.max(W, H)); c = cv(W * s, H * s); const g = c.getContext("2d"); g.imageSmoothingQuality = "high"; g.filter = "contrast(1.08) saturate(1.12)"; g.drawImage(im, 0, 0, W * s, H * s); }
+  // 白膜：本地近似效果（去色 + 提亮成象牙白），真实效果由模型完成
+  else if (req.op === "whitemodel") {
+    c = cv(W, H); const g = c.getContext("2d"); g.drawImage(im, 0, 0);
+    const d = g.getImageData(0, 0, W, H); const px = d.data;
+    for (let i = 0; i < px.length; i += 4) {
+      const lum = (px[i] * .299 + px[i + 1] * .587 + px[i + 2] * .114) / 255;
+      const v = Math.min(255, 236 + lum * 16);
+      px[i] = v; px[i + 1] = v; px[i + 2] = v;
+    }
+    g.putImageData(d, 0, 0);
+    g.fillStyle = "rgba(255,255,255,.14)"; g.fillRect(0, 0, W, H);
+  }
   else if (req.op === "cutout") { c = cv(W, H); const g = c.getContext("2d"); g.drawImage(im, 0, 0); const d = g.getImageData(0, 0, W, H); const px = d.data; const bg = [px[0], px[1], px[2]]; for (let i = 0; i < px.length; i += 4) { const dist = Math.abs(px[i] - bg[0]) + Math.abs(px[i + 1] - bg[1]) + Math.abs(px[i + 2] - bg[2]); if (dist < 46) px[i + 3] = 0; else if (dist < 80) px[i + 3] = Math.round(((dist - 46) / 34) * 255); } g.putImageData(d, 0, 0); }
   return { url: c.toDataURL(req.op === "cutout" ? "image/png" : "image/jpeg", .9), w: c.width, h: c.height };
 }

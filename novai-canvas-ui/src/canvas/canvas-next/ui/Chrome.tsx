@@ -22,7 +22,7 @@ import { novaiName, novaiZipName } from "./downloadName";
 import { stackOf, stackSelection } from "../stack";
 import { groupSelection } from "./LegacyNodes";
 import { groupName, groupsOf, membersOf, searchNodes, type SearchKind, type SearchScope } from "../search";
-import { runKeyOf, runnableIds, runNodes } from "./StackNode";
+import { runKeyOf, runnableIds, runNodes, saveAsTemplate } from "./StackNode";
 import { bounds, cloneParams, defaultParams, expandGroupInputs, genOf, NODE_TAG, inputsOf, isGenKind, outOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, type AnyParams, type GenKind, type TextParams, type VideoMode, type VideoParams } from "../model";
 import { emptyTable, withTable } from "../table";
 import { ThumbImg } from "./thumb";
@@ -1447,6 +1447,7 @@ function MultiBar() {
       : <FloatMenuButton icon="play" label="一键运行" primary disabled={!runnable.length} data={{ "data-mb": "run" }}
         title={runnable.length ? `按依赖顺序运行 ${runnable.length} 个生成节点（${keyHint("run")}，先确认消耗）` : "选中的节点里没有可运行的"}
         onClick={() => runNodes(ctl, nodes)} />}
+    <FloatMenuButton icon="layout" label="存为模板" title="存为我的模板" data={{ "data-mb": "tpl" }} onClick={() => saveAsTemplate(ctl, nodes, store.state.name + " 模板")} />
     <FloatMenuButton icon="download" label="下载" title="有结果的节点打包成 zip 下载" data={{ "data-mb": "dl" }} onClick={() => void downloadMany(nodes, store)} />
     <AnimateIcon asChild><button type="button" className="cn-fm-btn" data-mb="del" data-fm-danger="1" onClick={() => deleteSelection(store)}><Icon name="trash" /><span className="cn-fm-label">删除</span></button></AnimateIcon>
     <FloatMenuButton icon="x" label="取消选择" data={{ "data-mb": "cancel" }} onClick={() => store.setUI({ sel: new Set() })} />

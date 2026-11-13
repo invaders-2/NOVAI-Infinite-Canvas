@@ -207,3 +207,57 @@ def full_region_layer(
 
 def layer_color(rgb: np.ndarray, mask: np.ndarray) -> str:
     return hex_color(dominant_color(rgb, mask))
+
+
+def grabcut_cutout(
+    rgb: np.ndarray, bbox: tuple[int, int, int, int], iterations: int = 3
+) -> np.ndarray | None:
+    """抠图模型没命中时（扁平插画/纯色块常见）用 GrabCut 兜底，返回 0~1 alpha。
+
+    只在 bbox 内做，跑得很快；整块都被判成前景（等于没切）或几乎没有前景时返回 None，
+    让调用方退回矩形层，避免把背景整片抠进主体层。
+    """
+    try:
+        import cv2
+    except Exception:  # noqa: BLE001 - 没有 cv2 就走矩形层
+        return None
+
+    image_h, image_w = rgb.shape[:2]
+    x, y, w, h = (int(round(value)) for value in bbox)
+    x = max(0, min(x, image_w - 2))
+    y = max(0, min(y, image_h - 2))
+    w = max(2, min(w, image_w - x))
+    h = max(2, min(h, image_h - y))
+
+    mask = np.zeros((image_h, image_w), np.uint8)
+    background = np.zeros((1, 65), np.float64)
+    foreground = np.zeros((1, 65), np.float64)
+    try:
+        cv2.grabCut(
+            np.ascontiguousarray(rgb),
+            mask,
+            (x, y, w, h),
+            background,
+            foreground,
+            iterations,
+            cv2.GC_INIT_WITH_RECT,
+        )
+    except Exception:  # noqa: BLE001
+        return None
+
+    inside = np.zeros((image_h, image_w), bool)
+    inside[y : y + h, x : x + w] = True
+    solid = np.isin(mask, (cv2.GC_FGD, cv2.GC_PR_FGD)) & inside
+    ratio = float(solid.sum()) / float(w * h)
+    if ratio < 0.02 or ratio > 0.97:
+        return None
+
+    labels, count = ndimage.label(solid)
+    if count == 0:
+        return None
+    sizes = np.bincount(labels.ravel())
+    sizes[0] = 0
+    keep = labels == int(sizes.argmax())
+    alpha = ndimage.gaussian_filter(keep.astype(np.float32), 0.8)
+    alpha[~inside] = 0.0
+    return np.clip(alpha, 0.0, 1.0)

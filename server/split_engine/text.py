@@ -26,7 +26,7 @@ def _join(prev: str, word: str) -> str:
     return prev + " " + word
 
 
-def _same_line(a: dict, b: dict, max_gap_ratio: float = 1.2, min_overlap: float = 0.5) -> bool:
+def _same_line(a: dict, b: dict, max_gap_ratio: float = 1.8, min_overlap: float = 0.5) -> bool:
     overlap = min(a["y"] + a["h"], b["y"] + b["h"]) - max(a["y"], b["y"])
     if overlap <= min_overlap * min(a["h"], b["h"]):
         return False
@@ -143,6 +143,33 @@ def dedupe_lines(lines: list[dict]) -> list[dict]:
 def hex_color(rgb) -> str:
     values = [int(round(min(255, max(0, float(channel))))) for channel in rgb]
     return "#{:02X}{:02X}{:02X}".format(*values)
+
+
+def merge_lines(lines: list[dict]) -> list[dict]:
+    """跨 OCR pass 的同一行会各出一段（「限时5」+「-立即抢购」），按行合并后再拆层。"""
+    if not lines:
+        return []
+    return merge_words([dict(line) for line in lines])
+
+
+def ink_height(rgba) -> float:
+    rows = np.flatnonzero((rgba[..., 3] > 24).any(axis=1))
+    if rows.size == 0:
+        return float(rgba.shape[0])
+    return float(rows[-1] - rows[0] + 1)
+
+
+def estimate_font_size(content: str, ink_h: float, box_w: float) -> int:
+    """字号同时受字形高度和行宽约束，避免换成本机字体后字比原稿宽一截。"""
+    chars = [ch for ch in str(content or "") if not ch.isspace()]
+    if not chars:
+        return max(8, int(round(ink_h / 0.8)))
+    cjk = sum(1 for ch in chars if is_cjk(ch))
+    latin = max(0, len(chars) - cjk)
+    by_height = ink_h / 0.8
+    em_width = cjk * 1.0 + latin * 0.56
+    by_width = (box_w * 0.98) / max(0.8, em_width)
+    return max(8, int(round(min(by_height, by_width))))
 
 
 def estimate_font_weight(density: float) -> int:

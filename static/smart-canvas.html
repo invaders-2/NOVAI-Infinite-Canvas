@@ -14,7 +14,7 @@
     <!-- NOVAI 2.0 外观统一层：配色 / 状态色 / 字重对齐新前端，放在 glide.css 前面（glide.css 按约定必须最后），其余样式表之后 -->
     <link rel="stylesheet" href="/static/css/nv2-skin.css?v=2.0.07.1791729997">
     <link rel="stylesheet" href="/static/css/image-adjust.css?v=2.0.07.1793777400">
-    <link rel="stylesheet" href="/static/css/glide.css?v=2.0.07.1794475911">
+    <link rel="stylesheet" href="/static/css/glide.css?v=2.0.07.1794556942">
     <script defer src="/static/vendor/js/lucide-subset.js?v=2.0.07.1794194019"></script>
     <script defer src="/static/vendor/js/html-to-image.js?v=2.0.07.1789615756"></script>
     <script defer src="/static/js/shared/icons.js?v=2.0.07.1793785599"></script>
@@ -22,7 +22,7 @@
          统一加 defer：HTML 解析不再被 13 个串行下载+执行的脚本卡住（首屏 body 里的 defer 脚本
          也能更早被发现）。defer 之间严格按文档顺序执行，依赖顺序与原来一致；
          唯一保留同步的是 theme.js（首屏上色要在 CSS 生效前跑完，避免闪白）。 -->
-    <script src="/static/js/theme.js?v=2.0.07.1794279814"></script>
+    <script src="/static/js/theme.js?v=2.0.07.1794556942"></script>
     <script defer src="/static/js/credits.js?v=2.0.07.1792848048"></script>
     <script src="/static/js/user-menu.js?v=2.0.07.1793785628" defer></script>
     <script defer src="/static/js/shared/utils.js?v=2.0.07.1790560477"></script>
@@ -923,11 +923,11 @@ body.studio-theme-dark .canvas-zoombar button:hover i, body.studio-theme-dark .c
     <script defer src="/static/js/image-adjust-editor.js?v=2.0.07.1793785654"></script>
     <script defer src="/static/js/canvas-rail.js?v=2.0.07.1793421882"></script>
     <script defer src="/static/js/online-prompt-library.js?v=2.0.07.1792337992"></script>
-    <script defer src="/static/js/source-browser.js?v=2.0.07.1794307957"></script>
+    <script defer src="/static/js/source-browser.js?v=2.0.07.1794556942"></script>
     <script defer src="/static/js/shared/agent-session.js?v=2.0.07.1792816544"></script>
     <!-- 长文输出用的 Markdown 渲染（离线零依赖）：必须排在 smart-canvas.js 之前 -->
     <script defer src="/static/js/smart-markdown.js?v=2.0.07.1793000645"></script>
-    <script defer src="/static/js/smart-canvas.js?v=2.0.07.1794473830"></script>
+    <script defer src="/static/js/smart-canvas.js?v=2.0.07.1794556942"></script>
     <!-- 画布助手微应用：localStorage.NOVAI_CANVAS_UI=legacy 时留在旧面板，默认加载 React 版 -->
     <script defer src="/static/js/canvas-assistant-bridge.js?v=2.0.07.1793945957"></script>
     <script defer src="/static/js/collab.js?v=2.0.07.1793785628"></script>

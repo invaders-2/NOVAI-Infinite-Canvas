@@ -632,6 +632,155 @@
           "note": "文档确证 background 可选 auto/transparent/opaque，文生图与图生图都支持；透明背景必须配 output_format=png，生成侧会把输出格式强制改成 png"
         }
       ]
+    },
+    {
+      "provider_id": "apimart",
+      "name": "APIMart",
+      "version": 4,
+      "released_at": "2026-11-13",
+      "summary": "新增 10 个模型（图像 2 / 视频 8）：apimart-zoe、kling-v4、kling-v4-flash、gemini-omni-1.2-flash(-ext)、veo3.1-fast/quality/lite、minimax-h3-image(+highspeed)。协议侧新增统一视频入口 POST /v1/videos/generations 的 omni_reference_task_type（参考/编辑/延长路由）、首帧方式禁发画幅字段、nsfw_check（默认关）、模型参数契约接口。编辑器同步：这些模型的比例、分辨率、时长、张数、参考上限按文档写入能力表。",
+      "docs_url": "https://docs.apimart.ai/cn/api-reference/videos/kling-v4/generation",
+      "new_models": {
+        "chat": [],
+        "image": [
+          "minimax-h3-image",
+          "minimax-h3-image-highspeed"
+        ],
+        "video": [
+          "apimart-zoe",
+          "kling-v4",
+          "kling-v4-flash",
+          "gemini-omni-1.2-flash",
+          "gemini-omni-1.2-flash-ext",
+          "veo3.1-fast",
+          "veo3.1-quality",
+          "veo3.1-lite"
+        ],
+        "audio": []
+      },
+      "protocol_changes": [
+        {
+          "field": "video_unified_endpoint",
+          "from": "/v1/video/create（旧通用入口）",
+          "to": "POST /v1/videos/generations；查询 GET /v1/videos/generations/{task_id} 或统一 /v1/tasks/{task_id}",
+          "note": "文档确证：kling-v4 / kling-v4-flash / apimart-zoe / gemini-omni-1.2 / veo3.1 都走这个统一异步入口，返回 data[0].task_id。"
+        },
+        {
+          "field": "omni_reference_task_type",
+          "from": "",
+          "to": "auto（默认，等价省略）| reference | edit | extend（部分模型另收 text_to_video / image_to_video / reference_to_video）",
+          "note": "文档确证：新统一入口靠它区分参考生视频 / 视频编辑 / 视频延长。只用参考图生成时必须显式 reference，否则图片被当成首帧；只传 video_url 而没写 edit/extend 直接 400。apimart-zoe 不支持 extend。"
+        },
+        {
+          "field": "first_frame_ratio",
+          "from": "首帧/首尾帧也下发 aspect_ratio/size",
+          "to": "首帧/首尾帧方式不下发画幅字段（kling-v4、kling-v4-flash）",
+          "note": "文档确证：这两个模型在 image-to-video 下带非空 aspect_ratio/size 会 400，输出画幅跟随首帧；需要别的比例要先把首帧裁好。"
+        },
+        {
+          "field": "model_schema_endpoint",
+          "from": "v1 只记录了 /v1/models?expand=category|parameters",
+          "to": "补充单模型契约 GET /v1/models/{model}/schema（名字含 / 时用 /v1/model-schema?model=）",
+          "note": "文档确证：parameters 覆盖 image/video，含 endpoint / schema_version / input_schema（JSON Schema 2020-12），可用于动态表单与预校验。"
+        },
+        {
+          "field": "nsfw_check",
+          "from": "",
+          "to": "nsfw_check:boolean，默认 false（不审）",
+          "note": "文档确证：minimax-h3-image / kling-v4 / kling-v4-flash / apimart-zoe / gemini-omni-1.2 都收该布尔；项目当前不传，等于不审，省掉一次审核延迟与费用。"
+        },
+        {
+          "field": "minimax_image_resolution_default",
+          "from": "不传 resolution",
+          "to": "默认 4K（约 16MP，价格约 1K/2K 的 3 倍）",
+          "note": "文档确证：minimax-h3-image(-highspeed) 不传 resolution 就按 4K 出图与计费，所以必须显式下发档位；精确像素 size 与 resolution 互斥（同传 400），能力表因此不开 exact_size。"
+        },
+        {
+          "field": "veo31_official_channel",
+          "from": "",
+          "to": "veo3.1-fast-official / veo3.1-quality-official 是 720p/1080p + 4/6/8 秒的官方档",
+          "note": "只记录不纳入：本项目 apimart_veo31_model() 只认 fast/quality/lite，官方档名字会被归一到 ext 档（固定 8 秒、720p/1080p/4k），所以本期不给官方档建能力条目、也不加进模型列表。"
+        },
+        {
+          "field": "reference_media_caps",
+          "from": "通用分支最多上传 图 9 / 视频 3 / 音频 3",
+          "to": "文档允许更多：apimart-zoe 图 30 / 视频 10 / 音频 10；kling-v4 图 10 / 视频 5 / 音频 3",
+          "note": "能力表的 ref_max 按实际下发能力写（9/3/3），避免编辑器允许拖进 30 张却在后端被静默截断；放开上传上限要连上传/计费一起验，单独一轮做。"
+        }
+      ],
+      "model_caps": [],
+      "parameter_changes": [
+        {
+          "model": "minimax-h3-image",
+          "field": "resolutions",
+          "from": "",
+          "to": "1K / 2K / 4K（默认 4K）",
+          "note": "档位与 n 1–10、参考图 ≤16 张一并写入能力表；highspeed 版参数相同"
+        },
+        {
+          "model": "kling-v4",
+          "field": "resolution",
+          "from": "mode(std/pro/4k)（kling v3 口径）",
+          "to": "resolution 720p / 1080p",
+          "note": "V4 明确不支持 mode，分辨率改用 resolution 字段"
+        },
+        {
+          "model": "kling-v4",
+          "field": "duration",
+          "from": "",
+          "to": "3–30 秒（默认 5）",
+          "note": "编辑/延长不传时跟随输入视频"
+        },
+        {
+          "model": "kling-v4-flash",
+          "field": "resolutions",
+          "from": "",
+          "to": "只有 720p",
+          "note": "传 1080p 直接 400；时长 3–20 秒"
+        },
+        {
+          "model": "apimart-zoe",
+          "field": "durations",
+          "from": "",
+          "to": "4–30 秒，或 -1 让模型自选",
+          "note": "分辨率 480p/720p/1080p/2k/4k；比例含 adaptive"
+        },
+        {
+          "model": "gemini-omni-1.2-flash",
+          "field": "durations",
+          "from": "无 duration 参数（1.1 口径）",
+          "to": "3–15 秒（默认 10；首尾帧与延长只到 10）",
+          "note": "分辨率 360p/720p/1080p/4k；比例只有 16:9 / 9:16；参考图 ≤10 张且只收公网 URL"
+        },
+        {
+          "model": "gemini-omni-1.2-flash-ext",
+          "field": "durations",
+          "from": "",
+          "to": "3–15 秒",
+          "note": "与官方档同参数，ext 走加速通道"
+        },
+        {
+          "model": "veo3.1-fast",
+          "field": "durations",
+          "from": "",
+          "to": "固定 8 秒",
+          "note": "ext 档只收 8 秒；比例 16:9/9:16；分辨率 720p/1080p/4k"
+        },
+        {
+          "model": "veo3.1-lite",
+          "field": "modes",
+          "from": "",
+          "to": "只支持文生视频",
+          "note": "文档确证 lite 不收图片（项目侧已有 400 拦截），也不支持 reference 模式"
+        },
+        {
+          "model": "veo3.1-quality",
+          "field": "generation_type",
+          "from": "",
+          "to": "不支持 reference 模式",
+          "note": "最多 2 张图（首尾帧），第 3 张起项目侧会截断"
+        }
+      ]
     }
   ]
 }

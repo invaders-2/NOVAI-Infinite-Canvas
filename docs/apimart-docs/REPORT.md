@@ -457,3 +457,62 @@ Suno 版本/限制（**原文** L70320–L70357）：public version 仅 `v6` / `
 | U5 | `gpt-6.1-terra` 是否真实可调 | 是否进目录 | 调一次 `/v1/chat/completions` |
 | U6 | `seedream-4.5`（点）vs `seedream-4-5`（连字符）哪个真 | 用户填错就失败 | 各调一次，看 400 文案 |
 | U7 | `GET /v1/models?expand=parameters` 对项目的目标模型覆盖到什么程度 | 决定 O1 值不值 | 用用户 key 拉一次（**本任务没有用户 key，未做**） |
+
+---
+
+# G. 2026-11-13 文档增量（第二茬新模型，本次接入）
+
+> 调研对象：`https://docs.apimart.ai` 快照（`/llms-full.txt`，2,493,361 字节，2026-11-13 20:38 抓取）+ 价目页 `https://apimart.ai/zh/pricing`（同一时刻抓取）。
+> 判定口径沿用 A 段：文档确证 ➜ **原文**；由文档+代码推的 ➜ **推断**；文档没写 ➜ **未知**。
+> 结论：这一轮真正缺的是「统一视频入口支持 + 5 个视频模型 + 1 个图像模型的能力表」，模型名本身大多已经在定价目录里。
+
+## G.1 缺口盘点（文档有 vs 项目能力表有）
+
+把文档里 image/video 两个分类的模型 ID 全量抽出来，和 `APIMART_IMAGE_MODEL_CAPS` / `APIMART_VIDEO_MODEL_CAPS` 的 key 做「最长 key 子串」匹配（与 `apimart_image_model_caps` / `apimart_video_model_caps` 同一算法），命中不了的就是没有权威参数的模型：
+
+| 分类 | 文档里没有能力条的模型（改前） | 说明 |
+| - | - | - |
+| image | `minimax-h3-image`、`minimax-h3-image-highspeed` | 全新模型，定价目录里也没有 |
+| video | `apimart-zoe`、`kling-v4`、`kling-v4-flash`、`gemini-omni-1.2-flash`、`gemini-omni-1.2-flash-ext`、`veo3.1-fast/quality/lite`（含 `-ext` 别名） | 前 5 个是这一轮新增；veo3.1 一直走独立分支，从来没进过能力表 |
+
+其余文档模型（gpt-image-2.6 / seedream-5.5 / kling-v3 / wan3.0 / vidu q4 等）上一轮已经建过条目，本次不重复。
+
+## G.2 逐模型参数（原文）
+
+| 模型 | 分辨率 | 比例 | 时长 | 张数 / 参考上限 | 其他 |
+| - | - | - | - | - | - |
+| `minimax-h3-image`（`-highspeed` 参数相同） | `1K` / `2K` / `4K`，**不传默认 4K** | `auto` + 任意整数比例（1:3~3:1） | — | `n` 1–10；参考图 ≤16 张（URL 或 `data:image` base64） | 精确像素 655,360–20,000,000 且与 `resolution` **互斥**（同传 400）；`quality`/`style`/`seed`/`mask_url` 上游忽略；输出 jpeg/png/webp |
+| `apimart-zoe` | 480p / 720p / 1080p / 2k / 4k（普通生成默认 720p） | 21:9 / 16:9 / 4:3 / 1:1 / 3:4 / 9:16 / adaptive | 4–30 秒或 `-1`（模型自选） | 图 30 / 视频 10 / 音频 10 | 自带音轨（`audio`），`seed` 可传，输出 mp4 或 mov；**不支持 extend** |
+| `kling-v4` | `720p` / `1080p`（**用 resolution，不再有 mode**） | 16:9 / 9:16 / 1:1 / 21:9（仅参考生成认 auto） | 3–30 秒（默认 5） | 图 10 / 视频 5（合计 30 秒）/ 音频 3 | 首帧方式**不接受** `aspect_ratio`（跟随首帧）；参考音只有 v4 收 |
+| `kling-v4-flash` | 只有 `720p`（1080p 直接 400） | 同上 | 3–20 秒 | 图 10 / 视频 5（合计 20 秒）/ 不收参考音 | 首帧只收 1 张（无尾帧/中间帧） |
+| `gemini-omni-1.2-flash`（`-ext` 同参数） | `360p` / `720p` / `1080p` / `4k`（`2160p` 等同 4k，默认 720p） | **只有** 16:9 / 9:16 | 3–15 秒（默认 10；首尾帧与延长只到 10） | 参考图 ≤10 张（只收公网 URL，不收 base64）；视频输入 1 段 ≤15 秒 | 编辑/延长靠 `omni_reference_task_type` |
+| `veo3.1-fast/quality/lite` | `720p`（默认）/ `1080p` / `4k` | 16:9 / 9:16 | **固定 8 秒** | 图 ≤3（lite 一张都不收；quality 不支持 reference 模式） | `veo3.1-*-ext` 是等价别名 |
+
+## G.3 协议侧新事实（都写进了更新包 v4 的 `protocol_changes`）
+
+| 字段 | 文档怎么说（原文） | 项目处理 |
+| - | - | - |
+| `omni_reference_task_type` | `auto`（默认，等价省略）/ `reference` / `edit` / `extend`，部分模型另收 `text_to_video` / `image_to_video` / `reference_to_video` | 后端按用户选的生成方式下发：参考生视频 → `reference`、视频编辑 → `edit`、视频延长 → `extend`；能力表用 `omni_task_type: true` 标记 |
+| 首帧方式禁发画幅 | 「Image-to-video does not accept `aspect_ratio` or `size`: nonempty values return HTTP 400」 | 能力表 `ratio_follows_first_frame: true`，首帧/首尾帧请求直接不发比例字段（自适应那段覆盖也一起关掉） |
+| `nsfw_check` | 默认 `false`（不审） | 项目不传 = 不审，省一次审核延迟与费用 |
+| `GET /v1/models?expand=parameters` + 单模 `/v1/models/{id}/schema` | image/video 带完整 `input_schema`（JSON Schema 2020-12） | 已记录（v1 记过类别，这次补单模契约）；**未接成运行时**：项目仍是离线能力表，见 G.5 |
+| 精确像素与档位互斥 | 「When `size` uses exact pixels, you cannot pass `resolution`, otherwise 400」 | `minimax-h3-image` 因此**不开** `exact_size`（与 seedream-5.5 同处理）：开了精确像素分支会连带下发 `resolution` |
+
+## G.4 本轮代码改动（项目现值）
+
+- `main.py`：
+  - 图像能力表新增 `minimax-h3-image` 一条（`-highspeed` 靠最长 key 命中复用）。
+  - 视频能力表新增 `apimart-zoe`、`kling-v4`、`kling-v4-flash`、`gemini-omni-1-2-flash`、`gemini-omni-1-2-flash-ext`、`veo3-1`、`veo3-1-lite`。
+  - `apimart_video_modes()` 支持能力表里显式写死的 `modes`（`kling-v4-flash` 没有首尾帧、`apimart-zoe` 没有视频延长）。
+  - APIMart 视频请求体：`omni_task_type` 模型按生成方式下发 `omni_reference_task_type`；`ratio_follows_first_frame` 模型在首帧/首尾帧方式下不下发比例。
+- `server/protocols/protocol_updates.json`：新增 v4（图像 2 + 视频 8 个新模型、8 条协议变更、10 条参数变更，`model_caps` 留空——参数已进内置能力表，不再用覆盖包兜）。
+- 测试：`tests/test_apimart_model_caps.py`（minimax 图像条目）、`tests/test_apimart_video_params.py`（新模型字段名/时长/能力）、`tests/test_novai_canvas_model_caps.js`（真实 caps 条目 → 编辑器面板选项）、`tests/test_think_level_protocol_updates.py`（版本号与协议变更断言改成「按内置包最新版本算」，不再写死 3）。
+
+## G.5 遗留与未知（下一轮再动）
+
+| # | 项 | 现状 | 为什么没做 |
+| - | - | - | - |
+| U8 | 参考上限只到「图 9 / 视频 3 / 音频 3」 | 文档允许 zoe 图 30、kling-v4 图 10，但通用分支写死 `image_payload[:9]`、`videos[:3]`、`audios[:3]` | 放开要连上传、限流、计费一起验，没有用户 key 跑不了真机；能力表按**实际能发**的数量写，避免编辑器允许 30 张却在后端被静默截断 |
+| U9 | `veo3.1-*-official` 官方档 | 没建能力条目、没进模型列表 | `apimart_veo31_model()` 只认 fast/quality/lite，官方档名字会被归一到 ext 档；给它们建条目只会让编辑器发出 8 秒以外的时长被上游拒。要支持得先拆 veo 分支的模型白名单 |
+| U10 | 价格目录 `server/credits/apimart_pricing.json` 未刷新 | 仍是 2026-10-24 快照（341 条）；新抓的价目页只有 275 条（页面下架了 87 个老模型），且视频/音频详情页没抓，档位价会丢 | 直接覆盖会让 87 个老模型失去计价、视频丢失分档价；正确做法是先抓 60 个视频/音频详情页再全量重建，属于计费口径变更，单独一轮做 |
+| U11 | 参数契约接口没接成运行时校验 | 项目仍是「构建期离线能力表」 | 接成运行时要把 `/v1/models?expand=parameters` 拉下来做预校验，得用户 key 实测覆盖面（U7 仍未关闭） |

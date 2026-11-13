@@ -1924,6 +1924,10 @@
   background: rgba(255, 255, 255, .96);
   box-shadow: 0 24px 64px rgba(0, 0, 0, .16), 0 8px 20px rgba(0, 0, 0, .10);
 }
+/* 画布参数浮层（生成方式 / 分辨率 / 草稿 / 比例 · 尺寸 / 时长 / 音频）比消息区那条更高：
+   沿用 #pop 原来的 560 上限，不吃上面消息区专用的 420，否则「生成时长」要滚一次才看得到；
+   底色和模糊仍走同一套加厚磨砂。 */
+.cn-root #pop.param-pop.param-pop.param-pop.param-pop { max-height: min(560px, calc(100vh - 24px)); }
 /* 标题 / 分组标题：辅助字用 --fg2（浅 #6e6e73 / 深 #98989d），透明度不变 */
 .cn-root #pop.agent-pop.agent-pop .mh,
 .cn-root #pop.param-pop.param-pop .mh,

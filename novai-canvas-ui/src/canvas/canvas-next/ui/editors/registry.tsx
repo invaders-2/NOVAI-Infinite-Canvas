@@ -9,7 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import type { CanvasNode } from "../../../react-canvas/reactCanvasStore";
 import { relit } from "../../backend/mockEdit";
 import { GenError, type EditOp, type MattingModelStatus, type UpscaleRuntimeStatus } from "../../backend/types";
-import { clamp, clampTrim, genOf, outOf, uid, withGen, type GenOutput } from "../../model";
+import { clamp, clampTrim, genOf, outOf, uid, withGen, type GenOutput, type ModelSpec } from "../../model";
 import { fitMediaBox } from "../../mediaFit";
 import type { CanvasStore } from "../../store";
 import { useCtl, useS, type Ctl } from "../ctx";
@@ -22,6 +22,7 @@ import { OutpaintFrame } from "./OutpaintFrame";
 import { Markup } from "./Markup";
 import { barAbove, useEdBar } from "./barPos";
 import { brushRadius, ringVisible, type Ext } from "./outpaint-geometry";
+import { ComboMenu } from "../combo";
 // 扩图框 / 笔刷圆圈的样式：独立小块，写进 canvas-next.css 会和另一路（textdoc 段）冲突。
 // 在这里 import 一次即可 —— registry 随画布常驻，笔刷圆圈不用等扩图框打开才加载样式。
 import "./editors.css";
@@ -54,12 +55,36 @@ function enhancePrompt(n: CanvasNode) {
 /** 遮罩类编辑：说清「第几张参考图是什么」，并写明改完不要留标注笔迹 */
 const MASK_NOTE = "参考图说明：第一张是原图；第二张是涂抹遮罩（透明底上的笔迹标出要处理的部分，未标记区域请保持一模一样）。";
 const ANNOT_NOTE = "参考图说明：第一张是要改的原图；第二张是标注图层（透明底上只有红色笔迹，红色是标出要改的位置，不是要画进图里的内容）。";
-type EdState = { type: "crop" | "mask" | "outpaint" | "markup"; id: string; mode?: "redraw" | "erase" | "annot" } | null;
+type EdState = { type: "crop" | "mask" | "outpaint" | "markup" | "whitemodel"; id: string; mode?: "redraw" | "erase" | "annot" } | null;
 let ed: EdState = null; const ls = new Set<() => void>();
 const setEd = (v: EdState) => { ed = v; ls.forEach((l) => l()); };
 export const useEditorState = () => useSyncExternalStore((l) => { ls.add(l); return () => { ls.delete(l); }; }, () => ed);
 
 const loadImg = (src: string) => new Promise<HTMLImageElement>((res, rej) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onload = () => res(im); im.onerror = () => rej(new Error("图片读取失败")); im.src = src; });
+/**
+ * 白膜结果的自动审查：空白（整图一个颜色）和彩色残留（衣服 / 背景没变全白）都不写进版本。
+ * 惨痛教训：Qwen 一类的模型会把画面生成成空白或原样保留穿搭，不拦下来就是一张废图占着版本历史。
+ * 返回空串 = 通过。
+ */
+async function whiteModelIssue(src: string) {
+  const im = await loadImg(src);
+  const w = 96, h = Math.max(1, Math.round((96 * im.naturalHeight) / Math.max(1, im.naturalWidth)));
+  const c = cv(w, h); const g = c.getContext("2d")!; g.drawImage(im, 0, 0, w, h);
+  const d = g.getImageData(0, 0, w, h).data; let n = 0, s = 0, s2 = 0, colored = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], gg = d[i + 1], b = d[i + 2];
+    const l = r * .299 + gg * .587 + b * .114;
+    n++; s += l; s2 += l * l;
+    // 纯白 / 中性灰的 R−G−B 差很小；原图砖墙、皮肤、彩色鞋子会明显超阈值
+    if (Math.max(r, gg, b) - Math.min(r, gg, b) > 12 && l < 248) colored++;
+  }
+  if (!n) return "模型返回的图片读不出来，换一个图片模型再试";
+  const mean = s / n;
+  const std = Math.sqrt(Math.max(0, s2 / n - mean * mean));
+  if (std < 6) return "模型把画面生成成空白了：换一个更强的图片模型（nano banana / GPT Image）再试一次";
+  if (colored / n > 0.02) return "结果里还残留原图的颜色（衣服或背景没变全白），已拦下不写版本；换更强的图片模型再试一次";
+  return "";
+}
 const cv = (w: number, h: number) => { const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; };
 async function srcData(store: CanvasStore, url: string) { return isAssetRef(url) ? (await store.backend.resolveAsset(url)) || "" : url; }
 
@@ -98,17 +123,40 @@ async function transformImage(store: CanvasStore, id: string, op: "cw" | "ccw" |
  * 走模型的编辑：目标节点进入生成态（同一套加载动效），可停止。
  * 用哪个模型？统一跟节点当前选中的生图模型（节点底栏那颗模型按钮），编辑不再自己挑模型。
  */
-async function runEdit(store: CanvasStore, id: string, op: EditOp, label: string, extra: { maskDataUrl?: string; prompt?: string; params?: Record<string, unknown>; sourceUrl?: string } = {}, target?: string, onError?: (err: Error) => void) {
+async function runEdit(store: CanvasStore, id: string, op: EditOp, label: string, extra: { maskDataUrl?: string; prompt?: string; params?: Record<string, unknown>; sourceUrl?: string; model?: ModelSpec } = {}, target?: string, onError?: (err: Error) => void) {
   const n = store.node(id); const src = n ? outOf(n)?.url : ""; if (!n || !src) return;
   const tid = target || id; const abort = new AbortController();
   const dst = store.node(tid) || n;
-  const model = store.modelOf(dst) || store.modelOf(n) || store.defaultModel("image");
+  // extra.model：少数编辑会指定更适合的模型（白膜选人台理解更好的），其余仍跟节点当前模型
+  const model = extra.model || store.modelOf(dst) || store.modelOf(n) || store.defaultModel("image");
   store.setRun(tid, { status: "running", progress: .02, abort, startedAt: Date.now() });
   try {
     // 扩图会自己合成「原图 + 透明扩展」再传进来（extra.sourceUrl）；其余编辑仍用节点当前结果
     const { sourceUrl: prepadded, ...rest } = extra;
     const sourceUrl = prepadded || (store.backend.kind === "mock" ? await srcData(store, src) : src);
-    const out = await store.backend.editImage({ canvasId: store.state.canvasId, nodeId: tid, op, model, sourceUrl, ...rest }, (e) => { if (e.type === "progress") store.patchRun(tid, { progress: clamp(e.progress, .02, 1) }); }, abort.signal);
+    const req = { canvasId: store.state.canvasId, nodeId: tid, op, model, sourceUrl, ...rest };
+    const onEvent = (e: { type: string; progress?: number }) => { if (e.type === "progress") store.patchRun(tid, { progress: clamp(Number(e.progress) || .02, .02, 1) }); };
+    let out = await store.backend.editImage(req, onEvent, abort.signal);
+    if (op === "whitemodel") {
+      let issue = out.url ? await whiteModelIssue(await srcData(store, out.url)).catch(() => "") : "";
+      // 第一张没过审查（空白 / 还带原图颜色）时自动换一个更强的模型再试一次，仍不过才报错
+      if (issue) {
+        // 优先 APIMART 上的 Gemini / GPT Image（人台最稳），再退到 lovart 的 nano banana；每个只试一次
+        const images = store.state.models.filter((m) => m.kind === "image" && m.id !== model?.id);
+        const ranked = [
+          /gemini-nano-banana-2\.1/i, /gpt-image-2\.6/i, /gemini-3-pro-image-preview/i, /nano[._-]?banana/i, /gpt-image-2\.[56]/i,
+        ].flatMap((re) => images.filter((m) => re.test(m.id))).slice(0, 2);
+        for (const alt of ranked) {
+          store.patchRun(tid, { progress: .05 });
+          const retry = await store.backend.editImage({ ...req, model: alt }, onEvent, abort.signal).catch(() => null);
+          if (!retry?.url) continue;
+          const retryIssue = await whiteModelIssue(await srcData(store, retry.url)).catch(() => "");
+          if (!retryIssue) { out = retry; issue = ""; break; }
+          issue = retryIssue;
+        }
+      }
+      if (issue) throw new Error(issue);
+    }
     store.setRun(tid, null); await applyVariant(store, tid, out, label);
     store.logRun({ node: tid, title: genOf(store.node(tid)!).title, type: "image", model: label, status: "done", secs: 0 });
   } catch (err) {
@@ -328,6 +376,7 @@ export function openEditor(ctl: Ctl, kind: string, id: string, anchor?: Element)
   if (kind === "mask") return setEd({ type: "mask", id, mode: "redraw" });
   if (kind === "angle") return openModal(() => <AngleModal ctl={ctl} id={id} />);
   if (kind === "relight") return openModal(() => <RelightModal ctl={ctl} id={id} />);
+  if (kind === "whitemodel") return setEd({ type: "whitemodel", id });
   // 无损改图是全屏编辑层（有自己的 iframe + Esc 处理），不进 openModal，否则 Esc 会和 picker 打架
   if (kind === "adjust") return openColorAdjust(id);
   if (kind === "lossless") return openLosslessEdit(id);
@@ -488,6 +537,7 @@ export function EditorLayer() {
   const rect = { left: a.x - r0.left, top: a.y - r0.top, width: b.x - a.x, height: b.y - a.y };
   if (st.type === "outpaint") return <Outpaint ctl={ctl} n={n} onClose={() => setEd(null)} />;
   if (st.type === "markup") return <Markup key={n.id} ctl={ctl} n={n} rect={rect} onClose={() => setEd(null)} onApply={async (url, w, h) => { setEd(null); await applyVariant(ctl.store, n.id, { url, w, h }, "标注"); }} />;
+  if (st.type === "whitemodel") return <WhiteModelEditor key={n.id} ctl={ctl} n={n} rect={rect} onClose={() => setEd(null)} />;
   return st.type === "crop" ? <Crop ctl={ctl} n={n} rect={rect} /> : <Mask ctl={ctl} n={n} rect={rect} mode={st.mode || "redraw"} />;
 }
 
@@ -661,6 +711,83 @@ function RelightModal({ ctl, id }: { ctl: Ctl; id: string }) {
     <p style={{ color: "var(--fg3)", fontSize: 12, margin: "8px 0 0" }}>预览是本地近似效果，点「应用」由节点当前的图片模型按光源方向、强度和色温重新打光（参数会写进提示词）。</p>
     <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}><button className="btn solid" id="rgo" onClick={() => { closeModal(); void runEdit(ctl.store, id, "relight", "重打光", { params: { lx, ly, intensity: inten, temp }, prompt: relightPrompt() }); }}>应用</button></div>
   </div></>;
+}
+/**
+ * 白膜处理：和「涂鸦」一样叠在节点上操作 —— 底下一条浮动工具条选模型 / 开始，不再弹居中对话框（取消、Esc 关掉）。
+ * 模型理解力弱的会把穿搭留下来或生成空白，所以默认优先 APIMART 的 Gemini，并在生成后自检。
+ */
+function WhiteModelEditor({ ctl, n, rect, onClose }: { ctl: Ctl; n: CanvasNode; rect: Rect; onClose: () => void }) {
+  const store = ctl.store; const src = useAssetUrl(outOf(n)?.url || "");
+  const all = store.state.models.filter((m) => m.kind === "image");
+  const nodeModel = store.modelOf(n);
+  const best = all.find((m) => /gemini-3-pro-image-preview/i.test(m.id))
+    || all.find((m) => /gemini-nano-banana-2\.1/i.test(m.id))
+    || all.find((m) => /nano[._-]?banana/i.test(m.id))
+    || all.find((m) => /gpt-image-2\.[56]/i.test(m.id))
+    || nodeModel;
+  const [modelId, setModelId] = useState(best?.id || nodeModel?.id || "");
+  const model = all.find((m) => m.id === modelId) || nodeModel || best;
+  const shortName = (m: ModelSpec) => /gemini-3-pro-image-preview/i.test(m.id) ? "Gemini 3 Pro"
+    : /gemini-nano-banana-2\.1/i.test(m.id) ? "Nano Banana 2.1"
+    : /gpt-image-2\.6/i.test(m.id) ? "GPT Image 2.6"
+    : /nano[._-]?banana/i.test(m.id) ? "Nano Banana"
+    : /gpt-image-2\.5/i.test(m.id) ? "GPT Image 2.5"
+    : (m.name || m.id);
+  const stage = ctl.rect(); const bar = useEdBar(rect.left + rect.width / 2, stage.width);
+  const run = () => { onClose(); void runEdit(store, n.id, "whitemodel", "白膜", model ? { model } : {}, undefined, (err) => store.toast(err.message)); };
+  // 模型选择跟参数浮层同一套：先选供应商，再选这个供应商下的模型（ComboMenu 两级 + 搜索）
+  const vendorOf = (m: ModelSpec) => (m.vendor || "").trim() || "未命名供应商";
+  const currentVendor = model ? vendorOf(model) : "";
+  // 当前供应商排最前，打开菜单第一眼就能看到自己正在用的那家
+  const vendors = [...new Set(all.map(vendorOf))].sort((a, b) => (b === currentVendor ? 1 : 0) - (a === currentVendor ? 1 : 0));
+  // 编辑器的模型菜单怎么选，这里就怎么选：先弹「供应商」列表，点进去换成这家供应商的模型列表（顶部可返回），
+  // 每次只有一层列表、各自一个浮层，不做成一整块带背景的双栏。
+  // 菜单自己贴住编辑条上方 8px（和编辑器里的参数菜单同一个距离）：底边锚定，列表再长也往上长，不会压住浮条
+  const [pick, setPick] = useState<{ left: number; bottom: number; vendor?: string } | null>(null);
+  const openPicker = (fallback: Element) => {
+    const anchor = (bar.ref.current as Element) || fallback;
+    const r = anchor.getBoundingClientRect();
+    setPick({ left: Math.max(8, Math.min(r.left, innerWidth - 308)), bottom: innerHeight - r.top + 8 });
+  };
+  return <>
+    <div className="edov" data-ed="whitemodel" style={rect} onPointerDown={(e) => e.stopPropagation()}>
+      {src ? <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
+    </div>
+    <div className="edbar" ref={bar.ref} style={{ left: bar.left, top: Math.min(rect.top + rect.height + 14, stage.height - 54), transform: "translateX(-50%)" }} onPointerDown={(e) => e.stopPropagation()}>
+      <button className="ib" data-tip="取消（Esc）" onClick={onClose}><Icon name="x" /></button>
+      <span className="vsep" />
+      <span className="wm-hint">白膜</span>
+      <button className="pill" data-k="whitemodel-model" aria-haspopup="menu" onClick={(e) => openPicker(e.currentTarget)}><Icon name="user" size="s" /><span>{model ? shortName(model) : "模型"}</span><Icon name="right" size="xs" /></button>
+      <span className="vsep" />
+      <button className="pill" data-k="whitemodel-run" style={{ background: "var(--solid)", color: "var(--on-solid)" }} onClick={run}><Icon name="check" size="s" />开始白膜</button>
+    </div>
+    {pick ? <>
+      <div className="wm-pick-back" onPointerDown={() => setPick(null)} />
+      <div className="wm-pick-menu" style={{ left: pick.left, bottom: pick.bottom }} onPointerDown={(e) => e.stopPropagation()}>
+        {pick.vendor ? <ComboMenu
+          autoFocus searchable searchPlaceholder="搜索模型" onEscape={() => setPick(null)}
+          empty={<span>这个供应商还没有图片模型</span>}
+          header={<button className="mi" data-model-back aria-label="返回供应商列表" onClick={() => setPick({ ...pick, vendor: undefined })}><Icon name="left" size="s" /><span style={{ flex: 1 }}>{pick.vendor}<span className="d">返回供应商列表</span></span></button>}
+          itemAttrs={(m) => ({ "data-model": m.id })}
+          itemClassName={(m) => "mi combo-item" + (m.id === modelId ? " on" : "")}
+          items={all.filter((m) => vendorOf(m) === pick.vendor)}
+          label={(m) => m.name}
+          onPick={(m) => { setModelId(m.id); setPick(null); }}
+          renderItem={(m) => <span style={{ flex: 1 }}><span style={{ display: "flex", gap: 6, alignItems: "center" }}>{m.name}</span><span className="d">{m.vendor}{m.i2i ? " · 最多 " + m.maxRefs + " 张参考图" : " · 仅文生图"}</span></span>}
+        /> : <ComboMenu
+          autoFocus searchable searchPlaceholder="搜索供应商" onEscape={() => setPick(null)}
+          empty={<span>还没有配置图片模型</span>}
+          header={<div className="mh">账号模型 · 选择供应商</div>}
+          itemAttrs={(v) => ({ "data-vendor": v })}
+          itemClassName={(v) => "mi combo-item" + (v === currentVendor ? " on" : "")}
+          items={vendors}
+          label={(v) => v}
+          onPick={(v) => setPick({ ...pick, vendor: v })}
+          renderItem={(v) => <><span style={{ flex: 1 }}>{v}<span className="d">{all.filter((m) => vendorOf(m) === v).length} 个模型</span></span><Icon name="right" size="s" /></>}
+        />}
+      </div>
+    </> : null}
+  </>;
 }
 function ResizeModal({ ctl, id }: { ctl: Ctl; id: string }) {
   const n = ctl.store.node(id)!; const o = outOf(n)!; const w0 = o.w || 1024, h0 = o.h || 1024;

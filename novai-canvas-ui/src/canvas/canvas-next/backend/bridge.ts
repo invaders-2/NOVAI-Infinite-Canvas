@@ -517,6 +517,8 @@ export function createBridgeBackend(): CanvasBackend {
       case "enhance": return { mode: "prompt", prompt: `把这张图高清增强为 2 倍分辨率：提升清晰度和细节，去除噪点和压缩痕迹，内容、构图、颜色完全不变${extra}`, source, inputs: [] };
       // 生成模型大多输不出透明通道（会画一张假棋盘格）：让它换成纯绿背景，回来后本地抠成真透明
       case "cutout": return { mode: "prompt", prompt: `把画面主体完整保留、原样不动，背景全部换成纯绿色（#00FF00），绿色均匀平整，没有渐变、阴影、倒影和纹理，主体边缘干净清晰${extra}`, source, inputs: [] };
+      // 白膜：人物 + 场景统一转成白色石膏雕塑（提示词和 NOVAI 适配器保持同一套要求）
+      case "whitemodel": return { mode: "prompt", prompt: "把照片里的人物变成纯白色的服装店人台模特：像人体模特一样身上没有衣服，保持原来的姿势、动作、镜头角度和构图，全身哑光纯白、不偏黄（不要米白或奶白），浅灰白摄影棚背景，柔和的棚拍光和淡淡阴影，不要删除人物，不要文字、水印、边框" + extra, source, inputs: [] };
       default: return { mode: "prompt", prompt: req.prompt || "", source, inputs: [] };
     }
   }

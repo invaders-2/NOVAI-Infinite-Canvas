@@ -190,6 +190,14 @@ export function durationTiers(durs: number[] | undefined | null): { auto: boolea
   const list = (durs || []).filter((value) => Number.isFinite(Number(value))).map(Number);
   return { auto: list.includes(-1), positive: list.filter((value) => value > 0) };
 }
+/** 视频时长滑块的档位：-1 排最左（标签「自动」），其余按秒；只有一档时调用方给只读文案（见 DurationSlider） */
+export function durationSliderLevels(durs: number[] | undefined | null): { levels: string[]; labels: Record<string, string> } {
+  const { auto, positive } = durationTiers(durs);
+  const levels = [...(auto ? ["-1"] : []), ...positive.map((value) => String(value))];
+  const labels: Record<string, string> = {};
+  for (const level of levels) labels[level] = level === "-1" ? "自动" : level + "s";
+  return { levels, labels };
+}
 /** 模型默认时长：优先第一个正数档（-1=自动不参与默认，新建节点保持旧行为） */
 export function defaultVideoDuration(model: ModelSpec | null | undefined): number {
   const { auto, positive } = durationTiers(model?.durs);

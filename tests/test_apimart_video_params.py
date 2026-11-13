@@ -31,6 +31,9 @@ class ApimartVideoCapsTableTests(unittest.TestCase):
             "flux-3-video", "happyhorse-1-0", "happyhorse-1-1", "skyreels-v4",
             "grok-imagine-video", "gemini-omni-1-1-flash", "gemini-omni-1-1-flash-ext",
             "gemini-omni-flash-preview",
+            # 2026-11-13 文档新增（统一入口 + omni_reference_task_type）
+            "apimart-zoe", "kling-v4", "kling-v4-flash", "gemini-omni-1-2-flash",
+            "gemini-omni-1-2-flash-ext", "veo3-1", "veo3-1-lite",
         ):
             self.assertIn(key, main.APIMART_VIDEO_MODEL_CAPS, key)
         self.assertGreaterEqual(len(main.APIMART_VIDEO_MODEL_CAPS), 30)
@@ -128,6 +131,54 @@ class ApimartVideoBodyParamsTests(unittest.TestCase):
         self.assertEqual(params["ratio_value"], "9:16")
         self.assertEqual(params["resolution_value"], "1080p")
 
+    def test_kling_v4_uses_resolution_not_mode(self):
+        # 文档：V4 用 resolution 选档（720p/1080p），明确「不支持 mode」
+        params = self.params("kling-v4", 40, "21:9", "1080p")
+        self.assertEqual(params["duration"], 30)
+        self.assertEqual(params["ratio_key"], "aspect_ratio")
+        self.assertEqual(params["resolution_key"], "resolution")
+        self.assertEqual(params["resolution_value"], "1080p")
+        self.assertEqual(self.params("kling-v4", 1, "16:9", "720p")["duration"], 3)
+
+    def test_kling_v4_flash_only_720p(self):
+        params = self.params("kling-v4-flash", 40, "16:9", "1080p")
+        self.assertEqual(params["duration"], 20)
+        self.assertEqual(params["resolution_value"], "720p")
+
+    def test_apimart_zoe_durations_and_resolutions(self):
+        params = self.params("apimart-zoe", 20, "adaptive", "4k")
+        self.assertEqual(params["duration"], 20)
+        self.assertEqual(params["ratio_value"], "adaptive")
+        self.assertEqual(params["resolution_value"], "4k")
+
+    def test_gemini_omni_1_2_duration_range(self):
+        self.assertEqual(self.params("gemini-omni-1.2-flash", 20, "16:9", "1080p")["duration"], 15)
+        self.assertEqual(self.params("gemini-omni-1.2-flash-ext", 1, "9:16", "2160p")["duration"], 3)
+        self.assertEqual(self.params("gemini-omni-1.2-flash-ext", 1, "9:16", "2160p")["resolution_value"], "4k")
+
+    def test_veo31_family_hits_longest_key(self):
+        # ext 档固定 8 秒、比例只有 16:9/9:16、分辨率到 4k；lite 只出文生视频
+        self.assertIs(main.apimart_video_model_caps("veo3.1-fast"), main.APIMART_VIDEO_MODEL_CAPS["veo3-1"])
+        self.assertIs(main.apimart_video_model_caps("veo3.1-fast-ext"), main.APIMART_VIDEO_MODEL_CAPS["veo3-1"])
+        self.assertIs(main.apimart_video_model_caps("veo3.1-lite"), main.APIMART_VIDEO_MODEL_CAPS["veo3-1-lite"])
+        self.assertEqual(main.APIMART_VIDEO_MODEL_CAPS["veo3-1"]["durations"], (8,))
+        self.assertEqual(main.APIMART_VIDEO_MODEL_CAPS["veo3-1"]["resolutions"], ("720p", "1080p", "4k"))
+        self.assertEqual(main.apimart_video_modes("veo3.1-lite", main.APIMART_VIDEO_MODEL_CAPS["veo3-1-lite"]),
+                         ["text_to_video"])
+
+    def test_new_models_pin_modes_and_flags(self):
+        zoe = main.APIMART_VIDEO_MODEL_CAPS["apimart-zoe"]
+        self.assertTrue(zoe["omni_task_type"])
+        self.assertNotIn("video_extend", zoe["modes"])  # zoe 不支持 extend（文档 400）
+        v4 = main.APIMART_VIDEO_MODEL_CAPS["kling-v4"]
+        self.assertTrue(v4["ratio_follows_first_frame"])
+        self.assertTrue(v4["audio_urls"])
+        flash = main.APIMART_VIDEO_MODEL_CAPS["kling-v4-flash"]
+        self.assertFalse(flash["audio_urls"])
+        self.assertNotIn("start_end_to_video", flash["modes"])  # flash 首帧只收 1 张
+        self.assertEqual(main.apimart_video_modes("kling-v4-flash", flash),
+                         list(flash["modes"]))
+
     def test_unknown_model_keeps_legacy_field_names(self):
         params = self.params("some-unknown-video", 20, "9:21", "1080p")
         self.assertEqual(params["duration"], 15)
@@ -143,6 +194,18 @@ class ApimartVideoBranchSourceTests(unittest.TestCase):
         source = Path(main.__file__).read_text(encoding="utf-8")
         self.assertIn("video_params = apimart_video_body_params(", source)
         self.assertIn('body[video_params["ratio_key"]] = video_params["ratio_value"]', source)
+
+    def test_branch_wires_new_unified_entry_protocol(self):
+        source = Path(main.__file__).read_text(encoding="utf-8")
+        # 统一入口三件事必须都在请求体组装里出现，且都由能力表开关控制（不能按模型名猜）
+        self.assertIn('body["omni_reference_task_type"] = apimart_omni_task', source)
+        self.assertIn('.get("omni_task_type")', source)
+        self.assertIn('apimart_omit_ratio', source)
+        self.assertIn('.get("ratio_follows_first_frame")', source)
+        # 首帧方式禁发画幅：赋值处必须被 apimart_omit_ratio 挡住（含 adaptive 的两处覆盖）
+        self.assertEqual(source.count("and not apimart_omit_ratio"), 3)
+        # 「角色化图片 + 参考视频」的 400 只对老模型生效
+        self.assertIn('and not (apimart_video_caps or {}).get("omni_task_type"):', source)
         self.assertIn('body[video_params["resolution_key"]] = video_params["resolution_value"]', source)
         self.assertIn('apimart_video_caps is None or apimart_video_caps.get("seed")', source)
         self.assertIn('apimart_video_caps is None or apimart_video_caps.get("generate_audio")', source)

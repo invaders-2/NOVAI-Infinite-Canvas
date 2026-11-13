@@ -37,10 +37,24 @@ export const EFFORT_FALLBACKS: string[] = [
   "linear-gradient(90deg, #e7efff 0%, #6f86f6 45%, #a855f7 100%)",
 ];
 
+/** 纯蓝回退（视频时长滑块用）：只走蓝，不带「模型强度」那套靛蓝 / 紫的高档色 */
+export const BLUE_FALLBACKS: string[] = [
+  "linear-gradient(90deg, #eef6ff 0%, #a9cdfb 55%, #7fb6f8 100%)",
+  "linear-gradient(90deg, #e9f3ff 0%, #8fc1fa 55%, #5ba0f6 100%)",
+  "linear-gradient(90deg, #e6f0ff 0%, #7bb4f9 55%, #3f8ef2 100%)",
+  "linear-gradient(90deg, #e4efff 0%, #6aabf9 55%, #2f7fe8 100%)",
+];
+
 export const effortTier = (level: number) =>
   Math.max(0, Math.min(EFFORT_PALETTES.length - 1, Math.round(Math.max(0, Math.min(1, level)) * (EFFORT_PALETTES.length - 1))));
 
 export const effortFallback = (level: number) => EFFORT_FALLBACKS[effortTier(level)];
+
+/** 蓝色档位（0..3）：低位浅、高位是同一支蓝的深一档，不出现紫 */
+export const blueTier = (level: number) =>
+  Math.max(0, Math.min(BLUE_FALLBACKS.length - 1, Math.round(Math.max(0, Math.min(1, level)) * (BLUE_FALLBACKS.length - 1))));
+
+export const blueFallback = (level: number) => BLUE_FALLBACKS[blueTier(level)];
 
 const vertexShader = `
 attribute vec2 position;

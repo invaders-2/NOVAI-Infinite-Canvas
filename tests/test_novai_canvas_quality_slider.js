@@ -44,7 +44,8 @@ assert.ok(quality.trimEnd().endsWith('}, "quality-pop");'), '质量弹层用 qua
 
 // ---- pop() helper 增加可选 class ----
 assert.ok(gen.includes('const pop = (render: (close: () => void) => React.ReactNode, cls?: string) => openPop(anchor'), 'pop() 增加可选 class 参数');
-assert.ok(gen.includes('  </>, "up", "left", cls);'), 'pop() 把 class 透传给 openPop');
+// 2026-11-13：参数弹层统一挂 param-pop（走「小弹层加厚底」那套磨砂玻璃），调用方的 class 继续透传
+assert.ok(gen.includes('  </>, "up", "left", cls ? "param-pop " + cls : "param-pop");'), 'pop() 把 class 透传给 openPop，并统一挂 param-pop');
 
 // ---- model.ts：auto 第一档 / 空串「默认」 ----
 assert.ok(model.includes('? { value: "auto", label: "自动（默认）", isDefault: true }'), 'caps 有 auto 时第一档 value=auto、label=自动（默认）');

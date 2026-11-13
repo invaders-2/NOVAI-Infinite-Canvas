@@ -373,11 +373,17 @@
 .cn-root .opt-grid button.on{background:var(--solid);color:var(--on-solid)}
 .cn-root .opt-grid button:hover:not(.on):not(:disabled){background:var(--hover)}
 .cn-root .opt-grid i{display:block;border:1.5px solid currentColor;border-radius:3px}
-.cn-root .draft-row{display:flex;align-items:center;gap:5px;width:100%;padding:0 10px 8px;font-size:11px;color:var(--fg3);text-align:left}
-.cn-root .draft-row .t{color:var(--fgd)}
-.cn-root .draft-row.on .t{color:var(--fg)}
-.cn-root .draft-row .sp{flex:1}
-.cn-root .draft-row:hover:not(:disabled) .t{color:var(--hi)}
+/* 视频草稿模式：一行说明 + 画布统一的胶囊开关（.sw 在上方定义：36×20 胶囊 / 16px 圆钮 / 开态 --solid）。
+   零边框、零发丝线；整行可点，开着时标题提亮一档，避免和胶囊开关重复表达。 */
+.cn-root .draft-mode{display:flex;align-items:center;gap:10px;width:100%;margin:0;padding:2px 2px 8px;cursor:pointer}
+.cn-root .draft-mode .tx{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.cn-root .draft-mode .t{font-size:12px;line-height:1.25;color:var(--fg2);transition:color var(--d-std) var(--e-std)}
+.cn-root .draft-mode .d{font-size:10.5px;line-height:1.35;color:var(--fg3)}
+.cn-root .draft-mode .sw{flex:none;cursor:pointer}
+.cn-root .draft-mode[data-on] .t{color:var(--fg);font-weight:500}
+.cn-root .draft-mode:hover:not([data-locked]) .t{color:var(--fg)}
+.cn-root .draft-mode[data-locked]{opacity:.5;cursor:default}
+.cn-root .draft-mode[data-locked] .sw{cursor:default}
 .cn-root .row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 10px}
 /* GIF 帧参数（输出格式 = GIF 时才出现）：数值控件沿用 sunken 底、不加边框 */
 .cn-root .gif-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 10px}
@@ -1128,7 +1134,32 @@
   50%{opacity:1}
 }
 .cn-root .pill.sq-pill{padding:0;width:28px;justify-content:center}
+/* ---------- 参数弹层内边距 ----------
+   原来三层缩进各不相同（分组标题 16px / 选项卡片 12px / 模型名 8px），底部又只有 10px，看着上宽下窄。
+   这里统一：外层 12 / 14 / 14，内部各行不再二次缩进，最后一行去掉自带的下边距——四边都对同一个
+   14px 网格，底部与顶部一致。只作用于参数弹层（#pop.param-pop），不动助手面板里的同名弹层。 */
+.cn-root #pop.param-pop{padding:12px 14px 14px}
+.cn-root #pop.param-pop > .mh:first-child{padding-top:0}
+.cn-root #pop.param-pop .mh{padding:8px 0 6px}
+.cn-root #pop.param-pop .seg{padding:0 0 8px}
+.cn-root #pop.param-pop .opt-grid{padding:0 0 8px}
+.cn-root #pop.param-pop .mi{padding:8px 0}
+.cn-root #pop.param-pop .msep{margin:4px 0}
+.cn-root #pop.param-pop .ev-slider{padding:0}
+.cn-root #pop.param-pop .vset-model{padding:0 0 6px}
+.cn-root #pop.param-pop .vset-dur{padding:0}
+.cn-root #pop.param-pop > *:last-child,
+.cn-root #pop.param-pop .vset > *:last-child{padding-bottom:0}
+/* 视频参数浮层定宽：内容本身是 272px 的固定栅格（.vset），弹层按 max-content 会额外撑开，
+   结果右侧空出一条。宽度 = 内容 272 + 左右内边距 28，四边都贴着同一条 14px 网格。 */
+.cn-root #pop.param-pop.vset-pop{width:calc(272px + 28px)}
+
+/* 视频时长：拖动条（复用模型强度滑块的轨道 / 拇指视觉）+ 单档模型的只读说明；零边框、不画发丝线 */
 .cn-root .vset{width:272px}
+.cn-root .vset-dur{padding:2px 0 4px}
+.cn-root .ds-note{display:flex;align-items:baseline;gap:6px;padding:4px 8px 6px;font-size:11px;line-height:1.3;color:var(--fg3)}
+.cn-root .ds-note b{font-size:13px;font-weight:500;color:var(--fg)}
+.cn-root .ds-note em{font-style:normal;color:var(--fg3)}
 .cn-root .vset-model{display:flex;align-items:baseline;gap:6px;padding:2px 2px 4px}
 .cn-root .vset-model .n{font-size:13px;font-weight:600;color:var(--fg)}
 .cn-root .vset-model .d{font-size:11px;color:var(--fg3)}
@@ -1545,6 +1576,17 @@
 .cn-root .rg-foot{display:flex;justify-content:flex-end;gap:8px}
 .cn-root .nbody .lg-group .lg-group-acts{display:flex;gap:2px;margin-left:4px}
 .cn-root .rg-input{width:100%;box-sizing:border-box;padding:8px 10px;border-radius:9px;background:var(--sunken);border:0;color:var(--fg);font:inherit;font-size:13px;resize:vertical}
+/* 白膜：和涂鸦同一种就地编辑层，工具条里的模型菜单用系统 seg 样式 */
+.cn-root .wm-hint{color:var(--fg3);font-size:12px;padding:0 2px}
+/* 白膜编辑层盖在节点正文上，圆角跟 .nbody 保持一致，不然四角会方出来 */
+.cn-root .edov[data-ed="whitemodel"]{border-radius:14px;overflow:hidden}
+.cn-root .edov[data-ed="whitemodel"] img{border-radius:14px}
+/* 白膜模型菜单：底边贴住编辑条上方 8px，跟编辑器参数菜单一个距离；每层列表各自一块磨砂底 */
+.cn-root .wm-pick-back{position:fixed;inset:0;z-index:60}
+.cn-root .wm-pick-menu{position:fixed;z-index:61;width:300px;max-height:min(460px,calc(100vh - 120px));overflow:auto;padding:5px;border-radius:14px;background:linear-gradient(color-mix(in srgb,var(--glass-tint) 60%,transparent),color-mix(in srgb,var(--glass-tint) 60%,transparent)),color-mix(in srgb,var(--panel) 92%,transparent);-webkit-backdrop-filter:blur(42px) saturate(180%);backdrop-filter:blur(42px) saturate(180%);box-shadow:var(--glass-shadow);animation:comboIn .2s cubic-bezier(.215,.61,.355,1)}
+.cn-root .wm-pick-menu .mi:hover:not(:disabled){background:color-mix(in srgb,var(--ink) 8%,transparent)}
+.cn-root .wm-pick-menu .mi.on{background:color-mix(in srgb,var(--ink) 9%,transparent);color:var(--fg)}
+
 .cn-root #pop.vai-pop{width:320px}
 .cn-root .vai{display:flex;flex-direction:column;gap:6px;padding:2px 4px 4px}
 .cn-root .vai .mh{display:flex;align-items:center;gap:8px}

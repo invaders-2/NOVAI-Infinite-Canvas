@@ -72,6 +72,18 @@
 /* 两个工具都铺满：四周 16（= 100vw/vh - 32） */
 .cn-root .ie-dialog.le{width:calc(100vw - 32px);height:calc(100vh - 32px);}
 .cn-root .ie-dialog.ca{width:calc(100vw - 32px);height:calc(100vh - 32px);}
+/* 拆分：编辑器里自带图层栏 + 画板 + 工具条。默认比铺满小一档（1100×800，由 JS 写 inline），
+   右下角可拖动改尺寸；最大不超过视口 - 32。不再建「拆分结果」节点。 */
+.cn-root .ie-dialog.split{position:relative;width:1100px;height:800px;
+  max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);}
+.cn-root .ie-resize{position:absolute;right:2px;bottom:2px;z-index:6;width:20px;height:20px;
+  display:grid;place-items:center;color:var(--fg3);cursor:nwse-resize;border-radius:7px;touch-action:none;
+  transition:color var(--d-feedback) var(--e-std),background-color var(--d-feedback) var(--e-std);}
+.cn-root .ie-resize:hover{color:var(--fg);background:var(--hover);}
+.cn-root .ie-resize::before{content:"";width:9px;height:9px;border-right:1.5px solid currentColor;
+  border-bottom:1.5px solid currentColor;border-radius:0 0 3px 0;opacity:.7;}
+.cn-root .ie-resize::after{content:"";position:absolute;width:4px;height:4px;border-right:1.5px solid currentColor;
+  border-bottom:1.5px solid currentColor;border-radius:0 0 2px 0;transform:translate(4px,4px);opacity:.45;}
 .cn-root .ie-head{display:flex;align-items:center;gap:10px;padding:10px 12px;flex:0 0 auto;}
 .cn-root .ie-title{font-size:14px;font-weight:600;color:var(--fg);}
 .cn-root .ie-hint{font-size:12px;color:var(--fg3);}

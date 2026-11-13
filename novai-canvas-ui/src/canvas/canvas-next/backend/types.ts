@@ -54,7 +54,7 @@ export class GenError extends Error {
 }
 
 /** 图片编辑（局部重绘 / 擦除 / 标注 / 多角度 / 重打光 / 扩图 / 增强 / 抠图） */
-export type EditOp = "redraw" | "erase" | "annotate" | "angle" | "relight" | "outpaint" | "enhance" | "cutout";
+export type EditOp = "redraw" | "erase" | "annotate" | "angle" | "relight" | "outpaint" | "enhance" | "cutout" | "whitemodel";
 
 /** 本地抠图模型（RMBG）状态：NOVAI 后端有这套接口，NOVAI 桌面版没有 */
 export type MattingModelStatus = {
@@ -232,6 +232,8 @@ export interface CanvasBackend {
   upscaleRuntimeStatus?(): Promise<UpscaleRuntimeStatus>;
   upscaleRuntimeDownload?(): Promise<{ ok: boolean; installed?: boolean; error?: string }>;
   upscaleLocal?(sourceUrl: string, target: "2k" | "4k"): Promise<UpscaleResult>;
+  /** 深度动作捕捉：本机把视频逐帧转成深度参考视频（灰度、越近越亮）。没实现的后端不显示入口 */
+  depthCapture?(sourceUrl: string): Promise<{ url: string; w?: number; h?: number; dur?: number; seconds?: number }>;
   /** novai-asset:…（视频 / 音频）→ 可边播边拖的流式地址；拿不到时 null，调用方退回 resolveAsset */
   mediaUrl?(ref: string): Promise<{ url: string; expiresAt: number } | null>;
   /** 视频智能切镜：返回各镜头区间（秒）；没有 ffmpeg 等失败时 ok:false */

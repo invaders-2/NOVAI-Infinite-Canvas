@@ -10,7 +10,7 @@
  */
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Icon } from "./Icon";
-import { createEffortFill, effortFallback, type EffortFillHandle } from "./effort-fill";
+import { blueFallback, createEffortFill, effortFallback, type EffortFillHandle } from "./effort-fill";
 import "./effort-slider.css";
 
 export const EFFORT_LABEL: Record<string, string> = { low: "低", mid: "中", high: "高", xhigh: "极高", max: "Max" };
@@ -19,6 +19,8 @@ export const EFFORT_RECOMMENDED = "mid";
 
 const THUMB = { width: 38, height: 24 };
 const PAD = THUMB.width / 2;
+/** 小号拇指（视频时长滑块）：30×18，行程 34px；大号仍 38×24 / 行程 42px */
+const SMALL_THUMB = { width: 30, height: 18 };
 
 const labelOf = (level: string, labels: Record<string, string>) => labels[level] || level;
 
@@ -46,17 +48,30 @@ export type EffortSliderProps = {
   rightLabel?: string;
   /** 有显式档位时是否给「恢复默认」；质量档的第一档就是自动/默认，不需要 */
   showRestore?: boolean;
+  /** 用途标记：duration = 视频时长滑块（挂 data-dur-slider，不写 data-think-level，避免和模型强度选择器混） */
+  usage?: "effort" | "duration";
+  /** 不可交互（生成中 / 只读）：不响应拖动与键盘 */
+  disabled?: boolean;
+  /** 没有显式值时的文案；默认「默认」 */
+  emptyLabel?: string;
+  /** 尺寸：sm = 视频时长那种小号（20px 轨道 / 30×18 拇指）；默认 md */
+  size?: "md" | "sm";
+  /** 配色：blue = 只走纯蓝（不带高档的靛蓝 / 紫）；默认 effort 那套 */
+  tone?: "default" | "blue";
 };
 
-/** 填充层：WebGL 可用就挂 canvas，否则回退同色系 CSS 渐变（卸载时销毁上下文） */
-function EffortFill({ level }: { level: number }) {
+/** 填充层：WebGL 可用就挂 canvas，否则回退同色系 CSS 渐变（卸载时销毁上下文）
+    tone=blue（视频时长）直接用纯蓝 CSS 渐变，不建 WebGL 上下文——小滑块不值得常驻一个 3D canvas */
+function EffortFill({ level, tone = "default" }: { level: number; tone?: "default" | "blue" }) {
   const hostRef = useRef<HTMLSpanElement>(null);
   const levelRef = useRef(level);
   const handleRef = useRef<EffortFillHandle | null>(null);
-  const [failed, setFailed] = useState(false);
+  // blue 用纯 CSS 渐变，一开始就算「没有 WebGL」，useEffect 里直接跳过建上下文
+  const [failed, setFailed] = useState(tone === "blue");
   levelRef.current = level;
 
   useEffect(() => {
+    if (tone === "blue") return;
     const host = hostRef.current;
     if (!host) return;
     const canvas = document.createElement("canvas");
@@ -80,7 +95,7 @@ function EffortFill({ level }: { level: number }) {
       handleRef.current = null;
       canvas.remove();
     };
-  }, []);
+  }, [tone]);
 
   useEffect(() => {
     handleRef.current?.setLevel(level);
@@ -88,7 +103,7 @@ function EffortFill({ level }: { level: number }) {
 
   return (
     <span ref={hostRef} className="ev-fill" aria-hidden="true" data-webgl={failed ? "0" : "1"}>
-      {failed ? <span className="ev-fill-grad" style={{ background: effortFallback(level) }} /> : null}
+      {failed ? <span className="ev-fill-grad" style={{ background: tone === "blue" ? blueFallback(level) : effortFallback(level) }} /> : null}
     </span>
   );
 }
@@ -98,6 +113,8 @@ export function EffortSlider({
   recommended = EFFORT_RECOMMENDED, label = "模型强度",
   labels = EFFORT_LABEL, hint = "越高越慢，推理越深",
   leftLabel = "更快", rightLabel = "更强", showRestore = true,
+  usage = "effort", disabled = false, emptyLabel = "默认",
+  size = "md", tone = "default",
 }: EffortSliderProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -110,6 +127,10 @@ export function EffortSlider({
   const [tip, setTip] = useState(false);
   const tipId = useId();
 
+  /* 尺寸档：行程 / 圆心都按拇指宽推，md 与原来的 42px / 21px 完全等价 */
+  const dim = size === "sm" ? SMALL_THUMB : THUMB;
+  const travel = dim.width + 4;
+  const center = dim.width / 2 + 2;
   const last = levels.length - 1;
   const explicit = !!localValue && levels.includes(localValue);
   const rec = recommendedIndex(levels, recommended);
@@ -125,6 +146,7 @@ export function EffortSlider({
   if (!show) return null;
 
   const commit = (next: number) => {
+    if (disabled) return;
     const clamped = Math.min(last, Math.max(0, next));
     if (explicit && clamped === index) return;
     // 默认态点中推荐档也算一次显式选择，和拖动到别的档位一致
@@ -136,7 +158,7 @@ export function EffortSlider({
     const track = trackRef.current;
     if (!track) return 0;
     const rect = track.getBoundingClientRect();
-    return Math.min(1, Math.max(0, (clientX - rect.left - PAD) / Math.max(1, rect.width - THUMB.width)));
+    return Math.min(1, Math.max(0, (clientX - rect.left - dim.width / 2) / Math.max(1, rect.width - dim.width)));
   };
 
   const follow = (clientX: number) => {
@@ -146,7 +168,7 @@ export function EffortSlider({
   };
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || disabled) return;
     event.preventDefault();
     event.currentTarget.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -162,6 +184,7 @@ export function EffortSlider({
     follow(event.clientX);
   };
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (disabled) return;
     let next = index;
     if (event.key === "ArrowRight" || event.key === "ArrowUp") next = index + 1;
     else if (event.key === "ArrowLeft" || event.key === "ArrowDown") next = index - 1;
@@ -177,16 +200,17 @@ export function EffortSlider({
      圆心 = 2 + 19 + share·(W-42) = 21 + share·(W-42)，与档位圆点中心 / 推荐小字同一条线。
      填充 = 42 + share·(W-42)：右缘总在拇指右缘 + 2px（拇指上/下/左/右各露 2px 渐变），Max 时正好 = W 填到轨道右端。 */
   const vars = {
-    "--ev-thumb": `calc((100% - 42px) * ${share} + 2px)`,
-    "--ev-fill": `calc((100% - 42px) * ${share} + 42px)`,
-    "--ev-rec": `calc((100% - 42px) * ${recShare} + 21px)`,
+    "--ev-thumb": `calc((100% - ${travel}px) * ${share} + 2px)`,
+    "--ev-fill": `calc((100% - ${travel}px) * ${share} + ${travel}px)`,
+    "--ev-rec": `calc((100% - ${travel}px) * ${recShare} + ${center}px)`,
   } as CSSProperties;
 
-  return (
-    <div className="ev-slider" data-effort-slider data-think-level={localValue || "default"} style={vars}>
+  /* 轨道 + 文案整块复用：模型强度 / 时长两种用途只差最外层 data 钩子
+     （时长滑块不能再写 data-think-level，否则和模型强度选择器串台） */
+  const sliderBody = <>
       <div className="ev-head">
         <span className="ev-label">{label}</span>
-        <span className={"ev-value" + (explicit ? " is-on" : "")}>{explicit ? labelOf(localValue, labels) : "默认"}</span>
+        <span className={"ev-value" + (explicit ? " is-on" : "")}>{explicit ? labelOf(localValue, labels) : emptyLabel}</span>
         <span
           className="ev-info-wrap"
           onMouseEnter={() => setTip(true)}
@@ -207,6 +231,7 @@ export function EffortSlider({
         role="slider"
         tabIndex={0}
         aria-label={label}
+        aria-disabled={disabled || undefined}
         aria-valuemin={0}
         aria-valuemax={last}
         aria-valuenow={index}
@@ -219,7 +244,7 @@ export function EffortSlider({
         onLostPointerCapture={endDrag}
         onKeyDown={onKeyDown}
       >
-        <span className="ev-fill-wrap"><EffortFill level={level} /></span>
+        <span className="ev-fill-wrap"><EffortFill level={level} tone={tone} /></span>
         <span className="ev-dots" aria-hidden="true">
           {levels.map((item, position) => (
             <span key={item} className="ev-dot" data-think={item} data-on={position <= index ? "" : undefined} data-pop={position === index && dragging ? "" : undefined} />
@@ -229,6 +254,14 @@ export function EffortSlider({
       </div>
       {rec >= 0 ? <div className="ev-rec" aria-hidden="true"><span>推荐</span></div> : null}
       {showRestore && explicit ? <div className="ev-restore"><button type="button" onClick={() => { setLocalValue(""); onChange(""); }}>恢复默认</button></div> : null}
+  </>;
+
+  if (usage === "duration") return (
+    <div className="ev-slider" data-dur-slider data-size={size} data-tone={tone} data-disabled={disabled ? "" : undefined} style={vars}>{sliderBody}</div>
+  );
+  return (
+    <div className="ev-slider" data-effort-slider data-size={size} data-think-level={localValue || "default"} style={vars}>
+      {sliderBody}
     </div>
   );
 }

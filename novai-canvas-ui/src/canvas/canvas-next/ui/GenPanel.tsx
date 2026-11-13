@@ -12,10 +12,11 @@ import { mentionable, mentionedIds, unmentionedInputs } from "../mentions";
 import { PromptEditor } from "./PromptEditor";
 import { requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRole, stopNode } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
-import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, durationTiers, formatClock, genOf, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatOptions, outputFormatShortLabel, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
+import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, newNode, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatOptions, outputFormatShortLabel, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchInputWarnings, batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, ownRefCount, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS, type Ctl } from "./ctx";
-import { isSplitNode, startSplitNode } from "./SplitNode";
+import { isSplitNode } from "./SplitNode";
+import { openSplitEditor } from "./editors/SplitEditor";
 import { startVoiceCapture, transcribeVoice, voiceErrorText, type VoiceCapture, type VoicePhase } from "../voiceInput";
 import { keyHint } from "./shortcuts";
 import { ratioDisplayLabel, sourceBoxForNode, sourceSizeForTier, type RatioParams, type SourceBox } from "../originalRatio";
@@ -29,6 +30,7 @@ import { openPop } from "./overlay";
 import { ThumbImg } from "./thumb";
 import { OptCards, normRatio, ratioShape } from "./OptCards";
 import { OptimizeButton } from "./OptimizeButton";
+import { DurationSlider } from "./DurationSlider";
 import { EffortSlider } from "./EffortSlider";
 import { useEditorState } from "./editors/registry";
 import { draftToFinal, smartClip, trimToNode } from "../videoTools";
@@ -77,7 +79,7 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
     </div>;
   }
   /** 展开态用的短标签（提示文字仍是原来的 tip，data-tb / data-tip 逐字保留给 e2e 与功能） */
-  const LABEL: Record<string, string> = { crop: "裁剪", markup: "涂鸦", angle: "角度", mask: "局部", relight: "打光", adjust: "调色", lossless: "无损", more: "更多", bg: "背景色", pin: "标记", lib: "素材库", dl: "下载", full: "全屏", frame: "截帧", stop: "停止", upload: "上传", copy: "复制", trim: "修剪", smartclip: "切分", final: "出成片" };
+  const LABEL: Record<string, string> = { crop: "裁剪", markup: "涂鸦", angle: "角度", mask: "局部", relight: "打光", whitemodel: "白膜", adjust: "调色", lossless: "无损", more: "更多", bg: "背景色", pin: "标记", lib: "素材库", dl: "下载", full: "全屏", frame: "截帧", stop: "停止", upload: "上传", copy: "复制", trim: "修剪", smartclip: "切分", final: "出成片" };
   const B = (act: string, ic: IconName, tip: string, lab = "", on?: (el: HTMLElement) => void) => <FloatMenuButton key={act} icon={ic} label={lab || LABEL[act] || tip} title={tip} data={{ "data-tb": act, "data-tip": tip }} onClick={(e) => on ? on(e.currentTarget) : edit(act, e.currentTarget)} />;
   /** TapNow「背景颜色」：无色 + 7 种低饱和色，竖排弹出 */
   const bgBtn = () => <FloatMenuButton key="bg" icon="palette" label="背景色" title="背景颜色" data={{ "data-tb": "bg", "data-tip": "背景颜色" }}
@@ -104,7 +106,7 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
   if (running) items = node.kind === "video"
     ? [B("frame", "frame", "截帧（快捷键 1）", "截帧"), <span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))]
     : [<span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))];
-  else if (node.kind === "image") items = [B("crop", "crop", "裁剪 / 旋转"), B("markup", "pencil", "涂鸦 / 文字 / 马赛克"), B("angle", "cube", "多角度"), B("mask", "brush", "局部重绘"), B("relight", "sun", "重打光"), B("adjust", "palette", "调色"), B("lossless", "edit", "无损改图"), B("split", "layers", "拆分图层", "拆分图层", (el) => splitMenu(ctl, node.id, el)), B("more", "more", "更多"), <span key="s" className="vsep" />, tagBtn(), B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store)), B("full", "expand", "全屏查看", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })))];
+  else if (node.kind === "image") items = [B("crop", "crop", "裁剪 / 旋转"), B("markup", "pencil", "涂鸦 / 文字 / 马赛克"), B("angle", "cube", "多角度"), B("mask", "brush", "局部重绘"), B("relight", "sun", "重打光"), B("whitemodel", "user", "白膜处理：把人物变成白色石膏人台，保留姿势与构图"), B("adjust", "palette", "调色"), B("lossless", "edit", "无损改图"), B("split", "layers", "拆分图层", "拆分图层", (el) => splitMenu(ctl, node.id, el)), B("more", "more", "更多"), <span key="s" className="vsep" />, tagBtn(), B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store)), B("full", "expand", "全屏查看", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })))];
   else if (node.kind === "text") items = [bgBtn(), tagBtn(), <span key="s" className="vsep" />, B("copy", "copy", "复制全部", "", async () => { try { await navigator.clipboard.writeText(textOf(node)); store.toast("已复制全部内容"); } catch { store.toast("剪贴板不可用"); } }), B("lib", "libadd", "保存到素材库", "", (el) => { const r = el.getBoundingClientRect(); void saveNodeToLibrary(ctl, node, { x: r.left, y: r.bottom + 6 }); }), B("full", "expand", "全屏编辑", "", () => window.dispatchEvent(new CustomEvent("cn:textdoc", { detail: node.id })))];
   else if (node.kind === "video" && out) items = [
     // TapNow 视频工具栏：修剪 / 智能切镜 / AI 编辑（替换·移除·续写·重拍）/ 截帧 / 更多 ┃ 标签 ┃ 保存素材库 / 下载 / 全屏
@@ -490,7 +492,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
 /** 工具条「拆分图层」：自动 / 自定义两种拆法都打开同一个全屏编辑器（拆分本身不消耗积分） */
 function splitMenu(ctl: Ctl, id: string, anchor: Element) {
   openPop(anchor, (close) => {
-    const fire = (mode: "auto" | "custom") => () => { close(); startSplitNode(ctl, id, mode); };
+    const fire = (mode: "auto" | "custom") => () => { close(); openSplitEditor(id, mode); };
     return <>
       <div className="mh">拆分图层</div>
       <button className="mi" data-split-mode="auto" onClick={fire("auto")}>
@@ -505,6 +507,38 @@ function splitMenu(ctl: Ctl, id: string, anchor: Element) {
   }, "up");
 }
 
+/**
+ * 深度动作捕捉：本机逐帧把这段视频转成灰度深度视频（越近越亮、不带原片外观），
+ * 结果作为新视频节点接在源视频右边，再连到视频生成节点当参考视频用。
+ */
+async function runDepthCapture(store: CanvasStore, n: CanvasNode) {
+  const src = outOf(n)?.url;
+  if (!src) { store.toast("这段视频还没有画面，先上传或生成一段再提取"); return; }
+  const be = store.backend;
+  if (!be.depthCapture) { store.toast("当前后端没有深度动作捕捉，更新到最新安装包再试"); return; }
+  const started = Date.now();
+  const abort = new AbortController();
+  store.setRun(n.id, { status: "running", progress: .02, abort, startedAt: started });
+  try {
+    const out = await be.depthCapture(src);
+    store.setRun(n.id, null);
+    // 接口没有中止参数：点停止只是丢掉结果，后端那趟仍会跑完
+    if (abort.signal.aborted) return;
+    const w = out.w || n.w, h = out.h || n.h;
+    const made = newNode("video", n.x + n.w + 120, n.y, {
+      title: (n.text || "视频") + " · 深度动作捕捉",
+      hist: [{ url: out.url, w, h, dur: out.dur, meta: { model: "深度动作捕捉", at: Date.now() } }],
+      w, h,
+    });
+    store.addNodes([made], [{ id: uid("e"), from: n.id, to: made.id }], { select: true });
+    const secs = out.seconds ? Math.round(out.seconds) : Math.round((Date.now() - started) / 1000);
+    store.toast(`深度视频已生成，用了 ${secs} 秒；连到视频节点当参考用`);
+  } catch (err) {
+    store.setRun(n.id, null);
+    store.toast(err instanceof Error ? err.message : "深度动作捕捉失败");
+  }
+}
+
 /** 视频结果动作的「更多」：首帧/尾帧截帧、设为视频封面、应用到画布、下载、全屏（对齐 TapNow） */
 function videoMore(store: CanvasStore, node: CanvasNode, anchor: Element) {
   openPop(anchor, (close) => {
@@ -516,6 +550,10 @@ function videoMore(store: CanvasStore, node: CanvasNode, anchor: Element) {
       <div className="msep" />
       <button className="mi" data-tbk="setcover" onClick={fire("setcover")}><Icon name="star" size="s" />设为视频封面</button>
       <button className="mi" data-tbk="applycanvas" onClick={fire("applycanvas")}><Icon name="libadd" size="s" />应用到画布</button>
+      <div className="msep" />
+      <div className="msep" />
+      <div className="mh">参考视频</div>
+      <button className="mi" data-tbk="depthcapture" onClick={() => { close(); void runDepthCapture(store, node); }}><Icon name="layers" size="s" /><span style={{ flex: 1 }}>深度动作捕捉</span><span className="k">本机</span></button>
       <div className="msep" />
       <div className="mh">编辑当前帧</div>
       <button className="mi" data-tbk="cropframe" onClick={fire("cropframe")}><Icon name="crop" size="s" />裁剪画面<span className="k">先截帧</span></button>
@@ -648,6 +686,8 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   // 没配置模型：仍把同一套控件渲染出来（灰显），顶部保留引导 + 「打开模型设置」；有模型时行为不变。
   const dis = !m;
   const mm = m || placeholderSpec(kind);
+  // 参数弹层统一挂 param-pop：走「小弹层加厚底」那套磨砂玻璃（和模型菜单 / 生成态浮层一致），
+  // 不挂的话会退回大面积用的 70% 薄玻璃，画布内容透上来深浅不匀
   const pop = (render: (close: () => void) => React.ReactNode, cls?: string) => openPop(anchor, (close) => <>
     {dis ? <>
       <div className="mh">{TYPE_LABEL[kind]}参数</div>
@@ -656,7 +696,7 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
       <div className="msep" />
     </> : null}
     {render(close)}
-  </>, "up", "left", cls);
+  </>, "up", "left", cls ? "param-pop " + cls : "param-pop");
   if (k === "think") return pop((close) => {
     const levels = thinkLevelsFor(store.modelOf(node));
     const curThink = String((cur().g.params as TextParams).think || "");
@@ -723,7 +763,8 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   if (k === "vtimes") return pop((close) => <><div className="mh">一次生成几条</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + (((cur().g.params as VideoParams).times || 1) === c ? " on" : "")} disabled={dis || !(mm.times || [1]).includes(c)} onClick={() => { close(); set({ times: c }); }}>{c}×<span className="k">{!dis && (mm.times || [1]).includes(c) ? (c > 1 ? "每条单独计费" : "") : "该模型不支持"}</span></button>)}</>);
   if (k === "mode") return pop((close) => <><div className="mh">生成方式 · 会按输入自动选择</div>{(Object.keys(VMODES) as Array<keyof typeof VMODES>).map((x) => { const ok = (mm.modes || []).includes(x); return <button key={x} className={"mi" + ((cur().g.params as VideoParams).mode === x ? " on" : "")} disabled={!ok || dis} onClick={() => { close(); set({ mode: x }); }}><span style={{ flex: 1 }}>{x}<span className="d">{ok ? (x === "参考生视频" ? "最多 " + mm.maxRefs + " 张参考图" : VMODES[x].need) : mm.name + " 不支持"}</span></span><span className="k tnum">{VMODES[x].api}</span></button>; })}</>);
   if (k === "vratio") return pop(() => <VRatioPop node={node} m={mm} disabled={dis} />);
-  if (k === "vset") return pop(() => <VideoSetPop node={node} m={mm} disabled={dis} />);
+  // 视频参数是最高的一层（方式 / 分辨率 / 草稿 / 比例 / 时长 / 音频），单独放宽高度上限，别被 420 截掉
+  if (k === "vset") return pop(() => <VideoSetPop node={node} m={mm} disabled={dis} />, "vset-pop");
   if (k === "vres") { const rr = resRange(mm); const vp0 = cur().g.params as VideoParams; const list = mm.res || []; return pop((close) => <>
     <div className="mh">分辨率</div>
     <OptCards cols={list.length} items={list.map((r) => ({ key: r, label: r, on: vp0.res === r && !vp0.draft, disabled: dis, pick: () => { close(); set({ res: r, draft: false }); } }))} />
@@ -757,14 +798,24 @@ function useSourceBox(node: CanvasNode, kind: GenKind): SourceBox | null {
   return measured && measured.url === candidate.url ? measured : null;
 }
 
-/** 视频草稿模式：分辨率卡片下面单独一行轻量文字开关（不属于分辨率选项，不画框） */
+/**
+ * 视频草稿模式：分辨率下面一行（不是分辨率选项，所以不占卡片位）。
+ * 右侧用画布统一的胶囊开关（`.sw`：36×20 胶囊 + 16px 圆钮，开态走 --solid），
+ * 和「记忆开关 / 技能启用 / 广角镜头 / 锁定比例」是同一个控件；行本身也可以点。
+ */
 function DraftRow({ on, disabled = false, range, onToggle }: { on: boolean; disabled?: boolean; range?: { low: string; high: string } | null; onToggle: () => void }) {
-  return <button className={"draft-row" + (on ? " on" : "")} data-p="vdraft" data-vopt="draft" disabled={disabled || !range}
-    title={range ? `先按 ${range.low} 出草稿，满意后一键按 ${range.high} 出成片` : "该模型只有一档分辨率"} onClick={onToggle}>
-    <span className="t">草稿模式</span>
-    <span className="sp" />
-    {on ? <Icon name="check" size="s" /> : null}
-  </button>;
+  const caption = range ? `先按 ${range.low} 出草稿，满意后再按 ${range.high} 出成片` : "该模型只有一档分辨率";
+  const locked = disabled || !range;
+  return <div className="draft-mode" data-p="vdraft" data-vopt="draft" data-on={on ? "" : undefined}
+    data-locked={locked ? "" : undefined} title={caption} onClick={() => { if (!locked) onToggle(); }}>
+    <span className="tx">
+      <span className="t">草稿模式</span>
+      <span className="d">{caption}</span>
+    </span>
+    <button type="button" className={"sw" + (on ? " on" : "")} role="switch" aria-checked={on}
+      aria-label="草稿模式" disabled={locked}
+      onClick={(event) => { event.stopPropagation(); onToggle(); }} />
+  </div>;
 }
 
 const OUTPUT_FORMAT_TIP: Record<string, string> = { "": "PNG / JPG 单张图片", gif: "GIF 循环动画", svg: "SVG 矢量图，可任意放大" };
@@ -904,7 +955,7 @@ function VideoSetPop({ node, m, disabled = false }: { node: CanvasNode; m: Model
   const set = (patch: Partial<VideoParams>) => store.patchGen(node.id, (g) => ({ params: { ...(g.params as VideoParams), ...patch } }));
   const shape = (r: string) => ratioShape(r, 16);
   const modes = ((m.modes || []) as VideoMode[]).filter((x) => x in VMODES);
-  const durs = m.durs || []; const rr = resRange(m);
+  const rr = resRange(m);
   return <div className="vset" data-vset={m.id}>
     <div className="vset-model"><span className="n">{m.name}</span>{m.specSource === "guess" ? <span className="d">参数按名字推断</span> : <span className="d">这个模型支持的参数</span>}</div>
     {modes.length ? <><div className="mh">生成方式</div><div className="seg wrap">{modes.map((x) => <button key={x} data-vopt={"mode:" + x} className={p.mode === x ? "on" : ""} disabled={disabled} title={VMODES[x].need} onClick={() => set({ mode: x })}>{x}</button>)}</div></> : null}
@@ -917,21 +968,14 @@ function VideoSetPop({ node, m, disabled = false }: { node: CanvasNode; m: Model
       <div className="mh">比例</div>
       <OptCards cols={4} items={videoRatioChoices(m.ratios || []).map(({ value, label }) => ({ key: value, label, shape: shape(value), on: sameVideoRatio(p.ratio, value), disabled, attrs: { "data-vopt": "ratio:" + value }, pick: () => set({ ratio: value }) }))} />
     </> : null}
-    <div className="mh">生成时长</div>
-    {durs.length ? <div className="seg wrap">{durationTiers(durs).auto ? <button data-vopt="dur:auto" className={!p.dur || p.dur <= 0 ? "on" : ""} disabled={disabled} onClick={() => set({ dur: -1 })}>自动</button> : null}{durationTiers(durs).positive.map((d) => <button key={d} data-vopt={"dur:" + d} className={p.dur === d ? "on" : ""} disabled={disabled} onClick={() => set({ dur: d })}>{d}s</button>)}</div> : <div className="lg-dim" style={{ padding: "2px 0 6px" }}>由模型自动决定</div>}
+    <div className="vset-dur" data-vset-dur>
+      <DurationSlider node={node} model={m} disabled={disabled} />
+    </div>
     {m.audio ? <><div className="mh">生成音频</div><div className="seg"><button data-vopt="sound:on" className={p.sound ? "on" : ""} disabled={disabled} onClick={() => set({ sound: true })}>开启</button><button data-vopt="sound:off" className={!p.sound ? "on" : ""} disabled={disabled} onClick={() => set({ sound: false })}>关闭</button></div></> : null}
   </div>;
 }
 function DurPop({ node, m, disabled = false }: { node: CanvasNode; m: ModelSpec; disabled?: boolean }) {
-  const store = useCtl().store; const p = useNodeParams<VideoParams>(node);
-  const set = (patch: Partial<VideoParams>) => store.patchGen(node.id, (g) => ({ params: { ...(g.params as VideoParams), ...patch } }));
-  return <>
-    <div className="mh">生成时长</div>
-    <div className="seg wrap">
-      {durationTiers(m.durs).auto || !(m.durs || []).length ? <button className={!p.dur || p.dur <= 0 ? "on" : ""} disabled={disabled} onClick={() => set({ dur: -1 })}>自动</button> : null}
-      {durationTiers(m.durs).positive.map((d) => <button key={d} className={p.dur === d ? "on" : ""} disabled={disabled} onClick={() => set({ dur: d })}>{d}s</button>)}
-    </div>
-  </>;
+  return <DurationSlider node={node} model={m} disabled={disabled} />;
 }
 
 /** 视频比例（带形状预览，与图片比例弹层一致） */

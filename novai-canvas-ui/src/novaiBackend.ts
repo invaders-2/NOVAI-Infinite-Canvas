@@ -837,6 +837,7 @@ export function createNovaiBackend(): CanvasBackend {
         outpaint: "扩展画面并自然补全透明区域，保持原图内容不变",
         enhance: "将图片高清增强，提升细节和清晰度，内容保持不变",
         cutout: "完整保留主体并移除背景，输出透明背景图片",
+        whitemodel: "把照片里的人物变成纯白色的服装店人台模特：像人体模特一样身上没有衣服，保持原来的姿势、动作、镜头角度和构图，全身哑光纯白、不偏黄（不要米白或奶白），浅灰白摄影棚背景，柔和的棚拍光和淡淡阴影，不要删除人物，不要文字、水印、边框",
       };
       const params = { ...defaultParams("image", model), count: 1 } as ImageParams;
       // 编辑请求按源图真实比例要尺寸（不再固定方图）；扩图的源图是「原图 + 透明扩展」的合成图，天然是目标比例
@@ -959,6 +960,20 @@ export function createNovaiBackend(): CanvasBackend {
     async upscaleRuntimeDownload() {
       const data = await request("/api/image/upscale/runtime/download", jsonBody({}));
       return { ok: data?.ok !== false, installed: data?.installed === true, error: typeof data?.error === "string" ? data.error : undefined };
+    },
+    /** 深度动作捕捉：本机逐帧推理，视频不上传、不花额度；结果是灰度参考视频 */
+    async depthCapture(sourceUrl) {
+      const path = await localMediaPath(sourceUrl, "深度动作捕捉");
+      const data = await request("/api/video/depth-capture", jsonBody({ url: path }));
+      const url = urlOf(data);
+      if (!url) throw new GenError("NO_OUTPUT", "深度视频没有返回地址");
+      return {
+        url,
+        w: Number(data.width) || undefined,
+        h: Number(data.height) || undefined,
+        dur: Number(data.duration) || undefined,
+        seconds: Number(data.seconds) || undefined,
+      };
     },
     /** 本地超分：2k = 长边 2048、4k = 4096；skipped 表示原图已经够大，url 指回原图 */
     async upscaleLocal(sourceUrl, target): Promise<UpscaleResult> {

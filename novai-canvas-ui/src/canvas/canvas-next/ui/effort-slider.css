@@ -67,6 +67,28 @@
   outline: none;
 }
 .cn-root .ev-track[data-dragging] { cursor: grabbing; }
+/* 只读（生成中 / 不可交互）：整体降透明、轨道不再是可拖手势 */
+.cn-root .ev-slider[data-disabled] { opacity: .55; }
+.cn-root .ev-slider[data-disabled] .ev-track { cursor: default; }
+
+/* 小号（视频时长）：20px 轨道 / 30×18 拇指 / 3px 档位点 / 更小的字。
+   行程 = W - 34、圆心 = 2 + 15 = 17，与 --ev-thumb（JS 按拇指宽算）逐点对齐；
+   点层 inset -1.5px + padding 17px 让首点中心落在 17px（同 .ev-slider 默认那套算法）。 */
+.cn-root .ev-slider[data-size="sm"] { gap: 3px; padding: 0 5px; }
+.cn-root .ev-slider[data-size="sm"] .ev-head { gap: 5px; min-height: 16px; }
+.cn-root .ev-slider[data-size="sm"] .ev-label { font-size: 10.5px; }
+.cn-root .ev-slider[data-size="sm"] .ev-value { font-size: 11.5px; }
+.cn-root .ev-slider[data-size="sm"] .ev-caption { font-size: 10px; }
+.cn-root .ev-slider[data-size="sm"] .ev-info { width: 16px; height: 16px; border-radius: 5px; }
+.cn-root .ev-slider[data-size="sm"] .ev-info svg.i { width: 12px; height: 12px; }
+.cn-root .ev-slider[data-size="sm"] .ev-track { height: 20px; }
+.cn-root .ev-slider[data-size="sm"] .ev-thumb {
+  top: 1px;
+  left: min(var(--ev-thumb), calc(100% - 32px));
+  width: 30px; height: 18px;
+}
+.cn-root .ev-slider[data-size="sm"] .ev-dots { inset: 0 -1.5px; padding: 0 17px; }
+.cn-root .ev-slider[data-size="sm"] .ev-dot { width: 3px; height: 3px; }
 .cn-root .ev-track:focus-visible { outline: 2px solid rgba(var(--ink), .55); outline-offset: 2px; }
 
 /* 左侧填充：宽度 = 42px + share·(W-42)，右缘 = 拇指右缘 + 2px —— 拇指上/下/左/右各露 2px 渐变，

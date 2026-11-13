@@ -702,6 +702,8 @@ var $ = function(s,r){ return (r||document).querySelector(s); };
 var $$ = function(s,r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); };
 var sleep = function(ms){ return new Promise(function(r){ setTimeout(r,ms); }); };
 var clamp = function(n,a,b){ return Math.max(a,Math.min(b,n)); };
+var ROLE_LABELS={background:'背景',scene:'场景',decoration:'装饰',prop:'道具',subject:'主体',logo:'标识',text:'文字',object:'主体',block:'装饰'};
+function roleLabel(l){ if(!l) return '图层'; return ROLE_LABELS[l.role]||(l.type==='text'?'文字':'图片'); }
 var uid = (function(){ var i=0; return function(p){ i++; return (p||'id')+i; }; })();
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]; }); }
 function round(n,d){ var p=Math.pow(10,d||0); return Math.round(n*p)/p; }
@@ -1078,7 +1080,7 @@ function postSplit(mode,prompt,selection){
     var body={ image:packed.dataURL, mode:mode, maxLayers: mode==='custom'?24:16 };
     if(prompt) body.prompt=prompt;
     if(selection) body.selection={x:Math.round(selection.x),y:Math.round(selection.y),w:Math.round(selection.w),h:Math.round(selection.h)};
-    return apiFetch(state.backend.splitPath||'/api/split',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(body)},30000);
+    return apiFetch(state.backend.splitPath||'/api/split',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(body)},120000);
   }).then(function(res){
     return res.json().catch(function(){
       var e=new Error('后端响应不是 JSON'); e.apiError=true; throw e;
@@ -1445,9 +1447,17 @@ function bindResultNode(n){
   });
   stageEl.addEventListener('pointerdown',function(e){
     if(e.target.closest('.lyr-text') || e.target.closest('.lyr-img')) return;
+    if(e.button!==0 || state.splitting) return;
+    /* 先看点没点到某个图层：点中就选中并直接拖，不再要求先去右侧列表选 */
+    var hit=hitLayerAt(e.clientX,e.clientY);
+    if(hit){
+      e.preventDefault();
+      selectPlainLayer(hit.id);
+      startImageDrag(hit.id,e);
+      return;
+    }
     exitTextEdit();
     deselectText();
-    if(e.button!==0 || state.splitting) return;
     startResultPan(e);
   });
   /* 拆分加载层覆盖 stage：把拖动/滚轮转发给同一套平移缩放，避免等待期间不能移动视图 */
@@ -1648,6 +1658,7 @@ function enterResult(mode,payload,remote){
   var tb=$('#text-bar'); if(tb) tb.classList.add('off');
   renderStage();
   renderLayerList();
+  if(!state.localFonts.length) loadFontsFromBackend(true);
   layoutWorkspace();
   if(INLINE) inlineSetSourceHidden(true);
   if(payload.warnings && payload.warnings.length) toast('后端提示：'+payload.warnings[0],'warn',3400);
@@ -1841,6 +1852,49 @@ function syncLayerInteractivity(){
     el.classList.toggle('sel', state.selectedId===el.dataset.layerId);
   });
 }
+/* ---------- 画布点选：按 PNG 的 alpha 命中，点哪层就选哪层 ---------- */
+function layerAlphaMap(l){
+  if(l._alphaMap) return l._alphaMap;
+  var img=$('#artboard .lyr-img[data-layer-id="'+l.id+'"] img');
+  if(!img || !img.naturalWidth) return null;
+  var maxW=400, s=Math.min(1, maxW/Math.max(1,img.naturalWidth));
+  var w=Math.max(1,Math.round(img.naturalWidth*s)), h=Math.max(1,Math.round(img.naturalHeight*s));
+  var c=document.createElement('canvas'); c.width=w; c.height=h;
+  var ctx=c.getContext('2d'); if(!ctx) return null;
+  ctx.drawImage(img,0,0,w,h);
+  var data;
+  try{ data=ctx.getImageData(0,0,w,h).data; }catch(e){ return null; }
+  l._alphaMap={w:w,h:h,data:data};
+  return l._alphaMap;
+}
+function hitLayerAt(clientX,clientY){
+  var art=boardScreenRect(); if(!art) return null;
+  var bx=(clientX-art.left)/art.scale, by=(clientY-art.top)/art.scale;
+  if(bx<0 || by<0 || bx>state.board.w || by>state.board.h) return null;
+  var list=state.layers.filter(function(l){ return l.type!=='text' && l.visible!==false && l.role!=='background'; });
+  list.sort(function(a,b){ return (b.z||0)-(a.z||0); });
+  for(var i=0;i<list.length;i++){
+    var l=list[i], map=layerAlphaMap(l); if(!map) continue;
+    var box=layerBox(l);
+    var px=(bx-box.x)/Math.max(1,box.w)*map.w;
+    var py=(by-box.y)/Math.max(1,box.h)*map.h;
+    if(px<0 || py<0 || px>=map.w || py>=map.h) continue;
+    var a=map.data[(Math.floor(py)*map.w+Math.floor(px))*4+3];
+    if(a>24) return l;
+  }
+  return null;
+}
+function nudgeSelectedLayer(dx,dy){
+  var l=getLayer(state.selectedId);
+  if(!l || l.type==='text') return false;
+  var tf=layerTf(l);
+  var next=clampImageTf({x:tf.x+dx,y:tf.y+dy,w:tf.w,h:tf.h},'img-move');
+  if(next.x===tf.x && next.y===tf.y) return false;
+  l.tf=next;
+  applyImageBox(l);
+  updateTextFrame();
+  return true;
+}
 function renderStage(){
   var ab=$('#artboard');
   if(!ab) return;
@@ -1891,7 +1945,7 @@ function renderLayerList(){
     }
     var meta=document.createElement('div');
     meta.className='layer-meta';
-    meta.innerHTML='<div class="layer-name">'+esc(l.name)+'</div><span class="badge">'+(l.type==='text'?'文本':'图片')+'</span>';
+    meta.innerHTML='<div class="layer-name">'+esc(l.name)+'</div><span class="badge">'+esc(roleLabel(l))+'</span>';
     row.appendChild(meta);
     var eye=document.createElement('button');
     eye.className='icon-btn eye';
@@ -2533,6 +2587,11 @@ function onImageDragEnd(){
    14. 键盘
    ============================================================ */
 document.addEventListener('keydown',function(e){
+  var arrow={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
+  if(arrow[e.key] && state.selectedId && !state.editingId && !(e.target && e.target.isContentEditable)){
+    var step=e.shiftKey?10:1;
+    if(nudgeSelectedLayer(arrow[e.key][0]*step, arrow[e.key][1]*step)){ e.preventDefault(); return; }
+  }
   if(e.key==='Escape'){
     var iv=$('#img-viewer');
     if(iv && iv.classList.contains('open')){ closeImageViewer(); e.preventDefault(); return; }
@@ -2860,11 +2919,28 @@ function renderFontList(){
     addGroup('本机字体', state.localFonts.length? state.localFonts : LOCAL_FALLBACK_FONTS);
   }
 }
+function loadFontsFromBackend(silent){
+  var path=String(state.backend.splitPath||'/api/split').replace(/\/+$/,'')+'/fonts';
+  return apiFetch(path,{headers:{'Accept':'application/json'},cache:'no-store'},10000).then(function(res){
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    return res.json();
+  }).then(function(j){
+    if(!j || !Array.isArray(j.fonts) || !j.fonts.length) throw new Error('empty');
+    state.localFonts=j.fonts.map(function(f){ return f.family; }).filter(Boolean).slice(0,240);
+    state.localFontMeta={};
+    renderFontList();
+    if(!silent) toast('已读取 '+state.localFonts.length+' 个本机字体');
+    return true;
+  }).catch(function(){ return false; });
+}
 function loadLocalFonts(){
   if(!window.queryLocalFonts){
-    state.localFonts=LOCAL_FALLBACK_FONTS.slice();
-    renderFontList();
-    toast('当前浏览器不支持读取本机字体，已展示常用本机字体','warn',3000);
+    loadFontsFromBackend().then(function(ok){
+      if(ok) return;
+      state.localFonts=LOCAL_FALLBACK_FONTS.slice();
+      renderFontList();
+      toast('未连接到字体索引，已展示常用本机字体','warn',3000);
+    });
     return;
   }
   window.queryLocalFonts().then(function(fonts){
@@ -2885,9 +2961,12 @@ function loadLocalFonts(){
     }
     renderFontList();
   }).catch(function(){
-    state.localFonts=LOCAL_FALLBACK_FONTS.slice();
-    renderFontList();
-    toast('未获授权读取本机字体，已展示常用本机字体','warn',3200);
+    loadFontsFromBackend().then(function(ok){
+      if(ok) return;
+      state.localFonts=LOCAL_FALLBACK_FONTS.slice();
+      renderFontList();
+      toast('未获授权读取本机字体，已展示常用本机字体','warn',3200);
+    });
   });
 }
 function buildFontPanel(){

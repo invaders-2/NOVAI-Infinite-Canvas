@@ -68,6 +68,78 @@ assert.deepStrictEqual(videoSpec.res, ['720p', '1080p']);
 assert.deepStrictEqual(videoSpec.durs, [5, 10]);
 assert.deepStrictEqual(videoSpec.modes, ['文生视频', '首帧']);
 
+// ---- 2a. 2026-11-13 文档新增模型：/api/model-caps 的真实条目 → 编辑器面板选项 ----
+// 条目内容与后端实测一致（GET /api/model-caps，provider=apimart）
+const klingV4 = caps.modelCapsUi('video', {
+    provider: 'apimart', model: 'kling-v4', kind: 'video',
+    ratios: ['16:9', '9:16', '1:1', '21:9', 'auto'],
+    resolutions: ['720p', '1080p'],
+    durations: Array.from({ length: 28 }, (_, i) => i + 3),
+    modes: ['text_to_video', 'image_to_video', 'start_end_to_video', 'reference_to_video',
+            'video_edit', 'video_extend', 'reference_video_to_video'],
+    ref_max: 9, video_ref_max: 3, audio_ref_max: 3, n_max: 1,
+});
+assert.deepStrictEqual(klingV4.ratios, ['16:9', '9:16', '1:1', '21:9', '自适应'], 'auto → 自适应');
+assert.deepStrictEqual(klingV4.res, ['720p', '1080p'], 'V4 用 resolution 档位（不是 std/pro）');
+assert.deepStrictEqual(klingV4.durs, Array.from({ length: 28 }, (_, i) => i + 3), '3–30 秒全给');
+assert.deepStrictEqual(klingV4.modes, ['文生视频', '首帧', '首尾帧', '参考生视频',
+    '视频编辑', '视频延长', '参考视频生视频'], '统一入口的编辑/延长入口都出现');
+assert.strictEqual(klingV4.maxRefs, 9, '参考图上限按实际下发能力');
+
+const klingFlash = caps.modelCapsUi('video', {
+    provider: 'apimart', model: 'kling-v4-flash', kind: 'video',
+    ratios: ['16:9', '9:16', '1:1', '21:9', 'auto'], resolutions: ['720p'],
+    durations: Array.from({ length: 18 }, (_, i) => i + 3),
+    modes: ['text_to_video', 'image_to_video', 'reference_to_video', 'video_edit', 'video_extend',
+            'reference_video_to_video'],
+    ref_max: 9,
+});
+assert.deepStrictEqual(klingFlash.res, ['720p'], 'flash 只有 720p');
+assert.ok(!klingFlash.modes.includes('首尾帧'), 'flash 首帧只收 1 张，没有首尾帧入口');
+
+const zoeUi = caps.modelCapsUi('video', {
+    provider: 'apimart', model: 'apimart-zoe', kind: 'video',
+    ratios: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'adaptive'],
+    resolutions: ['480p', '720p', '1080p', '2k', '4k'],
+    durations: [-1].concat(Array.from({ length: 27 }, (_, i) => i + 4)),
+    modes: ['text_to_video', 'image_to_video', 'start_end_to_video', 'reference_to_video',
+            'video_edit', 'reference_video_to_video'],
+    ref_max: 9, video_ref_max: 3, audio_ref_max: 3,
+});
+assert.strictEqual(zoeUi.durs[0], -1, '-1（模型自选时长）保留为「自动」');
+assert.ok(zoeUi.modes.includes('视频编辑') && !zoeUi.modes.includes('视频延长'), 'zoe 不支持 extend');
+
+const omniUi = caps.modelCapsUi('video', {
+    provider: 'apimart', model: 'gemini-omni-1.2-flash', kind: 'video',
+    ratios: ['16:9', '9:16'], resolutions: ['360p', '720p', '1080p', '4k'],
+    durations: Array.from({ length: 13 }, (_, i) => i + 3),
+    modes: ['text_to_video', 'image_to_video', 'start_end_to_video', 'reference_to_video',
+            'video_edit', 'video_extend'],
+});
+assert.deepStrictEqual(omniUi.ratios, ['16:9', '9:16']);
+assert.deepStrictEqual(omniUi.res, ['360p', '720p', '1080p', '4k']);
+assert.deepStrictEqual(omniUi.durs, Array.from({ length: 13 }, (_, i) => i + 3), '3–15 秒');
+
+const miniImage = caps.modelCapsUi('image', {
+    provider: 'apimart', model: 'minimax-h3-image', kind: 'image',
+    ratios: ['auto', '1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9'],
+    resolutions: ['1K', '2K', '4K'], n_max: 10, ref_max: 16,
+    output_formats: ['png', 'jpeg', 'webp'],
+});
+assert.deepStrictEqual(miniImage.sizes, ['1K', '2K', '4K'], '默认 4K 的模型也要能选 1K/2K 省额度');
+assert.deepStrictEqual(miniImage.batch, [1, 2, 3, 4, 5, 6, 7, 8], 'n 1–10 只展开到 8');
+assert.strictEqual(miniImage.maxRefs, 16, '参考图 ≤16 张');
+assert.deepStrictEqual(miniImage.outputFormats, ['png', 'jpeg', 'webp'], '输出格式按文档给');
+assert.strictEqual('qualities' in miniImage, false, '文档说 quality 被忽略 → 不给质量档入口');
+
+const veoLiteUi = caps.modelCapsUi('video', {
+    provider: 'apimart', model: 'veo3.1-lite', kind: 'video',
+    ratios: ['16:9', '9:16'], resolutions: ['720p', '1080p', '4k'],
+    durations: [8], modes: ['text_to_video'],
+});
+assert.deepStrictEqual(veoLiteUi.modes, ['文生视频'], 'lite 只出文生视频');
+assert.deepStrictEqual(veoLiteUi.durs, [8], 'VEO 3.1 ext 档固定 8 秒');
+
 // ---- 3. 无 caps：保持 guess（未验证）----
 const guessed = model.specFor({ configId: 'x::some-image', label: 'some-image', kind: 'image', ui: null });
 assert.strictEqual(guessed.specSource, 'guess', '没有 caps 仍标 guess');
@@ -251,4 +323,4 @@ assert.ok(genPanel.includes('set({ background: "transparent", outputFormat: unde
 assert.ok(genPanel.includes('" · 透明"'), '比例摘要显示「 · 透明」状态');
 assert.ok(backend.includes('params.background === "transparent"') && backend.includes('background: "transparent"'), '生成请求按透明背景下发 background 字段');
 
-console.log('[PASS] model-caps 映射 / 未验证回落 / 方案卡选项与纠正 / 图片输出格式 / 后端接线（7 组）');
+console.log('[PASS] model-caps 映射 / 未验证回落 / 方案卡选项与纠正 / 图片输出格式 / 后端接线 / 2026-11 新模型面板选项（8 组）');

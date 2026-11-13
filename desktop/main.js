@@ -7,7 +7,7 @@
 //  5. iframe 子页面注入迷你桥（postMessage 转发），前端零改动获得完整桌面能力
 
 const { app, BrowserWindow, WebContentsView, session, shell, dialog, ipcMain, Tray, Menu, screen, desktopCapturer, nativeImage, net, Notification, nativeTheme } = require('electron');
-const { spawn, execFile } = require('child_process');
+const { spawn, spawnSync, execFile } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
@@ -366,6 +366,57 @@ function looksLikeNovaiBackend(port) {
   });
 }
 
+// 后端 Python 解释器选择：PATH 里的 python3 可能是别的工具链（如 agent venv），
+// 缺 onnxruntime/cv2 时拆分图层会退化成矩形裁切。优先用自带 venv / 用户数据目录 venv。
+function resolvesPythonDeps(cmd, spec) {
+  try {
+    const result = spawnSync(cmd, ['-c', 'import ' + spec], { timeout: 8000, encoding: 'utf8' });
+    return result.status === 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+function resolvePython(cwd, backendEnv) {
+  const candidates = [];
+  const push = (value) => {
+    if (value && candidates.indexOf(value) < 0 && (value.indexOf('/') < 0 && value.indexOf('\\\\') < 0 || fs.existsSync(value))) {
+      candidates.push(value);
+    }
+  };
+  if (process.env.NOVAI_PYTHON) push(process.env.NOVAI_PYTHON);
+  const win = process.platform === 'win32';
+  if (cwd) {
+    push(path.join(cwd, 'venv', win ? 'Scripts\\python.exe' : 'bin/python3'));
+    push(path.join(cwd, '.venv', win ? 'Scripts\\python.exe' : 'bin/python3'));
+  }
+  const dataDir = backendEnv && backendEnv.NOVAI_DATA_DIR;
+  if (dataDir) {
+    push(path.join(dataDir, 'venv', win ? 'Scripts\\python.exe' : 'bin/python3'));
+  }
+  if (process.resourcesPath) {
+    push(path.join(process.resourcesPath, 'backend', 'venv', win ? 'Scripts\\python.exe' : 'bin/python3'));
+  }
+  push(win ? 'python' : 'python3');
+
+  let fallback = null;
+  for (const cmd of candidates) {
+    const core = resolvesPythonDeps(cmd, 'fastapi, uvicorn');
+    if (!core) continue;
+    if (!fallback) fallback = cmd;
+    if (resolvesPythonDeps(cmd, 'cv2, onnxruntime')) {
+      clog('boot', '选择后端 Python（含本地拆分组件）: ' + cmd);
+      return cmd;
+    }
+  }
+  if (fallback) {
+    clog('boot', '警告：没有找到带 cv2/onnxruntime 的 Python，拆分图层会退化为矩形裁切；已用 ' + fallback);
+    return fallback;
+  }
+  clog('boot', '警告：没有找到可用 Python（缺 fastapi），后端可能起不来');
+  return win ? 'python' : 'python3';
+}
+
 // ---------- 启动后端 ----------
 function startBackend(port) {
   return new Promise(async (resolve, reject) => {
@@ -465,7 +516,7 @@ function startBackend(port) {
     }
 
     const cwd = path.dirname(mainPy);
-    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    const pythonCmd = resolvePython(cwd, backendEnv);
     const args = [mainPy, String(port)];
     backendProc = spawn(pythonCmd, args, { cwd, env: backendEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     backendProc.stdout.on('data', logBackend);

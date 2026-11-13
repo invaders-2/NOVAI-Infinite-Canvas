@@ -309,11 +309,14 @@ class ProtocolUpdatesTests(unittest.TestCase):
         latest = updates[-1]
         # 未应用的版本会一起合并：新模型期望要跨版本聚合（v1 的 4 图 1 视频 + v3 的 1 图）
         expected_models = {"chat": [], "image": [], "video": [], "audio": []}
+        expected_changes = []
         for update in updates:
             for kind in expected_models:
                 for name in update["new_models"][kind]:
                     if name not in expected_models[kind]:
                         expected_models[kind].append(name)
+            # 未应用的版本会一起合并：协议变更同样跨版本按版本顺序累加（v4 又加了 8 条）
+            expected_changes.extend(update.get("protocol_changes") or [])
         client = fresh_client()
         response = client.post("/api/providers/protocol-update/apply", json={"provider_id": "apimart"})
         self.assertEqual(response.status_code, 200, response.text)
@@ -322,8 +325,8 @@ class ProtocolUpdatesTests(unittest.TestCase):
         self.assertEqual(body["provider_id"], "apimart")
         for kind in ("chat", "image", "video", "audio"):
             self.assertEqual(body["applied"]["added_models"][kind], expected_models[kind], kind)
-        self.assertEqual(body["applied"]["protocol_changes"], expected["protocol_changes"])
-        # v3 是最后一个版本，apply 后版本应推进到 v3（v3 只带参数覆盖 + 1 个新模型）
+        self.assertEqual(body["applied"]["protocol_changes"], expected_changes)
+        # apply 后版本应推进到内置更新包的最后一个版本（当前 v4：新模型 + 协议变更，无参数覆盖）
         self.assertEqual(body["applied"]["model_caps"], expected.get("model_caps") or body["applied"]["model_caps"])
         self.assertTrue(body["applied"]["model_caps"])
         self.assertTrue(body["applied"]["parameter_changes"])
@@ -344,7 +347,8 @@ class ProtocolUpdatesTests(unittest.TestCase):
         # 文本类新增为 0；音频本次也必须是 0（TTS/转写/Lyria 走不了画布音乐接口）
         self.assertEqual(body["applied"]["added_models"]["chat"], [])
         self.assertEqual(body["applied"]["added_models"]["audio"], [])
-        self.assertEqual(sum(len(v) for v in body["applied"]["added_models"].values()), 6)
+        self.assertEqual(sum(len(v) for v in body["applied"]["added_models"].values()),
+                         sum(len(v) for v in expected_models.values()))
         # 落盘 + 缓存失效后的 /api/config 能读到新模型
         stored = self._stored()
         self.assertEqual(stored["protocol_version"], latest["version"])
@@ -680,8 +684,12 @@ class ModelCapsAndAudioTests(unittest.TestCase):
         self.assertEqual(item["new_models"]["audio"], [])
         self.assertEqual(item["new_models"]["image"], ["gpt-image-2.6-ext", "gpt-image-2.6-flare",
                                                        "gpt-image-2.6-sunburst", "muse-image-ext",
-                                                       "seedream-5-5"])
-        self.assertEqual(item["new_models"]["video"], ["muse-video-ext"])
+                                                       "seedream-5-5",
+                                                       "minimax-h3-image", "minimax-h3-image-highspeed"])
+        self.assertEqual(item["new_models"]["video"], ["muse-video-ext", "apimart-zoe", "kling-v4",
+                                                      "kling-v4-flash", "gemini-omni-1.2-flash",
+                                                      "gemini-omni-1.2-flash-ext", "veo3.1-fast",
+                                                      "veo3.1-quality", "veo3.1-lite"])
         self.assertEqual(item["new_models"]["chat"], [])
 
 
@@ -835,7 +843,8 @@ class ModelCapsOverrideTests(unittest.TestCase):
     def test_apply_writes_model_caps_overrides_and_v2(self) -> None:
         body = self._apply()
         stored = self._stored()
-        self.assertEqual(stored["protocol_version"], 3)
+        # 版本号按内置更新包的最新版本算，加新包时不用改断言（只要求「合并到最新」）
+        self.assertEqual(stored["protocol_version"], main._protocol_updates.latest_version("apimart"))
         overrides = stored.get("model_caps_overrides") or {}
         self.assertEqual(set(overrides), {"gpt-image-2.6-ext", "gpt-image-2.6-flare",
                                           "gpt-image-2.6-sunburst", "muse-image-ext", "muse-video-ext",
@@ -871,10 +880,11 @@ class ModelCapsOverrideTests(unittest.TestCase):
         self.assertEqual(second["applied"]["model_caps"], [])
         self.assertEqual(second["applied"]["parameter_changes"], [])
         after = self._stored()
-        self.assertEqual(after["protocol_version"], 3)
+        latest = main._protocol_updates.latest_version("apimart")
+        self.assertEqual(after["protocol_version"], latest)
         self.assertEqual(after.get("model_caps_overrides"), before.get("model_caps_overrides"))
         item = fresh_client().get("/api/providers/protocol-updates").json()["items"][0]
-        self.assertEqual(item["current_version"], 3)
+        self.assertEqual(item["current_version"], latest)
         self.assertFalse(item["available"])
 
     def test_put_providers_keeps_overrides(self) -> None:
@@ -882,7 +892,7 @@ class ModelCapsOverrideTests(unittest.TestCase):
         before = self._stored()
         self._put_provider(before)
         after = self._stored()
-        self.assertEqual(after["protocol_version"], 3)
+        self.assertEqual(after["protocol_version"], main._protocol_updates.latest_version("apimart"))
         self.assertEqual(after.get("model_caps_overrides"), before.get("model_caps_overrides"))
 
     def test_model_caps_field_level_merge(self) -> None:
@@ -952,7 +962,7 @@ class ModelCapsOverrideTests(unittest.TestCase):
 
     def test_view_exposes_model_caps_and_parameter_changes(self) -> None:
         item = fresh_client().get("/api/providers/protocol-updates").json()["items"][0]
-        self.assertEqual(item["latest_version"], 3)
+        self.assertEqual(item["latest_version"], main._protocol_updates.latest_version("apimart"))
         self.assertEqual(len(item["model_caps"]), 11)
         models = {cap["model"] for cap in item["model_caps"]}
         self.assertEqual(models, {"gpt-image-2.6-ext", "gpt-image-2.6-flare",
@@ -960,8 +970,8 @@ class ModelCapsOverrideTests(unittest.TestCase):
                                   "seedance-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
                                   "minimax-h3-context-ir", "midjourney", "seedream-5-5"})
         self.assertTrue(item["parameter_changes"])
-        # v2 没有新模型时，v1 的新模型/协议变更仍要聚合展示；v3 又加了 seedream-5-5
-        self.assertEqual(len(item["new_models"]["image"]), 5)
+        # v2 没有新模型时，v1 的新模型/协议变更仍要聚合展示；v3 加 seedream-5-5，v4 加 minimax-h3-image 两档
+        self.assertEqual(len(item["new_models"]["image"]), 7)
         self.assertTrue(item["protocol_changes"])
 
 

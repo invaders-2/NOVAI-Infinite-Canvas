@@ -47,10 +47,13 @@ assert.ok(react.includes('Math.round(next * last)'), '拖动 / 点击后吸附�
 assert.ok(react.includes('"ArrowRight"') && react.includes('"ArrowLeft"') && react.includes('"Home"') && react.includes('"End"'), '键盘 ←/→/Home/End');
 assert.ok(react.includes('aria-valuemin') && react.includes('aria-valuenow') && react.includes('aria-valuetext'), '滑块 ARIA');
 assert.ok(react.includes('const THUMB = { width: 38, height: 24 };'), '布局常量：拇指 38×24');
-assert.ok(react.includes('Math.min(1, Math.max(0, (clientX - rect.left - PAD) / Math.max(1, rect.width - THUMB.width)))'), '点击轨道按位置跳档');
-assert.ok(react.includes('"--ev-thumb": `calc((100% - 42px) * ${share} + 2px)`') && !react.includes('"--ev-fill": `calc((100% - 42px) * ${share} + 2px)`'), '布局变量：thumb = (100% - 42px)·share + 2px（两端各留 2px；拇指中心 = 圆点中心）');
-assert.ok(react.includes('"--ev-fill": `calc((100% - 42px) * ${share} + 42px)`'), '填充宽 = (100% - 42px)·share + 42px（右缘 = 拇指右缘 + 2px，拇指四周各露 2px 渐变；Max = 100% 填到轨道右端）');
-assert.ok(react.includes('"--ev-rec": `calc((100% - 42px) * ${recShare} + 21px)`') && react.includes('const PAD = THUMB.width / 2;'), '推荐小字 = (100% - 42px)·recShare + 21px（推荐点中心）');
+assert.ok(react.includes('const SMALL_THUMB = { width: 30, height: 18 };'), '小号拇指 30×18（视频时长那种）');
+// 行程 / 圆心按拇指宽推导：md 38 → 行程 42 / 圆心 21（与旧常量完全等价），sm 30 → 34 / 17
+assert.ok(react.includes('const travel = dim.width + 4;') && react.includes('const center = dim.width / 2 + 2;'), '行程 = 拇指宽 + 两端各 2px；圆心 = 2 + 拇指半径');
+assert.ok(react.includes('Math.min(1, Math.max(0, (clientX - rect.left - dim.width / 2) / Math.max(1, rect.width - dim.width)))'), '点击轨道按位置跳档（行程按当前尺寸取）');
+assert.ok(react.includes('"--ev-thumb": `calc((100% - ${travel}px) * ${share} + 2px)`') && !react.includes('"--ev-fill": `calc((100% - ${travel}px) * ${share} + 2px)`'), '布局变量：thumb = (100% - travel)·share + 2px（两端各留 2px；拇指中心 = 圆点中心）');
+assert.ok(react.includes('"--ev-fill": `calc((100% - ${travel}px) * ${share} + ${travel}px)`'), '填充宽 = (100% - travel)·share + travel（右缘 = 拇指右缘 + 2px；Max = 100% 填到轨道右端）');
+assert.ok(react.includes('"--ev-rec": `calc((100% - ${travel}px) * ${recShare} + ${center}px)`') && react.includes('const PAD = THUMB.width / 2;'), '推荐小字 = (100% - travel)·recShare + center（推荐点中心）');
 assert.ok(react.includes('const THUMB = { width: 38, height: 24 };'), '拇指宽度仍是 38（行程 42 = 38 + 两端各 2px）');
 assert.ok(!react.includes('+ 0px)'), '--ev-thumb / --ev-fill 不再从 +0px 起（低档左缘贴边）');
 assert.ok(!react.includes('${THUMB.width}px'), '布局变量不再用 (100% - 38px) 的旧行程');

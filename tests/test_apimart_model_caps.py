@@ -69,6 +69,21 @@ class ApimartImageCapsTableTests(unittest.TestCase):
         self.assertIs(caps["mask_url"], False)
         self.assertEqual(caps["output_formats"], ("png", "jpeg"))
 
+    def test_minimax_h3_image_caps_match_docs(self):
+        # 文档：1K/2K/4K（不传默认 4K）、n 1–10、参考图 ≤16 张、输出 jpeg/png/webp、
+        # quality/style/seed/mask_url 上游忽略；精确像素与 resolution 互斥所以不开 exact_size。
+        caps = main.APIMART_IMAGE_MODEL_CAPS["minimax-h3-image"]
+        self.assertEqual(caps["resolutions"], ("1K", "2K", "4K"))
+        self.assertEqual(caps["n_max"], 10)
+        self.assertEqual(caps["ref_max"], 16)
+        self.assertFalse(caps["mask_url"])
+        self.assertTrue(caps["base64_refs"])
+        self.assertEqual(caps["output_formats"], ("png", "jpeg", "webp"))
+        self.assertNotIn("exact_size", caps)
+        self.assertIn("21:9", caps["ratios"])
+        # highspeed 版参数与标准版一致，靠「最长 key 命中」复用同一条
+        self.assertIs(main.apimart_image_model_caps("minimax-h3-image-highspeed"), caps)
+
     def test_gpt_image_2_6_output_formats(self):
         caps = main.model_caps_for({"id": "apimart", "protocol": "apimart"}, "gpt-image-2.6-sunburst", "image")
         self.assertEqual(caps["output_formats"], ["png", "jpeg", "webp", "svg", "gif"])

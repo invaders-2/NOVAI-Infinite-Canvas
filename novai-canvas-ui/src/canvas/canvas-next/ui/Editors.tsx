@@ -8,6 +8,7 @@ import { useCtl } from "./ctx";
 import { EditorLayer, openEditor } from "./editors/registry";
 import { ColorAdjustLayer } from "./editors/ColorAdjust";
 import { LosslessEditLayer, warmLosslessTool } from "./editors/LosslessEdit";
+import { SplitEditorLayer } from "./editors/SplitEditor";
 
 export function Editors() {
   const ctl = useCtl();
@@ -17,5 +18,5 @@ export function Editors() {
     const on = (e: Event) => { const d = (e as CustomEvent).detail as { kind: string; id: string; anchor?: Element }; openEditor(ctl, d.kind, d.id, d.anchor); };
     addEventListener("cn:editor", on); return () => removeEventListener("cn:editor", on);
   }, [ctl]);
-  return <><EditorLayer /><LosslessEditLayer /><ColorAdjustLayer /></>;
+  return <><EditorLayer /><LosslessEditLayer /><ColorAdjustLayer /><SplitEditorLayer /></>;
 }
