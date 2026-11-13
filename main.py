@@ -44110,6 +44110,98 @@ AGENT_TOOLS["analyze_video"] = {
 
 
 # ---------------------------------------------------------------------------
+# depth_capture：本机深度动作捕捉（Depth Anything V2，本地推理、不上传、不花额度）。
+# 实现在 server/split_engine/depth_capture.py（和 /api/video/depth-capture 同一套）；
+# 模块或模型不在时只返回「不可用 + 原因」，不报错，技能据此走备选来源。
+# ---------------------------------------------------------------------------
+
+AGENT_DEPTH_CAPTURE_MAX_SECONDS = 30.0
+
+
+def _agent_depth_capture_module():
+    try:
+        from server.split_engine import depth_capture
+    except Exception as exc:  # 模块没合入 / onnxruntime 没装
+        return None, "本机深度动作捕捉没有安装（%s）" % (str(exc)[:120] or type(exc).__name__)
+    return depth_capture, ""
+
+
+def _agent_tool_depth_capture_validate(args):
+    args = dict(args or {})
+    node_id = str(args.get("node_id") or "").strip()
+    url = str(args.get("url") or "").strip()
+    check_only = bool(args.get("check_only"))
+    if not check_only and not node_id and not url:
+        raise AgentToolError("node_id 和 url 至少给一个（要转哪个视频）；只查能不能用就传 check_only=true", code="invalid_args")
+    canvas_id = str(args.get("canvas_id") or "").strip() or str(_AGENT_RUN_CANVAS_ID.get() or "").strip()
+    return {"canvas_id": canvas_id, "node_id": node_id, "url": url, "check_only": check_only,
+            "keep_audio": bool(args.get("keep_audio"))}
+
+
+def _agent_tool_depth_capture_preview(args, canvas=None):
+    if args.get("check_only"):
+        return "检查本机深度动作捕捉是否可用。"
+    return "把 %s 在本机逐帧转成深度通道视频（最长 30 秒，不花额度）。" % (args.get("node_id") or args.get("url") or "视频")
+
+
+async def _agent_tool_depth_capture_run(args):
+    module, reason = _agent_depth_capture_module()
+    ffmpeg = ffmpeg_binary() or ""
+    if module is not None:
+        ready, reason = module.available(ffmpeg)
+    else:
+        ready = False
+    if args.get("check_only") or not ready:
+        return {"ready": bool(ready), "reason": reason or "",
+                "message": "本机深度动作捕捉可用" if ready else
+                           "本机深度动作捕捉不可用：%s。按技能里的备选来源继续（画布上已有的深度视频 / 请用户上传）" % reason}
+    url, label = str(args.get("url") or "").strip(), "视频"
+    if args.get("node_id"):
+        try:
+            canvas = load_canvas(args["canvas_id"]) if args.get("canvas_id") else None
+        except HTTPException:
+            canvas = None
+        if canvas is None:
+            raise AgentToolError("读不到当前画布，没法按 node_id 找视频", code="canvas_not_found", status_code=404)
+        url, label = _agent_video_node_url(canvas, args["node_id"])
+    src = output_file_from_url(url)
+    if not src or not os.path.isfile(src):
+        raise AgentToolError("深度捕捉只支持画布里的本地视频（上传或生成到本机的 /output、/assets 文件）",
+                             code="invalid_args")
+    filename = "depth_capture_%s.mp4" % uuid.uuid4().hex[:12]
+    output_path = output_path_for(filename, "output")
+    result, error = await asyncio.to_thread(module.capture_video, ffmpeg, src, output_path,
+                                            max_seconds=AGENT_DEPTH_CAPTURE_MAX_SECONDS,
+                                            keep_audio=bool(args.get("keep_audio")))
+    if error or not result:
+        raise AgentToolError(error or "深度视频生成失败", code="depth_capture_failed")
+    depth_url = output_url_for(filename, "output")
+    return {"ready": True, "video": label, "source_url": url, "depth_url": depth_url,
+            "width": result.get("width", 0), "height": result.get("height", 0),
+            "frames": result.get("frames", 0), "duration": result.get("duration", 0),
+            "message": "已生成深度通道 depth_url（灰度，越近越亮，和原片等长）。先用 analyze_video(url=depth_url) 抽帧审查，"
+                       "再按段 analyze_video(url=depth_url, start, end, clip=true) 截出片段当 reference_video"}
+
+
+AGENT_TOOLS["depth_capture"] = {
+    "description": "本机深度动作捕捉：把画布上的本地视频（最长 30 秒）逐帧转成灰度深度通道视频，去掉颜色、纹理、人物长相，只留动作和空间层次；"
+                   "本地推理、不花额度。check_only=true 只查本机能不能用（模型 / 依赖是否就绪）。"
+                   "注意：深度里仍保留原物体轮廓（产品形状会被锁住）；平面内容（画、文字、屏幕）在深度里是一片平灰；"
+                   "暗片整体偏暗；快切和粒子转场处深度是糊的。",
+    "schema": {"type": "object", "properties": {
+        "canvas_id": {"type": "string", "description": "不填就用当前画布"},
+        "node_id": {"type": "string", "description": "视频节点 id"},
+        "url": {"type": "string", "description": "没有节点时直接给本地视频地址（/output 或 /assets）"},
+        "check_only": {"type": "boolean", "default": False, "description": "只检查本机深度捕捉是否可用，不转换"},
+        "keep_audio": {"type": "boolean", "default": False, "description": "是否保留原声（当参考视频用时一般不要）"}}},
+    "validate": _agent_tool_depth_capture_validate,
+    "run": _agent_tool_depth_capture_run,
+    "preview": _agent_tool_depth_capture_preview,
+    "mutates_canvas": False,
+}
+
+
+# ---------------------------------------------------------------------------
 # 阶段一（NOVAI_AGENT_V2_READ_TOOLS）：六个按需读取工具
 #   read_node / search_canvas / read_table / canvas_diff / view_image / recall_step
 #   纯只读、不花钱、不进确认闸门。和 review_table 一样挂在 AGENT_TOOLS 字面量之后：
@@ -45853,7 +45945,7 @@ AGENT_RUN_MAX_ROUNDS = _agent_run_limit_from_env("NOVAI_AGENT_MAX_ROUNDS", 60)
 # 步数不限之后时长才是真刹车：跑满一小时还没结论就停，不让一个 run 无限挂着
 AGENT_RUN_MAX_SECONDS = _agent_run_limit_from_env("NOVAI_AGENT_MAX_SECONDS", 3600)
 # 这些工具只是「查一下 / 等结果」：成功也不占步数，否则 check_task 轮询会把长任务顶到步数上限
-AGENT_RUN_STEP_FREE_TOOLS = {"check_task", "get_canvas", "list_canvases", "list_templates", "use_asset", "review_table", "analyze_video"}
+AGENT_RUN_STEP_FREE_TOOLS = {"check_task", "get_canvas", "list_canvases", "list_templates", "use_asset", "review_table", "analyze_video", "depth_capture"}
 # 阶段一（NOVAI_AGENT_V2_READ_TOOLS）：按需读取工具只读、不花钱，成功也不占步数
 if _agent_v2_read_tools_enabled():
     AGENT_RUN_STEP_FREE_TOOLS |= set(_agent_read_tools.READ_TOOL_NAMES)
@@ -47276,7 +47368,7 @@ _AGENT_STEP_LABELS = {
     "web_search": "联网搜索", "fetch_url": "读取网页", "search_images": "搜索参考图",
     "find_similar_images": "以图搜图", "lipsync_video": "对口型", "check_task": "查询任务",
     "activate_skill": "加载技能", "use_asset": "使用素材",
-    "batch_generate": "建多维表格并批量生成", "run_batch": "运行批量生成", "review_table": "检查表格", "analyze_video": "读参考视频",
+    "batch_generate": "建多维表格并批量生成", "run_batch": "运行批量生成", "review_table": "检查表格", "analyze_video": "读参考视频", "depth_capture": "本机深度动作捕捉",
 }
 _AGENT_NODE_TYPE_LABELS = {"text": "文本", "prompt": "提示词", "image": "图片", "video": "视频",
                            "audio": "配音", "timeline": "时间线", "group": "分组",
