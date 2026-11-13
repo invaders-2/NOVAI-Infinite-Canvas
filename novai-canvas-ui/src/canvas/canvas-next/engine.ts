@@ -10,7 +10,7 @@
  */
 import type { CanvasDoc, CanvasEdge, CanvasNode } from "../react-canvas/reactCanvasStore";
 import { GenError, type CanvasTask, type GenInput, type GenRequest } from "./backend/types";
-import { fitMediaBox, isAdaptiveRatio, ratioOf } from "./mediaFit";
+import { fitMediaBox, isAdaptiveRatio, ratioOf, refitNodeBox } from "./mediaFit";
 import { batchSourceSize, sourceBoxInDoc, sourceSizeForTier, wantedRatio } from "./originalRatio";
 import { applyElements, elementInputs } from "./elements";
 import { nodeError } from "./errorText";
@@ -269,7 +269,8 @@ export async function runNode(store: CanvasStore, id: string, opts: RunOpts = {}
         if (genOf(node).refMode && !genOf(result).refMode) store.patchGen(result.id, { refMode: genOf(node).refMode });
         node = store.node(result.id)!; id = result.id;
       } else {
-        const box = want ? fitMediaBox(node.w, want, 1) : null;
+        // 用户把节点拖大后再生成：新结果节点沿用当前宽度，只按比例改高（不缩回 360×640 的默认盒）
+        const box = want ? refitNodeBox(node, want, 1) : null;
         node = regenAsNew(store, node, box ? { w: box.w, h: box.h } : undefined); id = node.id;
       }
     }
@@ -289,7 +290,8 @@ async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, la
   // 原图比例（自适应）也要能摆正：按 params.sourceSize 的显式 WxH，或直接按源图真实像素
   // 用共享的最大盒等比缩放：9:16 这种高比例不会被单边夹扁
   const want = wantedRatio(store.state.doc, node, node.kind as GenKind, req.params);
-  const wantBox = want && (node.kind === "image" || node.kind === "video") ? fitMediaBox(node.w, want, 1) : null;
+  // 占位也按节点当前尺寸摆正：用户拖大的节点不能在点生成的一瞬间被缩回默认最大盒
+  const wantBox = want && (node.kind === "image" || node.kind === "video") ? refitNodeBox(node, want, 1) : null;
   if (wantBox) store.updateNode(id, (n) => ({ ...n, w: wantBox.w, h: wantBox.h }));
   store.setRun(id, { status: "running", progress: .02, abort, startedAt: Date.now() });
   try {
@@ -418,9 +420,9 @@ function applyOutputs(store: CanvasStore, id: string, outs: GenOutput[]) {
   // 优先真实像素；解码失败时用面板选的比例兜底（自适应不兜底，保持原尺寸）。宽高一起缩放，比例不变。
   const fit = (n: CanvasNode, o: GenOutput): CanvasNode => {
     if (n.kind !== "image" && n.kind !== "video") return n;
-    const box = o.w && o.h ? fitMediaBox(n.w, o.w, o.h) : null;
+    const box = o.w && o.h ? refitNodeBox(n, o.w, o.h) : null;
     const fallback = box ? null : ratioOf((genOf(n).params as { ratio?: string }).ratio);
-    const sized = box || (fallback ? fitMediaBox(n.w, fallback, 1) : null);
+    const sized = box || (fallback ? refitNodeBox(n, fallback, 1) : null);
     return sized ? { ...n, w: sized.w, h: sized.h } : n;
   };
   if (outs.length > 1 && store.state.ui.batchMode === "spread" && node.kind === "image") {

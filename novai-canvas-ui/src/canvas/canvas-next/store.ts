@@ -13,7 +13,7 @@ import type { CanvasBackend } from "./backend/types";
 import { resolveModelForParams } from "./agent/modelResolve";
 import { genOf, isGenKind, newNode, outOf, pinMissingModelIds, uid, withGen, type AnyParams, type GenData, type GenKind, type ModelSpec } from "./model";
 import { resumeCanvasTasks } from "./engine";
-import { fitMediaBox } from "./mediaFit";
+import { refitNodeBox } from "./mediaFit";
 import { declaredRatio, wantedRatio } from "./originalRatio";
 
 export type View = { x: number; y: number; k: number };
@@ -106,7 +106,8 @@ function fitEmptyRatio(prev: CanvasNode, next: CanvasNode, doc: CanvasDoc): Canv
   if (!want) return next;
   const have = declaredRatio(genOf(prev).params);
   if (have != null && Math.abs(have - want) <= Math.max(have, want) * .001) return next;
-  const box = fitMediaBox(next.w, want, 1);
+  // 换比例时只改高度、宽度沿用节点当前宽度：用户拖大的空节点不会被缩回 360×640 的默认最大盒
+  const box = refitNodeBox(next, want, 1);
   return box ? { ...next, w: box.w, h: box.h } : next;
 }
 

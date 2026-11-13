@@ -49,9 +49,23 @@ export function fitSourceBox(sourceW: number, sourceH: number, opts: Partial<Sou
   return { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) };
 }
 
-/** 已有节点换源图（切版本 / 老节点纠偏）：宽度不动，只按源图比例改高度；高过节点现有高度才收宽度 */
+/**
+ * 已有节点换源图（结果写回 / 切版本 / 老节点纠偏 / 连图后按比例摆正）：
+ *   · 节点还在默认最大盒以内（≤360×640）→ 按当前宽度等比摆正，和以前一样；
+ *   · 用户已经把它拖到比默认盒更大 → 按「面积不变」换算新比例，保持用户看到的块头，
+ *     不会因为结果 / 换比例被缩回 360×640（垂直反过来也能保持，不被压成细条）。
+ */
 export function refitNodeBox(current: MediaBox, sourceW: number, sourceH: number): MediaBox | null {
-  return fitMediaBox(current.w, sourceW, sourceH, { w: Math.max(MEDIA_FIT_MAX.w, current.w), h: Math.max(MEDIA_FIT_MAX.h, current.h) });
+  if (!Number.isFinite(sourceW) || !Number.isFinite(sourceH) || sourceW <= 0 || sourceH <= 0) return null;
+  if (current.w <= MEDIA_FIT_MAX.w && current.h <= MEDIA_FIT_MAX.h) return fitMediaBox(current.w, sourceW, sourceH);
+  const ratio = sourceW / sourceH;
+  const cur = current.w / Math.max(1, current.h);
+  // 比例本来就对（用户拖大的节点再次出同比例结果）：原样保留，取整都不动
+  if (Math.abs(cur - ratio) <= Math.max(cur, ratio) * 0.01) return { w: Math.round(current.w), h: Math.round(current.h) };
+  const area = Math.max(1, current.w * current.h);
+  const h = Math.sqrt(area / ratio);
+  const w = h * ratio;
+  return { w: Math.max(1, Math.round(w)), h: Math.max(1, Math.round(h)) };
 }
 
 /** "16:9" → 宽高比 16/9；自适应 / auto / 不合法 → null */

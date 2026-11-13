@@ -52,6 +52,11 @@ assert(engine.includes('naturalWidth') && engine.includes('naturalHeight'), '缺
 assert(engine.includes('decodeImageSize') && engine.includes('decodeVideoSize'), '图片 / 视频封面都有解码兜底');
 assert(engine.includes('const boxOf =') && engine.includes('const wantBox ='), '批量占位与生成中占位也按比例');
 assert(!engine.includes('clamp(n.w / want, 100, 520)') && !engine.includes('clamp((n.w * o.h) / o.w, 100, 520)'), '不再用单边 clamp 压比例');
+// 用户拖大的节点：占位 / 结果 / 新结果节点都按「保留块头」的 refit，不再套 360×640 的默认最大盒
+assert(!engine.includes('fitMediaBox(node.w, want') && !engine.includes('fitMediaBox(n.w, o.w'), '占位与结果写回不再用默认最大盒硬缩');
+assert((engine.match(/refitNodeBox\(/g) || []).length >= 4, '占位 / 结果 / 换新节点都走 refitNodeBox');
+const store = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/store.ts'), 'utf8');
+assert(store.includes('refitNodeBox(next, want'), '换比例也只改高度、不缩回默认最大盒');
 const registry = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/editors/registry.tsx'), 'utf8');
 assert(registry.includes('fitMediaBox('), '图片编辑结果也按真实比例摆正');
 
@@ -71,6 +76,10 @@ eq(fit.fitSourceBox(100, NaN), null, '源图高 NaN → 不处理');
 eq(fit.refitNodeBox({ w: 240, h: 240 }, 1676, 350), { w: 240, h: 50 }, '240×240 的老参考图节点改成 240×50');
 eq(fit.refitNodeBox({ w: 600, h: 600 }, 1, 1), { w: 600, h: 600 }, '方形图不动');
 eq(fit.refitNodeBox({ w: 240, h: 520 }, 480, 9724), { w: 32, h: 640 }, '1:20 超高图按现高收宽度');
+// 用户拖大的节点不再被「结果 / 换比例」缩回 360×640：同比例原样保留，换方向也保持块头（面积不变）
+eq(fit.refitNodeBox({ w: 800, h: 450 }, 16, 9), { w: 800, h: 450 }, '800×450 的 16:9 节点出同比例结果时原样保留');
+eq(fit.refitNodeBox({ w: 800, h: 450 }, 9, 16), { w: 450, h: 800 }, '800×450 换成 9:16 结果按面积换算，不缩回 360 宽');
+eq(fit.refitNodeBox({ w: 900, h: 300 }, 9, 16), { w: 390, h: 693 }, '900×300 换成 9:16 保持面积（390×693）');
 
 // 接线：所有「素材落成节点」的入口都用同一套等比盒子，不再有单边 clamp
 const sources = {
