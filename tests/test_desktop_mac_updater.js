@@ -131,6 +131,8 @@ const goodSha = crypto.createHash('sha512').update(fs.readFileSync(hashFile)).di
     ok(/rm -rf "\$BACKUP"/.test(script) && /rm -rf "\$TMP_DIR"/.test(script), '成功后清理备份与解压目录');
     ok(!/^TARGET=\$/m.test(script), '路径变量用 shell 引号包裹');
 
+    // 真跑安装脚本依赖 macOS 的 ditto / xattr / codesign / open（CI 的 ubuntu runner 没有）。
+    if (process.platform === 'darwin') {
     console.log('[4] 真跑安装脚本：替换 + 清理');
     const runDir = tmpDir('novai-run-');
     const targetApp = makeFakeApp(path.join(runDir, 'target', 'NOVAI.app'), '2.0.2', 'old-marker');
@@ -208,6 +210,9 @@ const goodSha = crypto.createHash('sha512').update(fs.readFileSync(hashFile)).di
         ok(rollbackLogText.includes('回滚完成') || rollbackLogText.includes('回滚'), 'install.log 记录回滚');
     } finally {
         try { sleepProc2.kill('SIGKILL'); } catch (_) {}
+    }
+    } else {
+        console.log('[4][5] 跳过真跑安装脚本：非 macOS（CI ubuntu runner）没有 ditto / codesign / open');
     }
 
     console.log('[6] 主进程 / preload / update.js 接线');
