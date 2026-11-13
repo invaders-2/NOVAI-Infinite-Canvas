@@ -69,6 +69,10 @@ STORE_REF_FIELD = "store_ref"
 # ---------------------------------------------------------------- 路径
 
 def _repo_root() -> str:
+    # 打包后 BASE_DIR 是 app 内的 backend 目录（桌面壳注入 NOVAI_APP_DIR），源码运行就是仓库根
+    bound = (os.environ.get("NOVAI_APP_DIR") or "").strip()
+    if bound:
+        return bound
     # server/routes/store.py -> server/routes -> server -> 仓库根
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
