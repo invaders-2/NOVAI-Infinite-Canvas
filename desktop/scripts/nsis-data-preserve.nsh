@@ -121,11 +121,20 @@ Var novaiKeepPending
 !macroend
 
 !ifndef BUILD_UNINSTALLER
-  ; ---- 安装 / 覆盖安装 ----
-  ; .onInit 里 initMultiUser 之后调用：$INSTDIR 已经是旧安装目录，先把数据挪到旁边，
-  ; 旧版卸载器（哪怕它自己不认识这些目录）就删不到数据了，装完 customInstall 再放回。
-  !macro customInit
+  ; CHECK_APP_RUNNING 内部带 loop: 标签，而 NSIS 的 label 是「函数作用域」。
+  ; electron-builder 的 .onInit 里已经插了 ALLOW_ONLY_ONE_INSTALLER_INSTANCE（同样有 loop:），
+  ; 直接把 CHECK_APP_RUNNING 再插进 customInit 会报「label "loop:" already declared in function」
+  ; （v2.0.07 Windows 打包就是这么挂的）。放进单独的函数里再 Call，标签作用域互不影响。
+  Function NovaiCheckAppRunning
     !insertmacro CHECK_APP_RUNNING
+  FunctionEnd
+
+  ; ---- 安装 / 覆盖安装 ----
+  ; .onInit 里 initMultiUser 之后调用：先把正在运行的 NOVAI 关掉（上面的函数），
+  ; 再把 $INSTDIR 里的用户数据挪到旁边 —— 旧版卸载器（哪怕它自己不认识这些目录）就删不到数据了，
+  ; 装完 customInstall 再放回。
+  !macro customInit
+    Call NovaiCheckAppRunning
     Sleep 300
     !insertmacro NOVAI_KEEP_BEGIN install
   !macroend
