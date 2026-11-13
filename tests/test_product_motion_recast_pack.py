@@ -84,7 +84,11 @@ class ProductMotionRecastPackTests(unittest.TestCase):
         self.assertIn("深度通道", prompt)
         self.assertIn("### GD 深度通道审查", prompt)
         self.assertIn("不要继承它的灰度画面", prompt)
-        self.assertIn("一个片段只转一次", prompt)
+        self.assertIn("整条深度视频只要一份", prompt)
+        # 深度转换在用户本地做：画布已有深度视频 → 本机深度模型 → 请用户本地转好上传
+        self.assertIn("画布上已有的深度视频", prompt)
+        self.assertIn("本机", prompt)
+        self.assertIn("在本地把原片转成深度视频后上传", prompt)
 
     def test_rerun_limit_matches_server_guard(self):
         """技能写的自动重跑上限要和服务端护栏一致，否则助手会撞上 review_rerun_limit。"""
