@@ -65,6 +65,25 @@ class ProductMotionRecastPackTests(unittest.TestCase):
         for key in ("结构", "接缝", "原产品才有的部件"):
             self.assertIn(key, prompt)
 
+    def test_review_gates_are_complete(self):
+        """画布助手照技能自己执行：每道关卡都要有判断、通过标准和不通过时的处理。"""
+        prompt = self.skill()["skill_prompt"]
+        gates = prompt.split("## 四、判断审查关卡", 1)[1].split("## 五、", 1)[0]
+        for gate in ("G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8"):
+            self.assertIn("### " + gate, gates)
+        for gate_text in gates.split("### ")[1:]:
+            self.assertIn("不通过", gate_text, "每道关卡都要写不通过怎么办：" + gate_text[:20])
+        self.assertIn("ask_user", gates)
+        self.assertIn("审查记录", prompt)
+        self.assertIn("重跑必须改请求", gates)
+
+    def test_rerun_limit_matches_server_guard(self):
+        """技能写的自动重跑上限要和服务端护栏一致，否则助手会撞上 review_rerun_limit。"""
+        import re
+        src = (ROOT / "main.py").read_text(encoding="utf-8")
+        limit = int(re.search(r"^_AGENT_REVIEW_RERUN_LIMIT = (\d+)", src, re.M).group(1))
+        self.assertIn("自动重跑最多 %d 次" % limit, self.skill()["skill_prompt"])
+
 
 if __name__ == "__main__":
     unittest.main()
