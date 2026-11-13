@@ -69,13 +69,22 @@ class ProductMotionRecastPackTests(unittest.TestCase):
         """画布助手照技能自己执行：每道关卡都要有判断、通过标准和不通过时的处理。"""
         prompt = self.skill()["skill_prompt"]
         gates = prompt.split("## 四、判断审查关卡", 1)[1].split("## 五、", 1)[0]
-        for gate in ("G0", "G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8"):
+        for gate in ("G0", "G1", "G2", "G3", "G4", "GD", "G5", "G6", "G7", "G8"):
             self.assertIn("### " + gate, gates)
         for gate_text in gates.split("### ")[1:]:
             self.assertIn("不通过", gate_text, "每道关卡都要写不通过怎么办：" + gate_text[:20])
         self.assertIn("ask_user", gates)
         self.assertIn("审查记录", prompt)
         self.assertIn("重跑必须改请求", gates)
+
+    def test_depth_motion_capture_step(self):
+        """锁动作段要先做深度动作捕捉（有深度转换模型时），转完审查，再按新外观重生成。"""
+        prompt = self.skill()["skill_prompt"]
+        self.assertIn("深度动作捕捉", prompt)
+        self.assertIn("深度通道", prompt)
+        self.assertIn("### GD 深度通道审查", prompt)
+        self.assertIn("不要继承它的灰度画面", prompt)
+        self.assertIn("一个片段只转一次", prompt)
 
     def test_rerun_limit_matches_server_guard(self):
         """技能写的自动重跑上限要和服务端护栏一致，否则助手会撞上 review_rerun_limit。"""
