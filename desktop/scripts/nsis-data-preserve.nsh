@@ -121,20 +121,38 @@ Var novaiKeepPending
 !macroend
 
 !ifndef BUILD_UNINSTALLER
-  ; CHECK_APP_RUNNING 内部带 loop: 标签，而 NSIS 的 label 是「函数作用域」。
-  ; electron-builder 的 .onInit 里已经插了 ALLOW_ONLY_ONE_INSTALLER_INSTANCE（同样有 loop:），
-  ; 直接把 CHECK_APP_RUNNING 再插进 customInit 会报「label "loop:" already declared in function」
-  ; （v2.0.07 Windows 打包就是这么挂的）。放进单独的函数里再 Call，标签作用域互不影响。
-  Function NovaiCheckAppRunning
-    !insertmacro CHECK_APP_RUNNING
-  FunctionEnd
+  ; 安装 / 覆盖安装前确认 NOVAI 已经退出。
+  ;
+  ; 不能用 electron-builder 的 CHECK_APP_RUNNING：它内部带 loop: 标签，而 .onInit 里已经插了
+  ; ALLOW_ONLY_ONE_INSTALLER_INSTANCE（同样有 loop:），NSIS 的 label 是函数作用域，会报
+  ; 「label "loop:" already declared in function」（v2.0.07 Windows 打包就是这么挂的）；
+  ; 自定义 include 又是在 CHECK_APP_RUNNING 定义之前被 include 的，不能包一层 Function 再引它。
+  ; 这里直接 tasklist + find 判断（不定义任何和别处重名的标签），运行中就提示并 taskkill。
+  !macro NOVAI_APP_RUNNING_CHECK
+    nsExec::Exec `%SYSTEMROOT%\System32\cmd.exe /c tasklist /FI "IMAGENAME eq ${APP_EXECUTABLE_FILENAME}" /FO CSV /NH | %SYSTEMROOT%\System32\find.exe /I "${APP_EXECUTABLE_FILENAME}"`
+    Pop $0
+  !macroend
+
+  !macro NOVAI_CLOSE_APP
+    !insertmacro NOVAI_APP_RUNNING_CHECK
+    ${If} $0 == "0"
+      MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "NOVAI 正在运行，安装 / 覆盖安装前需要先关闭它。$\r$\n$\r$\n点「确定」自动关闭 NOVAI 后继续安装；点「取消」退出安装。" /SD IDOK IDOK novai_close_app IDCANCEL novai_abort_install
+      novai_close_app:
+        nsExec::Exec `%SYSTEMROOT%\System32\cmd.exe /c taskkill /f /im "${APP_EXECUTABLE_FILENAME}"`
+        Sleep 1500
+        Goto novai_after_close
+      novai_abort_install:
+        Quit
+      novai_after_close:
+    ${EndIf}
+  !macroend
 
   ; ---- 安装 / 覆盖安装 ----
-  ; .onInit 里 initMultiUser 之后调用：先把正在运行的 NOVAI 关掉（上面的函数），
+  ; .onInit 里 initMultiUser 之后调用：先关掉正在运行的 NOVAI，
   ; 再把 $INSTDIR 里的用户数据挪到旁边 —— 旧版卸载器（哪怕它自己不认识这些目录）就删不到数据了，
   ; 装完 customInstall 再放回。
   !macro customInit
-    Call NovaiCheckAppRunning
+    !insertmacro NOVAI_CLOSE_APP
     Sleep 300
     !insertmacro NOVAI_KEEP_BEGIN install
   !macroend
