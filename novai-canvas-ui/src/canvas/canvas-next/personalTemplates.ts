@@ -65,12 +65,15 @@ export function templateDocument(doc: CanvasDoc): CanvasDoc {
     const current = gen.hist?.[gen.hi || 0];
     // 卡片封面：模板存一份「当前结果是哪张图」，读取时不用再猜（视频优先用首帧）
     const cover = current ? (current.frame || current.url || "") : "";
+    // 真正的媒体地址（视频 / 音频不能只存首帧封面，否则套用模板后节点是空的）
+    const asset = current ? (current.url || current.frame || "") : "";
     // 顶层 title 是铺模板时 createFromTemplate 认的字段；没有它 3 个节点会全变成模板名
     const nodeTitle = (gen.title || node.text || "").trim() || ({ text: "文本", image: "图片", video: "视频", audio: "音频" } as Record<string, string>)[node.kind] || "节点";
     return [{
       ...node,
       title: nodeTitle,
       ...(cover ? { cover } : {}),
+      ...(asset ? { asset } : {}),
       data: { gen: {
         title: nodeTitle, prompt: gen.prompt || "", ...(gen.params ? { params: cloneParams(gen.params) } : {}),
         ...(node.kind === "text" && current?.text ? { hist: [{ text: current.text }], hi: 0 } : {}),

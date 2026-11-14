@@ -665,6 +665,10 @@ type TplNode = {
   table?: { title?: string; columns?: string[]; rows?: string[][] } | null;
   /** 模板里已生成结果的封面（读取时从 doc 推导/保存时带上） */
   cover?: string;
+  /** 真实媒体地址（个人模板保存的已生成结果；视频/音频不能只用封面） */
+  asset?: string;
+  /** 个人模板原样带过来的节点数据（历史结果 / 参数） */
+  data?: { gen?: { title?: string; prompt?: string; params?: AnyParams; hist?: Array<{ text?: string; url?: string; frame?: string; w?: number; h?: number }>; hi?: number } };
 };
 type TplDoc = { nodes: TplNode[]; edges: Array<{ id: string; from: string; to: string }> };
 type TplEntry = {
@@ -795,11 +799,20 @@ function createFromTemplate(ctl: Ctl, tpl: TplEntry): { nodes: number; edges: nu
       made.push(withTable({ id, kind: "table", x, y, w: n.w, h: n.h, text: t.title }, t));
       continue;
     }
-    const prompt = n.prompt || (n.kind === tpl.kind ? tpl.prompt || "" : "");
-    const hist = n.kind === "text" && n.text ? [{ text: n.text }] : [];
+    const genData = n.data?.gen;
+    const cur = genData?.hist?.[genData?.hi || 0];
+    const prompt = n.prompt || genData?.prompt || (n.kind === tpl.kind ? tpl.prompt || "" : "");
+    // 个人模板：图片/视频/音频按保存下来的真实地址还原结果；文本用历史文本；
+    // 官方模板没有 asset，退回节点封面（image 的 cover 就是图本身）。
+    const mediaUrl = n.asset || cur?.url || "";
+    const cover = n.cover || cur?.frame || "";
+    const hist: Array<{ text?: string; url?: string; frame?: string; w?: number; h?: number }> = n.kind === "text"
+      ? (cur?.text || n.text ? [{ text: cur?.text || n.text }] : [])
+      : mediaUrl ? [{ url: mediaUrl, ...(cover && cover !== mediaUrl ? { frame: cover } : {}), ...(cur?.w ? { w: cur.w } : {}), ...(cur?.h ? { h: cur.h } : {}) }]
+      : cover ? [{ url: cover }] : [];
     const base = defaultParams(n.kind, store.defaultModel(n.kind));
     // 模板里的 params 可能被反复套用：这里先深拷贝，camera / mj 等嵌套对象不和模板源共用
-    const params: AnyParams = cloneParams(n.params ? { ...base, ...n.params } as AnyParams : base);
+    const params: AnyParams = cloneParams({ ...base, ...(genData?.params || {}), ...(n.params || {}) } as AnyParams);
     made.push(store.newNode(n.kind, x, y, {
       id, title, w: n.w, h: n.h, prompt, params,
       ...(hist.length ? { hist, hi: 0 } : {}),
