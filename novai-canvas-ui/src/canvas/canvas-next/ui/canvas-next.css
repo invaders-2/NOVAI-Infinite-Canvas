@@ -2697,3 +2697,9 @@ html.agent-layer-open .cn-root #agent{backdrop-filter:none;-webkit-backdrop-filt
 .cn-root .agrid .a:hover .ause{opacity:1}
 .cn-root .agrid .a.vid > svg{position:absolute;inset:0;margin:auto;color:var(--fg3)}
 
+
+/* 视频编辑器：首尾帧旁边列出的普通输入缩略图（图片 / 视频） */
+.cn-root .vp-in{position:relative}
+.cn-root .vp-in .x{position:absolute;top:1px;right:1px;width:15px;height:15px;border-radius:5px;display:grid;place-items:center;background:#000000a6;color:#fff;opacity:0;transition:opacity .12s}
+.cn-root .vp-in:hover .x,.cn-root .vp-in:focus-visible .x{opacity:1}
+.cn-root .vp-vplay{position:absolute;left:2px;bottom:2px;width:15px;height:15px;border-radius:4px;display:grid;place-items:center;background:#000000a6;color:#fff;pointer-events:none}

@@ -326,8 +326,12 @@ function GenPanel({ node }: { node: CanvasNode }) {
     const promptOnly = promptOnlyModel(m);
     const imgs = ins.filter((x) => x.node.kind === "image");
     const hasLast = (m?.modes || []).includes("首尾帧");
-    const first = imgs.find((x) => roles.get(x.edge.id) === "first_frame") || imgs[0];
-    const last = imgs.find((x) => roles.get(x.edge.id) === "last_frame") || (hasLast ? imgs[1] : undefined);
+    // 首/尾帧只放模式真正指定成帧的图片（rolesFor 按生成方式给角色）；其它连进来的图片和视频
+    // 都当作普通输入，在首尾帧旁边以缩略图列出，不再顶替帧位。
+    const first = imgs.find((x) => roles.get(x.edge.id) === "first_frame");
+    const last = imgs.find((x) => roles.get(x.edge.id) === "last_frame");
+    const frameIds = new Set([first?.edge.id, last?.edge.id].filter(Boolean) as string[]);
+    const others = ins.filter((x) => !frameIds.has(x.edge.id));
     const dropRef = (x: typeof imgs[number]) => { store.removeEdge(x.edge.id); afterInputsChanged(store, node.id); store.toast(`已移除「${title(x.node)}」`); };
     const addMenu = (anchor: Element) => openPop(anchor, (close) => <>
       <button className="mi" onClick={() => { close(); store.setUI({ pick: node.id }); store.toast("点画布上的节点，把它连成这个节点的输入；Esc 结束"); }}><Icon name="cursor" size="s" />从画布选择</button>
@@ -366,6 +370,14 @@ function GenPanel({ node }: { node: CanvasNode }) {
         <button className={"vp-pick tipB" + (pick === node.id ? " on" : "")} data-p="vpick" data-tip="从画布选择输入" onClick={() => { const on = pick !== node.id; store.setUI({ pick: on ? node.id : null }); if (on) store.toast("点画布上的节点，把它连成这个节点的输入；Esc 结束"); }}><Icon name="cursor" size="s" /></button>
         {slot("first", "首帧", first)}
         {hasLast ? <><button className="vp-swap tipB" data-p="vswap" data-fram-swap data-tip="交换首尾帧" disabled={busy || !first || !last} onClick={swap}><Icon name="branch" size="xs" /></button>{slot("last", "尾帧", last)}</> : null}
+        {/* 连进来的图片 / 视频：在首尾帧旁边以缩略图列出（视频带播放角标），点一下定位到画布节点 */}
+        {others.map((x) => { const src = srcOf(x.node); return (
+          <button key={x.edge.id} className="vp-thumb has vp-in" data-in={x.edge.id} title={title(x.node)} disabled={busy}
+            onClick={() => ctl.focusNode(x.node.id)}>
+            {src ? <ChipImg src={src} /> : <Icon name={x.node.kind === "table" ? "grid" : TYPE_ICON[x.node.kind as GenKind] || "layers"} size="s" />}
+            {x.node.kind === "video" ? <span className="vp-vplay"><Icon name="play" size="xs" /></span> : null}
+            <span className="x" onPointerDown={(e) => { e.stopPropagation(); store.removeEdge(x.edge.id); afterInputsChanged(store, node.id); store.toast(`已移除输入「${title(x.node)}」`); }}><Icon name="x" size="xs" /></span>
+          </button>); })}
         <button className="vp-add tipB" data-p="addin" data-tip="添加参考图" onClick={(e) => addMenu(e.currentTarget)}><Icon name="plus" size="s" /></button>
         <button className={"vp-pick tipB" + (preview ? " on" : "")} data-p="preview" data-tip="请求预览：看看这次会发给后端什么" onClick={() => store.setUI({ preview: !preview })}><Icon name="text" size="s" /></button>
         {m?.modes?.includes("视频编辑") ? <button className="vp-object" data-p="object-replace" disabled={busy} onClick={() => { set({ mode: "视频编辑" }); const next = draft.trim() || "替换源视频中的目标对象，保持其他人物、背景、光照、镜头运动和场景连续性不变"; setDraft(next); commitPrompt(next); }}><Icon name="wand" size="xs" />对象替换</button> : null}
