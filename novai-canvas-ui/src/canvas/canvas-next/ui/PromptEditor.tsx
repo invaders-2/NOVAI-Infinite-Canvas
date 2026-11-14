@@ -11,6 +11,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CanvasDoc, CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { connect, title } from "../actions";
+import { hostRoot } from "../../../novaiBridgeRoot";
 import { listElements, type CanvasElement } from "../elements";
 import { relinkMentions, kindIndex, KIND_SHORT, mentionable, mentionToken, selfRefOf, MENTION_RE } from "../mentions";
 import { expandGroupInputs, genOf, inputsOf, isGenKind, sectionsOf, srcOf, textOf, TYPE_LABEL, uid, type GenKind, type InputRef } from "../model";
@@ -20,10 +21,17 @@ import { Icon, ICON_PATHS } from "./Icon";
 import { resolveMediaUrl, useAssetUrl } from "./useAsset";
 import { ThumbImg, setChipThumb } from "./thumb";
 
+type AssetItem = { id: string; title?: string; kind?: string; mediaKind?: string; media?: { kind?: string }; coverRef?: string; resourceRef?: string; previewUrl?: string; url?: string; prompt?: string };
+type AssetCmd = (r: Record<string, unknown>) => Promise<Record<string, unknown>>;
+const assetCmd = (): AssetCmd | null => { const c = hostRoot<{ canvas?: { command?: AssetCmd } }>()?.canvas?.command; return typeof c === "function" ? c : null; };
+const assetRefOf = (it: AssetItem) => it.resourceRef || it.url || it.previewUrl || it.coverRef || "";
+const assetThumbOf = (it: AssetItem) => it.coverRef || it.previewUrl || it.url || it.resourceRef || "";
+const assetKindOf = (it: AssetItem): GenKind => { const k = String(it.mediaKind || it.media?.kind || it.kind || "image").toLowerCase(); return k === "video" ? "video" : k === "audio" ? "audio" : "image"; };
 type Item =
   | { type: "node"; key: string; node: CanvasNode; section?: string; ord: number; used: boolean }
   | { type: "fav"; key: string; node: CanvasNode }
-  | { type: "element"; key: string; el: CanvasElement };
+  | { type: "element"; key: string; el: CanvasElement }
+  | { type: "asset"; key: string; it: AssetItem };
 /** 「@」所在位置：选中后把这个 @ 换成胶囊 */
 type AtMark = { text: Text; at: number };
 
@@ -299,6 +307,17 @@ export function PromptEditor(props: PromptEditorProps) {
       store.toast(`已把「${it.el.name}」的 ${nodes.length} 张参考图放到画布并连成输入`);
       return;
     }
+    if (it.type === "asset") {
+      const live = store.node(node.id); if (!live) return;
+      const ref = assetRefOf(it.it);
+      if (!ref) { insertText("@" + (it.it.title || "素材") + " "); store.toast("这个素材没有可引用的地址"); return; }
+      const kind = assetKindOf(it.it); const w = kind === "image" ? 220 : 260; const h = kind === "image" ? 220 : 220;
+      const made = store.newNode(kind, live.x - w - 140, live.y + 32 + inputsOf(store.state.doc, node.id).length * 24, { title: it.it.title || "素材", uploaded: true, hist: [{ url: ref }], w, h });
+      store.addNodes([made], [{ id: uid("e"), from: made.id, to: node.id }], { select: false });
+      insertChip(made.id);
+      store.toast(`已把素材「${it.it.title || ""}」放到画布并连成输入`);
+      return;
+    }
     // 收藏的素材：复制一个上传节点放到左边、连进来，再在 @ 处插入它的引用
     const live = store.node(node.id); if (!live) return;
     const k = it.node.kind as GenKind; const o = genOf(it.node);
@@ -472,6 +491,7 @@ function restoreCaret(root: HTMLElement, off: number) {
 
 /* ---------- @ 弹层（TapNow：贴着 @ 往上弹，顶部搜索框；已连接节点 #序号 + 类型图标；个人素材库文件夹） ---------- */
 const FOLDERS: Array<{ id: string; name: string; always?: boolean }> = [
+  { id: "assets", name: "素材库", always: true },
   { id: "fav", name: "收藏", always: true }, { id: "character", name: "角色", always: true }, { id: "scene", name: "场景", always: true },
   { id: "product", name: "产品" }, { id: "style", name: "风格" }, { id: "other", name: "其他" },
 ];
@@ -498,6 +518,26 @@ function MentionMenu({ node, ins, value, x, y, onPick, onClose }: { node: Canvas
   const kw = q.trim().toLowerCase(); const hit = (...s: string[]) => !kw || s.some((t) => t.toLowerCase().includes(kw));
   const used = useMemo(() => new Set(([...value.matchAll(new RegExp(MENTION_RE.source, "g"))]).map((m) => m[1] + "#" + (m[2] || ""))), [value]);
   const els = listElements();
+  // 素材库：和软件「素材库」窗口同一个数据源（canvas/assetLibrary/list + get）
+  const [assets, setAssets] = useState<AssetItem[] | null>(null);
+  useEffect(() => {
+    const cmd = assetCmd(); if (!cmd) { setAssets([]); return; }
+    let dead = false;
+    void (async () => {
+      try {
+        const r = await cmd({ type: "canvas/assetLibrary/list" });
+        const libs = r && r.ok ? ((r.libraries as Array<{ id: string }>) || []) : [];
+        const all: AssetItem[] = [];
+        for (const lib of libs) {
+          const g = await cmd({ type: "canvas/assetLibrary/get", libraryId: lib.id }).catch(() => null);
+          if (g && g.ok && Array.isArray(g.items)) all.push(...(g.items as AssetItem[]));
+          if (all.length >= 120) break;
+        }
+        if (!dead) setAssets(all);
+      } catch { if (!dead) setAssets([]); }
+    })();
+    return () => { dead = true; };
+  }, []);
   const favs = doc.nodes.filter((n) => (n.kind === "image" || n.kind === "video") && genOf(n).fav && n.id !== node.id && !ins.some((x) => x.node.id === n.id));
   const linked: Item[] = []; ins.filter((x) => mentionable(x.node)).forEach((x) => {
     const typeLabel = x.node.kind === "group" ? "分组" : isGenKind(x.node.kind) ? TYPE_LABEL[x.node.kind] : "";
@@ -517,7 +557,9 @@ function MentionMenu({ node, ins, value, x, y, onPick, onClose }: { node: Canvas
     .sort((a, b) => a.y - b.y || a.x - b.x)
     .slice(0, 24)
     .map((n) => ({ type: "node", key: n.id, node: n, ord: 0, used: used.has(n.id + "#") }));
-  const inFolder = (f: string): Item[] => f === "fav" ? favs.filter((n) => hit(title(n))).map((n) => ({ type: "fav", key: "fav:" + n.id, node: n }))
+  const inFolder = (f: string): Item[] => f === "assets"
+    ? (assets || []).filter((it) => hit(it.title || "", it.prompt || "")).slice(0, 80).map((it) => ({ type: "asset", key: "asset:" + it.id, it }))
+    : f === "fav" ? favs.filter((n) => hit(title(n))).map((n) => ({ type: "fav", key: "fav:" + n.id, node: n }))
     : node.kind === "audio" ? [] : els.filter((e) => e.kind === f && hit(e.name, e.desc)).map((e) => ({ type: "element", key: "el:" + e.id, el: e }));
   const folders = FOLDERS.filter((f) => f.always || inFolder(f.id).length);
   // 搜索时直接列出素材库里匹配的条目（不用一层层点进去）
@@ -547,6 +589,7 @@ function MentionMenu({ node, ins, value, x, y, onPick, onClose }: { node: Canvas
       return <button key={it.key} {...common} data-self={self ? "1" : undefined}><MenuThumb node={it.node} /><span className="pm-nm">{self ? <>本节点 · {it.node.kind === "video" ? "当前视频" : "当前图"}</> : it.section ? <>{title(it.node)}<i> › </i>{it.section}</> : title(it.node)}</span>{it.used ? <Icon name="check" size="xs" /> : null}{self || !it.ord ? null : <span className="pm-k">#{it.ord}</span>}<span className="pm-ty"><Icon name={kindIconName(it.node.kind)} size="s" /></span></button>;
     }
     if (it.type === "fav") return <button key={it.key} {...common}><MenuThumb node={it.node} /><span className="pm-nm">{title(it.node)}</span><span className="pm-ty"><Icon name={kindIconName(it.node.kind)} size="s" /></span></button>;
+    if (it.type === "asset") return <button key={it.key} {...common}><span className="pm-mth"><ThumbImg src={assetThumbOf(it.it)} width={24} fallback={<Icon name={kindIconName(assetKindOf(it.it))} size="xs" />} /></span><span className="pm-nm">{it.it.title || "未命名素材"}</span><span className="pm-ty"><Icon name={kindIconName(assetKindOf(it.it))} size="s" /></span></button>;
     return <button key={it.key} {...common}><ElThumb el={it.el} /><span className="pm-nm">{it.el.name}</span><span className="pm-k">元素</span></button>;
   };
   return <div ref={box} className={"pm-menu" + (pos?.up ? " up" : "")} data-mention-menu style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: -9999 }} onPointerDown={(e) => e.stopPropagation()}>
@@ -558,7 +601,7 @@ function MentionMenu({ node, ins, value, x, y, onPick, onClose }: { node: Canvas
     <div className="pm-body">
       {folder ? <>
         <div className="pm-h"><span>{FOLDERS.find((f) => f.id === folder)?.name}</span></div>
-        {lib.length ? lib.map(row) : <div className="pm-empty">{folder === "fav" ? "还没有收藏：点图片 / 视频节点左上角的星标" : "这个文件夹还没有素材：在素材库里新建元素"}</div>}
+        {lib.length ? lib.map(row) : <div className="pm-empty">{folder === "assets" ? (assets === null ? "读取素材库…" : "素材库里还没有素材：先在素材库窗口导入") : folder === "fav" ? "还没有收藏：点图片 / 视频节点左上角的星标" : "这个文件夹还没有素材：在素材库里新建元素"}</div>}
       </> : <>
         <div className="pm-h"><span>已连接节点</span>{linked.length ? <span className="pm-tip">输入序号快选</span> : null}</div>
         {linked.length ? linked.map(row) : <div className="pm-empty">{ins.some((x) => mentionable(x.node)) ? "没有匹配的节点" : <>还没有连接上游节点<br /><span>把节点连到这里，或点 ⊕ 从画布选择</span></>}</div>}
