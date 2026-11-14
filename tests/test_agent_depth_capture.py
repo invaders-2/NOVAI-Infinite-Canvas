@@ -75,3 +75,22 @@ class AgentDepthCaptureToolTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BeatVideoNodeBoxTests(unittest.TestCase):
+
+    def test_video_node_box_follows_source_ratio(self):
+        import subprocess
+        ffmpeg = main.ffmpeg_binary()
+        if not ffmpeg:
+            self.skipTest("no ffmpeg")
+        path = main.output_path_for("box_test_square.mp4", "output")
+        subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:s=480x480:d=1",
+                        "-pix_fmt", "yuv420p", path], check=True)
+        node = main._agent_beat_new_node("video", 0, 0, url=main.output_url_for("box_test_square.mp4", "output"))
+        self.assertEqual(node["w"], node["h"])
+        self.assertEqual(node["data"]["gen"]["hist"][0]["w"], 480)
+        subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=gray:s=1280x720:d=1",
+                        "-pix_fmt", "yuv420p", path], check=True)
+        node = main._agent_beat_new_node("video", 0, 0, url=main.output_url_for("box_test_square.mp4", "output"))
+        self.assertAlmostEqual(node["w"] / node["h"], 16 / 9, places=1)

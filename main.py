@@ -35670,6 +35670,17 @@ def _agent_beat_new_node(kind, x, y, title="", prompt="", params=None, url="", t
         box = _agent_beat_media_box(src_w, src_h)
         if box:
             w, h = box
+    elif kind == "video" and url:
+        # 视频节点也按源片真实宽高定框（和前端 fitSourceBox(baseW=320) 一致），否则竖屏 / 方形片被塞进 16:9 默认框
+        path = _agent_local_image_path(url)
+        if path and os.path.isfile(path):
+            try:
+                src_w, src_h = probe_video_dimensions(path)
+            except Exception:
+                src_w = src_h = 0
+        box = _agent_beat_media_box(src_w, src_h, base_w=320)
+        if box:
+            w, h = box
     default_title = {"image": "图片", "video": "视频", "audio": "音频", "text": "文本"}.get(kind, "节点")
     if kind == "image":
         base = {"model": "", "ratio": "1:1", "size": "2K", "count": 1, "search": False, "style": "无",
@@ -35686,7 +35697,7 @@ def _agent_beat_new_node(kind, x, y, title="", prompt="", params=None, url="", t
         hist = [{"text": str(text)}]
     elif url:
         hist = [{"url": url, "meta": {"model": "", "at": now_ms()}}]
-        if kind == "image" and src_w > 0 and src_h > 0:
+        if kind in ("image", "video") and src_w > 0 and src_h > 0:
             # 同时记下真实像素：之后的「切换版本」「替换」按已有尺寸走，不用再解码量一次
             hist[0].update({"w": src_w, "h": src_h})
     gen = {"title": str(title or default_title)[:120], "prompt": str(prompt or ""), "params": base,
