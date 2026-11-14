@@ -727,6 +727,7 @@ function asTplDoc(value: unknown): TplDoc | null {
       params: n.params && typeof n.params === "object" ? (n.params as TplNode["params"]) : undefined,
       table: n.table && typeof n.table === "object" ? (n.table as TplNode["table"]) : null,
       ...(typeof n.cover === "string" && n.cover ? { cover: n.cover } : {}),
+      ...(typeof n.asset === "string" && n.asset ? { asset: n.asset } : {}),
     });
   }
   if (!nodes.length) return null;

@@ -64,6 +64,8 @@ export async function loadHomeEntries(): Promise<{ entries: HomeEntry[]; cats: R
 /* ---------- 模板 → 画布 doc（应用模板用） ---------- */
 export type PreviewDocNode = {
   id: string; kind: "text" | "image" | "video" | "audio" | "table";
+  /** 真实媒体地址（个人模板保存的图片 / 视频 / 音频） */
+  asset?: string;
   x: number; y: number; w: number; h: number; title: string; text: string; prompt: string;
   params?: { output?: "text" | "table" | "storyboard"; ratio?: string; count?: number; dur?: number; mode?: string };
   table?: { title?: string; columns?: string[]; rows?: string[][] } | null;
@@ -104,7 +106,7 @@ export function homeToDoc(home: HomeTemplate): { nodes: PreviewDocNode[]; edges:
 /* ---------- 只读画布图（首页定义 / 画布 doc 共用） ---------- */
 type GNode = {
   id: string; idx: number; key?: string; type: string; title: string; node: HomeNode | PreviewDocNode;
-  x: number; y: number; w: number; h: number; prompt?: string; text?: string; ratio?: string; video?: boolean; example?: boolean; cover?: string;
+  x: number; y: number; w: number; h: number; prompt?: string; text?: string; ratio?: string; video?: boolean; example?: boolean; cover?: string; asset?: string;
 };
 type GEdge = { from: GNode; to: GNode };
 const RATIO_SIZE: Record<string, [number, number]> = {
@@ -166,7 +168,7 @@ function docGraph(doc: { nodes: PreviewDocNode[]; edges: Array<{ id: string; fro
     if (!raw || !raw.id || !raw.kind) return;
     nodes.push({
       id: raw.id, idx: i, key: raw.id, type: raw.kind, title: raw.title || KIND_LABEL[raw.kind] || "节点", node: raw,
-      x: raw.x, y: raw.y, w: raw.w, h: raw.h, prompt: raw.prompt, text: raw.text, cover: raw.cover,
+      x: raw.x, y: raw.y, w: raw.w, h: raw.h, prompt: raw.prompt, text: raw.text, cover: raw.cover, asset: raw.asset,
       video: raw.kind === "video", ratio: raw.params?.ratio,
     });
   });
@@ -310,8 +312,14 @@ export function TemplatePreview({ entry, onClose, onApply, onDeleteConfirm, onAg
                   {video ? <video src={entry.home.video} poster={entry.home.media} muted loop autoPlay playsInline /> : <img src={entry.home.media} alt="" draggable={false} />}
                 </div> : <div className="tplpv-draft"><Icon name={raw.video ? "video" : "image"} size="s" /><p>{n.prompt}</p><span>{ratioLabel(n.ratio)}</span></div>)
                   : n.type === "text" ? <div className="tplpv-txt">{raw.brief ? "在首页输入框里写的需求会放在这里，例如卖点、风格、使用场景。" : n.text}</div>
-                    : n.cover && (n.type === "image" || n.type === "video") ? <div className="tplpv-im"><img src={n.cover} alt="" draggable={false} /></div>
-                  : n.type === "image" || n.type === "group" ? <div className="tplpv-drop"><Icon name={n.type === "group" ? "layers" : "upload"} size="s" /><span>{n.type === "group" ? "把多张图片一起拖进来" : raw.ref ? "首页上传的参考图会放在这里" : "把图片拖进来"}</span></div>
+                    : n.type === "video" ? ((n.asset || n.cover)
+                      ? <PreviewVideo src={(n.asset || n.cover)!} poster={n.cover && n.cover !== n.asset ? n.cover : undefined} />
+                      : <div className="tplpv-drop"><Icon name="video" size="s" /><span>{entry.home ? "视频提示词" : "视频素材"}</span></div>)
+                    : n.type === "audio" ? <PreviewAudio src={n.asset || n.cover} title={n.title} />
+                    : n.type === "image" ? ((n.asset || n.cover)
+                      ? <div className="tplpv-im"><img src={(n.asset || n.cover)!} alt="" draggable={false} /></div>
+                      : <div className="tplpv-drop"><Icon name="upload" size="s" /><span>{raw.ref ? "首页上传的参考图会放在这里" : "把图片拖进来"}</span></div>)
+                  : n.type === "group" ? <div className="tplpv-drop"><Icon name="layers" size="s" /><span>把多张图片一起拖进来</span></div>
                       : n.type === "table" ? <div className="tplpv-tbl">{Array.from({ length: 12 }, (_, i) => <i key={i} />)}</div>
                         : n.type === "batch" ? <div className="tplpv-drop"><Icon name="layers" size="s" /><span>表格每一行生成一张</span></div>
                           : entry.home ? <div className="tplpv-drop"><Icon name="video" size="s" /><span>视频提示词</span></div>
@@ -353,4 +361,16 @@ export function TemplatePreview({ entry, onClose, onApply, onDeleteConfirm, onAg
       </div> : null}
     </div>
   </>;
+}
+
+const isVideoSrc = (s: string) => /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(s);
+/** 模板预览里的视频节点：能拿到 mp4 就显示首帧（#t=0.1），只存了首帧图就按图片显示 */
+function PreviewVideo({ src, poster }: { src: string; poster?: string }) {
+  return <div className="tplpv-im">{isVideoSrc(src)
+    ? <video src={src + (src.includes("#") ? "" : "#t=0.1")} poster={poster} muted playsInline preload="metadata" />
+    : <img src={src} alt="" draggable={false} />}</div>;
+}
+/** 模板预览里的音频节点：至少显示图标 + 名称（<audio> 无画面） */
+function PreviewAudio({ src, title }: { src?: string; title?: string }) {
+  return <div className="tplpv-aud"><Icon name="audio" size="s" /><span>{title || "音频素材"}</span>{src ? <audio src={src} preload="metadata" /> : null}</div>;
 }
