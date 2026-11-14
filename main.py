@@ -44214,12 +44214,12 @@ AGENT_TOOLS["depth_capture"] = {
 AGENT_SKILL_GATES = {
     "product-motion-recast": {
         "title": "动作复刻换产品",
-        "nodes": (("产品结构对比", "产品结构对比与节拍映射"), ("分镜表", "分镜表")),
+        "nodes": (("结构对比", "产品结构对比与节拍映射"), ("分镜", "分镜表")),
         "confirm": True,
     },
 }
 _AGENT_SKILL_GATE_TOOLS = ("generate_image", "generate_video")
-_AGENT_SKILL_GATE_YES = ("按方案做", "先只做第一段", "确认", "同意", "开始做", "开始生成", "可以", "没问题", "就这样", "ok", "好的", "行")
+_AGENT_SKILL_GATE_YES = ("按方案做", "按这个方案", "先只做第一段", "满意", "继续", "确认", "同意", "开始做", "开始生成", "可以", "没问题", "就这样", "ok", "好的", "行")
 _AGENT_SKILL_GATE_NO = ("改方案", "我来改", "修改", "不要", "先别", "不行", "不对")
 _AGENT_RUN_SKILL_GATE = contextvars.ContextVar("novai_agent_run_skill_gate", default="")
 _AGENT_SKILL_GATE_LOCK = Lock()
@@ -53862,6 +53862,7 @@ async def _agent_run_producer(req, queue, bus=None):
                 status = "ok"
                 message = summary_text or f"Agent 已完成（执行 {steps_executed} 步，共 {rounds} 轮）"
                 if decision.get("questions"):
+                    _agent_skill_gate_record_ask(decision.get("questions"), summary_text)
                     message = _agent_message_with_questions(summary_text, decision.get("questions"),
                                                             kind="confirm" if decision.get("confirm") is True else "")
                 break
@@ -54326,6 +54327,7 @@ async def _agent_run_producer(req, queue, bus=None):
                     status = "ok"
                     message = summary_text or f"Agent 已完成（执行 {steps_executed} 步，共 {rounds} 轮）"
                     if deferred.get("questions"):
+                        _agent_skill_gate_record_ask(deferred.get("questions"), summary_text)
                         message = _agent_message_with_questions(
                             summary_text, deferred.get("questions"),
                             kind="confirm" if deferred.get("confirm") is True else "")
