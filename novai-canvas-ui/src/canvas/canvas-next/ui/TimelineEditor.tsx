@@ -19,7 +19,7 @@ import { novaiName } from "./downloadName";
 import { genOf, newNode, outOf, uid } from "../model";
 import { addFiles } from "../actions";
 import { clipable, clipFromNode } from "../playlist";
-import { openPop } from "./overlay";
+import { closePop, openPop } from "./overlay";
 import { dropIndex, duplicate, fadeOf, fmt, frameSize, IMAGE_LEN, lenOf, moveTo, normalize, place, RATIOS, renderPlan, RESES, shiftSub, snapPoints, snapTo, speedOf, SPEEDS, splitAt, tickStep, toSrt, totalOf, trackOf, transOf, trimEdge, volOf, type Clip, type ClipMedia, type Placed, type Track, type TransKind } from "../timelineModel";
 import { grabThumb, recordWebM, TimelinePlayer, type SubStyle } from "../timelinePlayer";
 import { useCtl, useS } from "./ctx";
@@ -140,6 +140,25 @@ export function TimelineEditor({ node }: { node: CanvasNode }) {
     </>, "down");
   };
   const remove = (id = sel) => { if (!id) return; commit(clips.filter((c) => c.id !== id)); setSel(null); };
+  // 片段选中后，Delete/Backspace 一律删片段：焦点在画布或右键菜单上（例如右键节点后再按 Delete）也能用。
+  // 输入框/可编辑区不抢；画布上已选节点/连线时让画布自己处理（那时用户意图是删节点）。
+  const selRef = useRef(sel); selRef.current = sel;
+  const removeRef = useRef(remove); removeRef.current = remove;
+  useEffect(() => {
+    const onWinKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (!selRef.current) return;
+      if (store.state.ui.sel.size || store.state.ui.edge) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      e.preventDefault(); e.stopPropagation();
+      closePop();
+      removeRef.current();
+    };
+    window.addEventListener("keydown", onWinKey, true);
+    return () => window.removeEventListener("keydown", onWinKey, true);
+  }, [store]);
   const patchSel = (p: Partial<Clip>, history = false) => { if (!sel) return; if (history) store.snapshot(); store.updateNode(node.id, (n) => ({ ...n, clips: ((n.clips || []) as Clip[]).map((c) => (c.id === sel ? { ...c, ...p } : c)) })); };
   const addSource = (s: CanvasNode) => { const c = clipFromNode(s); commit([...clips, c]); setSel(c.id); };
   const addSub = () => {
