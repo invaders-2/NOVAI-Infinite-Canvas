@@ -7,6 +7,7 @@ import { SharePanels } from "./SharePanels";
 import { ShareLinkHost, shareMenu } from "./ShareSheet";
 import { LanAvatarFace, LanChatHost, LanIdentity, LanNoticeHost, LanUnread, openChatEntry, openMyProfile } from "./LanChat";
 import { LibrarySection } from "./Library";
+import { VendorLogo } from "./VendorLogo";
 import { ElementsSection } from "./Elements";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as RKeyboardEvent, type PointerEvent as RPointerEvent, type ReactNode } from "react";
 import { clearOf, filterHistory, histNode, historyItems, histTime, usable, type HistFilter, type HistItem } from "../history";
