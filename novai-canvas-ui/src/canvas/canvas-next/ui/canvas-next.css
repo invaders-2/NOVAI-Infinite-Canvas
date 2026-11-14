@@ -2592,3 +2592,58 @@ html.agent-layer-open .cn-root #agent{backdrop-filter:none;-webkit-backdrop-filt
 .cn-root .splitnode .rz:before{content:"";position:absolute;left:4px;top:4px;width:22px;height:22px;border-radius:7px;background:color-mix(in srgb,var(--panel) 78%,transparent);-webkit-backdrop-filter:blur(10px) saturate(140%);backdrop-filter:blur(10px) saturate(140%);box-shadow:0 6px 16px rgba(0,0,0,.28)}
 .cn-root .splitnode .rz:after{right:8px;bottom:8px;width:14px;height:14px}
 .cn-root .splitmiss{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--fg3);font-size:12px}
+
+/* ---- 素材库抽屉 v2：用途筛选 / 产品档案 / 文件夹手风琴（就地展开）/ 类型筛选 ---- */
+.cn-root .lib-chips{display:flex;flex-wrap:wrap;gap:4px;flex:none}
+.cn-root .lib-chip{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 9px;border-radius:999px;background:var(--sunken);color:var(--fg2);font-size:12px;white-space:nowrap}
+.cn-root .lib-chip em{font-style:normal;color:var(--fg3);font-size:11px;font-variant-numeric:tabular-nums}
+.cn-root .lib-chip:hover{background:var(--hover);color:var(--fg)}
+.cn-root .lib-chip.on{background:var(--solid);color:var(--on-solid)}
+.cn-root .lib-chip.on em{color:inherit;opacity:.7}
+.cn-root .lib-sec{display:flex;flex-direction:column;gap:4px;flex:none}
+.cn-root .lib-section-title{display:flex;align-items:center;gap:5px}
+.cn-root .lib-section-title span{color:var(--fg2);font-weight:600}
+.cn-root .lib-section-title small{color:var(--fg3);font-size:11px}
+.cn-root .lib-prods{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px 0}
+.cn-root .lib-prods::-webkit-scrollbar{display:none}
+.cn-root .lib-prod{flex:none;display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:112px;padding:6px;border-radius:12px;background:var(--sunken);text-align:left}
+.cn-root .lib-prod:hover{background:var(--hover)}
+.cn-root .lib-prod.on{background:color-mix(in srgb,var(--fg) 14%,transparent)}
+.cn-root .lib-prod-angs{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;width:100%;margin-bottom:3px}
+.cn-root .lib-prod-angs i{aspect-ratio:1;border-radius:6px;background:var(--s2) center/cover no-repeat}
+.cn-root .lib-prod b{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:600;color:var(--fg)}
+.cn-root .lib-prod small{font-size:11px;color:var(--fg3)}
+.cn-root .lib-fitem{display:flex;flex-direction:column}
+.cn-root .lib-frow{position:relative;min-height:34px}
+.cn-root .lib-frow .lib-chev{flex:none;color:var(--fg3);transition:transform .16s ease}
+.cn-root .lib-fitem.open > .lib-frow .lib-chev{transform:rotate(90deg);color:var(--fg2)}
+.cn-root .lib-frow .lib-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 「⋯」悬停时盖在数量的位置上，平时不占位，数量列对齐 */
+.cn-root .lib-frow .lib-fmore{position:absolute;right:4px;top:50%;translate:0 -50%;width:24px;height:24px;opacity:0;pointer-events:none;transition:opacity .12s}
+.cn-root .lib-frow:hover .lib-fmore,.cn-root .lib-frow:focus-within .lib-fmore{opacity:1;pointer-events:auto}
+.cn-root .lib-frow:has(.lib-fmore):hover em,.cn-root .lib-frow:has(.lib-fmore):focus-within em{opacity:0}
+.cn-root .lib-fbody{display:flex;flex-direction:column;gap:4px;padding:2px 0 8px;animation:lib-fbody-in .16s ease}
+@keyframes lib-fbody-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.cn-root .lib-fgrid{grid-template-columns:repeat(4,1fr);gap:5px}
+.cn-root .lib-fgrid .a{border-radius:8px}
+.cn-root .lib-fempty{padding:8px 6px;color:var(--fg3);font-size:11.5px;line-height:1.5}
+.cn-root .lib-fall{align-self:flex-start;font-size:12px}
+.cn-root .lib-fedit{display:flex;flex-direction:column;gap:3px;padding:3px 0}
+.cn-root .lib-fedit-row{display:flex;align-items:center;gap:6px;height:34px;padding:0 4px 0 8px;border-radius:9px;background:var(--sunken);color:var(--fg2)}
+.cn-root .lib-fedit-row input{flex:1;min-width:0;height:100%;border:0;background:transparent;outline:none;color:var(--fg);font:inherit;font-size:12px}
+.cn-root .lib-fedit-row .ib{width:24px;height:24px}
+.cn-root .lib-fedit-err{padding:0 8px;color:var(--danger,#e5484d);font-size:11px}
+.cn-root .lib-newfolder{color:var(--fg3)}
+.cn-root .lib-grid-head{display:flex;align-items:center;gap:6px;padding:8px 2px 0;flex:none}
+.cn-root .lib-grid-head b{font-size:12.5px;font-weight:600;color:var(--fg)}
+.cn-root .lib-grid-head em{font-style:normal;color:var(--fg3);font-size:11px;font-variant-numeric:tabular-nums}
+.cn-root .lib-grid-head .sp{flex:1}
+.cn-root .lib-grid-head .ib{width:22px;height:22px}
+.cn-root .lib-types{display:flex;gap:1px;padding:2px;border-radius:9px;background:var(--sunken)}
+.cn-root .lib-types button{width:26px;height:22px;border-radius:7px;display:grid;place-items:center;color:var(--fg3)}
+.cn-root .lib-types button:hover{color:var(--fg)}
+.cn-root .lib-types button.on{background:var(--s1);color:var(--fg);box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.cn-root .agrid .a .abadge{position:absolute;left:4px;bottom:4px;display:inline-flex;align-items:center;gap:3px;height:18px;padding:0 6px;border-radius:6px;background:#0000008c;color:#fff;font-size:10px;backdrop-filter:blur(8px)}
+.cn-root .agrid .a .ause{position:absolute;left:4px;top:4px;height:17px;padding:0 5px;border-radius:5px;background:#0000007a;color:#fff;font-size:10px;line-height:17px;opacity:0;transition:opacity .12s;backdrop-filter:blur(8px)}
+.cn-root .agrid .a:hover .ause{opacity:1}
+.cn-root .agrid .a.vid > svg{position:absolute;inset:0;margin:auto;color:var(--fg3)}

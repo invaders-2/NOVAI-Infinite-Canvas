@@ -3,30 +3,29 @@
  * 首屏只渲染 60 条，缩略图走 media-preview + lazy，滚到底再增加。
  */
 import { hostRoot } from "../../../novaiBridgeRoot";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type ReactElement } from "react";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { replaceNodeMedia } from "../actions";
 import { filterLibraryItems, libraryNodeBox } from "../libraryAssets";
-import { categoryOwners, matchFixedFolders, rowKeyIntent } from "../libraryTree";
+import { buildFolderTree, categoryOwners, matchFixedFolders, rowKeyIntent, type FolderNode } from "../libraryTree";
 import { genOf, outOf, uid, type AssetRef, type GenKind } from "../model";
 import { openCharacterLibrary } from "./CharacterLibrary";
 import { useCtl, type Ctl } from "./ctx";
 import { AnimateIcon } from "./AnimateIcon";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { openModal, openPop } from "./overlay";
 import { useAssetUrl } from "./useAsset";
 import { IS_MAC } from "./shortcuts";
 
 type Lib = { id: string; name: string; visibility?: string; access?: string; itemCount?: number; categoryIds?: string[] };
 type Cmd = (r: Record<string, unknown>) => Promise<Record<string, any>>;
-type GItem = { id: string; name: string; url: string; kind: string; categoryIds: string[]; natural_w?: number; natural_h?: number; prompt?: string; canvas_title?: string; assetId?: string; use?: string; productId?: string };
+type GItem = { id: string; name: string; url: string; kind: string; categoryIds: string[]; natural_w?: number; natural_h?: number; prompt?: string; canvas_title?: string; assetId?: string; use?: string; productId?: string; summary?: string; tags?: string[] };
 /** 资产库条目放到画布上时写进节点的来源引用（gen.asset） */
 export function assetRefOf(it: Pick<GItem, "assetId" | "use" | "productId" | "name">): AssetRef | undefined {
   if (!it.assetId) return undefined;
   return { id: it.assetId, ...(it.use ? { use: it.use } : {}), ...(it.productId ? { productId: it.productId } : {}), ...(it.name ? { name: it.name } : {}) };
 }
 type GCat = { id: string; name: string; count: number; kind: string };
-type FolderRow = { key: string; name: string; icon: Parameters<typeof Icon>[0]["name"]; count: number; total?: number; ids: string[]; assetId?: string; parentKey?: string; depth?: number; hasChildren?: boolean };
 
 const PAGE = 60;
 const localParents = new Map<string, string>();
@@ -35,7 +34,8 @@ function applyLocalParents(cats: GCat[]): GCat[] {
 }
 const cmdOf = (): Cmd | null => { const c = hostRoot<{ canvas?: { command?: Cmd } }>()?.canvas?.command; return typeof c === "function" ? c : null; };
 const isPersonal = (l: Lib) => l.access === "owner" && String(l.visibility || "").toUpperCase() === "PRIVATE";
-const thumbOf = (it: GItem) => it.kind === "image" && it.url ? "/api/media-preview?w=256&url=" + encodeURIComponent(it.url) : "";
+// 图片和视频都走 media-preview（视频由后端抽帧），不再给视频显示灰块
+const thumbOf = (it: GItem) => (it.kind === "image" || it.kind === "video") && it.url ? "/api/media-preview?w=256&url=" + encodeURIComponent(it.url) : "";
 
 function mediaKind(kind: string): "image" | "video" | "audio" | null {
   return kind === "video" ? "video" : kind === "audio" ? "audio" : kind === "image" ? "image" : null;
@@ -68,100 +68,72 @@ function scopeOf(it: GItem, scope: "personal" | "local") {
   const nonLocal = it.categoryIds.some((id) => id !== "all" && !id.startsWith("local:"));
   return scope === "local" ? local : nonLocal;
 }
-function folderRows(items: GItem[], cats: GCat[], scope: "personal" | "local"): FolderRow[] {
-  const pool = items.filter((it) => scopeOf(it, scope));
-  const own = (ids: string[]) => new Set(pool.filter((it) => it.categoryIds.some((id) => ids.includes(id))).map((it) => it.url)).size;
-  const fixed: Array<[string, string, string, string[]]> = [
-    ["role", "角色", "user", ["角色", "characters", "character", "role"]],
-    ["scene", "场景", "image", ["场景", "scenes", "scene"]],
-    ["prop", "道具", "cube", ["道具", "props", "prop"]],
-    ["style", "风格", "palette", ["风格", "styles", "style"]],
-    ["sound", "音效", "audio", ["音效", "audio", "sounds", "sound"]],
-  ];
-  const rows: FolderRow[] = []; const used = new Set<string>();
-  const assetCats = cats.filter((c) => c.kind === "asset");
-  const localCats = cats.filter((c) => c.kind === "local" && c.id !== "local:all");
-  const addChildren = (parentCatId: string, parentKey: string, depth: number) => {
-    for (const c of assetCats) {
-      if (used.has(c.id)) continue;
-      const pid = String((c as GCat & { parent_id?: string }).parent_id || "");
-      if (pid !== parentCatId) continue;
-      const ids = [c.id]; const row: FolderRow = { key: "folder:custom:" + c.id, name: c.name, icon: "folder", count: own(ids), ids, assetId: c.id.replace(/^asset:/, ""), parentKey, depth };
-      used.add(c.id); rows.push(row); addChildren(c.id, row.key, depth + 1);
-    }
-  };
-  for (const [key, name, icon, needles] of fixed) {
-    // 只按顶级分类归并；有 parent_id 的子文件夹（如「小道具」）留给 parentKey 正常挂载
-    const match = matchFixedFolders(scope === "personal" ? assetCats : localCats, needles);
-    match.forEach((c) => used.add(c.id));
-    const ids = match.map((c) => c.id);
-    const primary = match.find((c) => c.kind === "asset");
-    const row: FolderRow = { key: "folder:" + key, name, icon: icon as FolderRow["icon"], count: own(ids), ids, assetId: primary?.id.replace(/^asset:/, ""), depth: 0 };
-    rows.push(row);
-    if (primary) addChildren(primary.id, row.key, 1);
-  }
-  for (const c of scope === "personal" ? assetCats : localCats) {
-    if (used.has(c.id)) continue;
-    const pid = String((c as GCat & { parent_id?: string }).parent_id || "");
-    if (pid) continue;
-    const ids = [c.id]; const row: FolderRow = { key: "folder:custom:" + c.id, name: c.name, icon: "folder", count: own(ids), ids, assetId: c.kind === "asset" ? c.id.replace(/^asset:/, "") : undefined, depth: 0 };
-    used.add(c.id); rows.push(row);
-    if (c.kind === "asset") addChildren(c.id, row.key, 1);
-  }
-  // 父级缺失的孤儿分类按顶级展示，避免后端还没上线 parent_id 时丢项
-  for (const c of scope === "personal" ? assetCats : localCats) {
-    if (used.has(c.id)) continue;
-    const ids = [c.id]; used.add(c.id);
-    rows.push({ key: "folder:custom:" + c.id, name: c.name, icon: "folder", count: own(ids), ids, assetId: c.kind === "asset" ? c.id.replace(/^asset:/, "") : undefined, depth: 0 });
-  }
-  const otherIds = (scope === "personal" ? assetCats : localCats).map((c) => c.id).filter((id) => !used.has(id));
-  const otherCount = own(otherIds);
-  rows.push({ key: "folder:other", name: "Others", icon: "folder", count: otherCount, ids: otherIds, depth: 0 });
-  const byKey = new Map(rows.map((r) => [r.key, r]));
-  for (const r of rows) { r.total = r.count; }
-  for (const r of rows) {
-    let p = r.parentKey; const seen = new Set<string>();
-    while (p && !seen.has(p)) { seen.add(p); const row = byKey.get(p); if (!row) break; row.total = (row.total || 0) + r.count; p = row.parentKey; }
-  }
-  for (const r of rows) { r.hasChildren = rows.some((x) => x.parentKey === r.key); }
-  return rows;
-}
 
-type FolderRowProps = {
-  f: FolderRow; active: boolean;
-  onEnter: (f: FolderRow) => void; onBack: () => void; onContext: (f: FolderRow, e: MouseEvent) => void;
-};
-/** 文件夹行（列表扁平/进入后的子文件夹共用）：单击整行 = 直接进入，Enter 进入，← 返回上一级 */
-function FolderRowView({ f, active, onEnter, onBack, onContext }: FolderRowProps) {
-  const key = (e: ReactKeyboardEvent) => {
-    const intent = rowKeyIntent(e.key);
-    if (!intent) return;
-    e.preventDefault(); e.stopPropagation();
-    if (intent === "enter") onEnter(f); else onBack();
+/** 素材用途（和后端 server/asset_meta.py 的 ASSET_USES 同一套 id） */
+export const USES: Array<{ id: string; label: string; icon: IconName }> = [
+  { id: "product", label: "产品", icon: "cube" },
+  { id: "model", label: "模特", icon: "user" },
+  { id: "scene", label: "场景", icon: "image" },
+  { id: "source", label: "源视频", icon: "video" },
+  { id: "depth", label: "深度视频", icon: "layers" },
+  { id: "style", label: "风格参考", icon: "palette" },
+  { id: "sound", label: "音效", icon: "audio" },
+];
+const USE_LABEL: Record<string, string> = Object.fromEntries(USES.map((u) => [u.id, u.label]));
+const TYPES: Array<{ id: string; label: string; icon: IconName }> = [
+  { id: "all", label: "全部类型", icon: "layoutgrid" },
+  { id: "image", label: "图片", icon: "image" },
+  { id: "video", label: "视频", icon: "video" },
+  { id: "audio", label: "音频", icon: "audio" },
+  { id: "prompt", label: "提示词", icon: "text" },
+];
+type Product = { id: string; name: string; selling_points?: string; angle_count: number; angles: Array<{ item_id: string; label?: string; url: string; name?: string; kind?: string }> };
+/** 文件夹里先显示这么多个，多了点「显示全部」 */
+const FOLDER_PEEK = 12;
+
+type FolderEditState = { mode: "new" } | { mode: "sub"; parentKey: string; parentId: string } | { mode: "rename"; key: string };
+
+/** 行内输入框：新建 / 改名文件夹都在列表里直接改，不弹窗。Enter 保存，Esc 取消。 */
+function FolderEditRow({ initial, depth, onSave, onCancel }: { initial: string; depth: number; onSave: (name: string) => Promise<string | null>; onCancel: () => void }) {
+  const [name, setName] = useState(initial); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
+  const save = async () => {
+    const v = name.trim(); if (!v) { setErr("请输入文件夹名称"); return; }
+    if (v === initial.trim()) { onCancel(); return; }
+    setBusy(true); const e = await onSave(v); setBusy(false); if (e) setErr(e);
   };
-  return <div role="button" tabIndex={0}
-    data-folder-name={f.name} data-folder-id={f.ids.find((id) => id.startsWith("asset:"))?.slice(6) || ""}
-    title="单击进入文件夹"
-    className={"lib-row" + (active ? " on" : "")}
-    onClick={() => onEnter(f)} onKeyDown={key} onContextMenu={(e) => onContext(f, e)}>
-    <Icon name={f.icon} size="s" />
-    <span className="lib-name">{f.name}</span>
-    <em>{f.count}{f.total && f.total !== f.count ? <small> / {f.total}</small> : null}</em>
+  return <div className="lib-fedit" style={{ marginLeft: depth * 14 }}>
+    <div className="lib-fedit-row">
+      <Icon name="folder" size="s" />
+      <input autoFocus maxLength={24} value={name} placeholder="文件夹名称" aria-label="文件夹名称" disabled={busy}
+        onChange={(e) => { setName(e.target.value); setErr(""); }}
+        onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") void save(); else if (e.key === "Escape") onCancel(); }} />
+      <button className="ib" aria-label="保存" disabled={busy} onClick={() => void save()}><Icon name="check" size="xs" /></button>
+      <button className="ib" aria-label="取消" disabled={busy} onClick={onCancel}><Icon name="x" size="xs" /></button>
+    </div>
+    {err ? <div className="lib-fedit-err">{err}</div> : null}
   </div>;
 }
 
 export function LibrarySection({ q }: { q: string }) {
   const ctl = useCtl(); const cmd = cmdOf();
   const [items, setItems] = useState<GItem[]>([]); const [cats, setCats] = useState<GCat[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [scope, setScope] = useState<"personal" | "local">("personal");
-  const [active, setActive] = useState("all"); const [query, setQuery] = useState(q || "");
-  const [folderKey, setFolderKey] = useState<string | null>(null); const [lastOpened, setLastOpened] = useState<string | null>(null);
-  const scrollPos = useRef(0);
+  const [query, setQuery] = useState(q || "");
+  const [use, setUse] = useState("all"); const [type, setType] = useState("all"); const [productId, setProductId] = useState<string | null>(null);
+  // 手风琴：展开的文件夹（可同时开多个）；showAll = 已点过「显示全部」的文件夹
+  const [open, setOpen] = useState<Set<string>>(() => new Set()); const [showAll, setShowAll] = useState<Set<string>>(() => new Set());
+  const [edit, setEdit] = useState<FolderEditState | null>(null);
   const [busy, setBusy] = useState(true); const [err, setErr] = useState(""); const [tick, setTick] = useState(0);
   const [offset, setOffset] = useState(0); const [hasMore, setHasMore] = useState(true); const [loadingMore, setLoadingMore] = useState(false);
   const [visible, setVisible] = useState(PAGE); const sentinel = useRef<HTMLDivElement>(null); const [selected, setSelected] = useState<string | null>(null);
   const offsetRef = useRef(PAGE); const refreshTimer = useRef<number | null>(null); const [libId, setLibId] = useState("default");
   useEffect(() => { if (!cmd) return; void cmd({ type: "canvas/assetLibrary/list" }).then((r) => { const id = r?.ok && r.libraries?.[0]?.id; if (id) setLibId(String(id)); }).catch(() => undefined); }, [cmd]);
+  const loadProducts = useCallback(async () => {
+    if (!cmd) return;
+    const r = await cmd({ type: "canvas/assetLibrary/products" }).catch(() => null);
+    setProducts(r?.ok && Array.isArray(r.products) ? r.products.filter((p: Product) => p && p.angle_count > 0) : []);
+  }, [cmd]);
   useEffect(() => {
     if (!cmd) { setBusy(false); return; }
     setBusy(true); setErr("");
@@ -171,7 +143,8 @@ export function LibrarySection({ q }: { q: string }) {
       setItems(Array.isArray(r.items) ? r.items : []); setCats(Array.isArray(r.categories) ? applyLocalParents(r.categories) : []);
       offsetRef.current = PAGE; setOffset(PAGE); setHasMore(!!r.hasMore); setVisible(PAGE);
     }).catch((e) => setErr(e instanceof Error ? e.message : "读取素材库失败")).finally(() => setBusy(false));
-  }, [cmd, tick]);
+    void loadProducts();
+  }, [cmd, tick, loadProducts]);
   useEffect(() => { offsetRef.current = offset; }, [offset]);
   const refreshAssets = useCallback(async () => {
     if (!cmd) return;
@@ -180,7 +153,8 @@ export function LibrarySection({ q }: { q: string }) {
     if (!r || !r.ok) return;
     setItems(Array.isArray(r.items) ? r.items : []); setCats(Array.isArray(r.categories) ? applyLocalParents(r.categories) : []);
     setHasMore(!!r.hasMore); offsetRef.current = limit; setOffset(limit);
-  }, [cmd]);
+    void loadProducts();
+  }, [cmd, loadProducts]);
   const scheduleRefresh = useCallback(() => {
     if (refreshTimer.current) window.clearTimeout(refreshTimer.current);
     refreshTimer.current = window.setTimeout(() => { refreshTimer.current = null; void refreshAssets(); }, 400);
@@ -214,12 +188,8 @@ export function LibrarySection({ q }: { q: string }) {
     connect();
     return () => { stop = true; window.clearTimeout(timer); try { ws?.close(); } catch { /* ignore */ } };
   }, [scheduleRefresh]);
-  useEffect(() => { setVisible(PAGE); setActive("all"); }, [scope]);
-  useEffect(() => {
-    const d = sentinel.current?.closest(".dbody") as HTMLElement | null; if (!d) return;
-    if (folderKey) d.scrollTop = 0;
-    else requestAnimationFrame(() => { d.scrollTop = scrollPos.current; });
-  }, [folderKey]);
+  useEffect(() => { setVisible(PAGE); setUse("all"); setProductId(null); setEdit(null); }, [scope]);
+  useEffect(() => { setVisible(PAGE); }, [use, type, productId, query]);
   const loadMore = async () => {
     if (!cmd || loadingMore || !hasMore) return;
     setLoadingMore(true);
@@ -234,19 +204,23 @@ export function LibrarySection({ q }: { q: string }) {
     } finally { setLoadingMore(false); }
   };
   const scoped = useMemo(() => items.filter((it) => scopeOf(it, scope)), [items, scope]);
-  const folders = useMemo(() => folderRows(items, cats, scope), [items, cats, scope]);
-  // 列表扁平：只列顶级文件夹，子文件夹只在进入后的视图顶部出现（不再就地展开子项）
-  const topFolders = useMemo(() => folders.filter((f) => !f.parentKey), [folders]);
-  const favoriteCount = 0; const subjectCount = new Set(scoped.filter((it) => it.categoryIds.some((id) => id.startsWith("asset:"))).map((it) => it.url)).size;
-  const folder = folders.find((f) => f.key === folderKey) || null;
-  const childFolders = folder ? folders.filter((f) => f.parentKey === folder.key) : [];
-  const activeIds = folder?.ids || [];
+  // 文件夹 = 后端真实分类（个人 = 资产库，本地 = 上传目录），不再有前端写死的虚拟文件夹
+  const folders = useMemo(() => {
+    const pool = scope === "personal" ? cats.filter((c) => c.kind === "asset") : cats.filter((c) => c.kind === "local" && c.id !== "local:all");
+    const urlsOf = (catId: string) => new Set(scoped.filter((it) => it.categoryIds.includes(catId)).map((it) => it.url)).size;
+    return buildFolderTree(pool as Array<GCat & { parent_id?: string }>, urlsOf);
+  }, [cats, scoped, scope]);
+  const folderByKey = useMemo(() => new Map(folders.map((f) => [f.key, f])), [folders]);
+  const product = productId ? products.find((p) => p.id === productId) || null : null;
+  const useCounts = useMemo(() => { const m = new Map<string, number>(); for (const it of scoped) if (it.use) m.set(it.use, (m.get(it.use) || 0) + 1); return m; }, [scoped]);
+  const searching = !!query.trim();
   const shown = useMemo(() => {
-    if (folder) return filterLibraryItems(scoped.filter((it) => it.categoryIds.some((id) => activeIds.includes(id))), "all", query);
-    if (active === "favorite") return [];
-    if (active === "subject") return filterLibraryItems(scoped.filter((it) => it.categoryIds.some((id) => id.startsWith("asset:"))), "all", query);
-    return filterLibraryItems(scoped, "all", query);
-  }, [scoped, folder, activeIds, active, query]);
+    let list = scoped;
+    if (product) { const ids = new Set(product.angles.map((a) => a.item_id)); list = list.filter((it) => !!it.assetId && ids.has(it.assetId)); }
+    if (use !== "all") list = list.filter((it) => it.use === use);
+    if (type !== "all") list = list.filter((it) => it.kind === type);
+    return filterLibraryItems(list, "all", query);
+  }, [scoped, product, use, type, query]);
   useEffect(() => {
     const el = sentinel.current; if (!el) return;
     const root = el.closest(".dbody"); const io = new IntersectionObserver((es) => {
@@ -257,7 +231,7 @@ export function LibrarySection({ q }: { q: string }) {
     io.observe(el); return () => io.disconnect();
   }, [shown.length, visible, hasMore, loadingMore, offset]);
   if (!cmd) return <div className="lib-shell"><div className="lib-empty">素材库只在桌面版可用</div></div>;
-  const close = () => { setFolderKey(null); ctl.store.setUI({ drawer: null }); };
+  const close = () => { ctl.store.setUI({ drawer: null }); };
   const preview = (it: GItem) => openModal((cl) => <AssetPreview it={it} onClose={cl} />, "asset-preview-modal");
   const menu = (it: GItem, e: MouseEvent) => {
     e.preventDefault(); e.stopPropagation(); setSelected(it.url);
@@ -268,69 +242,111 @@ export function LibrarySection({ q }: { q: string }) {
     </>, "down", "left");
   };
   const upload = () => { close(); window.dispatchEvent(new CustomEvent("cn:upload", { detail: { at: ctl.center() } })); };
-  const enterFolder = (f: FolderRow) => {
-    const d = sentinel.current?.closest(".dbody") as HTMLElement | null;
-    scrollPos.current = d?.scrollTop || 0;
-    setActive("all"); setLastOpened(f.key); setFolderKey(f.key); setVisible(PAGE);
-  };
-  const back = () => { const cur = folders.find((f) => f.key === folderKey); setFolderKey(cur?.parentKey || null); };
-  const createFolder = (parentId?: string, label = "新建文件夹") => openModal((cl) => <FolderNameDialog title={label} initial="" onClose={cl} onSave={async (name) => {
-    if (!cmd) return "桌面版不可用";
+  const assetIdOf = (f: FolderNode) => f.catId.startsWith("asset:") ? f.catId.slice(6) : "";
+  const setOpenKey = (key: string, on: boolean) => setOpen((prev) => { const next = new Set(prev); if (on) next.add(key); else next.delete(key); return next; });
+  const toggleFolder = (f: FolderNode) => setOpenKey(f.key, !open.has(f.key));
+  const createFolder = async (name: string, parentId?: string): Promise<string | null> => {
     const r = await cmd({ type: "canvas/assetLibrary/folderCreate", libraryId: libId, name, parentId }).catch(() => null);
     if (!r || !r.ok) return String(r?.detail || r?.error || "新建失败");
     if (parentId && r.folder?.id) localParents.set("asset:" + r.folder.id, "asset:" + parentId);
-    await refreshAssets(); return null;
-  }} />, "folder-dialog-modal");
-  const renameFolder = (f: FolderRow) => openModal((cl) => <FolderNameDialog title="重命名文件夹" initial={f.name} onClose={cl} onSave={async (name) => {
-    if (!cmd) return "桌面版不可用";
-    const r = await cmd({ type: "canvas/assetLibrary/folderRename", libraryId: libId, categoryId: f.assetId || undefined, from: f.name, to: name }).catch(() => null);
+    await refreshAssets(); setEdit(null); ctl.store.toast("已新建文件夹「" + name + "」"); return null;
+  };
+  const renameFolder = async (f: FolderNode, name: string): Promise<string | null> => {
+    const r = await cmd({ type: "canvas/assetLibrary/folderRename", libraryId: libId, categoryId: assetIdOf(f) || undefined, from: f.name, to: name }).catch(() => null);
     if (!r || !r.ok) return String(r?.detail || r?.error || "重命名失败");
-    await refreshAssets(); return null;
-  }} />, "folder-dialog-modal");
-  const deleteFolder = (f: FolderRow) => openModal((cl) => <DeleteFolderDialog name={f.name} count={f.total || f.count} children={folders.filter((x) => x.parentKey === f.key).length} onClose={cl} onConfirm={async () => {
-    if (!cmd) return "桌面版不可用";
-    const id = f.assetId; if (!id) return "这个文件夹没有对应的后端分类";
+    await refreshAssets(); setEdit(null); return null;
+  };
+  const deleteFolder = (f: FolderNode) => openModal((cl) => <DeleteFolderDialog name={f.name} count={f.total} children={f.childKeys.length} onClose={cl} onConfirm={async () => {
+    const id = assetIdOf(f); if (!id) return "这个文件夹没有对应的后端分类";
     const r = await cmd({ type: "canvas/assetLibrary/folderDelete", libraryId: libId, categoryId: id }).catch(() => null);
     if (!r || !r.ok) return String(r?.detail || r?.error || "删除失败");
-    if (folderKey === f.key) setFolderKey(null);
+    setOpenKey(f.key, false);
     await refreshAssets(); ctl.store.toast("已删除文件夹「" + f.name + "」"); return null;
   }} />, "folder-dialog-modal");
-  const folderMenu = (f: FolderRow, e: MouseEvent) => {
-    e.preventDefault(); e.stopPropagation(); setLastOpened(f.key);
-    openPop({ x: e.clientX, y: e.clientY }, (cl) => <>
+  const folderMenu = (f: FolderNode, e: MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    const id = assetIdOf(f); if (!id) return; // 本地上传目录只读
+    const at = e.type === "contextmenu" ? { x: e.clientX, y: e.clientY } : (() => { const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); return { x: r.right, y: r.bottom }; })();
+    openPop(at, (cl) => <>
       <div className="mh">{f.name}</div>
-      <button className="mi" onClick={() => { cl(); renameFolder(f); }}><Icon name="pencil" size="s" />重命名</button>
+      <button className="mi" onClick={() => { cl(); setOpenKey(f.key, true); setEdit({ mode: "sub", parentKey: f.key, parentId: id }); }}><Icon name="plus" size="s" />新建子文件夹</button>
+      <button className="mi" onClick={() => { cl(); setEdit({ mode: "rename", key: f.key }); }}><Icon name="pencil" size="s" />重命名</button>
       <button className="mi danger" onClick={() => { cl(); deleteFolder(f); }}><Icon name="trash" size="s" />删除文件夹</button>
     </>, "down", "left");
   };
+  const tile = (it: GItem) => <LibTile key={it.id + ":" + it.url} it={it} selected={selected === it.url} onSelect={() => setSelected(it.url)} onPreview={() => preview(it)} onMenu={(e) => menu(it, e)} />;
+  /** 一个文件夹 + （展开时）它正下方的子文件夹和素材 */
+  const renderFolder = (f: FolderNode): ReactElement => {
+    if (edit?.mode === "rename" && edit.key === f.key) return <FolderEditRow key={f.key} initial={f.name} depth={f.depth} onCancel={() => setEdit(null)} onSave={(name) => renameFolder(f, name)} />;
+    const isOpen = open.has(f.key);
+    const own = isOpen ? filterLibraryItems(scoped.filter((it) => it.categoryIds.includes(f.catId)), "all", "") : [];
+    const peek = showAll.has(f.key) ? own : own.slice(0, FOLDER_PEEK);
+    const editable = !!assetIdOf(f);
+    const onKey = (e: ReactKeyboardEvent) => {
+      const intent = rowKeyIntent(e.key); if (!intent) return;
+      e.preventDefault(); e.stopPropagation();
+      setOpenKey(f.key, intent === "toggle" ? !isOpen : intent === "open");
+    };
+    return <div key={f.key} className={"lib-fitem" + (isOpen ? " open" : "")}>
+      <div role="button" tabIndex={0} aria-expanded={isOpen}
+        data-folder-name={f.name} data-folder-id={assetIdOf(f)}
+        className={"lib-row lib-frow" + (isOpen ? " on" : "")} style={{ paddingLeft: 6 + f.depth * 14 }}
+        title={isOpen ? "单击收起" : "单击展开"}
+        onClick={() => toggleFolder(f)} onKeyDown={onKey} onContextMenu={(e) => folderMenu(f, e)}>
+        <Icon name="right" size="xs" className="lib-chev" />
+        <Icon name="folder" size="s" />
+        <span className="lib-name">{f.name}</span>
+        <em>{f.total !== f.count ? f.count + " / " + f.total : f.count}</em>
+        {editable ? <button className="ib lib-fmore" aria-label={"「" + f.name + "」更多操作"} onClick={(e) => folderMenu(f, e)}><Icon name="more" size="xs" /></button> : null}
+      </div>
+      {isOpen ? <div className="lib-fbody">
+        {f.childKeys.map((k) => folderByKey.get(k)).filter((x): x is FolderNode => !!x).map(renderFolder)}
+        {edit?.mode === "sub" && edit.parentKey === f.key ? <FolderEditRow initial="" depth={f.depth + 1} onCancel={() => setEdit(null)} onSave={(name) => createFolder(name, edit.parentId)} /> : null}
+        {own.length ? <div className="agrid lib-grid lib-fgrid" style={{ marginLeft: 6 + (f.depth + 1) * 14 }}>{peek.map(tile)}</div>
+          : !f.childKeys.length ? <div className="lib-fempty" style={{ marginLeft: 6 + (f.depth + 1) * 14 }}>这个文件夹还是空的，把素材或画布节点拖到文件夹名上就能放进来</div> : null}
+        {own.length > peek.length ? <button className="linkbtn lib-fall" style={{ marginLeft: 6 + (f.depth + 1) * 14 }} onClick={() => setShowAll((prev) => new Set(prev).add(f.key))}>显示全部 {own.length} 个</button> : null}
+      </div> : null}
+    </div>;
+  };
+  const topFolders = folders.filter((f) => !f.parentKey);
+  const gridTitle = searching ? "搜索结果" : product ? product.name + " · 产品角度" : use !== "all" ? USE_LABEL[use] || "素材" : "全部素材";
   return <div className="lib-shell">
-    <div className="lib-head"><button className="ib" aria-label={folder ? "返回文件夹列表" : "返回"} onClick={folder ? back : close}><Icon name="left" size="s" /></button><b>{folder ? folder.name + " · " + folder.count + " 个素材" + (folder.total && folder.total !== folder.count ? "（合计 " + folder.total + "）" : "") : "素材库"}</b><span className="sp" />{!folder ? <button className="lib-ai" data-lib-ai onClick={() => openCharacterLibrary(ctl)}><Icon name="user" size="xs" />AI 角色</button> : null}<button className="ib" aria-label="上传或新建" onClick={upload}><Icon name="plus" size="s" /></button></div>
-    {!folder ? <><div className="lib-scope"><button className={scope === "personal" ? "on" : ""} onClick={() => setScope("personal")}>个人</button><button className={scope === "local" ? "on" : ""} onClick={() => setScope("local")}>本地</button></div>
-    <div className="lib-search"><Icon name="search" size="xs" /><input value={query} placeholder="搜索素材、提示词" onChange={(e) => setQuery(e.target.value)} /><AnimateIcon asChild><button className="ib" aria-label="刷新" onClick={() => setTick((t) => t + 1)}><Icon name="history" size="xs" /></button></AnimateIcon></div>
-    <button className={"lib-row" + (active === "favorite" ? " on" : "")} onClick={() => setActive("favorite")}><Icon name="star" size="s" /><span>收藏</span><em>{favoriteCount}</em></button>
-    <button className={"lib-row" + (active === "subject" ? " on" : "")} onClick={() => setActive("subject")}><Icon name="layers" size="s" /><span>主体库</span><em>{subjectCount}</em></button>
-    <div className="lib-section-title"><span>文件夹</span></div>
-    <div className="lib-folder-list">{topFolders.map((f) => <FolderRowView key={f.key} f={f} active={lastOpened === f.key} onEnter={enterFolder} onBack={back} onContext={folderMenu} />)}{scope === "personal" ? <button className="lib-row lib-newfolder" onClick={() => createFolder()}><Icon name="plus" size="s" /><span>新建文件夹</span></button> : null}</div></> : <div className="lib-search"><Icon name="search" size="xs" /><input autoFocus value={query} placeholder={"搜索「" + folder.name + "」"} onChange={(e) => setQuery(e.target.value)} /><button className="ib" aria-label="返回上一级" onClick={back}><Icon name="left" size="xs" /></button></div>}
-    {folder ? <div className="lib-folder-list lib-subfolders">{childFolders.map((f) => <FolderRowView key={f.key} f={f} active={false} onEnter={enterFolder} onBack={back} onContext={folderMenu} />)}{folder.assetId ? <button className="lib-row lib-newfolder" onClick={() => createFolder(folder.assetId, "新建子文件夹")}><Icon name="plus" size="s" /><span>新建子文件夹</span></button> : null}</div> : null}
+    <div className="lib-head"><button className="ib" aria-label="收起素材库" onClick={close}><Icon name="left" size="s" /></button><b>素材库</b><span className="sp" /><button className="lib-ai" data-lib-ai onClick={() => openCharacterLibrary(ctl)}><Icon name="user" size="xs" />AI 角色</button><button className="ib" aria-label="上传素材" onClick={upload}><Icon name="plus" size="s" /></button></div>
+    <div className="lib-scope"><button className={scope === "personal" ? "on" : ""} onClick={() => setScope("personal")}>个人</button><button className={scope === "local" ? "on" : ""} onClick={() => setScope("local")}>本地</button></div>
+    <div className="lib-search"><Icon name="search" size="xs" /><input value={query} placeholder="搜名称或 AI 标签，如「白色运动鞋」" onChange={(e) => setQuery(e.target.value)} />{query ? <button className="ib" aria-label="清空搜索" onClick={() => setQuery("")}><Icon name="x" size="xs" /></button> : null}<AnimateIcon asChild><button className="ib" aria-label="刷新" onClick={() => setTick((t) => t + 1)}><Icon name="history" size="xs" /></button></AnimateIcon></div>
+    {useCounts.size ? <div className="lib-chips" role="group" aria-label="按用途筛选">
+      <button className={"lib-chip" + (use === "all" ? " on" : "")} aria-pressed={use === "all"} onClick={() => setUse("all")}>全部</button>
+      {USES.filter((u) => useCounts.has(u.id)).map((u) => <button key={u.id} className={"lib-chip" + (use === u.id ? " on" : "")} aria-pressed={use === u.id} onClick={() => setUse(use === u.id ? "all" : u.id)}><Icon name={u.icon} size="xs" />{u.label}<em>{useCounts.get(u.id)}</em></button>)}
+    </div> : null}
     {err ? <div className="lib-empty">{err}<button className="linkbtn" onClick={() => setTick((t) => t + 1)}>重试</button></div> : null}
     {busy && !items.length ? <div className="lib-empty">正在读取全局素材…</div> : null}
-    {!folder && (active === "favorite" ? <div className="lib-empty">还没有收藏素材</div> : active === "subject" && !subjectCount ? <div className="lib-empty">主体库还没有素材</div> : null)}
-    {folder && !shown.length && !busy ? <div className="lib-empty">这个文件夹还没有素材</div> : null}
-    <div className="lib-drop-tip"><Icon name="upload" size="xs" /><span>{"把画布上的节点拖到这里存入素材库（按住 " + (IS_MAC ? "⌥" : "Alt") + " 也行）"}</span></div>
-    <div className="agrid lib-grid">{shown.slice(0, visible).map((it) => <LibTile key={it.id + ":" + it.url} it={it} selected={selected === it.url} onSelect={() => setSelected(it.url)} onPreview={() => preview(it)} onMenu={(e) => menu(it, e)} />)}
-      {!shown.length && !busy && !folder && active !== "favorite" ? <span className="lg-dim" style={{ gridColumn: "1/-1" }}>{items.length ? "这个分类下还没有素材" : "素材库是空的"}</span> : null}
+    {!searching && scope === "personal" && products.length ? <div className="lib-sec">
+      <div className="lib-section-title"><Icon name="layers" size="xs" /><span>产品档案</span><small>多角度参考</small></div>
+      <div className="lib-prods">{products.map((p) => <button key={p.id} className={"lib-prod" + (productId === p.id ? " on" : "")} aria-pressed={productId === p.id} title={p.selling_points || p.name} onClick={() => setProductId(productId === p.id ? null : p.id)}>
+        <span className="lib-prod-angs">{p.angles.slice(0, 3).map((a) => <i key={a.item_id} style={{ backgroundImage: "url(\"/api/media-preview?w=128&url=" + encodeURIComponent(a.url) + "\")" }} />)}</span>
+        <b>{p.name}</b><small>{p.angle_count} 个角度</small>
+      </button>)}</div>
+    </div> : null}
+    {!searching ? <div className="lib-sec">
+      <div className="lib-section-title"><Icon name="folder" size="xs" /><span>文件夹</span><small>点开在下方展开，再点收起</small></div>
+      <div className="lib-folder-list">
+        {topFolders.map(renderFolder)}
+        {!topFolders.length && !busy ? <div className="lib-fempty">{scope === "personal" ? "还没有文件夹" : "本地上传目录还没有子文件夹"}</div> : null}
+        {scope === "personal" ? edit?.mode === "new" ? <FolderEditRow initial="" depth={0} onCancel={() => setEdit(null)} onSave={(name) => createFolder(name)} />
+          : <button className="lib-row lib-newfolder" onClick={() => setEdit({ mode: "new" })}><Icon name="plus" size="s" /><span>新建文件夹</span></button> : null}
+      </div>
+    </div> : null}
+    <div className="lib-grid-head">
+      <b>{gridTitle}</b><em>{shown.length}{hasMore && !product ? "+" : ""}</em>
+      {product ? <button className="ib" aria-label="取消产品筛选" onClick={() => setProductId(null)}><Icon name="x" size="xs" /></button> : null}
+      <span className="sp" />
+      <div className="lib-types" role="group" aria-label="按类型筛选">{TYPES.map((t) => <button key={t.id} className={type === t.id ? "on" : ""} title={t.label} aria-label={t.label} aria-pressed={type === t.id} onClick={() => setType(t.id)}><Icon name={t.icon} size="xs" /></button>)}</div>
+    </div>
+    <div className="agrid lib-grid">{shown.slice(0, visible).map(tile)}
+      {!shown.length && !busy ? <span className="lg-dim" style={{ gridColumn: "1/-1" }}>{searching ? "没有和「" + query.trim() + "」匹配的素材，换个说法试试" : items.length ? "这里还没有素材" : "素材库是空的"}</span> : null}
     </div>
     <div ref={sentinel} className="lib-sentinel" />{loadingMore ? <div className="lib-empty">正在加载更多…</div> : shown.length > visible ? <div className="lib-empty">继续下滑加载更多</div> : null}
-  </div>;
-}
-
-function FolderNameDialog({ title, initial, onSave, onClose }: { title: string; initial: string; onSave: (name: string) => Promise<string | null>; onClose: () => void }) {
-  const [name, setName] = useState(initial); const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
-  const save = async () => { const v = name.trim(); if (!v) { setErr("请输入文件夹名称"); return; } setBusy(true); const e = await onSave(v); setBusy(false); if (e) setErr(e); else onClose(); };
-  return <div className="folder-dialog"><div className="fd-head"><b>{title}</b><button className="ib" aria-label="关闭" onClick={onClose}><Icon name="x" size="s" /></button></div>
-    <input autoFocus value={name} placeholder="文件夹名称" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void save(); }} />
-    {err ? <div className="fd-err">{err}</div> : null}
-    <div className="fd-foot"><button className="btn" onClick={onClose}>取消</button><button className="btn solid" disabled={busy} onClick={() => void save()}>{busy ? "保存中…" : "保存"}</button></div>
+    <div className="lib-drop-tip"><Icon name="upload" size="xs" /><span>{"把画布上的节点拖到这里存入素材库，拖到文件夹名上直接放进该文件夹（按住 " + (IS_MAC ? "⌥" : "Alt") + " 也行）"}</span></div>
   </div>;
 }
 
@@ -355,9 +371,14 @@ function AssetPreview({ it, onClose }: { it: GItem; onClose: () => void }) {
 }
 
 function LibTile({ it, selected, onSelect, onPreview, onMenu }: { it: GItem; selected: boolean; onSelect: () => void; onPreview: () => void; onMenu: (e: MouseEvent) => void }) {
-  const thumb = thumbOf(it);
-  return <div className={"a" + (selected ? " sel" : "") + (it.kind === "prompt" ? " txt" : "")} title={[it.name, it.canvas_title].filter(Boolean).join(" · ")} onClick={(e) => { e.stopPropagation(); onSelect(); }} onDoubleClick={(e) => { e.stopPropagation(); onPreview(); }} onContextMenu={onMenu} draggable onDragStart={(e) => { (window as unknown as { __novaiLibDrag?: GItem }).__novaiLibDrag = it; try { e.dataTransfer?.setData("text/plain", it.url); } catch { /* ignore */ } }} onDragEnd={() => { (window as unknown as { __novaiLibDrag?: GItem }).__novaiLibDrag = undefined; }}>
-    {thumb ? <img src={thumb} alt="" loading="lazy" decoding="async" /> : it.kind === "video" ? <Icon name="video" /> : it.kind === "audio" ? <Icon name="audio" /> : <span className="atext"><Icon name={it.kind === "prompt" ? "pencil" : "image"} size="xs" />{it.name}</span>}
+  const [broken, setBroken] = useState(false);
+  const thumb = broken ? "" : thumbOf(it);
+  const useLabel = it.use ? USE_LABEL[it.use] : "";
+  const tip = [it.name, useLabel, it.summary, (it.tags || []).slice(0, 6).join(" · "), it.canvas_title].filter(Boolean).join("\n");
+  return <div className={"a" + (selected ? " sel" : "") + (it.kind === "prompt" ? " txt" : "") + (it.kind === "video" ? " vid" : "")} title={tip} onClick={(e) => { e.stopPropagation(); onSelect(); }} onDoubleClick={(e) => { e.stopPropagation(); onPreview(); }} onContextMenu={onMenu} draggable onDragStart={(e) => { (window as unknown as { __novaiLibDrag?: GItem }).__novaiLibDrag = it; try { e.dataTransfer?.setData("text/plain", it.url); } catch { /* ignore */ } }} onDragEnd={() => { (window as unknown as { __novaiLibDrag?: GItem }).__novaiLibDrag = undefined; }}>
+    {thumb ? <img src={thumb} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} /> : it.kind === "video" ? <Icon name="video" /> : it.kind === "audio" ? <span className="atext"><Icon name="audio" size="xs" />{it.name}</span> : <span className="atext"><Icon name={it.kind === "prompt" ? "pencil" : "image"} size="xs" />{it.name}</span>}
+    {it.kind === "video" ? <span className="abadge"><Icon name={it.use === "depth" ? "layers" : "play"} size="xs" />{it.use === "depth" ? "深度" : "视频"}</span> : null}
+    {useLabel && it.kind !== "video" && it.kind !== "audio" ? <span className="ause">{useLabel}</span> : null}
   </div>;
 }
 
