@@ -293,7 +293,7 @@
 .cn-root .mb-btn.icon-only{width:26px;height:26px;padding:0;justify-content:center}
 .cn-root #gp.gp-video{width:min(640px,calc(100vw - 32px));padding:10px}
 .cn-root .vp-top{display:flex;align-items:center;gap:6px;padding:2px 0 8px}
-.cn-root .vp-pick{flex:none;width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:var(--sunken);color:var(--fg2)}
+.cn-root .vp-pick{flex:none;width:40px;height:40px;border-radius:9px;display:grid;place-items:center;background:var(--sunken);color:var(--fg2)}
 .cn-root .vp-pick:hover,.cn-root .vp-pick.on{background:var(--hover);color:var(--hi)}
 .cn-root .vp-thumb{position:relative;flex:none;width:40px;height:40px;aspect-ratio:1;border-radius:9px;border:1px dashed rgba(var(--ink),.22);background:var(--sunken);color:var(--fg3);display:grid;place-items:center;overflow:hidden}
 .cn-root .vp-thumb.has{border-style:solid;border-color:rgba(var(--ink),.14);background:var(--s2)}
