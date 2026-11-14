@@ -40390,6 +40390,7 @@ def _agent_tool_activate_skill_run(args):
     if truncated:
         prompt = prompt[:AGENT_SKILL_PROMPT_MAX_CHARS] + AGENT_SKILL_TRUNCATED_NOTE
     activated.add(name)
+    _agent_skill_gate_activate(skill.get("id") or name)
     return {"name": name, "skill_id": skill.get("id"), "title": skill.get("name") or name,
             "characters": len(prompt), "truncated": truncated, "already_loaded": False,
             "text": prompt}
@@ -44202,6 +44203,148 @@ AGENT_TOOLS["depth_capture"] = {
 
 
 # ---------------------------------------------------------------------------
+# 技能级生成闸门：技能里写的「审查关卡」对模型只是建议，实测会被跳过（不写结构对比、
+# 不问用户就直接生成）。挂了带闸门的技能时，服务端在 generate_image / generate_video
+# 执行前硬检查：①画布上有技能要求的分析节点 ②用户已在问答卡里确认过方案。
+# 确认状态按画布存（问答卡的回答在下一次运行才到），模型自己写「已确认」不算。
+# ---------------------------------------------------------------------------
+
+AGENT_SKILL_GATES = {
+    "product-motion-recast": {
+        "title": "动作复刻换产品",
+        "nodes": (("产品结构对比", "产品结构对比与节拍映射"), ("分镜表", "分镜表")),
+        "confirm": True,
+    },
+}
+_AGENT_SKILL_GATE_TOOLS = ("generate_image", "generate_video")
+_AGENT_SKILL_GATE_YES = ("按方案做", "先只做第一段", "确认", "同意", "开始做", "开始生成", "可以", "没问题", "就这样", "ok", "好的", "行")
+_AGENT_SKILL_GATE_NO = ("改方案", "我来改", "修改", "不要", "先别", "不行", "不对")
+_AGENT_RUN_SKILL_GATE = contextvars.ContextVar("novai_agent_run_skill_gate", default="")
+_AGENT_SKILL_GATE_LOCK = Lock()
+
+
+def _agent_skill_gate_path():
+    return os.path.join(DATA_DIR, "agent_skill_gates.json")
+
+
+def _agent_skill_gate_load():
+    try:
+        with open(_agent_skill_gate_path(), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _agent_skill_gate_update(canvas_id, skill_id, **fields):
+    if not canvas_id or not skill_id:
+        return
+    with _AGENT_SKILL_GATE_LOCK:
+        data = _agent_skill_gate_load()
+        key = "%s::%s" % (canvas_id, skill_id)
+        entry = data.get(key) if isinstance(data.get(key), dict) else {}
+        entry.update(fields)
+        data[key] = entry
+        os.makedirs(os.path.dirname(_agent_skill_gate_path()), exist_ok=True)
+        tmp = _agent_skill_gate_path() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=1)
+        os.replace(tmp, _agent_skill_gate_path())
+
+
+def _agent_skill_gate_state(canvas_id, skill_id):
+    entry = _agent_skill_gate_load().get("%s::%s" % (canvas_id, skill_id))
+    return entry if isinstance(entry, dict) else {}
+
+
+def _agent_skill_gate_activate(skill_id):
+    skill_id = str(skill_id or "").strip()
+    if skill_id in AGENT_SKILL_GATES:
+        _AGENT_RUN_SKILL_GATE.set(skill_id)
+
+
+def _agent_skill_gate_answer_confirms(text):
+    text = str(text or "").strip()
+    if not text:
+        return False
+    low = text.lower()
+    if any(word in text for word in _AGENT_SKILL_GATE_NO):
+        return False
+    return any(word in low for word in _AGENT_SKILL_GATE_YES)
+
+
+def _agent_skill_gate_begin(ctx, instruction):
+    """运行开始：选中了带闸门的技能就挂上；上次问过方案、这次是用户的回答 → 记下是否确认。"""
+    canvas_id = str(getattr(ctx, "canvas_id", "") or "")
+    _agent_skill_gate_activate(getattr(ctx, "skill_id", ""))
+    if not canvas_id:
+        return
+    for skill_id in AGENT_SKILL_GATES:
+        state = _agent_skill_gate_state(canvas_id, skill_id)
+        if state.get("asked_at") and not state.get("answered_at"):
+            confirmed = _agent_skill_gate_answer_confirms(instruction)
+            _agent_skill_gate_update(canvas_id, skill_id, answered_at=time.time(),
+                                     answer=str(instruction or "")[:200],
+                                     confirmed_at=time.time() if confirmed else 0)
+            if confirmed:
+                _agent_skill_gate_activate(skill_id)
+
+
+def _agent_skill_gate_record_ask(questions, message=""):
+    skill_id = _AGENT_RUN_SKILL_GATE.get()
+    canvas_id = str(_AGENT_RUN_CANVAS_ID.get() or "")
+    if not skill_id or not canvas_id or not questions:
+        return
+    _agent_skill_gate_update(canvas_id, skill_id, asked_at=time.time(), answered_at=0, confirmed_at=0,
+                             question=(str(message or "") + " " + json.dumps(questions, ensure_ascii=False))[:400])
+
+
+def _agent_skill_gate_missing(canvas, skill_id):
+    from server.agent_core.read_tools import CanvasAccess
+
+    gate = AGENT_SKILL_GATES.get(skill_id) or {}
+    access = CanvasAccess()
+    heads = []
+    for node in access.nodes(canvas or {}):
+        if access.kind(node) not in ("text", "label"):
+            continue
+        heads.append((access.title(node) + "\n" + (access.text(node) or str(node.get("text") or ""))[:200]))
+    return [label for keyword, label in gate.get("nodes") or () if not any(keyword in h for h in heads)]
+
+
+def _agent_skill_gate_check(tool_name, args):
+    """生成前的硬检查；返回 None 放行，否则返回拦下时给模型的结果。"""
+    skill_id = _AGENT_RUN_SKILL_GATE.get()
+    if tool_name not in _AGENT_SKILL_GATE_TOOLS or not skill_id:
+        return None
+    gate = AGENT_SKILL_GATES.get(skill_id) or {}
+    canvas_id = str((args or {}).get("canvas_id") or _AGENT_RUN_CANVAS_ID.get() or "")
+    try:
+        canvas = load_canvas(canvas_id) if canvas_id else {}
+    except HTTPException:
+        canvas = {}
+    missing = _agent_skill_gate_missing(canvas, skill_id)
+    state = _agent_skill_gate_state(canvas_id, skill_id) if canvas_id else {}
+    need_confirm = bool(gate.get("confirm")) and not state.get("confirmed_at")
+    if not missing and not need_confirm:
+        return None
+    todo = []
+    if missing:
+        todo.append("先用 create_node(type=text) 写好%s（标题要带这几个字），按技能逐项写出判定和依据" %
+                    "、".join("「%s」" % m for m in missing))
+    if need_confirm:
+        if state.get("answered_at") and not state.get("confirmed_at"):
+            todo.append("用户上次没有确认方案（回答：%s），按用户意见改分镜表后再用 ask_user 确认一次" %
+                        (state.get("answer") or "空"))
+        else:
+            todo.append("再用 ask_user 把方案交给用户确认（选项至少有「按方案做」「先只做第一段试试」「我来改方案」），"
+                        "用户确认之前不生成任何图片和视频")
+    return {"ok": False, "tool": tool_name, "code": "skill_gate_blocked", "status_code": 409,
+            "error": "技能「%s」的生成闸门：还不能生成。%s。不花钱的步骤（读视频、写分析、本机深度、审查）可以继续做。" %
+                     (gate.get("title") or skill_id, "；".join(todo))}
+
+
+# ---------------------------------------------------------------------------
 # 阶段一（NOVAI_AGENT_V2_READ_TOOLS）：六个按需读取工具
 #   read_node / search_canvas / read_table / canvas_diff / view_image / recall_step
 #   纯只读、不花钱、不进确认闸门。和 review_table 一样挂在 AGENT_TOOLS 字面量之后：
@@ -44402,6 +44545,9 @@ async def agent_execute_step(tool_name, args):
     if not entry:
         return {"ok": False, "tool": tool_name, "error": f"未知工具：{tool_name}",
                 "code": "unknown_tool", "status_code": 400}
+    gate_block = _agent_skill_gate_check(tool_name, args or {})
+    if gate_block:
+        return gate_block
     notes_token = _AGENT_TABLE_CELL_NOTES.set([])
     try:
         norm_args = entry["validate"](_agent_resolve_aliases_in_args(args or {}))
@@ -50611,6 +50757,7 @@ def _agent_decision_from_native(raw, canvas_id, tools=None):
             continue
         if name == _AGENT_ASK_TOOL:
             # 要问用户：这一轮就到这里，问题交给面板的问答卡（同时出的画布步骤不执行）
+            _agent_skill_gate_record_ask(args.get("questions") or [], args.get("message") or "")
             return {"done": True, "native": True, "reasoning": reasoning,
                     "thought": _agent_clean_native_text(content)[:_agent_thought_max_chars()],
                     "message": str(args.get("message") or _agent_clean_native_text(content) or "").strip(),
@@ -53000,7 +53147,9 @@ async def _agent_run_producer(req, queue, bus=None):
     instruction = req["instruction"]
     focus = req["focus"]
     chat = req["chat"]
-    run_chat_token = _AGENT_RUN_CHAT.set(chat)      # 反图优先用本次 run 的对话模型读图
+    run_chat_token = _AGENT_RUN_CHAT.set(chat)
+    if canvas_run:
+        _agent_skill_gate_begin(ctx, instruction)      # 反图优先用本次 run 的对话模型读图
     _AGENT_BEAT_RUN.set(str(req.get("renderer") or "") == "beat")
     max_steps = _agent_run_normalize_max_steps(req.get("max_steps"))
     chat_history = req.get("history") or []
