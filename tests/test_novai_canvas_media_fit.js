@@ -99,4 +99,11 @@ assert(repair.includes('refitNodeBox(') && repair.includes('needsAgentRefFit'), 
 const app = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/CanvasApp.tsx'), 'utf8');
 assert(app.includes('repairAgentRefBoxes(store)'), '载入画布后执行一次纠偏');
 
+assert(app.includes('repairSkewedMediaBoxes(store)'), '载入画布后摆正被压歪的媒体节点');
+const rep = load('novai-canvas-ui/src/canvas/canvas-next/mediaBoxRepair.ts');
+const vid = (w, h, sw, sh) => ({ id: 'v', kind: 'video', x: 0, y: 0, w, h, text: '', data: { gen: { hist: [{ url: '/a.mp4', w: sw, h: sh }], hi: 0 } } });
+const fixed = rep.skewedMediaBox(vid(800, 720, 1280, 720));
+assert(fixed && near(fixed.w / fixed.h, 16 / 9), '800×720 的 16:9 视频摆回 16:9');
+eq(rep.skewedMediaBox(vid(800, 450, 1280, 720)), null, '比例正确不动');
+eq(rep.skewedMediaBox(vid(800, 720, 0, 0)), null, '没有真实像素不动');
 console.log('[PASS] 生成结果 / 上传 / 参考素材按真实比例排版（9:16、16:9、4.79:1、1:20 与最大盒）');
