@@ -83,6 +83,11 @@ description: 动作复刻换产品（NOVAI 画布版）——照着一条参考�
 这改变了原片内容，要用户点头。按关卡 G4 用 `ask_user` 确认。
 服务端有硬闸门：挂着本技能时，画布上没有「产品结构对比与节拍映射」「分镜表」这两个文本节点，或者用户还没在问答卡里确认方案，`generate_image` / `generate_video` 会被拒绝（`skill_gate_blocked`）。被拒后按返回的提示补齐，不要换别的工具绕过；界面上的「待生成」卡片不等于用户确认了方案。
 
+确认之后还有一道「锚定原片」检查，每次生成都必须挂在原片上，否则返回 `skill_source_missing`：
+- `generate_image`（首帧 / 尾帧）：`reference_urls` 里要有原片该时刻的关键帧（`analyze_video` 返回的 `frames[].url`），或上一段成片的 `last_frame_url`；只放产品图 / 场景图会被拦。
+- `generate_video`：锁动作段带 `reference_video`（深度片段或 `clip_url`）；重做段 `inputs` 放本技能生成过的首帧 / 尾帧节点。
+- 不能用 `batch_generate` / `run_batch`：后一段要接前一段的尾帧，只能按分镜表逐段做。
+
 ### 第 5 步：生成
 按时间顺序一段一段做，后一段依赖前一段的尾帧：
 1. **锁动作段**分两步：

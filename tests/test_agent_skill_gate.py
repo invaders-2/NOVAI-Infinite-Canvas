@@ -16,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main  # noqa: E402
 
 SKILL = "product-motion-recast"
+ANCHORED = {"reference_urls": ["/output/agent_video_reader/abc123/frame_01.jpg"],
+            "reference_video": ["/assets/clips/seg1.mp4"]}
 
 
 def tearDownModule():
@@ -44,7 +46,47 @@ class SkillGateTests(unittest.TestCase):
                                  main._AGENT_RUN_CANVAS_ID.reset(self.tokens[0])])
 
     def check(self, tool="generate_video"):
-        return main._agent_skill_gate_check(tool, {"canvas_id": "cv1"})
+        # 默认带上原片锚点（原片关键帧 + 片段），这几条只测分析节点和确认
+        return main._agent_skill_gate_check(tool, {"canvas_id": "cv1", **ANCHORED})
+
+    def confirm(self):
+        main._agent_skill_gate_activate(SKILL)
+        self.canvas["nodes"] = [text_node("a", "产品结构对比与节拍映射"), text_node("b", "分镜表")]
+        main._agent_skill_gate_record_ask([{"question": "确认方案？"}])
+        main._agent_skill_gate_begin(types.SimpleNamespace(canvas_id="cv1", skill_id=""), "按方案做")
+
+    def test_image_without_source_frame_is_blocked(self):
+        self.confirm()
+        args = {"canvas_id": "cv1", "inputs": ["p1"], "reference_urls": ["/assets/t-product1.jpg"]}
+        self.canvas["nodes"].append({"id": "p1", "kind": "image", "url": "/assets/t-product1.jpg"})
+        blocked = main._agent_skill_gate_check("generate_image", args)
+        self.assertEqual(blocked["code"], "skill_source_missing")
+        self.assertIn("frames[].url", blocked["error"])
+        # 放进原片关键帧就放行
+        args["reference_urls"].append("/output/agent_video_reader/abc123/frame_03.jpg")
+        self.assertIsNone(main._agent_skill_gate_check("generate_image", args))
+
+    def test_recorded_anchors_and_made_nodes_count(self):
+        self.confirm()
+        main._agent_skill_gate_record_result("analyze_video", {"canvas_id": "cv1"},
+                                             {"clip_url": "/assets/clips/seg1.mp4", "last_frame_url": "/assets/x/last.jpg"})
+        self.assertIsNone(main._agent_skill_gate_check(
+            "generate_image", {"canvas_id": "cv1", "reference_urls": [{"url": "/assets/x/last.jpg"}]}))
+        main._agent_skill_gate_record_result("generate_image", {"canvas_id": "cv1"}, {"node_id": "n_first"})
+        self.canvas["nodes"].append({"id": "n_first", "kind": "image"})
+        # 重做段：首帧节点是本技能生成的 → 放行
+        self.assertIsNone(main._agent_skill_gate_check("generate_video", {"canvas_id": "cv1", "inputs": ["n_first"]}))
+        # 只给产品图的视频 → 拦
+        self.canvas["nodes"].append({"id": "p1", "kind": "image", "url": "/assets/t-product1.jpg"})
+        blocked = main._agent_skill_gate_check("generate_video", {"canvas_id": "cv1", "inputs": ["p1"]})
+        self.assertEqual(blocked["code"], "skill_source_missing")
+        self.assertIn("reference_video", blocked["error"])
+
+    def test_batch_is_blocked_for_anchored_skill(self):
+        self.confirm()
+        blocked = main._agent_skill_gate_check("batch_generate", {"canvas_id": "cv1"})
+        self.assertEqual(blocked["code"], "skill_source_missing")
+        self.assertIn("逐段", blocked["error"])
 
     def test_no_gate_without_skill(self):
         self.assertIsNone(self.check())

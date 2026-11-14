@@ -44227,6 +44227,8 @@ AGENT_SKILL_GATES = {
         "title": "动作复刻换产品",
         "nodes": (("结构对比", "产品结构对比与节拍映射"), ("分镜", "分镜表")),
         "confirm": True,
+        # 每张图 / 每段视频都要锚在原片上：原片关键帧、原片片段 / 深度片段，或本技能前面生成的帧
+        "anchor": True,
     },
 }
 _AGENT_SKILL_GATE_TOOLS = ("generate_image", "generate_video", "batch_generate", "run_batch")
@@ -44390,6 +44392,103 @@ def _agent_skill_gate_confirm_only(canvas_id):
     return "" if _agent_skill_gate_missing(canvas, skill_id) else skill_id
 
 
+_AGENT_SKILL_GATE_MEDIA_RE = re.compile(r"\.(jpe?g|png|webp|gif|mp4|mov|webm|m4v)(\?.*)?$", re.I)
+
+
+def _agent_skill_gate_urls_in(value, out=None):
+    """从工具结果里收集所有媒体地址（帧图 / 片段 / 深度视频）。"""
+    out = [] if out is None else out
+    if isinstance(value, str):
+        v = value.strip()
+        if (v.startswith("/") or v.startswith("http")) and _AGENT_SKILL_GATE_MEDIA_RE.search(v):
+            out.append(v)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _agent_skill_gate_urls_in(item, out)
+    elif isinstance(value, list):
+        for item in value:
+            _agent_skill_gate_urls_in(item, out)
+    return out
+
+
+def _agent_skill_gate_record_result(tool_name, args, result):
+    """挂着要求锚定原片的闸门时，记下原片帧 / 片段 / 深度视频地址和本技能生成的节点，后面判断生成有没有锚在原片上。"""
+    skill_id = _AGENT_RUN_SKILL_GATE.get()
+    gate = AGENT_SKILL_GATES.get(skill_id) or {}
+    if not gate.get("anchor") or not isinstance(result, dict):
+        return
+    canvas_id = str((args or {}).get("canvas_id") or _AGENT_RUN_CANVAS_ID.get() or "")
+    if not canvas_id:
+        return
+    state = _agent_skill_gate_state(canvas_id, skill_id)
+    anchors = list(state.get("anchors") or [])
+    made = list(state.get("made") or [])
+    if tool_name in ("analyze_video", "depth_capture"):
+        for url in _agent_skill_gate_urls_in(result):
+            if url not in anchors:
+                anchors.append(url)
+        if tool_name == "depth_capture" and result.get("node_id"):
+            made.append(str(result["node_id"]))
+    elif tool_name in ("generate_image", "generate_video") and result.get("node_id"):
+        made.append(str(result["node_id"]))
+    else:
+        return
+    _agent_skill_gate_update(canvas_id, skill_id, anchors=anchors[-400:], made=list(dict.fromkeys(made))[-200:])
+
+
+def _agent_skill_gate_raw_urls(value):
+    out = []
+    for item in value if isinstance(value, list) else ([value] if value else []):
+        url = item.get("url") if isinstance(item, dict) else item
+        if isinstance(url, str) and url.strip():
+            out.append(url.strip())
+    return out
+
+
+def _agent_skill_gate_anchor_missing(tool_name, args, canvas, canvas_id, skill_id):
+    """生成请求没锚在原片上 → 返回给模型的说明；锚上了返回空串。"""
+    gate = AGENT_SKILL_GATES.get(skill_id) or {}
+    if not gate.get("anchor"):
+        return ""
+    if tool_name in ("batch_generate", "run_batch"):
+        return ("这个技能每段都要锚在原片对应时刻的画面上、后一段还要接前一段的尾帧，不能用批量生成。"
+                "请按分镜表逐段用 generate_image（首帧 / 尾帧）和 generate_video 来做")
+    state = _agent_skill_gate_state(canvas_id, skill_id)
+    anchors = set(state.get("anchors") or [])
+    made = set(state.get("made") or [])
+
+    def is_anchor_url(url):
+        return "/agent_video_reader/" in url or url in anchors
+
+    by_id = _agent_nodes_by_id(canvas or {})
+    input_ids = [str(i.get("id") if isinstance(i, dict) else i or "").strip() for i in (args.get("inputs") or [])]
+    node_hit = False
+    video_input = False
+    for nid in input_ids:
+        node = by_id.get(nid)
+        if not node:
+            continue
+        url = _agent_beat_url(node)
+        if nid in made or (url and is_anchor_url(url)):
+            node_hit = True
+        if str(node.get("kind") or node.get("type") or "") == "video":
+            video_input = True
+    image_hit = node_hit or any(is_anchor_url(u) for u in _agent_skill_gate_raw_urls(args.get("reference_urls")))
+    if tool_name == "generate_image":
+        if image_hit:
+            return ""
+        return ("这张图没有锚在原片上：参考里只有产品 / 场景图，生成出来的构图、机位和原片对不上，段与段也接不起来。"
+                "请在 reference_urls 里放原片该时刻的关键帧（analyze_video 返回的 frames[].url，接上一段时用上一段成片的 last_frame_url），"
+                "产品图、场景图照常放 inputs，提示词写「保持参考图 1 的构图、机位、光线和背景，只把产品换成新产品」")
+    if tool_name == "generate_video":
+        if _agent_skill_gate_raw_urls(args.get("reference_video")) or video_input or image_hit:
+            return ""
+        return ("这段视频没有锚在原片上：锁动作段要把这一段的深度片段或原片 clip_url 放进 reference_video；"
+                "重做段要把本技能已生成并审查过的首帧 / 尾帧节点放进 inputs（或 reference_urls 放上一段的 last_frame_url）。"
+                "只靠文字和产品图生成的视频接不上原片")
+    return ""
+
+
 def _agent_skill_gate_check(tool_name, args):
     """生成前的硬检查；返回 None 放行，否则返回拦下时给模型的结果。"""
     skill_id = _AGENT_RUN_SKILL_GATE.get()
@@ -44405,6 +44504,10 @@ def _agent_skill_gate_check(tool_name, args):
     state = _agent_skill_gate_state(canvas_id, skill_id) if canvas_id else {}
     need_confirm = bool(gate.get("confirm")) and not state.get("confirmed_at")
     if not missing and not need_confirm:
+        hint = _agent_skill_gate_anchor_missing(tool_name, args or {}, canvas, canvas_id, skill_id)
+        if hint:
+            return {"ok": False, "tool": tool_name, "code": "skill_source_missing", "status_code": 409,
+                    "error": "技能「%s」：%s。改好参考再调用，不用重新确认方案。" % (gate.get("title") or skill_id, hint)}
         return None
     todo = []
     if missing:
@@ -44642,6 +44745,10 @@ async def agent_execute_step(tool_name, args):
         notes = list(_AGENT_TABLE_CELL_NOTES.get() or [])
         _AGENT_TABLE_CELL_NOTES.reset(notes_token)
         payload = {"ok": True, "tool": tool_name, "result": result, "message": "执行成功"}
+        try:
+            _agent_skill_gate_record_result(tool_name, norm_args, result)
+        except Exception:
+            pass
         if notes:
             payload["message"] = "执行成功（" + "；".join(notes[:4]) + "）"
             payload["warnings"] = notes
