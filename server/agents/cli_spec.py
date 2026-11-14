@@ -40,6 +40,8 @@ CANVAS_TOOL_NAMES = (
     "arrange_canvas",
     "refine_prompt",
     "use_asset",
+    "save_asset",
+    "save_product",
     "check_task",
 )
 
@@ -177,6 +179,18 @@ COMMANDS: Dict[str, Dict] = {
         "mutates": True,
         "mutates_canvas": False,
         "summary": "把选中的节点连同连线存成流程模板（写资产库）",
+    },
+    "asset.save": {
+        "tool": "save_asset",
+        "mutates": True,
+        "mutates_canvas": False,
+        "summary": "把生成结果 / 上传素材存进素材库（可标用途、指定文件夹、归入产品档案）",
+    },
+    "product.save": {
+        "tool": "save_product",
+        "mutates": True,
+        "mutates_canvas": False,
+        "summary": "新建或更新产品档案（一个产品挂多张角度图）",
     },
     "memory.remember": {
         "tool": "remember",

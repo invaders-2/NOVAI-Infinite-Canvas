@@ -3,6 +3,8 @@ import { fitMediaBox } from "./mediaFit";
 export type LibraryItem = {
   id: string; name: string; url: string; kind: string; categoryIds: string[];
   natural_w?: number; natural_h?: number; prompt?: string; source?: string; canvas_title?: string; folder?: string;
+  /** 资产库条目才有：条目 id / 用途 / 所属产品档案（放到画布时写进节点 gen.asset） */
+  assetId?: string; use?: string; productId?: string;
 };
 export type LibraryCategory = { id: string; name: string; count: number; kind: string };
 export type LibraryData = { items: LibraryItem[]; categories: LibraryCategory[] };
@@ -28,12 +30,15 @@ export function mergeAssetSources(canvasData: any, localData: any, assetData: an
     const old = byUrl.get(url);
     if (old) {
       for (const id of categoryIds) if (!old.categoryIds.includes(id)) old.categoryIds.push(id);
+      // 同一个文件既在画布里又在资产库里：补上资产库的条目信息
+      if (raw.assetId && !old.assetId) { old.assetId = String(raw.assetId); if (raw.use) old.use = String(raw.use); if (raw.product_id) old.productId = String(raw.product_id); }
       old.natural_w = old.natural_w || Number(raw.natural_w || raw.width) || 0;
       old.natural_h = old.natural_h || Number(raw.natural_h || raw.height) || 0;
       return;
     }
     const item: LibraryItem = {
       id: String(raw.id || url), name: String(raw.name || raw.title || "素材"), url, kind, categoryIds: [...new Set(categoryIds)],
+      ...(raw.assetId ? { assetId: String(raw.assetId) } : {}), ...(raw.use ? { use: String(raw.use) } : {}), ...(raw.product_id ? { productId: String(raw.product_id) } : {}),
       natural_w: Number(raw.natural_w || raw.width) || 0, natural_h: Number(raw.natural_h || raw.height) || 0,
       prompt: String(raw.prompt || ""), source: String(raw.source || ""),
       canvas_title: String(raw.canvas_title || ""), folder: String(raw.folder || ""),
@@ -59,7 +64,7 @@ export function mergeAssetSources(canvasData: any, localData: any, assetData: an
   for (const cat of assetData?.library?.categories || []) {
     const id = "asset:" + String(cat.id);
     addCat(id, String(cat.name || "资产"), "asset");
-    for (const raw of cat.items || []) addItem({ ...raw, kind: raw.kind || cat.type || "image" }, ["all", id]);
+    for (const raw of cat.items || []) addItem({ ...raw, kind: raw.kind || cat.type || "image", assetId: raw.id }, ["all", id]);
   }
 
   let promptCount = 0;
