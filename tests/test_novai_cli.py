@@ -23,13 +23,13 @@ if str(ROOT) not in sys.path:
 import novai_cli
 from server.agents import cli_spec
 
-# 允许清单：与 cli_spec 派生的 26 个工具一一对应；单测另外解析源码核对
+# 允许清单：与 cli_spec 派生的 28 个工具一一对应；单测另外解析源码核对
 ALLOWED_TOOLS = {
     "list_canvases", "get_canvas", "create_node", "delete_node", "connect_nodes",
     "disconnect_nodes", "update_node", "run_generation", "generate_image", "generate_video",
     "batch_generate", "run_batch", "list_templates", "save_template", "apply_template",
     "remember", "forget", "run_downstream", "arrange_canvas", "refine_prompt",
-    "use_asset", "check_task",
+    "use_asset", "save_asset", "save_product", "check_task",
     "read_table", "write_html_report", "write_xlsx", "image_generate",
 }
 
@@ -41,7 +41,7 @@ EXPECTED_WRITE_COMMANDS = {
     "node.create", "node.update", "node.delete", "node.connect", "node.disconnect",
     "generation.run", "generation.downstream", "image.generate", "video.generate",
     "batch.generate", "batch.run", "template.apply",
-    "template.save", "memory.remember", "memory.forget",
+    "template.save", "memory.remember", "memory.forget", "asset.save", "product.save",
     "report.write_html", "xlsx.write", "file.image_generate",
 }
 
@@ -130,9 +130,9 @@ class CommandTableTests(unittest.TestCase):
         canvas_used = {spec["tool"] for _name, spec in cli_spec.iter_commands()
                        if spec["tool"] in canvas_only}
         self.assertEqual(canvas_used, set(canvas_only))
-        self.assertEqual(len(canvas_only), 22)
-        # 22 个通用画布工具 + 3 个技能/专用工具 = 25 条；数量变化要在这里显式说明
-        self.assertEqual(len(canvas_tools), 22 + len(NON_CANVAS_TOOLS))
+        self.assertEqual(len(canvas_only), 24)
+        # 24 个通用画布工具（2026-11 加了 save_asset / save_product 写素材库）+ 3 个技能/专用工具 = 27 条；数量变化要在这里显式说明
+        self.assertEqual(len(canvas_tools), 24 + len(NON_CANVAS_TOOLS))
         for tool in set(cli_spec.CANVAS_TOOL_NAMES):
             self.assertIn(tool, canvas_only)
 

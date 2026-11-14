@@ -20,6 +20,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
+from server import asset_meta
 from server.agents import store as agent_store
 from server.routes.deps import deps
 
@@ -106,6 +107,27 @@ class AssetLibraryAddRequest(BaseModel):
     library_id: str = ""
     # false = 跳过 AI 分类（只落库立即返回）；默认 true 但分类在后台跑，不阻塞保存
     classify: bool = True
+    # 用途（product/model/scene/source/depth/style/sound，也认中文）；空 = 按类型 / 文件夹 / AI 分类自动推断
+    use: str = ""
+    # 由哪个素材生成（深度视频 → 原视频），条目 id 或 url
+    derived_from: str = ""
+
+
+class AssetLibraryItemPatchRequest(BaseModel):
+    """改素材条目：None = 不改。use 传空串 = 清掉手动用途、回到自动推断。"""
+    name: Optional[str] = None
+    use: Optional[str] = None
+    derived_from: Optional[str] = None
+    library_id: str = ""
+
+
+class AssetProductRequest(BaseModel):
+    name: str = ""
+    selling_points: Optional[str] = None
+    # [{"item_id": "...", "label": "正面"}]，也可以只给 item_id 字符串或 {"url": ...}
+    angles: Optional[List[Any]] = None
+    # true = 追加角度（去重）；false = 整体替换
+    append: bool = False
 
 
 class AssetLibraryBatchAddRequest(BaseModel):
@@ -843,6 +865,93 @@ def _find_asset_library_item(lib, item_id, library_id=""):
 _ASSET_LIBRARY_CLASSIFY_LOCK = threading.Lock()
 
 
+# 助手 / 技能存素材时，没指定文件夹就按用途落到这些文件夹（没有就建），不再全塞进第一个图片分类（「角色」）
+_USE_DEFAULT_FOLDER = {"product": "产品", "model": "模特", "scene": "场景", "source": "视频素材",
+                       "depth": "深度视频", "style": "风格参考", "sound": "音效"}
+
+
+def _folder_by_name(lib, library, name, media_kind):
+    """在库里按名字找分类（媒体类型要对得上），找不到就建一个顶级分类。"""
+    name = deps.sanitize_asset_name(name, "未分组")[:40]
+    categories = library.setdefault("categories", [])
+    for cat in categories:
+        if str(cat.get("name") or "") == name and _asset_library_media_type(cat) == media_kind:
+            return cat
+    cat = {"id": f"cat_{uuid.uuid4().hex[:12]}", "name": name, "type": media_kind, "items": [], "parent_id": ""}
+    categories.append(cat)
+    if (library.get("id") or "") == (lib.get("active_library_id") or ""):
+        lib["categories"] = categories
+    return cat
+
+
+def save_urls_to_asset_library(entries, *, library="", folder="", use="", derived_from="", classify=True):
+    """把一批本地媒体 URL 存进资产库（画布助手的 save_asset 工具用）。
+
+    entries: [{"url", "name"?, "label"?}]；library: 库名或 id（空 = 当前激活库）；
+    folder: 文件夹名（空 = 按用途 / 媒体类型自动选）。返回 (lib, [(entry, item)], errors)。
+    """
+    lib = deps.load_asset_library()
+    wanted = str(library or "").strip()
+    target = None
+    if wanted:
+        target = next((l for l in lib.get("libraries") or [] if l.get("id") == wanted or l.get("name") == wanted), None)
+        if target is None:
+            return lib, [], [{"url": "", "error": f"没有叫「{wanted}」的资产库"}]
+    else:
+        target = deps.find_asset_library(lib, "")
+    norm_use = asset_meta.normalize_use(use)
+    added, errors, spawn = [], [], []
+    for entry in (entries or [])[:50]:
+        url = str((entry or {}).get("url") or "").strip()
+        _, _, existing = asset_meta.find_item(lib, url=url)
+        if existing:  # 已经是素材库里的条目：只补用途，不再复制一份
+            if norm_use:
+                asset_meta.set_manual_use(existing, norm_use)
+            added.append((entry, existing))
+            continue
+        src = deps.output_file_from_url(url)
+        if not src or not os.path.isfile(src):
+            errors.append({"url": url, "error": "只支持本机 /assets 或 /output 里的图片 / 视频 / 音频"})
+            continue
+        media_kind = deps.asset_library_media_kind(src)
+        if media_kind not in _ASSET_LIBRARY_MEDIA_TYPES:
+            errors.append({"url": url, "error": "该文件类型不能存进素材库"})
+            continue
+        if folder:
+            cat = _folder_by_name(lib, target, folder, media_kind)
+        elif norm_use in _USE_DEFAULT_FOLDER:
+            cat = _folder_by_name(lib, target, _USE_DEFAULT_FOLDER[norm_use], media_kind)
+        elif media_kind == "image":
+            cat = _folder_by_name(lib, target, "未分组", media_kind)
+        else:
+            cat = _ensure_asset_library_media_category(lib, target, media_kind)
+        _, item = deps.make_asset_library_item(src, str(entry.get("name") or "") or os.path.basename(src),
+                                               subdir=cat.get("dir") or "")
+        gen = deps.generation_meta_for_url(url)
+        if gen:
+            item["generation"] = gen
+        _apply_item_meta(lib, item, cat, norm_use, derived_from)
+        cat.setdefault("items", []).append(item)
+        added.append((entry, item))
+        spawn.append((item, src))
+    if added:
+        deps.save_asset_library(lib)
+    if classify:
+        for item, src in spawn:
+            _spawn_asset_library_classification(item, src, target.get("id") or "")
+    return lib, added, errors
+
+
+def _apply_item_meta(lib, item, cat, use="", derived_from=""):
+    """新条目落库前：记下来源素材，再定用途（明确给了就按手动，否则自动推断）。"""
+    if derived_from:
+        asset_meta.link_derived(lib, item, derived_from)
+    if asset_meta.normalize_use(use):
+        asset_meta.set_manual_use(item, use)
+    else:
+        asset_meta.apply_auto_use(item, (cat or {}).get("name") or "")
+
+
 def _classify_asset_item_background(item_id, src, library_id=""):
     """后台跑 AI 分类：完成后重新加载资产库更新该条目并落盘（save_asset_library 内部会广播 ws）。
     分类失败只打日志，条目保持可用，前端仍可手动点分类。"""
@@ -862,6 +971,8 @@ def _classify_asset_item_background(item_id, src, library_id=""):
             if not item:
                 return
             item["classification"] = classification
+            _, cat, _ = asset_meta.find_item(lib, item_id=item_id)
+            asset_meta.apply_auto_use(item, (cat or {}).get("name") or "")
             deps.save_asset_library(lib)
         print(f"[AssetLibrary] 后台分类完成 item={item_id}", flush=True)
     except Exception as exc:
@@ -1438,6 +1549,7 @@ async def add_asset_library_item(payload: AssetLibraryAddRequest):
     gen = await asyncio.to_thread(deps.generation_meta_for_url, payload.url)
     if gen:
         item["generation"] = gen
+    _apply_item_meta(lib, item, cat, payload.use, payload.derived_from)
     cat.setdefault("items", []).append(item)
     # 先落库并返回（save 内部会广播 ws），AI 分类改到后台线程：不再让保存等几秒
     deps.save_asset_library(lib)
@@ -1476,6 +1588,7 @@ async def batch_add_asset_library_items(payload: AssetLibraryBatchAddRequest):
         gen = await asyncio.to_thread(deps.generation_meta_for_url, entry.url)
         if gen:
             item["generation"] = gen
+        _apply_item_meta(lib, item, cat, entry.use, entry.derived_from)
         cat.setdefault("items", []).append(item)
         added.append((item, src, entry))
     # 先落库并返回（save 内部广播一次 ws），图片分类全部丢到后台，批量保存不再逐张等 AI
@@ -1599,16 +1712,69 @@ async def import_shared_folder_files(payload: SharedFolderImport):
 
 
 @router.patch("/asset-library/items/{item_id}")
-async def rename_asset_library_item(item_id: str, payload: AssetLibraryRenameRequest):
+async def rename_asset_library_item(item_id: str, payload: AssetLibraryItemPatchRequest):
+    """改名 / 改用途 / 记来源素材（只改传了的字段）。"""
     lib = deps.load_asset_library()
-    for library in lib.get("libraries", []):
-        for cat in library.get("categories", []):
-            for item in cat.get("items", []):
-                if item.get("id") == item_id:
-                    item["name"] = deps.sanitize_asset_name(payload.name, item.get("name") or "asset")
-                    deps.save_asset_library(lib)
-                    return {"library": lib, "item": item}
-    raise HTTPException(status_code=404, detail="资产不存在")
+    _, cat, item = asset_meta.find_item(lib, item_id=item_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="资产不存在")
+    if payload.name is not None:
+        item["name"] = deps.sanitize_asset_name(payload.name, item.get("name") or "asset")
+    if payload.use is not None:
+        if str(payload.use).strip() and not asset_meta.normalize_use(payload.use):
+            raise HTTPException(status_code=400, detail="用途只能是：" + "、".join(asset_meta.ASSET_USES.values()))
+        if not asset_meta.set_manual_use(item, payload.use):
+            asset_meta.apply_auto_use(item, (cat or {}).get("name") or "")
+    if payload.derived_from is not None:
+        if not str(payload.derived_from).strip():
+            item.pop("derived_from", None)
+        elif not asset_meta.link_derived(lib, item, payload.derived_from):
+            raise HTTPException(status_code=404, detail="来源素材不存在")
+    deps.save_asset_library(lib)
+    return {"library": lib, "item": item}
+
+
+# ===== 产品档案 =====
+
+@router.get("/asset-library/products")
+async def list_asset_products():
+    lib = deps.load_asset_library()
+    return {"products": [asset_meta.product_view(lib, p) for p in asset_meta.products(lib) if isinstance(p, dict)],
+            "uses": asset_meta.ASSET_USES}
+
+
+@router.post("/asset-library/products")
+async def create_asset_product(payload: AssetProductRequest):
+    """新建产品档案；同名产品已存在时按更新处理（append=true 追加角度）。"""
+    lib = deps.load_asset_library()
+    try:
+        product = asset_meta.upsert_product(lib, name=payload.name, selling_points=payload.selling_points,
+                                            angles=payload.angles, append=payload.append)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    deps.save_asset_library(lib)
+    return {"product": asset_meta.product_view(lib, product)}
+
+
+@router.patch("/asset-library/products/{product_id}")
+async def update_asset_product(product_id: str, payload: AssetProductRequest):
+    lib = deps.load_asset_library()
+    if not asset_meta.find_product(lib, product_id=product_id):
+        raise HTTPException(status_code=404, detail="产品档案不存在")
+    product = asset_meta.upsert_product(lib, product_id=product_id, name=payload.name,
+                                        selling_points=payload.selling_points, angles=payload.angles,
+                                        append=payload.append)
+    deps.save_asset_library(lib)
+    return {"product": asset_meta.product_view(lib, product)}
+
+
+@router.delete("/asset-library/products/{product_id}")
+async def delete_asset_product(product_id: str):
+    lib = deps.load_asset_library()
+    if not asset_meta.delete_product(lib, product_id):
+        raise HTTPException(status_code=404, detail="产品档案不存在")
+    deps.save_asset_library(lib)
+    return {"ok": True}
 
 
 @router.post("/asset-library/items/classify")
@@ -1635,6 +1801,8 @@ async def classify_asset_library_items(payload: AssetLibraryClassifyRequest):
         try:
             classification = await deps.classify_image_with_provider(path, payload.provider, payload.model, payload.ms_model, payload.prompt)
             item["classification"] = classification
+            _, cat, _ = asset_meta.find_item(lib, item_id=item_id)
+            asset_meta.apply_auto_use(item, (cat or {}).get("name") or "")
             changed = True
             result.update({"ok": True, "classification": classification})
         except Exception as exc:

@@ -8,7 +8,7 @@ import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { replaceNodeMedia } from "../actions";
 import { filterLibraryItems, libraryNodeBox } from "../libraryAssets";
 import { categoryOwners, matchFixedFolders, rowKeyIntent } from "../libraryTree";
-import { genOf, outOf, uid, type GenKind } from "../model";
+import { genOf, outOf, uid, type AssetRef, type GenKind } from "../model";
 import { openCharacterLibrary } from "./CharacterLibrary";
 import { useCtl, type Ctl } from "./ctx";
 import { AnimateIcon } from "./AnimateIcon";
@@ -19,7 +19,12 @@ import { IS_MAC } from "./shortcuts";
 
 type Lib = { id: string; name: string; visibility?: string; access?: string; itemCount?: number; categoryIds?: string[] };
 type Cmd = (r: Record<string, unknown>) => Promise<Record<string, any>>;
-type GItem = { id: string; name: string; url: string; kind: string; categoryIds: string[]; natural_w?: number; natural_h?: number; prompt?: string; canvas_title?: string };
+type GItem = { id: string; name: string; url: string; kind: string; categoryIds: string[]; natural_w?: number; natural_h?: number; prompt?: string; canvas_title?: string; assetId?: string; use?: string; productId?: string };
+/** 资产库条目放到画布上时写进节点的来源引用（gen.asset） */
+export function assetRefOf(it: Pick<GItem, "assetId" | "use" | "productId" | "name">): AssetRef | undefined {
+  if (!it.assetId) return undefined;
+  return { id: it.assetId, ...(it.use ? { use: it.use } : {}), ...(it.productId ? { productId: it.productId } : {}), ...(it.name ? { name: it.name } : {}) };
+}
 type GCat = { id: string; name: string; count: number; kind: string };
 type FolderRow = { key: string; name: string; icon: Parameters<typeof Icon>[0]["name"]; count: number; total?: number; ids: string[]; assetId?: string; parentKey?: string; depth?: number; hasChildren?: boolean };
 
@@ -52,8 +57,9 @@ export async function placeItem(ctl: Ctl, it: GItem, at?: { x: number; y: number
   let sw = Number(it.natural_w) || 0, sh = Number(it.natural_h) || 0;
   if (!sw || !sh) { const m = mk === "audio" ? null : await measure(it.url, mk); if (m) { sw = m.w; sh = m.h; } }
   const box = libraryNodeBox(sw, sh, mk);
-  if (target && store.node(target)) { replaceNodeMedia(store, target, { url: it.url, w: box.w, h: box.h }); store.setUI({ replace: null }); store.toast("已替换素材"); return; }
-  const c = at || ctl.center(); const n = store.newNode(mk, c.x - box.w / 2, c.y - box.h / 2, { title: it.name, uploaded: true, hist: [{ url: it.url, w: sw || box.w, h: sh || box.h }], w: box.w, h: box.h });
+  const asset = assetRefOf(it);
+  if (target && store.node(target)) { replaceNodeMedia(store, target, { url: it.url, w: box.w, h: box.h }); store.patchGen(target, { asset }); store.setUI({ replace: null }); store.toast("已替换素材"); return; }
+  const c = at || ctl.center(); const n = store.newNode(mk, c.x - box.w / 2, c.y - box.h / 2, { title: it.name, uploaded: true, hist: [{ url: it.url, w: sw || box.w, h: sh || box.h }], w: box.w, h: box.h, ...(asset ? { asset } : {}) });
   store.addNodes([n], [], { select: true }); store.toast("已放到画布");
 }
 
