@@ -9,7 +9,7 @@ import { TextDocLayer } from "./ui/TextDoc";
 import { TableDocLayer } from "./ui/TableNode";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addFiles, DOC_ACCEPT, pasteFromSystem } from "./actions";
-import { repairAgentRefBoxes } from "./mediaBoxRepair";
+import { repairAgentRefBoxes, repairSkewedMediaBoxes } from "./mediaBoxRepair";
 import { AgentPanel } from "../tapnow/AgentPanel";
 import type { CanvasBackend } from "./backend/types";
 import { CanvasStore } from "./store";
@@ -100,6 +100,8 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
         // 老画布：助手以前建的参考图节点固定 240×240（外链参考图也量不到像素），会把图片裁掉一截；
         // 量一次真实像素按原比例摆正并写回尺寸（幂等，替换过素材的节点不会被动）
         if (!dead) void repairAgentRefBoxes(store);
+        // 被旧版加载逻辑压歪、又被自动保存写回的媒体节点（比例偏离真实像素 >5%）：按真实比例摆正
+        if (!dead) repairSkewedMediaBoxes(store);
         if (!dead) {
           // 兜底：加载完成后若文档里已经有 assistant 标记（agentRun / agentRunQueue / data.batch），立刻调度一次；
           // 再补两次延迟调度，覆盖「文档刚载入、面板可能还没挂载」的时序。

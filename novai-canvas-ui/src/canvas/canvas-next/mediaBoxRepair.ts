@@ -70,3 +70,34 @@ export async function repairAgentRefBoxes(store: CanvasStore): Promise<void> {
     }),
   }));
 }
+
+/** 盒子比例和当前版本真实像素比例差超过这个比例，就算被压歪了 */
+const SKEW_TOLERANCE = 0.05;
+
+/**
+ * 被压歪的媒体节点：当前版本记着真实像素，但节点框比例偏离超过 5%。
+ * 典型来源：旧版加载逻辑把宽高各自夹在 800 以内（1280×720 的视频被夹成 800×720），
+ * 自动保存又把歪掉的框写回了文件。媒体节点拖动时保持比例，所以比例对不上只会是被压坏的。
+ */
+export function skewedMediaBox(node: CanvasNode): { w: number; h: number } | null {
+  if (node.kind !== "image" && node.kind !== "video") return null;
+  const g = genOf(node);
+  const out = g.hist[g.hi];
+  const sw = Number(out?.w) || 0, sh = Number(out?.h) || 0;
+  if (!out?.url || sw <= 0 || sh <= 0 || node.w <= 0 || node.h <= 0) return null;
+  const ratio = sw / sh, cur = node.w / node.h;
+  if (Math.abs(cur - ratio) <= Math.max(cur, ratio) * SKEW_TOLERANCE) return null;
+  // 宽度不动、按真实比例改高度；改完超上限再按 fitMediaBox 规则收
+  return refitNodeBox({ w: node.w, h: node.w / ratio }, sw, sh);
+}
+
+export function repairSkewedMediaBoxes(store: CanvasStore): void {
+  if (!store.state.doc.nodes.some((node) => skewedMediaBox(node))) return;
+  store.mutate((doc) => ({
+    ...doc,
+    nodes: doc.nodes.map((node) => {
+      const box = skewedMediaBox(node);
+      return box ? { ...node, w: box.w, h: box.h } : node;
+    }),
+  }));
+}
