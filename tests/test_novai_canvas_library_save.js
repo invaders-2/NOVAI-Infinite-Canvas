@@ -50,8 +50,8 @@ assert.ok(component.includes('const owners = useMemo(() => categoryOwners(libs),
 assert.ok(component.includes('libraryId: ownerOf('), '每个文件夹行带上所属 libraryId');
 const saveBlock = component.slice(component.indexOf('const save = async () => {'), component.indexOf('const makeFolder = async () => {'));
 assert.ok(saveBlock.includes('const targetLib = (row?.libraryId ? libs.find((l) => l.id === row.libraryId) : null) || lib;'), '保存时用选中文件夹所属的库');
-assert.ok(saveBlock.includes('saveOne(cmd, store, targetLib, node, target)'), 'import 走 targetLib 而不是固定第一个库');
-assert.ok(saveBlock.includes('已存入「" + targetLib.name + "」'), 'toast 报实际落到的库');
+assert.ok(saveBlock.includes('saveOne(cmd, store, targetLib, node, node.kind === "image" ? folder : null)'), 'import 走 targetLib 而不是固定第一个库');
+assert.ok(saveBlock.includes('const where = "「" + targetLib.name + "」"'), 'toast 报实际落到的库');
 const makeBlock = component.slice(component.indexOf('const makeFolder = async () => {'), component.indexOf('return <div className="save-lib">'));
 assert.ok(makeBlock.includes('const parentLib = (parent?.libraryId ? libs.find((l) => l.id === parent.libraryId) : null) || lib;'), '新建子文件夹也落在父文件夹所属的库');
 assert.ok(makeBlock.includes('libraryId: parentLib.id'), '新建用 parentLib.id');
