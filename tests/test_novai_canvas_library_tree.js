@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /*
- * task-48：素材库文件夹列表 = 扁平 + 钻取。
- *   列表只列顶级文件夹，不再就地展开子项（用户说那看着像子菜单）；
- *   单击任意文件夹行 = 直接进入该文件夹视图；子文件夹只在进入后的视图顶部列出；
- *   键盘 Enter = 进入、← = 返回上一级；行上没有箭头/没有「›」/没有子级缩进；
- *   保存弹窗保留层级缩进（那是选择器，不是子菜单）。
+ * 素材库抽屉文件夹 = 手风琴（2026-11 用户要求，取代 task-48 的「扁平 + 钻取」）：
+ *   单击文件夹行在它正下方就地展开（子文件夹 + 素材），再点收起，收起时什么都不显示；
+ *   键盘 Enter/空格 = 展开或收起、→ 展开、← 收起；
+ *   新建 / 改名文件夹在列表里行内输入，不弹窗；
+ *   文件夹来自后端真实分类（buildFolderTree），保存弹窗保留层级缩进。
  */
 'use strict';
 const fs = require('fs');
@@ -52,61 +52,61 @@ assert.deepStrictEqual(tree.matchFixedFolders(cats, ['不存在']).map((c) => c.
 assert.deepStrictEqual(tree.matchFixedFolders([{ id: 'asset:characters', name: '人物' }], ['角色', 'characters']).map((c) => c.name), ['人物'], '后端默认分类被改名后，靠 id 命中仍归到「角色」');
 
 
-// ---- 键盘规则：Enter 进入、← 返回，其它键不处理 ----
-assert.strictEqual(tree.rowKeyIntent('Enter'), 'enter', 'Enter = 进入文件夹');
-assert.strictEqual(tree.rowKeyIntent('ArrowLeft'), 'back', '← = 返回上一级');
-assert.strictEqual(tree.rowKeyIntent('ArrowRight'), null, '→ 不再参与展开');
+// ---- 键盘规则：Enter/空格 展开收起，→ 展开，← 收起 ----
+assert.strictEqual(tree.rowKeyIntent('Enter'), 'toggle', 'Enter = 展开 / 收起');
+assert.strictEqual(tree.rowKeyIntent(' '), 'toggle', '空格 = 展开 / 收起');
+assert.strictEqual(tree.rowKeyIntent('ArrowRight'), 'open', '→ = 展开');
+assert.strictEqual(tree.rowKeyIntent('ArrowLeft'), 'close', '← = 收起');
 assert.strictEqual(tree.rowKeyIntent('a'), null, '其它键不处理');
 
-// ---- 展开逻辑已删除：没有 toggle / expand / collapse / 双击窗口 ----
-assert.strictEqual(tree.clickIntent, undefined, '不再有单击展开判定');
-assert.strictEqual(tree.keyIntent, undefined, '不再有展开/收起键盘判定');
-assert.strictEqual(tree.libraryExpansion, undefined, '展开状态 store 已删除');
-assert.strictEqual(tree.DOUBLE_CLICK_GUARD, undefined, '单击延迟/双击窗口已删除');
+// ---- buildFolderTree：先序排列、子级紧跟父级、合计含子级、孤儿 / 成环兜底 ----
+const tcats = [
+  { id: 'asset:a', name: '产品' },
+  { id: 'asset:b', name: '场景' },
+  { id: 'asset:a1', name: '鞋', parent_id: 'asset:a' },
+  { id: 'asset:a1x', name: '白鞋', parent_id: 'asset:a1' },
+  { id: 'asset:orphan', name: '孤儿', parent_id: 'asset:gone' },
+  { id: 'asset:c1', name: '环1', parent_id: 'asset:c2' },
+  { id: 'asset:c2', name: '环2', parent_id: 'asset:c1' },
+];
+const counts = { 'asset:a': 2, 'asset:a1': 3, 'asset:a1x': 1, 'asset:b': 4 };
+const ft = tree.buildFolderTree(tcats, (id) => counts[id] || 0);
+assert.deepStrictEqual(ft.map((f) => f.name), ['产品', '鞋', '白鞋', '场景', '孤儿', '环1', '环2'], '先序：子文件夹紧跟父级');
+assert.deepStrictEqual(ft.map((f) => f.depth), [0, 1, 2, 0, 0, 0, 1], '层级深度');
+const byName = Object.fromEntries(ft.map((f) => [f.name, f]));
+assert.strictEqual(byName['产品'].total, 6, '合计含所有子孙');
+assert.strictEqual(byName['产品'].count, 2, '自己直接装的数量');
+assert.deepStrictEqual(byName['产品'].childKeys, ['folder:asset:a1'], '直接子级');
+assert.strictEqual(byName['鞋'].parentKey, 'folder:asset:a', 'parentKey 指向父级');
+assert.strictEqual(byName['孤儿'].parentKey, undefined, '父级不存在的按顶级显示');
+assert.strictEqual(new Set(ft.map((f) => f.key)).size, ft.length, '成环也不重复');
 
-// ---- 组件：扁平列表 + 单击直接进入 ----
+// ---- 组件：手风琴 + 行内新建 / 改名 ----
 const component = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/Library.tsx'), 'utf8');
-assert.ok(component.includes('rowKeyIntent'), '文件夹行用 libraryTree 的键盘规则');
-assert.ok(component.includes('folders.filter((f) => !f.parentKey)') && component.includes('topFolders'), '列表只列顶级文件夹（扁平）');
-assert.ok(!component.includes('visibleFolders'), '不再按展开状态过滤可见行');
-assert.ok(!component.includes('expanded') && !component.includes('toggleExpanded') && !component.includes('expandRow') && !component.includes('collapseRow'), '展开状态/展开函数全部移除');
-assert.ok(!component.includes('DOUBLE_CLICK_GUARD') && !component.includes('clickIntent'), '没有单击延迟和双击判定');
-
-const rowView = component.slice(component.indexOf('function FolderRowView'), component.indexOf('export function LibrarySection'));
-assert.ok(rowView.includes('onClick={() => onEnter(f)}'), '整行单击 = 直接进入');
-assert.ok(!rowView.includes('onDoubleClick'), '不需要双击（单击就进）');
-assert.ok(rowView.includes('role="button"') && rowView.includes('tabIndex={0}'), '行可聚焦');
-assert.ok(!rowView.includes('aria-expanded') && !rowView.includes('aria-level'), '不再是可展开的树节点');
-assert.ok(!rowView.includes('lib-caret'), '行上没有 ▸/▾ 箭头');
-assert.ok(!rowView.includes('name="right"') && !rowView.includes('lib-enter'), '行尾没有「›」进入按钮');
-assert.ok(!rowView.includes('paddingLeft'), '行没有子级缩进');
-assert.ok(rowView.includes('if (intent === "enter") onEnter(f); else onBack();'), 'Enter 进入、← 返回');
-
-const listLine = component.slice(component.indexOf('<div className="lib-folder-list">{topFolders'), component.indexOf('</> : <div className="lib-search">'));
-assert.ok(listLine.includes('topFolders.map') && !listLine.includes('paddingLeft'), '列表渲染扁平、无缩进');
-const folderView = component.slice(component.indexOf('lib-folder-list lib-subfolders'), component.indexOf('lib-folder-list lib-subfolders') + 900);
-assert.ok(folderView.includes('childFolders.map') && folderView.includes('onEnter={enterFolder}'), '子文件夹只在进入后的视图里列出并可进入');
-assert.ok(!folderView.includes('name="right"') && !folderView.includes('paddingLeft'), '子文件夹行也没有箭头/缩进');
-
-// ---- 归并修复接进了列表和保存弹窗 ----
-assert.ok(component.includes('matchFixedFolders(scope === "personal" ? assetCats : localCats, needles)'), '列表的固定文件夹归并排除了子文件夹');
-assert.ok(component.includes('matchFixedFolders(pool, needles)'), '保存弹窗的固定文件夹归并同样排除子文件夹');
-assert.ok(!component.includes('needles.some((n) => c.name.toLowerCase()'), '旧的关键词匹配（会吞子文件夹）已全部替换');
-// 固定行（角色/场景/道具/风格/音效）即使没匹配到分类也要照常渲染（空行，不消失）
-const drawerFixed = component.slice(component.indexOf('for (const [key, name, icon, needles] of fixed)'), component.indexOf('// 父级缺失的孤儿分类按顶级展示'));
-assert.ok(drawerFixed.indexOf('rows.push(row);') > 0 && drawerFixed.indexOf('rows.push(row);') < drawerFixed.indexOf('if (primary) addChildren'), '列表：固定行无条件 push，再挂子级');
-const dialogStart = component.indexOf('for (const [name, needles] of defs)');
-const dialogFixed = component.slice(dialogStart, component.indexOf('for (const c of pool) {', dialogStart));
-assert.ok(dialogFixed.indexOf('out.push({ name,') > 0 && dialogFixed.indexOf('out.push({ name,') < dialogFixed.indexOf('if (primary) addChildren'), '保存弹窗：固定行无条件 push，再挂子级');
-
-const favRow = component.slice(component.indexOf('active === "favorite"'), component.indexOf('active === "favorite"') + 400);
-assert.ok(!favRow.includes('name="right"'), '收藏/主体库行也去掉行尾「›」');
+const section = component.slice(component.indexOf('export function LibrarySection'), component.indexOf('function DeleteFolderDialog'));
+assert.ok(section.includes('rowKeyIntent'), '文件夹行用 libraryTree 的键盘规则');
+assert.ok(section.includes('buildFolderTree(pool'), '文件夹来自后端真实分类树');
+assert.ok(!section.includes('["role", "角色", "user"'), '抽屉不再有写死的虚拟文件夹');
+assert.ok(!section.includes('"Others"'), '不再常驻 Others');
+assert.ok(!section.includes('收藏') && !section.includes('主体库'), '去掉空壳「收藏」和「主体库」');
+assert.ok(!section.includes('enterFolder') && !section.includes('folderKey'), '不再钻取进入文件夹视图');
+const renderBlock = section.slice(section.indexOf('const renderFolder'), section.indexOf('const topFolders'));
+assert.ok(renderBlock.includes('aria-expanded={isOpen}') && renderBlock.includes('onClick={() => toggleFolder(f)}'), '单击行 = 展开 / 收起');
+assert.ok(renderBlock.includes('{isOpen ? <div className="lib-fbody">'), '内容紧跟在该文件夹行下方，收起时不渲染');
+assert.ok(renderBlock.includes('f.childKeys.map((k) => folderByKey.get(k))') && renderBlock.includes('.map(renderFolder)'), '子文件夹在父级下方递归展开');
+assert.ok(renderBlock.includes('data-folder-name={f.name}') && renderBlock.includes('className={"lib-row lib-frow"'), '行保留拖放落点标记（Viewport 用 .lib-folder-list .lib-row）');
+assert.ok(renderBlock.includes('edit?.mode === "rename"') && renderBlock.includes('<FolderEditRow'), '改名在行内输入');
+assert.ok(section.includes('edit?.mode === "new"') && section.includes('setEdit({ mode: "new" })'), '新建文件夹在列表末尾行内输入');
+assert.ok(section.includes('mode: "sub"') && section.includes('新建子文件夹'), '右键 / 更多菜单可新建子文件夹');
+assert.ok(!component.includes('FolderNameDialog'), '新建 / 改名不再弹窗');
+const editRow = component.slice(component.indexOf('function FolderEditRow'), component.indexOf('export function LibrarySection'));
+assert.ok(editRow.includes('e.key === "Enter"') && editRow.includes('e.key === "Escape"'), '行内输入 Enter 保存 / Esc 取消');
 
 // 保存弹窗：层级缩进保留（选择器）
 const saveRows = component.slice(component.indexOf('className={"lib-row sl-frow"'), component.indexOf('className={"lib-row sl-frow"') + 900);
 assert.ok(saveRows.includes('paddingLeft: 6 + r.depth * 15'), '保存弹窗保留层级缩进');
 assert.ok(!saveRows.includes('lib-caret') && !saveRows.includes('name="right"'), '保存弹窗没有展开箭头');
-assert.ok(saveRows.includes('onClick={() => setSel(r.name)}'), '保存弹窗单击只选中');
+assert.ok(saveRows.includes('onClick={() => setSel(folderKeyOf(r))}'), '保存弹窗单击只选中（按文件夹 id）');
 
 // ---- 样式：没有箭头/进入按钮样式，行可点、不选字、焦点无框 ----
 const css = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/canvas-next.css'), 'utf8');
@@ -118,5 +118,10 @@ assert.ok(styleBlock.includes('.lib-folder-list .lib-row{cursor:pointer;outline:
 assert.ok(styleBlock.includes('.lib-row:focus-visible{background:var(--hover);color:var(--fg);outline:none;box-shadow:none}'), '焦点态软底、无描边');
 assert.ok(!/border:\s*(1px|0\.5px)/.test(styleBlock), '文件夹行样式里没有 1px 描边');
 
-console.log('[PASS] 文件夹列表：扁平无箭头/无缩进，单击整行直接进入，子文件夹只在文件夹视图里');
-console.log('[PASS] 文件夹列表：Enter 进入 / ← 返回、行尾无「›」、保存弹窗保留层级缩进');
+console.log('[PASS] 文件夹手风琴：单击就地展开 / 收起，子文件夹递归展开，行内新建 / 改名');
+console.log('[PASS] 文件夹树：Enter/空格 展开收起、→ 展开、← 收起，先序 + 合计 + 孤儿兜底，保存弹窗保留层级缩进');
+
+// ---- 单击画布空白处收起素材库抽屉（拖动平移 / 框选不收）----
+const viewportSrc = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/Viewport.tsx'), 'utf8');
+assert.ok(viewportSrc.includes('if ((d.kind === "pan" || d.kind === "marq") && !d.moved && (st.ui.drawer === "assets" || st.ui.drawer === "history")) store.setUI({ drawer: null });'), '单击空白处收起抽屉');
+console.log('[PASS] 单击画布空白处收起素材库抽屉');

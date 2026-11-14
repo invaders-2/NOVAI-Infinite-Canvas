@@ -1,16 +1,17 @@
 /**
  * 素材库文件夹的交互 + 归并/归属规则（纯逻辑，node 可直接单测）。
  *
- * 文件夹列表是扁平的：只列顶级文件夹，不再展开子项（用户说那看着像子菜单）。
- * 单击任意文件夹行 = 直接进入该文件夹视图；子文件夹只在进入后的视图顶部列出。
- * 键盘：Enter = 进入，← = 返回上一级（和顶部「‹ 返回」同一个动作）。
+ * 抽屉里的文件夹是手风琴：单击文件夹行在它正下方就地展开（子文件夹 + 素材），再点收起；
+ * 收起时不显示任何内容。（2026-11 用户明确要求，取代之前「扁平 + 钻取」的做法。）
+ * 键盘：Enter / 空格 = 展开或收起，→ = 展开，← = 收起。
  */
 
-export type KeyIntent = "enter" | "back" | null;
+export type KeyIntent = "toggle" | "open" | "close" | null;
 
 export function rowKeyIntent(key: string): KeyIntent {
-  if (key === "Enter") return "enter";
-  if (key === "ArrowLeft") return "back";
+  if (key === "Enter" || key === " ") return "toggle";
+  if (key === "ArrowRight") return "open";
+  if (key === "ArrowLeft") return "close";
   return null;
 }
 
@@ -50,4 +51,38 @@ export function categoryOwners(libs: LibraryRef[]): Map<string, string> {
   const map = new Map<string, string>();
   for (const lib of libs) for (const id of lib.categoryIds || []) map.set(String(id).replace(/^asset:/, ''), lib.id);
   return map;
+}
+
+export type FolderNode = {
+  key: string; catId: string; name: string; kind: string;
+  parentKey?: string; depth: number;
+  /** 文件夹自己直接装的素材数 / 连同所有子文件夹的合计 */
+  count: number; total: number; childKeys: string[];
+};
+
+/**
+ * 把分类摊成按树先序排列的文件夹列表（父在前、子紧跟其后）。
+ * parent_id 指向不存在的分类 → 当顶级显示，避免丢项；成环的只取第一次遇到的位置。
+ */
+export function buildFolderTree<T extends CategoryRef & { kind?: string }>(cats: T[], countOf: (catId: string) => number): FolderNode[] {
+  const ids = new Set(cats.map((c) => c.id));
+  const parentOf = (c: T) => { const p = String(c.parent_id || "").trim(); return p && p !== c.id && ids.has(p) ? p : ""; };
+  const kids = new Map<string, T[]>();
+  for (const c of cats) { const p = parentOf(c); if (!kids.has(p)) kids.set(p, []); kids.get(p)!.push(c); }
+  const out: FolderNode[] = []; const used = new Set<string>();
+  const walk = (c: T, parentKey: string | undefined, depth: number) => {
+    if (used.has(c.id)) return;
+    used.add(c.id);
+    const node: FolderNode = { key: "folder:" + c.id, catId: c.id, name: String(c.name || "未命名"), kind: String(c.kind || ""), parentKey, depth, count: countOf(c.id), total: 0, childKeys: [] };
+    out.push(node);
+    for (const k of kids.get(c.id) || []) { if (!used.has(k.id)) { node.childKeys.push("folder:" + k.id); walk(k, node.key, depth + 1); } }
+  };
+  for (const c of kids.get("") || []) walk(c, undefined, 0);
+  for (const c of cats) walk(c, undefined, 0); // 成环的分类兜底按顶级显示
+  const byKey = new Map(out.map((n) => [n.key, n]));
+  for (let i = out.length - 1; i >= 0; i--) {
+    const n = out[i];
+    n.total = n.count + n.childKeys.reduce((sum, k) => sum + (byKey.get(k)?.total || 0), 0);
+  }
+  return out;
 }

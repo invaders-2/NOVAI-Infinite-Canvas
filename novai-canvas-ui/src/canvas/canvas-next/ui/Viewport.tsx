@@ -412,6 +412,8 @@ export function Viewport() {
       return;
     }
     if (d.kind === "pan" && !d.moved) { if (st.ui.editText) (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur(); store.setUI({ sel: new Set(), edge: null, editCell: null }); }
+    // 单击画布空白处（没拖动）= 收起左侧素材库 / 生成历史抽屉；拖动平移、框选不收
+    if ((d.kind === "pan" || d.kind === "marq") && !d.moved && (st.ui.drawer === "assets" || st.ui.drawer === "history")) store.setUI({ drawer: null });
     // 调整组内节点大小后，只把所属普通分组扩到包住它（只扩不缩、x/y 不变）；移动组员仍走 reconcileGroups
     if (d.kind === "resize") {
       const next = growOwnerFrames(store.state.doc, [d.id]);

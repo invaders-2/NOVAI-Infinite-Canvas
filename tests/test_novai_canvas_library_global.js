@@ -50,12 +50,12 @@ assert.ok(component.includes('loading="lazy"') && component.includes('decoding="
 assert.ok(bridge.includes('globalPageCache') && bridge.includes('globalExtrasCache') && bridge.includes('5 * 60 * 1000') && bridge.includes('input.refresh'), '会话分页缓存 + 手动刷新');
 assert.ok(bridge.includes('?limit=') && component.includes('hasMore') && component.includes('offset + PAGE'), 'API limit 分页 + 滚到底加载');
 assert.ok(component.includes('lib-head') && component.includes('lib-scope') && component.includes('个人') && component.includes('本地'), '文件管理器式头部/个人本地切换');
-assert.ok(component.includes('lib-folder-list') && ['角色','场景','道具','风格','音效','Others'].every((x) => component.includes(x)), '文件夹固定映射');
+assert.ok(component.includes('lib-folder-list') && component.includes('buildFolderTree(pool'), '抽屉文件夹 = 后端真实分类树（不再有前端写死的虚拟文件夹）');
 const css = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/canvas-next.css'), 'utf8');
 assert.ok(css.includes('.drawer:has(.lib-shell)') && css.includes('.lib-row') && css.includes('.lib-scope'), '抽屉布局样式');
-assert.ok(component.includes('folderKey') && component.includes('enterFolder') && component.includes('scrollPos'), '文件夹钻取 + 滚动恢复');
-assert.ok(component.includes('返回文件夹列表') && component.includes('个素材') && component.includes('这个文件夹还没有素材'), '钻取头部标题/空态');
-assert.ok(component.includes('lastOpened') && component.includes('搜索「'), '返回保留 tab/选中态 + 文件夹内搜索');
+assert.ok(component.includes('aria-expanded={isOpen}') && component.includes('toggleFolder') && component.includes('lib-fbody'), '文件夹手风琴：点开在下方就地展开，再点收起');
+assert.ok(component.includes('这个文件夹还是空的') && component.includes('显示全部'), '展开后的空态 / 超出先折叠');
+assert.ok(component.includes('canvas/assetLibrary/products') && component.includes('lib-chips') && component.includes('lib-types'), '产品档案 / 用途筛选 / 类型筛选');
 assert.ok(component.includes('normalizeAssetUrl(store, o.url)') && component.includes('input.url = prep.url'), '素材地址先归一化再直传 URL');
 assert.ok(component.includes('prep.dataUrl') && component.includes('读取素材失败'), 'data/不可读素材有明确兜底');
 assert.ok(component.includes('x?.detail || x?.error'), '后端 detail 原样进 toast');

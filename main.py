@@ -56,6 +56,7 @@ from server.agents.context import AgentRunContext as _AgentRunContext
 from server.agents.tools import AGENT_FILE_TOOLS as _AGENT_FILE_TOOLS, AgentFileToolError as _AgentFileToolError
 from server.agents import canvas_cli as _agent_canvas_cli
 from server.agents import tools as _agent_file_tools
+from server import asset_meta as _asset_meta
 # 阶段一的三个新模块（上下文引擎 / 运行转录 / 按需读取工具）。包一层 try：
 # 裁剪安装或缺文件时不让后端起不来，开关打开时再如实报错。
 try:
@@ -35880,7 +35881,27 @@ def _agent_beat_node_summary(node, canvas, max_text=160):
     status = _agent_beat_status(node)
     if status:
         summary["status"] = status
+    asset = _agent_beat_asset(node)
+    if asset:
+        summary["asset"] = asset
     return summary
+
+
+def _agent_beat_asset(node):
+    """从素材库放到画布上的节点记着来源素材（gen.asset）：给助手看用途 / 产品，方便「把这张产品图换到…」。"""
+    gen = _agent_beat_gen(node) or {}
+    raw = gen.get("asset") if isinstance(gen.get("asset"), dict) else None
+    if not raw or not str(raw.get("id") or "").strip():
+        return None
+    out = {"item_id": str(raw.get("id"))[:64]}
+    use = _asset_meta.normalize_use(raw.get("use"))
+    if use:
+        out["use"] = use
+    if raw.get("productId"):
+        out["product_id"] = str(raw.get("productId"))[:64]
+    if raw.get("name"):
+        out["name"] = str(raw.get("name"))[:80]
+    return out
 
 
 def _agent_beat_model_id(provider, model, field="image_models"):
@@ -40692,71 +40713,326 @@ def _agent_tool_use_asset_validate(args):
         limit = max(1, min(20, int(args.get("limit") or 10)))
     except (TypeError, ValueError):
         limit = 10
-    return {"query": query, "kind": kind, "limit": limit}
+    use_raw = str(args.get("use") or "").strip()
+    use = _asset_meta.normalize_use(use_raw)
+    if use_raw and not use:
+        raise AgentToolError("use 必须是 " + "|".join(_asset_meta.ASSET_USES), code="invalid_args")
+    product = str(args.get("product") or "").strip()[:60]
+    return {"query": query, "kind": kind, "limit": limit, "use": use, "product": product}
+
+
+_AGENT_ASSET_EXTS = {
+    "image": (".png", ".jpg", ".jpeg", ".webp", ".gif"),
+    "video": (".mp4", ".mov", ".webm"),
+    "audio": (".mp3", ".wav", ".m4a"),
+}
+
+
+def _agent_asset_kind_of(name):
+    low = str(name or "").lower()
+    for kind, exts in _AGENT_ASSET_EXTS.items():
+        if low.endswith(exts):
+            return kind
+    return ""
+
+
+def _agent_asset_terms(query):
+    """把检索词拆成若干词：按空白/标点切；中文整句不切（靠「标签 ⊂ 检索词」匹配，见 _agent_asset_score）。"""
+    parts = re.split(r"[\s,，、;；/|]+", str(query or "").lower())
+    return [p for p in parts if p]
+
+
+def _agent_asset_tags(classification, limit=12):
+    """从 AI 分类结果里取出标签（去重、保序）。"""
+    if not isinstance(classification, dict):
+        return []
+    tags, seen = [], set()
+    for entry in (classification.get("flat") or []):
+        tag = str((entry or {}).get("tag") or "").strip() if isinstance(entry, dict) else ""
+        if tag and tag not in seen:
+            seen.add(tag)
+            tags.append(tag)
+    for tag in (classification.get("tags") or []):
+        tag = str(tag or "").strip()
+        if tag and tag not in seen:
+            seen.add(tag)
+            tags.append(tag)
+    return tags[:limit] if limit else tags
+
+
+def _agent_asset_score(terms, texts, tags):
+    """关键词打分：名称/摘要等文本里包含检索词得分；AI 标签既可被检索词包含、也可包含检索词。
+
+    「白色运动鞋」这种不带空格的中文检索词切不开，靠「标签（白色、运动鞋）是检索词的子串」来命中。
+    texts: [(文本, 权重)]；tags: 标签列表（权重 2）。没有任何命中返回 0。
+    """
+    score = 0
+    for term in terms:
+        hit = 0
+        for text, weight in texts:
+            if text and term in text:
+                hit = max(hit, weight)
+        for tag in tags:
+            low = tag.lower()
+            if term in low or (len(low) >= 2 and low in term):
+                hit += 2
+        score += hit
+    return score
 
 
 def _agent_tool_use_asset_run(args):
-    lib = load_asset_library()
-    query = args["query"].lower()
+    """检索素材：所有资产库 + 本地上传 + 画布上传目录，按名称 / AI 标签 / 摘要打分排序。
+
+    以前只看「当前激活的资产库」、只按文件名匹配、上传目录写死在程序目录（改过存储路径就失效），
+    这里统一修掉；返回值保持 total / items / results 结构，并附上 summary / tags / library / source。
+    """
+    terms = _agent_asset_terms(args["query"])
     kind = args["kind"]
-    hits = []
+    limit = args["limit"]
+    use_filter = args.get("use") or ""
+    candidates = []
     seen = set()
-    for cat in (lib.get("categories") or []):
-        if not isinstance(cat, dict):
-            continue
-        cat_kind = str(cat.get("type") or "image").lower()
-        for item in (cat.get("items") or []):
-            if not isinstance(item, dict):
-                continue
-            url = str(item.get("url") or "")
-            if not url or url in seen:
-                continue
-            item_kind = str(item.get("kind") or cat_kind or "image").lower()
-            if kind and item_kind != kind:
-                continue
-            name = str(item.get("name") or "")
-            if query and query not in name.lower() and query not in url.lower():
-                continue
-            seen.add(url)
-            hits.append({"url": url, "name": name[:120], "kind": item_kind,
-                         "category": str(cat.get("name") or "")})
-            if len(hits) >= args["limit"]:
-                break
-        if len(hits) >= args["limit"]:
-            break
-    # 补充：画布上传的素材（assets/input/ 目录）——用户上传的素材也应可检索作参考
-    if len(hits) < args["limit"]:
+    lib = load_asset_library()
+
+    # 指定产品档案：直接返回它的各个角度（技能「换产品」要多角度参考就走这里）
+    if args.get("product"):
+        product = _asset_meta.find_product(lib, product_id=args["product"], name=args["product"])
+        if not product:
+            names = [str(p.get("name") or "") for p in _asset_meta.products(lib) if isinstance(p, dict)]
+            return {"total": 0, "items": [], "results": [], "query": args["query"], "kind": kind,
+                    "product": None, "available_products": names[:20],
+                    "hint": "没有这个产品档案" + ("；现有：" + "、".join(names[:20]) if names else "；素材库里还没有产品档案")}
+        view = _asset_meta.product_view(lib, product)
+        hits = [{"url": a["url"], "name": a["name"], "kind": a["kind"], "item_id": a["item_id"], "use": "product",
+                 "label": a["label"], "product_id": view["id"], "source": "library"} for a in view["angles"]][:limit]
+        return {"total": len(hits), "items": hits, "results": hits, "query": args["query"], "kind": kind,
+                "product": {"id": view["id"], "name": view["name"], "selling_points": view["selling_points"],
+                            "angle_count": view["angle_count"]}}
+
+    def _add(url, name, item_kind, *, category="", library="", source="", classification=None,
+             caption="", created_at=0, item=None):
+        if not url or url in seen:
+            return
+        if kind and item_kind != kind:
+            return
+        use = _asset_meta.effective_use(item, category) if isinstance(item, dict) else \
+            _asset_meta.infer_use({"kind": item_kind, "name": name, "classification": classification}, category)
+        if use_filter and use != use_filter:
+            return
+        tags = _agent_asset_tags(classification)
+        summary = str((classification or {}).get("summary") or "").strip() if isinstance(classification, dict) else ""
+        score = 0
+        if terms:
+            texts = [(str(name or "").lower(), 3), (summary.lower(), 2), (str(caption or "").lower(), 2),
+                     (str(category or "").lower(), 1), (url.lower(), 1)]
+            score = _agent_asset_score(terms, texts, tags)
+            if score <= 0:
+                return
+        seen.add(url)
         try:
-            in_dir = os.path.join(os.path.dirname(__file__), "assets", "input")
-            if os.path.isdir(in_dir):
-                for fn in sorted(os.listdir(in_dir)):
-                    if len(hits) >= args["limit"]:
-                        break
-                    if fn.startswith(".") or fn == "ai_ref":
-                        continue
-                    low = fn.lower()
-                    ext_ok = low.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".webm", ".mp3", ".wav", ".m4a"))
-                    if not ext_ok:
-                        continue
-                    if kind == "image" and not low.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
-                        continue
-                    if kind == "video" and not low.endswith((".mp4", ".mov", ".webm")):
-                        continue
-                    if kind == "audio" and not low.endswith((".mp3", ".wav", ".m4a")):
-                        continue
-                    url = f"/assets/input/{fn}"
-                    if url in seen:
-                        continue
-                    if query and query not in low:
-                        continue
-                    item_kind = "video" if low.endswith((".mp4", ".mov", ".webm")) else ("audio" if low.endswith((".mp3", ".wav", ".m4a")) else "image")
-                    if kind and item_kind != kind:
-                        continue
-                    seen.add(url)
-                    hits.append({"url": url, "name": fn[:120], "kind": item_kind, "category": "上传素材"})
-        except Exception as exc:
-            print(f"[Agent] use_asset 扫描上传素材失败: {exc}")
-    return {"total": len(hits), "items": hits, "results": hits, "query": args["query"], "kind": args["kind"]}
+            ts = float(created_at or 0)
+        except (TypeError, ValueError):
+            ts = 0.0
+        if ts > 1e11:  # 资产库是毫秒，本地文件是秒；统一成秒再比较新旧
+            ts /= 1000.0
+        hit = {"url": url, "name": str(name or "")[:120], "kind": item_kind, "category": category,
+               "library": library, "source": source}
+        if use:
+            hit["use"] = use
+        if isinstance(item, dict):
+            if item.get("id"):
+                hit["item_id"] = str(item["id"])
+            if item.get("product_id"):
+                hit["product_id"] = str(item["product_id"])
+            if item.get("derived_from"):
+                hit["derived_from"] = str(item["derived_from"])
+        if summary:
+            hit["summary"] = summary[:120]
+        if tags:
+            hit["tags"] = tags[:8]
+        candidates.append((score, ts, hit))
+
+    # 1) 所有资产库（不只是当前激活的那个）
+    for library in (lib.get("libraries") or []):
+        if not isinstance(library, dict):
+            continue
+        lib_name = str(library.get("name") or "")
+        for cat in (library.get("categories") or []):
+            if not isinstance(cat, dict):
+                continue
+            cat_kind = str(cat.get("type") or "image").lower()
+            for item in (cat.get("items") or []):
+                if not isinstance(item, dict):
+                    continue
+                url = str(item.get("url") or "")
+                item_kind = str(item.get("kind") or cat_kind or "image").lower()
+                _add(url, item.get("name"), item_kind, category=str(cat.get("name") or ""), library=lib_name,
+                     source="library", classification=item.get("classification"),
+                     created_at=item.get("created_at"), item=item)
+
+    # 2) 本地上传（assets/uploads；画布生成物不算素材，跳过）
+    try:
+        _tree, local_items = _local_upload_tree_and_items()
+        for item in (local_items or []):
+            if not isinstance(item, dict) or str(item.get("source") or "") == "output":
+                continue
+            _add(str(item.get("url") or ""), item.get("name"), str(item.get("kind") or "image").lower(),
+                 category=str(item.get("folder") or "本地上传"), source="local",
+                 classification=item.get("classification"), caption=item.get("caption") or "",
+                 created_at=item.get("created_at"))
+    except Exception as exc:
+        print(f"[Agent] use_asset 扫描本地上传失败: {exc}")
+
+    # 3) 画布上传目录（跟随存储设置里的上传目录，不再写死程序目录）
+    try:
+        in_dir = OUTPUT_INPUT_DIR
+        if in_dir and os.path.isdir(in_dir):
+            for fn in os.listdir(in_dir):
+                if fn.startswith(".") or fn == "ai_ref":
+                    continue
+                item_kind = _agent_asset_kind_of(fn)
+                if not item_kind:
+                    continue
+                try:
+                    mtime = os.path.getmtime(os.path.join(in_dir, fn))
+                except OSError:
+                    mtime = 0
+                _add(f"/assets/input/{urllib.parse.quote(fn)}", fn, item_kind, category="画布上传",
+                     source="upload", created_at=mtime)
+    except Exception as exc:
+        print(f"[Agent] use_asset 扫描上传素材失败: {exc}")
+
+    # 有检索词按分数排，分数相同（或没检索词）按新旧排；资产库优先于上传目录
+    source_rank = {"library": 2, "local": 1, "upload": 0}
+    candidates.sort(key=lambda c: (c[0], source_rank.get(c[2]["source"], 0), c[1]), reverse=True)
+    hits = [c[2] for c in candidates[:limit]]
+    result = {"total": len(hits), "items": hits, "results": hits, "query": args["query"], "kind": args["kind"]}
+    if use_filter:
+        result["use"] = use_filter
+    # 检索词正好是某个产品档案的名字：提示可以直接按产品取多角度
+    if terms:
+        matched = [str(p.get("name") or "") for p in _asset_meta.products(lib)
+                   if isinstance(p, dict) and any(t in str(p.get("name") or "").lower() for t in terms)]
+        if matched:
+            result["products"] = matched[:5]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# 工具 7d: save_asset / save_product（写素材库，不改画布、不花钱）
+# ---------------------------------------------------------------------------
+
+def _agent_asset_entries(args):
+    raw = args.get("items") if isinstance(args.get("items"), list) else []
+    if not raw and isinstance(args.get("urls"), list):
+        raw = [{"url": u} for u in args["urls"]]
+    if not raw and args.get("url"):
+        raw = [{"url": args.get("url"), "name": args.get("name")}]
+    entries = []
+    for row in raw[:50]:
+        if isinstance(row, str):
+            row = {"url": row}
+        if not isinstance(row, dict):
+            continue
+        url = str(row.get("url") or "").strip()
+        if url:
+            entries.append({"url": url, "name": str(row.get("name") or "").strip()[:120],
+                            "label": str(row.get("label") or "").strip()[:24]})
+    return entries
+
+
+def _agent_tool_save_asset_validate(args):
+    entries = _agent_asset_entries(args)
+    if not entries:
+        raise AgentToolError("items（要存的素材 url）不能为空", code="invalid_args")
+    use_raw = str(args.get("use") or "").strip()
+    use = _asset_meta.normalize_use(use_raw)
+    if use_raw and not use:
+        raise AgentToolError("use 必须是 " + "|".join(_asset_meta.ASSET_USES), code="invalid_args")
+    return {"entries": entries, "use": use, "folder": str(args.get("folder") or "").strip()[:40],
+            "library": str(args.get("library") or "").strip()[:60],
+            "product": str(args.get("product") or "").strip()[:60],
+            "derived_from": str(args.get("derived_from") or "").strip()}
+
+
+def _agent_tool_save_asset_run(args):
+    from server.routes import assets as _assets_routes
+    use = args["use"] or ("product" if args["product"] else "")
+    lib, pairs, errors = _assets_routes.save_urls_to_asset_library(
+        args["entries"], library=args["library"], folder=args["folder"], use=use,
+        derived_from=args["derived_from"])
+    added = [item for _entry, item in pairs]
+    product_view = None
+    if args["product"] and pairs:
+        product = _asset_meta.upsert_product(lib, name=args["product"], append=True,
+                                             angles=[{"item_id": it["id"], "label": e.get("label") or ""} for e, it in pairs])
+        save_asset_library(lib)
+        product_view = _asset_meta.product_view(lib, product)
+    saved = [{"item_id": it.get("id"), "url": it.get("url"), "name": it.get("name"), "kind": it.get("kind"),
+              "use": it.get("use") or ""} for it in added]
+    msg = f"已存入素材库 {len(saved)} 个" if saved else "没有存进去"
+    if product_view:
+        msg += f"，并归入产品档案「{product_view['name']}」（共 {product_view['angle_count']} 个角度）"
+    if errors:
+        msg += f"；{len(errors)} 个失败：" + "；".join(e["error"] for e in errors[:3])
+    return {"ok": bool(saved), "saved": saved, "errors": errors, "product": product_view, "message": msg}
+
+
+def _agent_tool_save_asset_preview(args, canvas):
+    n = len(_agent_asset_entries(args))
+    where = args.get("folder") or _asset_meta.ASSET_USES.get(_asset_meta.normalize_use(args.get("use")), "") or "自动归类"
+    extra = f"，归入产品档案「{args.get('product')}」" if args.get("product") else ""
+    return f"把 {n} 个素材存进素材库（{where}）{extra}"
+
+
+def _agent_tool_save_product_validate(args):
+    name = str(args.get("name") or "").strip()
+    product_id = str(args.get("product_id") or "").strip()
+    if not name and not product_id:
+        raise AgentToolError("产品名称 name 不能为空", code="invalid_args")
+    angles = args.get("angles") if isinstance(args.get("angles"), list) else None
+    clean = None
+    if angles is not None:
+        clean = []
+        for row in angles[:24]:
+            if isinstance(row, str):
+                row = {"url": row} if row.startswith("/") else {"item_id": row}
+            if isinstance(row, dict):
+                clean.append({"item_id": str(row.get("item_id") or "").strip(), "url": str(row.get("url") or "").strip(),
+                              "label": str(row.get("label") or "").strip()[:24]})
+    sp = args.get("selling_points")
+    return {"name": name[:60], "product_id": product_id, "angles": clean, "append": args.get("append") is not False,
+            "selling_points": None if sp is None else str(sp)[:300]}
+
+
+def _agent_tool_save_product_run(args):
+    lib = load_asset_library()
+    missing = []
+    angles = None
+    if args["angles"] is not None:
+        angles = []
+        for row in args["angles"]:
+            _, _, item = _asset_meta.find_item(lib, item_id=row["item_id"], url=row["url"])
+            if item:
+                angles.append({"item_id": item["id"], "label": row["label"]})
+            else:
+                missing.append(row["url"] or row["item_id"])
+    try:
+        product = _asset_meta.upsert_product(lib, product_id=args["product_id"], name=args["name"],
+                                             selling_points=args["selling_points"], angles=angles, append=args["append"])
+    except ValueError as exc:
+        raise AgentToolError(str(exc), code="invalid_args")
+    save_asset_library(lib)
+    view = _asset_meta.product_view(lib, product)
+    msg = f"产品档案「{view['name']}」已保存，共 {view['angle_count']} 个角度"
+    if missing:
+        msg += f"；{len(missing)} 张不在素材库里，先用 save_asset 存进去再加"
+    return {"ok": True, "product": view, "missing": missing, "message": msg}
+
+
+def _agent_tool_save_product_preview(args, canvas):
+    n = len(args.get("angles") or [])
+    return f"保存产品档案「{args.get('name') or args.get('product_id')}」" + (f"（{n} 个角度）" if n else "")
 
 
 def _agent_tool_use_asset_preview(args, canvas):
@@ -44247,15 +44523,51 @@ AGENT_TOOLS = {
         "mutates_canvas": False,
     },
     "use_asset": {
-        "description": "从素材库检索素材（按关键词/类型过滤），返回 URL 列表供 generate_image 的 reference_urls 使用（只读，不修改素材库）。",
+        "description": "从素材库检索素材（所有资产库 + 本地上传 + 画布上传，按名称 / AI 标签 / 摘要匹配，例如「白色运动鞋」「女模特 全身」），"
+                       "返回 URL 列表（附摘要与标签，便于挑选）供 generate_image 的 reference_urls 使用（只读，不修改素材库）。",
         "schema": {"type": "object", "properties": {
-            "query": {"type": "string", "description": "关键词（按名称/URL 模糊匹配）"},
+            "query": {"type": "string", "description": "关键词，可空格分隔多个（匹配名称、AI 标签、摘要、文件夹名）"},
             "kind": {"type": "string", "enum": ["image", "video", "audio", "workflow"]},
+            "use": {"type": "string", "enum": list(_asset_meta.ASSET_USES),
+                    "description": "按用途筛选：product 产品 / model 模特 / scene 场景 / source 源视频 / depth 深度视频 / style 风格参考 / sound 音效"},
+            "product": {"type": "string", "description": "产品档案名称或 id：直接返回这个产品的各个角度图（换产品时用）"},
             "limit": {"type": "integer", "default": 10}},
             "required": []},
         "validate": _agent_tool_use_asset_validate,
         "run": _agent_tool_use_asset_run,
         "preview": _agent_tool_use_asset_preview,
+        "mutates_canvas": False,
+    },
+    "save_asset": {
+        "description": "把画布上的生成结果或上传素材（本机 /assets、/output 的图片 / 视频 / 音频 url）存进素材库，不改画布、不花钱。"
+                       "use 标用途（product 产品 / model 模特 / scene 场景 / source 源视频 / depth 深度视频 / style 风格参考 / sound 音效），"
+                       "folder 指定文件夹名（没有会新建；不填按用途自动归类）；product 填产品名会同时归入该产品档案（items 里可给 label 如「正面」）；"
+                       "derived_from 填来源素材的 url 或 item_id（例如深度视频对应的原视频）。用户说「存进素材库 / 归档 / 收藏这些」时用。",
+        "schema": {"type": "object", "properties": {
+            "items": {"type": "array", "items": {"type": "object", "properties": {
+                "url": {"type": "string"}, "name": {"type": "string"}, "label": {"type": "string"}}, "required": ["url"]}},
+            "use": {"type": "string", "enum": list(_asset_meta.ASSET_USES)},
+            "folder": {"type": "string"}, "library": {"type": "string", "description": "资产库名称，不填用当前库"},
+            "product": {"type": "string"}, "derived_from": {"type": "string"}},
+            "required": ["items"]},
+        "validate": _agent_tool_save_asset_validate,
+        "run": _agent_tool_save_asset_run,
+        "preview": _agent_tool_save_asset_preview,
+        "mutates_canvas": False,
+    },
+    "save_product": {
+        "description": "新建或更新产品档案：一个产品挂多张角度图（素材库里已有的素材，用 url 或 item_id 指定，label 写角度如「正面 / 侧面 / 细节」）。"
+                       "同名产品会合并，append=false 时整体替换角度；selling_points 写卖点。不改画布、不花钱。"
+                       "图还不在素材库里时先用 save_asset（带 product 参数可一步完成）。",
+        "schema": {"type": "object", "properties": {
+            "name": {"type": "string"}, "product_id": {"type": "string"},
+            "angles": {"type": "array", "items": {"type": "object", "properties": {
+                "url": {"type": "string"}, "item_id": {"type": "string"}, "label": {"type": "string"}}}},
+            "selling_points": {"type": "string"}, "append": {"type": "boolean", "default": True}},
+            "required": ["name"]},
+        "validate": _agent_tool_save_product_validate,
+        "run": _agent_tool_save_product_run,
+        "preview": _agent_tool_save_product_preview,
         "mutates_canvas": False,
     },
     "activate_skill": {
@@ -46952,6 +47264,9 @@ _AGENT_RUN_SYSTEM_PROMPT = (
     "19) 项目记忆：用户说「记住 / 以后都 / 默认 / 每次都」这类长期偏好时，用 remember 记下（只说这张画布、这个项目用 canvas；说所有画布、我的品牌用 global；"
     "拿不准用 canvas），同一句话里还有要做的事就接着照常做；说「忘掉 / 不用再 / 别记」用 forget。一次性的要求不要记成长期偏好。"
     "上下文里有「项目记忆」时，做方案默认照做（比例、模型、风格写进参数和提示词），回复里一句话说明按哪条来的。\n"
+    "19b) 素材库：要找参考素材用 use_asset（检索词可写「白色运动鞋」这类描述，会匹配 AI 标签；要某类素材加 use，"
+    "要某个产品的多角度图用 product=产品名）；用户说「存进素材库 / 归档 / 存成产品档案」用 save_asset（标 use，产品图带 product），"
+    "已在素材库里的图组成产品档案用 save_product。这两个只写素材库、不改画布，直接执行。\n"
     "20) 串起来的流程（先出图再拿图做视频等）：用户说「继续跑 / 把后面的也跑了 / 整条跑完」时用 run_downstream，"
     "不要对后面的节点一个个 run_generation（它们的上游还没结果）。\n"
     "21) 用户说「整理一下 / 太乱了 / 排整齐」用 arrange_canvas（只挪位置，不要用 update_node 一个个改 x/y）；"
@@ -47256,8 +47571,11 @@ def _agent_run_focus_text(focus, canvas):
                 node = nodes[nid]
                 if _agent_is_beat_node(node):
                     url = _agent_beat_url(node)
+                    asset = _agent_beat_asset(node) or {}
                     lines.append(f"- {nid}｜kind={node.get('kind')}｜标题={_agent_beat_title(node) or '无'}"
-                                 + (f"｜素材={url}" if url else "") + f"｜状态={_agent_beat_status(node) or '—'}")
+                                 + (f"｜素材={url}" if url else "") + f"｜状态={_agent_beat_status(node) or '—'}"
+                                 + (f"｜来自素材库（用途={_asset_meta.ASSET_USES.get(asset.get('use'), '未标')}"
+                                    + (f"，产品档案={asset['product_id']}" if asset.get("product_id") else "") + "）" if asset else ""))
                 else:
                     lines.append(f"- {nid}｜type={node.get('type')}｜编号={node.get('alias') or '无'}｜标题={node.get('title') or '无'}")
     else:
@@ -48277,7 +48595,7 @@ _AGENT_STEP_LABELS = {
     "create_node": "新建{type}节点", "update_node": "修改节点", "delete_node": "删除节点",
     "connect_nodes": "连线", "disconnect_nodes": "断开连线", "generate_image": "生成图片",
     "generate_video": "生成视频", "run_generation": "重新生成", "refine_prompt": "改写提示词",
-    "remember": "写入记忆", "forget": "删除记忆", "arrange_canvas": "整理画布", "get_canvas": "读取画布",
+    "remember": "写入记忆", "forget": "删除记忆", "save_asset": "存入素材库", "save_product": "保存产品档案", "arrange_canvas": "整理画布", "get_canvas": "读取画布",
     "web_search": "联网搜索", "fetch_url": "读取网页", "search_images": "搜索参考图",
     "find_similar_images": "以图搜图", "lipsync_video": "对口型", "check_task": "查询任务",
     "activate_skill": "加载技能", "use_asset": "使用素材",
@@ -48689,11 +49007,14 @@ def _agent_plan_event(intent, steps, expected_output="", extra=None, reason="", 
 
 AGENT_FREE_TOOLS = {"refine_prompt", "get_canvas", "list_canvases", "use_asset", "check_task", "list_templates",
                     "remember", "forget", "arrange_canvas", "activate_skill",
+                    # 写素材库：不改画布、不花钱，和 remember 一样免确认直接跑
+                    "save_asset", "save_product",
                     # 只读联网工具：搜图/反图/搜网页/读网页不改画布、不花钱，免确认直接跑
                     "search_images", "find_similar_images", "web_search", "fetch_url"}
 
 # 「免确认签名工具」：批里至少有一个这类工具，整批只读才判定为可直跑（避免空批/纯无副作用任意批都放行）
 _AGENT_FREE_SIGNATURE_TOOLS = ("refine_prompt", "list_templates", "remember", "forget", "arrange_canvas",
+                               "save_asset", "save_product",
                                "search_images", "find_similar_images", "web_search", "fetch_url")
 
 

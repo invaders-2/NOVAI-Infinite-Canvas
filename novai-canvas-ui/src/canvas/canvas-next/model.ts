@@ -29,6 +29,9 @@ export type AudioParams = { model: string; kind: string; dur: string };
 export type ParamsOf<K extends GenKind> = K extends "image" ? ImageParams : K extends "video" ? VideoParams : K extends "text" ? TextParams : AudioParams;
 export type AnyParams = ImageParams | VideoParams | TextParams | AudioParams;
 
+/** 素材库条目引用（gen.asset）：id 是资产库条目 id；use 是用途（product / model / scene / source / depth / style / sound） */
+export type AssetRef = { id: string; use?: string; productId?: string; name?: string };
+
 /** 一次生成的产物。图片 / 视频 / 音频是地址，文本是正文。 */
 export type GenOutput = {
   url?: string;
@@ -68,6 +71,8 @@ export type GenData = {
   manual?: boolean;
   /** 图片节点：用户上传 */
   uploaded?: boolean;
+  /** 从素材库放上来的节点记住来源素材：助手据此知道「这是哪个产品 / 什么用途」，以后也能存回原条目 */
+  asset?: AssetRef;
   /** 拆分图层：结果节点已建好，正在等全屏编辑器回传合成图（上一版；新入口用 split） */
   splitPending?: boolean;
   /** 拆分图层：结果节点里的内联编辑器配置（源图 / 模式 / 加载状态） */
