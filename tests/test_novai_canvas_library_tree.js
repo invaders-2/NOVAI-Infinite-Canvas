@@ -120,3 +120,8 @@ assert.ok(!/border:\s*(1px|0\.5px)/.test(styleBlock), '文件夹行样式里没�
 
 console.log('[PASS] 文件夹手风琴：单击就地展开 / 收起，子文件夹递归展开，行内新建 / 改名');
 console.log('[PASS] 文件夹树：Enter/空格 展开收起、→ 展开、← 收起，先序 + 合计 + 孤儿兜底，保存弹窗保留层级缩进');
+
+// ---- 单击画布空白处收起素材库抽屉（拖动平移 / 框选不收）----
+const viewportSrc = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/Viewport.tsx'), 'utf8');
+assert.ok(viewportSrc.includes('if ((d.kind === "pan" || d.kind === "marq") && !d.moved && (st.ui.drawer === "assets" || st.ui.drawer === "history")) store.setUI({ drawer: null });'), '单击空白处收起抽屉');
+console.log('[PASS] 单击画布空白处收起素材库抽屉');
