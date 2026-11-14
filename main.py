@@ -35971,6 +35971,17 @@ def _agent_beat_new_node(kind, x, y, title="", prompt="", params=None, url="", t
         box = _agent_beat_media_box(src_w, src_h)
         if box:
             w, h = box
+    elif kind == "video" and url:
+        # 视频节点也按源片真实宽高定框（和前端 fitSourceBox(baseW=320) 一致），否则竖屏 / 方形片被塞进 16:9 默认框
+        path = _agent_local_image_path(url)
+        if path and os.path.isfile(path):
+            try:
+                src_w, src_h = probe_video_dimensions(path)
+            except Exception:
+                src_w = src_h = 0
+        box = _agent_beat_media_box(src_w, src_h, base_w=320)
+        if box:
+            w, h = box
     default_title = {"image": "图片", "video": "视频", "audio": "音频", "text": "文本"}.get(kind, "节点")
     if kind == "image":
         base = {"model": "", "ratio": "1:1", "size": "2K", "count": 1, "search": False, "style": "无",
@@ -35987,7 +35998,7 @@ def _agent_beat_new_node(kind, x, y, title="", prompt="", params=None, url="", t
         hist = [{"text": str(text)}]
     elif url:
         hist = [{"url": url, "meta": {"model": "", "at": now_ms()}}]
-        if kind == "image" and src_w > 0 and src_h > 0:
+        if kind in ("image", "video") and src_w > 0 and src_h > 0:
             # 同时记下真实像素：之后的「切换版本」「替换」按已有尺寸走，不用再解码量一次
             hist[0].update({"w": src_w, "h": src_h})
     gen = {"title": str(title or default_title)[:120], "prompt": str(prompt or ""), "params": base,
@@ -40792,6 +40803,9 @@ def _agent_tool_activate_skill_run(args):
     if truncated:
         prompt = prompt[:AGENT_SKILL_PROMPT_MAX_CHARS] + AGENT_SKILL_TRUNCATED_NOTE
     activated.add(name)
+    _agent_skill_gate_activate(skill.get("id") or name)
+    if _AGENT_RUN_SKILL_GATE.get() and _AGENT_RUN_CANVAS_ID.get():
+        _agent_skill_gate_update(_AGENT_RUN_CANVAS_ID.get(), _AGENT_RUN_SKILL_GATE.get(), attached_at=time.time())
     return {"name": name, "skill_id": skill.get("id"), "title": skill.get("name") or name,
             "characters": len(prompt), "truncated": truncated, "already_loaded": False,
             "text": prompt}
@@ -44500,7 +44514,7 @@ AGENT_TOOLS["analyze_video"] = {
     "description": "读懂一个参考视频（只读、不改画布）：在指定区间均匀抽 4–24 帧，拼成带「#序号 时间」标注的关键帧网格图并在下一轮交给你看；"
                    "同时转写口播，按句带 [mm:ss] 时间戳（走设置里的语音转写，没配会明确说明）。"
                    "返回时长、分辨率/画幅、硬切点 cuts、每帧地址（可直接当参考图）、整条视频真正的首帧 / 尾帧 first_frame_url / last_frame_url（接镜头用）和口播；"
-                   "clip=true 时把 start–end 这段（2–15 秒）截成 clip_url，可直接当 generate_video 的 reference_video。"
+                   "clip=true 时把 start–end 这段（2–15 秒，超过 15 秒会失败，读全片时不要带 clip）截成 clip_url，可直接当 generate_video 的 reference_video。"
                    "视频复刻 / 拆解爆款 / 分析节奏和分镜时先用它读全片，再用 start/end 缩小到某一段细看；"
                    "不要只看封面帧就下结论。node_id 填画布上的视频节点（用户上传或生成的）。",
     "schema": {"type": "object", "properties": {
@@ -44521,31 +44535,59 @@ AGENT_TOOLS["analyze_video"] = {
 
 
 # ---------------------------------------------------------------------------
-# 深度动作迁移：把画布上的参考视频转成「深度动作通道」（本机推理，不上传、不花额度）。
+# 深度动作迁移 / depth_capture：把画布上的参考视频转成「深度动作通道」（本机推理，不上传、不花额度）。
 # 和 analyze_video 一样是只读 + 产出一个 /output 文件，不写画布、不进确认闸门。
+# 实现在 server/split_engine/depth_capture.py（和 /api/video/depth-capture 同一套）；
+# 模块或模型不在时只返回「不可用 + 原因」，不报错，技能据此走备选来源。
 # ---------------------------------------------------------------------------
+
+AGENT_DEPTH_CAPTURE_MAX_SECONDS = 30.0
+
+
+def _agent_depth_capture_module():
+    try:
+        from server.split_engine import depth_capture
+    except Exception as exc:  # 模块没合入 / onnxruntime 没装
+        return None, "本机深度动作捕捉没有安装（%s）" % (str(exc)[:120] or type(exc).__name__)
+    return depth_capture, ""
+
 
 def _agent_tool_depth_capture_validate(args):
     args = dict(args or {})
     node_id = str(args.get("node_id") or "").strip()
     url = str(args.get("url") or "").strip()
-    if not node_id and not url:
-        raise AgentToolError("node_id 和 url 至少给一个（要把哪个视频转成深度通道）", code="invalid_args")
+    check_only = bool(args.get("check_only"))
+    if not check_only and not node_id and not url:
+        raise AgentToolError("node_id 和 url 至少给一个（要把哪个视频转成深度通道）；只查能不能用就传 check_only=true", code="invalid_args")
     canvas_id = str(args.get("canvas_id") or "").strip() or str(_AGENT_RUN_CANVAS_ID.get() or "").strip()
-    return {"canvas_id": canvas_id, "node_id": node_id, "url": url,
-            "keep_audio": args.get("keep_audio", True) is not False}
+    raw_max = args.get("max_seconds")
+    try:
+        max_seconds = float(raw_max) if raw_max not in (None, "") else AGENT_DEPTH_CAPTURE_MAX_SECONDS
+    except (TypeError, ValueError):
+        raise AgentToolError("max_seconds 必须是数字（0 表示不限时长）", code="invalid_args")
+    return {"canvas_id": canvas_id, "node_id": node_id, "url": url, "check_only": check_only,
+            "keep_audio": bool(args.get("keep_audio")), "max_seconds": max(0.0, max_seconds)}
 
 
 def _agent_tool_depth_capture_preview(args, canvas=None):
-    target = args.get("node_id") or args.get("url") or "视频"
-    return "把 %s 转成深度动作通道：本机逐帧推理，视频不上传、不花额度，只产出一段灰度参考视频（越近越亮）。" % target
+    if args.get("check_only"):
+        return "检查本机深度动作捕捉是否可用。"
+    return "把 %s 转成深度动作通道：本机逐帧推理，视频不上传、不花额度，只产出一段灰度参考视频（越近越亮）。" % (
+        args.get("node_id") or args.get("url") or "视频")
 
 
 async def _agent_tool_depth_capture_run(args):
-    """复用 /api/video/depth-capture 的同一条链路：只接受画布里的本地视频，不限时长。"""
-    from server.split_engine import depth_capture
-
-    url = args.get("url") or ""
+    """复用 /api/video/depth-capture 的同一条链路：只接受画布里的本地视频。"""
+    module, reason = _agent_depth_capture_module()
+    ffmpeg = ffmpeg_binary() or ""
+    ready = False
+    if module is not None:
+        ready, reason = module.available(ffmpeg)
+    if args.get("check_only") or not ready:
+        return {"ready": bool(ready), "reason": reason or "",
+                "message": "本机深度动作捕捉可用" if ready else
+                           "本机深度动作捕捉不可用：%s。按技能里的备选来源继续（画布上已有的深度视频 / 请用户上传）" % (reason or "原因未知")}
+    url = str(args.get("url") or "").strip()
     label = "视频"
     canvas = None
     if args.get("canvas_id"):
@@ -44559,22 +44601,23 @@ async def _agent_tool_depth_capture_run(args):
         url, label = _agent_video_node_url(canvas, args["node_id"])
     src = _agent_local_image_path(str(url or "").strip())
     if not src or not os.path.isfile(src):
-        raise AgentToolError("深度动作捕捉只处理画布里的本地视频：请先把参考视频拖进画布（或用画布上的视频节点），再用 node_id 调用",
-                             code="invalid_args")
-    ffmpeg = ffmpeg_binary() or ""
-    ready, reason = depth_capture.available(ffmpeg)
-    if not ready:
-        raise AgentToolError(reason or "本机深度能力未就绪", code="depth_unavailable")
+        raise AgentToolError("深度动作捕捉只处理画布里的本地视频：请先把参考视频拖进画布（或用画布上的视频节点），"
+                             "再用 node_id 调用", code="invalid_args")
     filename = "depth_capture_%s.mp4" % uuid.uuid4().hex[:12]
     output_path = output_path_for(filename, "output")
+    started = time.time()
     result, error = await asyncio.to_thread(
-        depth_capture.capture_video, ffmpeg, src, output_path,
-        keep_audio=bool(args.get("keep_audio", True)))
+        module.capture_video, ffmpeg, src, output_path,
+        max_seconds=float(args.get("max_seconds") or 0.0),
+        keep_audio=bool(args.get("keep_audio")))
     if error or not result:
-        raise AgentToolError(error or "深度视频生成失败", code="depth_failed")
-    seconds = float(result.get("elapsed") or 0)
+        raise AgentToolError(error or "深度视频生成失败", code="depth_capture_failed")
+    seconds = round(float(result.get("elapsed") or (time.time() - started)), 2)
+    depth_url = output_url_for(filename, "output")
     return {
-        "url": output_url_for(filename, "output"),
+        "ready": True,
+        "url": depth_url,
+        "depth_url": depth_url,
         "name": filename,
         "kind": "video",
         "video": label,
@@ -44583,25 +44626,27 @@ async def _agent_tool_depth_capture_run(args):
         "height": result.get("height", 0),
         "frames": result.get("frames", 0),
         "duration": result.get("duration", 0),
-        "seconds": round(seconds, 2),
+        "seconds": seconds,
         "message": "已生成深度动作通道 %s（%s 帧 / %s 秒，本机推理没有上传视频）。"
                    "它只保留动作、节奏、站位和空间关系，不带原片外观：把它当参考视频喂给视频生成节点，"
                    "再配人物 / 产品参考图重生成；不要把灰度深度图当画面外观描述给用户。"
-                   % (label, result.get("frames", 0), result.get("duration", 0)),
+                   % (depth_url, result.get("frames", 0), result.get("duration", 0)),
     }
 
 
 AGENT_TOOLS["depth_capture"] = {
-    "description": "把画布上的参考视频转成「深度动作通道」：本机逐帧推理，视频不上传、不花额度，产出一段灰度深度视频（越近越亮）。"
-                   "用途是做动作迁移 / 运镜复刻：深度视频只负责动作、节奏、站位和空间关系，人物与外观由参考图决定，"
-                   "不要把深度图的灰度外观继承到成片里。限制：只接受画布里的本地视频（用户上传或生成的视频节点），时长不限（长片会慢，按每帧推理时间估），"
-                   "超过就先裁剪或用 analyze_video 的 clip 截段。返回 url 可直接当 generate_video 的 reference_video。"
-                   "node_id 填画布上的视频节点；本机没装模型 / ffmpeg 时会明确告诉你原因。",
+    "description": "本机深度动作捕捉：把画布上的本地视频逐帧转成灰度深度通道视频（越近越亮），去掉颜色、纹理、人物长相，只留动作和空间层次；"
+                   "本地推理、不上传、不花额度。用途是做动作迁移 / 运镜复刻：深度视频只负责动作、节奏、站位和空间关系，人物与外观由参考图决定，"
+                   "不要把深度图的灰度外观继承到成片里。默认最长 30 秒（max_seconds 可调，0 = 不限）；check_only=true 只查本机能不能用（模型 / 依赖是否就绪）。"
+                   "限制：只接受画布里的本地视频（上传或生成的视频节点）；深度里仍保留原物体轮廓（产品形状会被锁住），平面内容（画、文字、屏幕）在深度里是一片平灰，"
+                   "暗片整体偏暗，快切和粒子转场处深度是糊的。返回 url / depth_url 可直接当 generate_video 的 reference_video。",
     "schema": {"type": "object", "properties": {
         "canvas_id": {"type": "string", "description": "不填就用当前画布"},
         "node_id": {"type": "string", "description": "视频节点 id"},
         "url": {"type": "string", "description": "没有节点时直接给画布里的本地视频路径（/assets/… 或 /output/…）"},
-        "keep_audio": {"type": "boolean", "default": True, "description": "是否保留源视频音轨（默认 true）"}}},
+        "check_only": {"type": "boolean", "default": False, "description": "只检查本机深度捕捉是否可用，不转换"},
+        "max_seconds": {"type": "number", "description": "最长处理多少秒（默认 30；0 = 不限，长片会慢）"},
+        "keep_audio": {"type": "boolean", "default": False, "description": "是否保留源视频音轨（默认不要）"}}},
     "validate": _agent_tool_depth_capture_validate,
     "run": _agent_tool_depth_capture_run,
     "preview": _agent_tool_depth_capture_preview,
@@ -44723,6 +44768,324 @@ AGENT_TOOLS["mux_audio"] = {
     "preview": _agent_tool_mux_audio_preview,
     "mutates_canvas": False,
 }
+
+
+# 技能级生成闸门：技能里写的「审查关卡」对模型只是建议，实测会被跳过（不写结构对比、
+# 不问用户就直接生成）。挂了带闸门的技能时，服务端在 generate_image / generate_video
+# 执行前硬检查：①画布上有技能要求的分析节点 ②用户已在问答卡里确认过方案。
+# 确认状态按画布存（问答卡的回答在下一次运行才到），模型自己写「已确认」不算。
+# ---------------------------------------------------------------------------
+
+AGENT_SKILL_GATES = {
+    "product-motion-recast": {
+        "title": "动作复刻换产品",
+        "nodes": (("结构对比", "产品结构对比与节拍映射"), ("分镜", "分镜表")),
+        "confirm": True,
+        # 每张图 / 每段视频都要锚在原片上：原片关键帧、原片片段 / 深度片段，或本技能前面生成的帧
+        "anchor": True,
+    },
+}
+_AGENT_SKILL_GATE_TOOLS = ("generate_image", "generate_video", "batch_generate", "run_batch")
+_AGENT_SKILL_GATE_YES = ("按方案做", "按这个方案", "先只做第一段", "满意", "继续", "确认", "同意", "开始做", "开始生成", "可以", "没问题", "就这样", "ok", "好的", "行")
+_AGENT_SKILL_GATE_STRONG_YES = ("按方案", "按这个方案", "确认方案", "方案确认", "先只做第一段", "开始生成")
+_AGENT_SKILL_GATE_CONFIRM_QUESTIONS = [{"question": "按画布上的「产品结构对比」和「分镜表」开始生成吗？",
+                                        "options": ["按方案做", "先只做第一段试试", "我来改方案"]}]
+_AGENT_SKILL_GATE_NO = ("改方案", "我来改", "修改", "不要", "先别", "不行", "不对")
+_AGENT_RUN_SKILL_GATE = contextvars.ContextVar("novai_agent_run_skill_gate", default="")
+_AGENT_SKILL_GATE_LOCK = Lock()
+_AGENT_RUN_GATE_BLOCKS = contextvars.ContextVar("novai_agent_run_gate_blocks", default=None)
+
+
+def _agent_skill_gate_path():
+    return os.path.join(DATA_DIR, "agent_skill_gates.json")
+
+
+def _agent_skill_gate_load():
+    try:
+        with open(_agent_skill_gate_path(), "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _agent_skill_gate_update(canvas_id, skill_id, **fields):
+    if not canvas_id or not skill_id:
+        return
+    with _AGENT_SKILL_GATE_LOCK:
+        data = _agent_skill_gate_load()
+        key = "%s::%s" % (canvas_id, skill_id)
+        entry = data.get(key) if isinstance(data.get(key), dict) else {}
+        entry.update(fields)
+        data[key] = entry
+        os.makedirs(os.path.dirname(_agent_skill_gate_path()), exist_ok=True)
+        tmp = _agent_skill_gate_path() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=1)
+        os.replace(tmp, _agent_skill_gate_path())
+
+
+def _agent_skill_gate_state(canvas_id, skill_id):
+    entry = _agent_skill_gate_load().get("%s::%s" % (canvas_id, skill_id))
+    return entry if isinstance(entry, dict) else {}
+
+
+def _agent_skill_gate_activate(skill_id):
+    skill_id = str(skill_id or "").strip()
+    if skill_id in AGENT_SKILL_GATES:
+        _AGENT_RUN_SKILL_GATE.set(skill_id)
+
+
+def _agent_skill_gate_answer_confirms(text):
+    text = str(text or "").strip()
+    if not text:
+        return False
+    low = text.lower()
+    if any(word in text for word in _AGENT_SKILL_GATE_NO):
+        return False
+    return any(word in low for word in _AGENT_SKILL_GATE_YES)
+
+
+def _agent_skill_gate_named(instruction):
+    """用户在输入框里用文字点名了带闸门的技能（没从技能按钮选）→ 返回技能 id。"""
+    text = str(instruction or "")
+    for skill_id, gate in AGENT_SKILL_GATES.items():
+        names = {skill_id, str(gate.get("title") or "")}
+        try:
+            skill = _skills_registry.get_skill(skill_id) or {}
+        except Exception:
+            skill = {}
+        if not skill.get("enabled"):
+            continue
+        names.add(str(skill.get("name") or ""))
+        if any(name and name in text for name in names):
+            return skill_id
+    return ""
+
+
+def _agent_skill_gate_begin(ctx, instruction):
+    """运行开始挂闸门，三种情况任一满足：界面选中了技能；用户用文字点名了技能（同时把技能正文注入，
+    不靠模型自己去 activate_skill）；这张画布之前已经挂过这个技能（闸门按画布生效，后续轮次不会掉）。
+    上次问过方案、这次是用户的回答 → 记下是否确认。"""
+    canvas_id = str(getattr(ctx, "canvas_id", "") or "")
+    _AGENT_RUN_GATE_BLOCKS.set([0])
+    _agent_skill_gate_activate(getattr(ctx, "skill_id", ""))
+    named = _agent_skill_gate_named(instruction)
+    if named:
+        _agent_skill_gate_activate(named)
+        if not str(getattr(ctx, "skill_id", "") or "") and not str(getattr(ctx, "skill_prompt", "") or ""):
+            try:
+                ctx.skill_id = named          # 系统提示末尾注入技能全文（同界面选中技能）
+            except Exception:
+                pass
+    if not canvas_id:
+        return
+    current = _AGENT_RUN_SKILL_GATE.get()
+    if current:
+        if not _agent_skill_gate_state(canvas_id, current).get("attached_at"):
+            _agent_skill_gate_update(canvas_id, current, attached_at=time.time())
+    for skill_id in AGENT_SKILL_GATES:
+        state = _agent_skill_gate_state(canvas_id, skill_id)
+        if state.get("attached_at") and not _AGENT_RUN_SKILL_GATE.get():
+            _agent_skill_gate_activate(skill_id)
+        # 没出过确认卡，但用户看过画布上的方案、明确说了「按方案…」：分析节点齐了就算确认
+        if (state.get("attached_at") and not state.get("asked_at") and not state.get("confirmed_at")
+                and any(word in str(instruction or "") for word in _AGENT_SKILL_GATE_STRONG_YES)
+                and not any(word in str(instruction or "") for word in _AGENT_SKILL_GATE_NO)):
+            try:
+                canvas = load_canvas(canvas_id)
+            except HTTPException:
+                canvas = None
+            if canvas is not None and not _agent_skill_gate_missing(canvas, skill_id):
+                _agent_skill_gate_update(canvas_id, skill_id, asked_at=time.time(), answered_at=time.time(),
+                                         answer=str(instruction or "")[:200], confirmed_at=time.time())
+        if state.get("asked_at") and not state.get("answered_at"):
+            confirmed = _agent_skill_gate_answer_confirms(instruction)
+            _agent_skill_gate_update(canvas_id, skill_id, answered_at=time.time(),
+                                     answer=str(instruction or "")[:200],
+                                     confirmed_at=time.time() if confirmed else 0)
+            if confirmed:
+                _agent_skill_gate_activate(skill_id)
+
+
+def _agent_skill_gate_record_ask(questions, message=""):
+    skill_id = _AGENT_RUN_SKILL_GATE.get()
+    canvas_id = str(_AGENT_RUN_CANVAS_ID.get() or "")
+    if not skill_id or not canvas_id or not questions:
+        return
+    if _agent_skill_gate_state(canvas_id, skill_id).get("confirmed_at"):
+        return          # 已确认过方案：后面问「选哪一版」之类的问题不撤销确认
+    _agent_skill_gate_update(canvas_id, skill_id, asked_at=time.time(), answered_at=0, confirmed_at=0,
+                             question=(str(message or "") + " " + json.dumps(questions, ensure_ascii=False))[:400])
+
+
+def _agent_skill_gate_missing(canvas, skill_id):
+    from server.agent_core.read_tools import CanvasAccess
+
+    gate = AGENT_SKILL_GATES.get(skill_id) or {}
+    access = CanvasAccess()
+    heads = []
+    for node in access.nodes(canvas or {}):
+        if access.kind(node) not in ("text", "label"):
+            continue
+        heads.append((access.title(node) + "\n" + (access.text(node) or str(node.get("text") or ""))[:200]))
+    return [label for keyword, label in gate.get("nodes") or () if not any(keyword in h for h in heads)]
+
+
+def _agent_skill_gate_confirm_only(canvas_id):
+    """当前挂着的闸门只差用户确认（分析节点都齐了）→ 返回技能 id，否则空串。"""
+    skill_id = _AGENT_RUN_SKILL_GATE.get()
+    if not skill_id or not canvas_id:
+        return ""
+    if _agent_skill_gate_state(canvas_id, skill_id).get("confirmed_at"):
+        return ""
+    try:
+        canvas = load_canvas(canvas_id)
+    except HTTPException:
+        return ""
+    return "" if _agent_skill_gate_missing(canvas, skill_id) else skill_id
+
+
+_AGENT_SKILL_GATE_MEDIA_RE = re.compile(r"\.(jpe?g|png|webp|gif|mp4|mov|webm|m4v)(\?.*)?$", re.I)
+
+
+def _agent_skill_gate_urls_in(value, out=None):
+    """从工具结果里收集所有媒体地址（帧图 / 片段 / 深度视频）。"""
+    out = [] if out is None else out
+    if isinstance(value, str):
+        v = value.strip()
+        if (v.startswith("/") or v.startswith("http")) and _AGENT_SKILL_GATE_MEDIA_RE.search(v):
+            out.append(v)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _agent_skill_gate_urls_in(item, out)
+    elif isinstance(value, list):
+        for item in value:
+            _agent_skill_gate_urls_in(item, out)
+    return out
+
+
+def _agent_skill_gate_record_result(tool_name, args, result):
+    """挂着要求锚定原片的闸门时，记下原片帧 / 片段 / 深度视频地址和本技能生成的节点，后面判断生成有没有锚在原片上。"""
+    skill_id = _AGENT_RUN_SKILL_GATE.get()
+    gate = AGENT_SKILL_GATES.get(skill_id) or {}
+    if not gate.get("anchor") or not isinstance(result, dict):
+        return
+    canvas_id = str((args or {}).get("canvas_id") or _AGENT_RUN_CANVAS_ID.get() or "")
+    if not canvas_id:
+        return
+    state = _agent_skill_gate_state(canvas_id, skill_id)
+    anchors = list(state.get("anchors") or [])
+    made = list(state.get("made") or [])
+    if tool_name in ("analyze_video", "depth_capture"):
+        for url in _agent_skill_gate_urls_in(result):
+            if url not in anchors:
+                anchors.append(url)
+        if tool_name == "depth_capture" and result.get("node_id"):
+            made.append(str(result["node_id"]))
+    elif tool_name in ("generate_image", "generate_video") and result.get("node_id"):
+        made.append(str(result["node_id"]))
+    else:
+        return
+    _agent_skill_gate_update(canvas_id, skill_id, anchors=anchors[-400:], made=list(dict.fromkeys(made))[-200:])
+
+
+def _agent_skill_gate_raw_urls(value):
+    out = []
+    for item in value if isinstance(value, list) else ([value] if value else []):
+        url = item.get("url") if isinstance(item, dict) else item
+        if isinstance(url, str) and url.strip():
+            out.append(url.strip())
+    return out
+
+
+def _agent_skill_gate_anchor_missing(tool_name, args, canvas, canvas_id, skill_id):
+    """生成请求没锚在原片上 → 返回给模型的说明；锚上了返回空串。"""
+    gate = AGENT_SKILL_GATES.get(skill_id) or {}
+    if not gate.get("anchor"):
+        return ""
+    if tool_name in ("batch_generate", "run_batch"):
+        return ("这个技能每段都要锚在原片对应时刻的画面上、后一段还要接前一段的尾帧，不能用批量生成。"
+                "请按分镜表逐段用 generate_image（首帧 / 尾帧）和 generate_video 来做")
+    state = _agent_skill_gate_state(canvas_id, skill_id)
+    anchors = set(state.get("anchors") or [])
+    made = set(state.get("made") or [])
+
+    def is_anchor_url(url):
+        return "/agent_video_reader/" in url or url in anchors
+
+    by_id = _agent_nodes_by_id(canvas or {})
+    input_ids = [str(i.get("id") if isinstance(i, dict) else i or "").strip() for i in (args.get("inputs") or [])]
+    node_hit = False
+    video_input = False
+    for nid in input_ids:
+        node = by_id.get(nid)
+        if not node:
+            continue
+        url = _agent_beat_url(node)
+        if nid in made or (url and is_anchor_url(url)):
+            node_hit = True
+        if str(node.get("kind") or node.get("type") or "") == "video":
+            video_input = True
+    image_hit = node_hit or any(is_anchor_url(u) for u in _agent_skill_gate_raw_urls(args.get("reference_urls")))
+    if tool_name == "generate_image":
+        if image_hit:
+            return ""
+        return ("这张图没有锚在原片上：参考里只有产品 / 场景图，生成出来的构图、机位和原片对不上，段与段也接不起来。"
+                "请在 reference_urls 里放原片该时刻的关键帧（analyze_video 返回的 frames[].url，接上一段时用上一段成片的 last_frame_url），"
+                "产品图、场景图照常放 inputs，提示词写「保持参考图 1 的构图、机位、光线和背景，只把产品换成新产品」")
+    if tool_name == "generate_video":
+        if _agent_skill_gate_raw_urls(args.get("reference_video")) or video_input or image_hit:
+            return ""
+        return ("这段视频没有锚在原片上：锁动作段要把这一段的深度片段或原片 clip_url 放进 reference_video；"
+                "重做段要把本技能已生成并审查过的首帧 / 尾帧节点放进 inputs（或 reference_urls 放上一段的 last_frame_url）。"
+                "只靠文字和产品图生成的视频接不上原片")
+    return ""
+
+
+def _agent_skill_gate_check(tool_name, args):
+    """生成前的硬检查；返回 None 放行，否则返回拦下时给模型的结果。"""
+    skill_id = _AGENT_RUN_SKILL_GATE.get()
+    if tool_name not in _AGENT_SKILL_GATE_TOOLS or not skill_id:
+        return None
+    gate = AGENT_SKILL_GATES.get(skill_id) or {}
+    canvas_id = str((args or {}).get("canvas_id") or _AGENT_RUN_CANVAS_ID.get() or "")
+    try:
+        canvas = load_canvas(canvas_id) if canvas_id else {}
+    except HTTPException:
+        canvas = {}
+    missing = _agent_skill_gate_missing(canvas, skill_id)
+    state = _agent_skill_gate_state(canvas_id, skill_id) if canvas_id else {}
+    need_confirm = bool(gate.get("confirm")) and not state.get("confirmed_at")
+    if not missing and not need_confirm:
+        hint = _agent_skill_gate_anchor_missing(tool_name, args or {}, canvas, canvas_id, skill_id)
+        if hint:
+            return {"ok": False, "tool": tool_name, "code": "skill_source_missing", "status_code": 409,
+                    "error": "技能「%s」：%s。改好参考再调用，不用重新确认方案。" % (gate.get("title") or skill_id, hint)}
+        return None
+    todo = []
+    if missing:
+        todo.append("先用 create_node(type=text) 写好%s（标题要带这几个字），按技能逐项写出判定和依据" %
+                    "、".join("「%s」" % m for m in missing))
+    if need_confirm:
+        if state.get("answered_at") and not state.get("confirmed_at"):
+            todo.append("用户上次没有确认方案（回答：%s），按用户意见改分镜表后再用 ask_user 确认一次" %
+                        (state.get("answer") or "空"))
+        else:
+            todo.append("再用 ask_user 把方案交给用户确认（选项至少有「按方案做」「先只做第一段试试」「我来改方案」），"
+                        "用户确认之前不生成任何图片和视频")
+    counter = _AGENT_RUN_GATE_BLOCKS.get()
+    if counter is None:
+        counter = [0]
+        _AGENT_RUN_GATE_BLOCKS.set(counter)
+    counter[0] += 1
+    error = "技能「%s」的生成闸门：还不能生成。%s。不花钱的步骤（读视频、写分析、本机深度、审查）可以继续做。" % (
+        gate.get("title") or skill_id, "；".join(todo))
+    if counter[0] >= 2:
+        error = ("本轮已被生成闸门拦下 %d 次：换提示词、换参数、换成别的生成工具都会被拦，不要再调用任何生成工具。"
+                 "下一步只能做上面缺的事（写节点 / ask_user）。" % counter[0]) + error
+    return {"ok": False, "tool": tool_name, "code": "skill_gate_blocked", "status_code": 409, "error": error}
+
 
 
 # ---------------------------------------------------------------------------
@@ -44926,6 +45289,9 @@ async def agent_execute_step(tool_name, args):
     if not entry:
         return {"ok": False, "tool": tool_name, "error": f"未知工具：{tool_name}",
                 "code": "unknown_tool", "status_code": 400}
+    gate_block = _agent_skill_gate_check(tool_name, args or {})
+    if gate_block:
+        return gate_block
     notes_token = _AGENT_TABLE_CELL_NOTES.set([])
     try:
         norm_args = entry["validate"](_agent_resolve_aliases_in_args(args or {}))
@@ -44934,6 +45300,10 @@ async def agent_execute_step(tool_name, args):
         notes = list(_AGENT_TABLE_CELL_NOTES.get() or [])
         _AGENT_TABLE_CELL_NOTES.reset(notes_token)
         payload = {"ok": True, "tool": tool_name, "result": result, "message": "执行成功"}
+        try:
+            _agent_skill_gate_record_result(tool_name, norm_args, result)
+        except Exception:
+            pass
         if notes:
             payload["message"] = "执行成功（" + "；".join(notes[:4]) + "）"
             payload["warnings"] = notes
@@ -46488,7 +46858,7 @@ AGENT_RUN_MAX_ROUNDS = _agent_run_limit_from_env("NOVAI_AGENT_MAX_ROUNDS", 60)
 # 步数不限之后时长才是真刹车：跑满一小时还没结论就停，不让一个 run 无限挂着
 AGENT_RUN_MAX_SECONDS = _agent_run_limit_from_env("NOVAI_AGENT_MAX_SECONDS", 3600)
 # 这些工具只是「查一下 / 等结果」：成功也不占步数，否则 check_task 轮询会把长任务顶到步数上限
-AGENT_RUN_STEP_FREE_TOOLS = {"check_task", "get_canvas", "list_canvases", "list_templates", "use_asset", "review_table", "analyze_video"}
+AGENT_RUN_STEP_FREE_TOOLS = {"check_task", "get_canvas", "list_canvases", "list_templates", "use_asset", "review_table", "analyze_video", "depth_capture"}
 # 阶段一（NOVAI_AGENT_V2_READ_TOOLS）：按需读取工具只读、不花钱，成功也不占步数
 if _agent_v2_read_tools_enabled():
     AGENT_RUN_STEP_FREE_TOOLS |= set(_agent_read_tools.READ_TOOL_NAMES)
@@ -47911,7 +48281,7 @@ _AGENT_STEP_LABELS = {
     "web_search": "联网搜索", "fetch_url": "读取网页", "search_images": "搜索参考图",
     "find_similar_images": "以图搜图", "lipsync_video": "对口型", "check_task": "查询任务",
     "activate_skill": "加载技能", "use_asset": "使用素材",
-    "batch_generate": "建多维表格并批量生成", "run_batch": "运行批量生成", "review_table": "检查表格", "analyze_video": "读参考视频",
+    "batch_generate": "建多维表格并批量生成", "run_batch": "运行批量生成", "review_table": "检查表格", "analyze_video": "读参考视频", "depth_capture": "本机深度动作捕捉",
 }
 _AGENT_NODE_TYPE_LABELS = {"text": "文本", "prompt": "提示词", "image": "图片", "video": "视频",
                            "audio": "配音", "timeline": "时间线", "group": "分组",
@@ -51233,6 +51603,7 @@ def _agent_decision_from_native(raw, canvas_id, tools=None):
             continue
         if name == _AGENT_ASK_TOOL:
             # 要问用户：这一轮就到这里，问题交给面板的问答卡（同时出的画布步骤不执行）
+            _agent_skill_gate_record_ask(args.get("questions") or [], args.get("message") or "")
             return {"done": True, "native": True, "reasoning": reasoning,
                     "thought": _agent_clean_native_text(content)[:_agent_thought_max_chars()],
                     "message": str(args.get("message") or _agent_clean_native_text(content) or "").strip(),
@@ -53638,6 +54009,8 @@ async def _agent_run_producer(req, queue, bus=None):
     focus = req["focus"]
     chat = req["chat"]
     run_chat_token = _AGENT_RUN_CHAT.set(chat)      # 反图优先用本次 run 的对话模型读图
+    if canvas_run:
+        _agent_skill_gate_begin(ctx, instruction)
     _AGENT_BEAT_RUN.set(str(req.get("renderer") or "") == "beat")
     max_steps = _agent_run_normalize_max_steps(req.get("max_steps"))
     chat_history = req.get("history") or []
@@ -54335,6 +54708,7 @@ async def _agent_run_producer(req, queue, bus=None):
                 status = "ok"
                 message = summary_text or f"Agent 已完成（执行 {steps_executed} 步，共 {rounds} 轮）"
                 if decision.get("questions"):
+                    _agent_skill_gate_record_ask(decision.get("questions"), summary_text)
                     message = _agent_message_with_questions(summary_text, decision.get("questions"),
                                                             kind="confirm" if decision.get("confirm") is True else "")
                 break
@@ -54620,6 +54994,19 @@ async def _agent_run_producer(req, queue, bus=None):
                               (time.monotonic() - round_tools_started) * 1000.0, chat.get("model"))
             if budget_blocked:
                 break               # 已经发过 budget_required，本轮到此为止
+            # 技能闸门：本轮生成被拦、而且只差用户确认 → 服务端直接出确认卡结束本轮（实测模型被拦后只会换提示词重试）
+            if any(isinstance(r, dict) and r.get("code") == "skill_gate_blocked"
+                   for r in results[round_results_start:]):
+                gate_skill = _agent_skill_gate_confirm_only(str(context_id or ""))
+                if gate_skill:
+                    gate_title = (AGENT_SKILL_GATES.get(gate_skill) or {}).get("title") or gate_skill
+                    summary_text = ("「%s」的分析和分镜已经写在画布上（「产品结构对比」「分镜表」节点）。"
+                                    "生成要花额度，先请你确认方案。" % gate_title)
+                    _agent_skill_gate_record_ask(_AGENT_SKILL_GATE_CONFIRM_QUESTIONS, summary_text)
+                    emit("message", {"text": summary_text})
+                    status = "ok"
+                    message = _agent_message_with_questions(summary_text, _AGENT_SKILL_GATE_CONFIRM_QUESTIONS)
+                    break
             # BEAT：本轮交给画布跑的节点，等它们出结果（或失败）再进下一轮，模型才能看到结果接着做
             def _queued(obj, depth=0):
                 # canvas_cli 会把工具结果再包一层：往里找两层
@@ -54802,6 +55189,7 @@ async def _agent_run_producer(req, queue, bus=None):
                     status = "ok"
                     message = summary_text or f"Agent 已完成（执行 {steps_executed} 步，共 {rounds} 轮）"
                     if deferred.get("questions"):
+                        _agent_skill_gate_record_ask(deferred.get("questions"), summary_text)
                         message = _agent_message_with_questions(
                             summary_text, deferred.get("questions"),
                             kind="confirm" if deferred.get("confirm") is True else "")
