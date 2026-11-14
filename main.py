@@ -44216,6 +44216,130 @@ AGENT_TOOLS["depth_capture"] = {
 
 
 # ---------------------------------------------------------------------------
+# extract_audio：把画布上本地视频的原声抽成音频节点（ffmpeg，本机、不花额度），
+# 复刻成片要沿用原片的配乐 / 口播时，用 create_timeline(audio_nodes=[这个节点]) 铺在成片下面。
+# ---------------------------------------------------------------------------
+
+
+def _agent_tool_extract_audio_validate(args):
+    args = dict(args or {})
+    node_id = str(args.get("node_id") or "").strip()
+    url = str(args.get("url") or "").strip()
+    if not node_id and not url:
+        raise AgentToolError("node_id 和 url 至少给一个（要抽哪个视频的声音）", code="invalid_args")
+    def _sec(key):
+        try:
+            v = float(args.get(key)) if args.get(key) not in (None, "") else None
+        except (TypeError, ValueError):
+            raise AgentToolError("%s 必须是秒数" % key, code="invalid_args")
+        if v is not None and v < 0:
+            raise AgentToolError("%s 不能是负数" % key, code="invalid_args")
+        return v
+    start, end = _sec("start"), _sec("end")
+    if start is not None and end is not None and end <= start:
+        raise AgentToolError("end 必须大于 start", code="invalid_args")
+    canvas_id = str(args.get("canvas_id") or "").strip() or str(_AGENT_RUN_CANVAS_ID.get() or "").strip()
+    if not canvas_id:
+        raise AgentToolError("缺少 canvas_id", code="invalid_args")
+    return {"canvas_id": canvas_id, "node_id": node_id, "url": url, "start": start, "end": end,
+            "title": str(args.get("title") or "").strip()[:60]}
+
+
+def _agent_tool_extract_audio_preview(args, canvas=None):
+    return "把 %s 的原声抽成音频节点（本机处理，不花额度）。" % (args.get("node_id") or args.get("url") or "视频")
+
+
+def _agent_extract_audio_sync(ffmpeg, src, out_path, start=None, end=None):
+    probe = ffprobe_binary()
+    if probe:
+        res = subprocess.run([probe, "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+                              "-of", "csv=p=0", src], capture_output=True, text=True, timeout=30)
+        if not (res.stdout or "").strip():
+            return None, "这个视频没有声音轨道"
+    cmd = [ffmpeg, "-y", "-v", "error"]
+    if start:
+        cmd += ["-ss", "%.3f" % start]
+    cmd += ["-i", src]
+    if end is not None:
+        cmd += ["-t", "%.3f" % (end - (start or 0))]
+    cmd += ["-vn", "-ac", "2", "-ar", "44100", "-c:a", "aac", "-b:a", "192k", out_path]
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if res.returncode != 0 or not os.path.isfile(out_path):
+        return None, _agent_clean_error_text(res.stderr or "", fallback="抽取声音失败")
+    seconds = 0.0
+    if probe:
+        dur = subprocess.run([probe, "-v", "error", "-show_entries", "format=duration", "-of",
+                              "default=nw=1:nk=1", out_path], capture_output=True, text=True, timeout=30)
+        try:
+            seconds = float((dur.stdout or "0").strip() or 0)
+        except ValueError:
+            seconds = 0.0
+    return {"duration": round(seconds, 3)}, ""
+
+
+async def _agent_tool_extract_audio_run(args):
+    ffmpeg = ffmpeg_binary()
+    if not ffmpeg:
+        raise AgentToolError("本机没有 ffmpeg，抽不了声音", code="ffmpeg_missing")
+    url, label = args.get("url") or "", "视频"
+    try:
+        canvas = load_canvas(args["canvas_id"])
+    except HTTPException:
+        raise AgentToolError("读不到当前画布", code="canvas_not_found", status_code=404)
+    if args.get("node_id"):
+        url, label = _agent_video_node_url(canvas, args["node_id"])
+    src = output_file_from_url(url)
+    if not src or not os.path.isfile(src):
+        raise AgentToolError("只支持画布里的本地视频（上传或生成到本机的 /output、/assets 文件）", code="invalid_args")
+    filename = "audio_extract_%s.m4a" % uuid.uuid4().hex[:12]
+    out_path = output_path_for(filename, "output")
+    result, error = await asyncio.to_thread(_agent_extract_audio_sync, ffmpeg, src, out_path,
+                                            args.get("start"), args.get("end"))
+    if error or not result:
+        raise AgentToolError(error or "抽取声音失败", code="extract_audio_failed")
+    audio_url = output_url_for(filename, "output")
+    title = args.get("title") or ("%s 原声" % label)[:60]
+    state = {}
+
+    def _mutate(cv):
+        w, h = _AGENT_BEAT_SIZE["audio"]
+        near = [args["node_id"]] if args.get("node_id") else []
+        x, y = _agent_beat_place(cv, near, w, h)
+        node = _agent_beat_new_node("audio", x, y, title=title, url=audio_url, uploaded=True)
+        hist = (node.get("data") or {}).get("gen", {}).get("hist") or []
+        if hist and result.get("duration"):
+            hist[0]["dur"] = result["duration"]
+        cv.setdefault("nodes", []).append(node)
+        if args.get("node_id"):
+            cv.setdefault("connections", []).append(_agent_beat_edge(args["node_id"], node["id"]))
+        state["node"] = node
+        return None
+
+    _agent_mutate_canvas(args["canvas_id"], _mutate)
+    return {"node_id": state["node"]["id"], "title": title, "audio_url": audio_url, "source_url": url,
+            "duration": result.get("duration", 0),
+            "message": "已把原声抽成音频节点「%s」（%.1f 秒）。成片沿用原声时，create_node(type=timeline) 的 music 填这个节点 id"
+                       "（会自动静音各镜头自带的声音）" % (title, result.get("duration", 0))}
+
+
+AGENT_TOOLS["extract_audio"] = {
+    "description": "把画布上本地视频的原声（配乐 + 口播）抽成音频节点，本机处理、不花额度；可用 start / end 只抽一段。"
+                   "复刻视频要沿用原声时用它，再把这个音频节点当 create_node(type=timeline) 的 music 铺在成片下面。",
+    "schema": {"type": "object", "properties": {
+        "canvas_id": {"type": "string", "description": "不填就用当前画布"},
+        "node_id": {"type": "string", "description": "视频节点 id"},
+        "url": {"type": "string", "description": "没有节点时直接给本地视频地址（/output 或 /assets）"},
+        "start": {"type": "number", "description": "从第几秒开始抽（可选）"},
+        "end": {"type": "number", "description": "抽到第几秒（可选）"},
+        "title": {"type": "string", "description": "音频节点标题（可选）"}}},
+    "validate": _agent_tool_extract_audio_validate,
+    "run": _agent_tool_extract_audio_run,
+    "preview": _agent_tool_extract_audio_preview,
+    "mutates_canvas": True,
+}
+
+
+# ---------------------------------------------------------------------------
 # 技能级生成闸门：技能里写的「审查关卡」对模型只是建议，实测会被跳过（不写结构对比、
 # 不问用户就直接生成）。挂了带闸门的技能时，服务端在 generate_image / generate_video
 # 执行前硬检查：①画布上有技能要求的分析节点 ②用户已在问答卡里确认过方案。
@@ -46284,7 +46408,7 @@ AGENT_RUN_MAX_ROUNDS = _agent_run_limit_from_env("NOVAI_AGENT_MAX_ROUNDS", 60)
 # 步数不限之后时长才是真刹车：跑满一小时还没结论就停，不让一个 run 无限挂着
 AGENT_RUN_MAX_SECONDS = _agent_run_limit_from_env("NOVAI_AGENT_MAX_SECONDS", 3600)
 # 这些工具只是「查一下 / 等结果」：成功也不占步数，否则 check_task 轮询会把长任务顶到步数上限
-AGENT_RUN_STEP_FREE_TOOLS = {"check_task", "get_canvas", "list_canvases", "list_templates", "use_asset", "review_table", "analyze_video", "depth_capture"}
+AGENT_RUN_STEP_FREE_TOOLS = {"check_task", "get_canvas", "list_canvases", "list_templates", "use_asset", "review_table", "analyze_video", "depth_capture", "extract_audio"}
 # 阶段一（NOVAI_AGENT_V2_READ_TOOLS）：按需读取工具只读、不花钱，成功也不占步数
 if _agent_v2_read_tools_enabled():
     AGENT_RUN_STEP_FREE_TOOLS |= set(_agent_read_tools.READ_TOOL_NAMES)
@@ -47707,7 +47831,7 @@ _AGENT_STEP_LABELS = {
     "web_search": "联网搜索", "fetch_url": "读取网页", "search_images": "搜索参考图",
     "find_similar_images": "以图搜图", "lipsync_video": "对口型", "check_task": "查询任务",
     "activate_skill": "加载技能", "use_asset": "使用素材",
-    "batch_generate": "建多维表格并批量生成", "run_batch": "运行批量生成", "review_table": "检查表格", "analyze_video": "读参考视频", "depth_capture": "本机深度动作捕捉",
+    "batch_generate": "建多维表格并批量生成", "run_batch": "运行批量生成", "review_table": "检查表格", "analyze_video": "读参考视频", "depth_capture": "本机深度动作捕捉", "extract_audio": "抽取原声",
 }
 _AGENT_NODE_TYPE_LABELS = {"text": "文本", "prompt": "提示词", "image": "图片", "video": "视频",
                            "audio": "配音", "timeline": "时间线", "group": "分组",
