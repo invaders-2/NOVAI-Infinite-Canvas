@@ -40391,6 +40391,8 @@ def _agent_tool_activate_skill_run(args):
         prompt = prompt[:AGENT_SKILL_PROMPT_MAX_CHARS] + AGENT_SKILL_TRUNCATED_NOTE
     activated.add(name)
     _agent_skill_gate_activate(skill.get("id") or name)
+    if _AGENT_RUN_SKILL_GATE.get() and _AGENT_RUN_CANVAS_ID.get():
+        _agent_skill_gate_update(_AGENT_RUN_CANVAS_ID.get(), _AGENT_RUN_SKILL_GATE.get(), attached_at=time.time())
     return {"name": name, "skill_id": skill.get("id"), "title": skill.get("name") or name,
             "characters": len(prompt), "truncated": truncated, "already_loaded": False,
             "text": prompt}
@@ -44090,7 +44092,7 @@ AGENT_TOOLS["analyze_video"] = {
     "description": "读懂一个参考视频（只读、不改画布）：在指定区间均匀抽 4–24 帧，拼成带「#序号 时间」标注的关键帧网格图并在下一轮交给你看；"
                    "同时转写口播，按句带 [mm:ss] 时间戳（走设置里的语音转写，没配会明确说明）。"
                    "返回时长、分辨率/画幅、硬切点 cuts、每帧地址（可直接当参考图）、整条视频真正的首帧 / 尾帧 first_frame_url / last_frame_url（接镜头用）和口播；"
-                   "clip=true 时把 start–end 这段（2–15 秒）截成 clip_url，可直接当 generate_video 的 reference_video。"
+                   "clip=true 时把 start–end 这段（2–15 秒，超过 15 秒会失败，读全片时不要带 clip）截成 clip_url，可直接当 generate_video 的 reference_video。"
                    "视频复刻 / 拆解爆款 / 分析节奏和分镜时先用它读全片，再用 start/end 缩小到某一段细看；"
                    "不要只看封面帧就下结论。node_id 填画布上的视频节点（用户上传或生成的）。",
     "schema": {"type": "object", "properties": {
@@ -44273,14 +44275,47 @@ def _agent_skill_gate_answer_confirms(text):
     return any(word in low for word in _AGENT_SKILL_GATE_YES)
 
 
+def _agent_skill_gate_named(instruction):
+    """用户在输入框里用文字点名了带闸门的技能（没从技能按钮选）→ 返回技能 id。"""
+    text = str(instruction or "")
+    for skill_id, gate in AGENT_SKILL_GATES.items():
+        names = {skill_id, str(gate.get("title") or "")}
+        try:
+            skill = _skills_registry.get_skill(skill_id) or {}
+        except Exception:
+            skill = {}
+        if not skill.get("enabled"):
+            continue
+        names.add(str(skill.get("name") or ""))
+        if any(name and name in text for name in names):
+            return skill_id
+    return ""
+
+
 def _agent_skill_gate_begin(ctx, instruction):
-    """运行开始：选中了带闸门的技能就挂上；上次问过方案、这次是用户的回答 → 记下是否确认。"""
+    """运行开始挂闸门，三种情况任一满足：界面选中了技能；用户用文字点名了技能（同时把技能正文注入，
+    不靠模型自己去 activate_skill）；这张画布之前已经挂过这个技能（闸门按画布生效，后续轮次不会掉）。
+    上次问过方案、这次是用户的回答 → 记下是否确认。"""
     canvas_id = str(getattr(ctx, "canvas_id", "") or "")
     _agent_skill_gate_activate(getattr(ctx, "skill_id", ""))
+    named = _agent_skill_gate_named(instruction)
+    if named:
+        _agent_skill_gate_activate(named)
+        if not str(getattr(ctx, "skill_id", "") or "") and not str(getattr(ctx, "skill_prompt", "") or ""):
+            try:
+                ctx.skill_id = named          # 系统提示末尾注入技能全文（同界面选中技能）
+            except Exception:
+                pass
     if not canvas_id:
         return
+    current = _AGENT_RUN_SKILL_GATE.get()
+    if current:
+        if not _agent_skill_gate_state(canvas_id, current).get("attached_at"):
+            _agent_skill_gate_update(canvas_id, current, attached_at=time.time())
     for skill_id in AGENT_SKILL_GATES:
         state = _agent_skill_gate_state(canvas_id, skill_id)
+        if state.get("attached_at") and not _AGENT_RUN_SKILL_GATE.get():
+            _agent_skill_gate_activate(skill_id)
         if state.get("asked_at") and not state.get("answered_at"):
             confirmed = _agent_skill_gate_answer_confirms(instruction)
             _agent_skill_gate_update(canvas_id, skill_id, answered_at=time.time(),
@@ -44295,6 +44330,8 @@ def _agent_skill_gate_record_ask(questions, message=""):
     canvas_id = str(_AGENT_RUN_CANVAS_ID.get() or "")
     if not skill_id or not canvas_id or not questions:
         return
+    if _agent_skill_gate_state(canvas_id, skill_id).get("confirmed_at"):
+        return          # 已确认过方案：后面问「选哪一版」之类的问题不撤销确认
     _agent_skill_gate_update(canvas_id, skill_id, asked_at=time.time(), answered_at=0, confirmed_at=0,
                              question=(str(message or "") + " " + json.dumps(questions, ensure_ascii=False))[:400])
 
@@ -53147,9 +53184,9 @@ async def _agent_run_producer(req, queue, bus=None):
     instruction = req["instruction"]
     focus = req["focus"]
     chat = req["chat"]
-    run_chat_token = _AGENT_RUN_CHAT.set(chat)
+    run_chat_token = _AGENT_RUN_CHAT.set(chat)      # 反图优先用本次 run 的对话模型读图
     if canvas_run:
-        _agent_skill_gate_begin(ctx, instruction)      # 反图优先用本次 run 的对话模型读图
+        _agent_skill_gate_begin(ctx, instruction)
     _AGENT_BEAT_RUN.set(str(req.get("renderer") or "") == "beat")
     max_steps = _agent_run_normalize_max_steps(req.get("max_steps"))
     chat_history = req.get("history") or []

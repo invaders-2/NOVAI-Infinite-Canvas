@@ -82,6 +82,35 @@ class SkillGateTests(unittest.TestCase):
         self.canvas["nodes"] = [text_node("a", "产品结构对比与节拍映射"), text_node("b", "分镜表 用户已确认")]
         self.assertIsNotNone(self.check())
 
+    def test_named_in_text_attaches_and_injects(self):
+        ctx = types.SimpleNamespace(canvas_id="cv1", skill_id="", skill_prompt="")
+        with mock.patch.object(main._skills_registry, "get_skill",
+                               return_value={"id": SKILL, "name": "动作复刻换产品", "enabled": True}):
+            main._agent_skill_gate_begin(ctx, "用动作复刻换产品技能，把鞋换成我的")
+        self.assertEqual(ctx.skill_id, SKILL)
+        self.assertEqual(main._AGENT_RUN_SKILL_GATE.get(), SKILL)
+        self.assertIsNotNone(self.check())
+        # 下一轮没点名、没选技能：这张画布挂过，闸门照样生效
+        main._AGENT_RUN_SKILL_GATE.set("")
+        with mock.patch.object(main._skills_registry, "get_skill", return_value={"enabled": True}):
+            main._agent_skill_gate_begin(types.SimpleNamespace(canvas_id="cv1", skill_id=""), "继续做")
+        self.assertEqual(main._AGENT_RUN_SKILL_GATE.get(), SKILL)
+
+    def test_disabled_skill_name_does_not_attach(self):
+        ctx = types.SimpleNamespace(canvas_id="cv2", skill_id="", skill_prompt="")
+        with mock.patch.object(main._skills_registry, "get_skill", return_value={"enabled": False}):
+            main._agent_skill_gate_begin(ctx, "动作复刻换产品")
+        self.assertEqual(main._AGENT_RUN_SKILL_GATE.get(), "")
+
+    def test_later_questions_do_not_revoke_confirmation(self):
+        main._agent_skill_gate_activate(SKILL)
+        self.canvas["nodes"] = [text_node("a", "产品结构对比与节拍映射"), text_node("b", "分镜表")]
+        main._agent_skill_gate_record_ask([{"question": "确认方案？"}])
+        main._agent_skill_gate_begin(types.SimpleNamespace(canvas_id="cv1", skill_id=""), "按方案做")
+        main._agent_skill_gate_record_ask([{"question": "选哪一版？"}])
+        main._agent_skill_gate_begin(types.SimpleNamespace(canvas_id="cv1", skill_id=""), "第二版")
+        self.assertIsNone(self.check())
+
     def test_answer_parser(self):
         self.assertTrue(main._agent_skill_gate_answer_confirms("先只做第一段试试"))
         self.assertTrue(main._agent_skill_gate_answer_confirms("可以，开始吧"))
