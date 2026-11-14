@@ -23,6 +23,13 @@ async function rawLibrary(): Promise<Row> {
   return data.library || { libraries: [] };
 }
 
+/** 按文件夹 id 找它所在的资产库（抽屉现在列出所有库的文件夹，不能再默认用第一个库） */
+function libraryOwning(data: Row, categoryId: unknown): Row | null {
+  const id = String(categoryId || "").replace(/^asset:/, "");
+  if (!id) return null;
+  return (data.libraries || []).find((lib: Row) => (lib.categories || []).some((cat: Row) => String(cat.id) === id)) || null;
+}
+
 function categories(library: Row | null, imageOnly = false): Row[] {
   return (library?.categories || []).filter((cat: Row) => !imageOnly || (cat.type || "image") === "image");
 }
@@ -162,6 +169,24 @@ async function upsert(input: Row): Promise<Row> {
   return importAsset({ ...input, ...item });
 }
 
+/**
+ * 抽屉 / 保存弹窗要看到**所有**资产库的文件夹：/api/asset-library 的 library.categories 只镜像「当前激活」的库，
+ * 新建一个库后激活库就切过去了，抽屉里原来的素材全看不见、存进别的库的也看不见。
+ * 这里把所有库的分类摊平；有多个库时，非默认库的顶级文件夹名前加「库名 · 」免得同名文件夹分不清。
+ */
+export function allLibrariesView(asset: Row): Row {
+  const library = asset?.library || {};
+  const libs: Row[] = Array.isArray(library.libraries) ? library.libraries : [];
+  if (!libs.length) return asset;
+  const multi = libs.length > 1;
+  const categories: Row[] = [];
+  for (const lib of libs) {
+    const prefix = multi && lib.id !== "default" ? String(lib.name || "资产库") + " · " : "";
+    for (const cat of lib.categories || []) categories.push(prefix && !cat.parent_id ? { ...cat, name: prefix + String(cat.name || "") } : cat);
+  }
+  return { ...asset, library: { ...library, categories } };
+}
+
 let globalExtrasCache: { at: number; asset: Row; prompt: Row } | null = null;
 const globalPageCache = new Map<string, { at: number; data: Row }>();
 /**
@@ -188,7 +213,7 @@ async function globalAssets(limit = 60, refresh = false): Promise<Row> {
       request("/api/asset-library").catch(() => ({ library: { categories: [] } })),
       request("/api/prompt-libraries").catch(() => ({ library: { libraries: [] } })),
     ]);
-    globalExtrasCache = { at: Date.now(), asset, prompt };
+    globalExtrasCache = { at: Date.now(), asset: allLibrariesView(asset), prompt };
   }
   const [canvasData, localData] = await Promise.all([
     request("/api/canvas-assets?limit=" + limit).catch(() => ({ categories: [], items: [] })),
@@ -277,21 +302,27 @@ async function canvasCommand(input: Row): Promise<Row> {
     return { ok: true, folders: categories(lib, true).map((cat: Row) => ({ name: String(cat.name), count: (cat.items || []).length, custom: true })) };
   }
   if (type === "canvas/assetLibrary/folderCreate") {
-    const made = await request("/api/asset-library/categories", json({ library_id: String(input.libraryId || ""), name: String(input.name || ""), type: "image", ...(input.parentId ? { parent_id: String(input.parentId) } : {}) }));
+    const owner = input.parentId ? libraryOwning(await rawLibrary(), input.parentId) : null;
+    const made = await request("/api/asset-library/categories", json({ library_id: String(owner?.id || input.libraryId || ""), name: String(input.name || ""), type: "image", ...(input.parentId ? { parent_id: String(input.parentId) } : {}) }));
     return { ok: true, folder: made.category };
   }
   if (type === "canvas/assetLibrary/folderRename") {
-    const lib = findLibrary(await rawLibrary(), String(input.libraryId || ""));
+    const data = await rawLibrary();
+    const lib = libraryOwning(data, input.categoryId) || findLibrary(data, String(input.libraryId || ""));
     const cat = String(input.categoryId || "") ? categories(lib, true).find((row: Row) => String(row.id) === String(input.categoryId)) : categories(lib, true).find((row: Row) => row.name === input.from);
     if (!cat) throw new Error("文件夹不存在");
-    const made = await request(`/api/asset-library/categories/${encodeURIComponent(String(cat.id))}`, json({ name: String(input.to || ""), library_id: String(input.libraryId || "") }, "PATCH"));
+    // 抽屉给非默认库的文件夹名加了「库名 · 」前缀（allLibrariesView），改名时别把前缀存进去
+    const prefix = String(lib?.name || "") + " · ";
+    const to = String(input.to || "").startsWith(prefix) ? String(input.to || "").slice(prefix.length) : String(input.to || "");
+    const made = await request(`/api/asset-library/categories/${encodeURIComponent(String(cat.id))}`, json({ name: to, library_id: String(lib?.id || input.libraryId || "") }, "PATCH"));
     return { ok: true, folder: made.category };
   }
   if (type === "canvas/assetLibrary/folderDelete") {
-    const lib = findLibrary(await rawLibrary(), String(input.libraryId || ""));
+    const data = await rawLibrary();
+    const lib = libraryOwning(data, input.categoryId) || findLibrary(data, String(input.libraryId || ""));
     const cat = String(input.categoryId || "") ? categories(lib, false).find((row: Row) => String(row.id) === String(input.categoryId)) : categories(lib, false).find((row: Row) => row.name === input.name);
     if (!cat) throw new Error("文件夹不存在");
-    const made = await commandOf(`/api/asset-library/categories/${encodeURIComponent(String(cat.id))}?library_id=${encodeURIComponent(String(input.libraryId || ""))}`, { method: "DELETE" });
+    const made = await commandOf(`/api/asset-library/categories/${encodeURIComponent(String(cat.id))}?library_id=${encodeURIComponent(String(lib?.id || input.libraryId || ""))}`, { method: "DELETE" });
     return { ok: true, ...made };
   }
   if (type === "canvas/assetLibrary/folderMove") {

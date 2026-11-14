@@ -106,7 +106,7 @@ assert.ok(!favRow.includes('name="right"'), '收藏/主体库行也去掉行尾�
 const saveRows = component.slice(component.indexOf('className={"lib-row sl-frow"'), component.indexOf('className={"lib-row sl-frow"') + 900);
 assert.ok(saveRows.includes('paddingLeft: 6 + r.depth * 15'), '保存弹窗保留层级缩进');
 assert.ok(!saveRows.includes('lib-caret') && !saveRows.includes('name="right"'), '保存弹窗没有展开箭头');
-assert.ok(saveRows.includes('onClick={() => setSel(r.name)}'), '保存弹窗单击只选中');
+assert.ok(saveRows.includes('onClick={() => setSel(folderKeyOf(r))}'), '保存弹窗单击只选中（按文件夹 id）');
 
 // ---- 样式：没有箭头/进入按钮样式，行可点、不选字、焦点无框 ----
 const css = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/canvas-next.css'), 'utf8');

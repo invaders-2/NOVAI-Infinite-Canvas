@@ -405,17 +405,11 @@ async function saveOne(cmd: Cmd, store: Ctl["store"], lib: Lib, n: CanvasNode, f
   if (x && x.ok) window.dispatchEvent(new CustomEvent("cn:asset-saved", { detail: { libraryId: lib.id, item: x.item, categoryId: folder?.id, categoryName: folder?.name || x.item?.group, kind: n.kind } }));
   return x && x.ok ? null : String(x?.detail || x?.error || "存入失败");
 }
-async function pickLibrary(cmd: Cmd, anchor: { x: number; y: number } | Element, then: (lib: Lib) => void) {
-  const r = await cmd({ type: "canvas/assetLibrary/list" }).catch(() => null); const libs: Lib[] = r && r.ok ? r.libraries || [] : [];
-  if (!libs.length) { const e = await cmd({ type: "canvas/assetLibrary/ensure" }).catch(() => null); if (e && e.ok && e.library) libs.push(e.library); }
-  if (!libs.length) return false;
-  if (libs.length === 1) { then(libs[0]); return true; }
-  openPop(anchor, (close) => <><div className="mh">存入哪个资产库</div>{libs.map((l) => <button key={l.id} className="mi" onClick={() => { close(); then(l); }}><Icon name={isPersonal(l) ? "user" : "layers"} size="s" />{l.name}<span className="k">{isPersonal(l) ? "个人" : "团队"}</span></button>)}</>);
-  return true;
-}
 
 type SaveFolder = { name: string; count: number; id?: string; depth: number; total?: number; parentKey?: string; libraryId?: string };
-function SaveLibraryDialog({ ctl, node, onClose }: { ctl: Ctl; node: CanvasNode; onClose: () => void }) {
+/** 文件夹行的选中键：有 id 用 id（同名文件夹不会串），没有 id 的固定文件夹（尚未建）才退回名字 */
+const folderKeyOf = (r: { id?: string; name: string }) => r.id ? "id:" + r.id : "name:" + r.name;
+function SaveLibraryDialog({ ctl, nodes, onClose }: { ctl: Ctl; nodes: CanvasNode[]; onClose: () => void }) {
   const cmd = cmdOf()!; const store = ctl.store;
   const [lib, setLib] = useState<Lib | null>(null); const [libs, setLibs] = useState<Lib[]>([]); const [cats, setCats] = useState<GCat[]>([]);
   const [scope, setScope] = useState<"personal" | "local">("personal"); const [sel, setSel] = useState("");
@@ -469,19 +463,26 @@ function SaveLibraryDialog({ ctl, node, onClose }: { ctl: Ctl; node: CanvasNode;
   const save = async () => {
     if (!lib || busy) return;
     setBusy(true);
-    const row = sel ? rows.find((r) => r.name === sel) : null;
+    const row = sel ? rows.find((r) => folderKeyOf(r) === sel) : null;
     // 选中的文件夹属于哪个库就用哪个库（多库时别落到第一个库里，否则后端报「文件夹不存在」）
     const targetLib = (row?.libraryId ? libs.find((l) => l.id === row.libraryId) : null) || lib;
-    const target = node.kind === "image" && row ? { name: row.name, id: row.id } : null;
-    const err = await saveOne(cmd, store, targetLib, node, target);
+    const folder = row ? { name: row.name, id: row.id } : null;
+    // 多选 / 堆叠也走这个弹窗：以前直接存，图片全落到第一个图片分类（默认「角色」）
+    let done = 0; const fails: string[] = []; let lastErr = "";
+    for (const node of nodes) {
+      const err = await saveOne(cmd, store, targetLib, node, node.kind === "image" ? folder : null);
+      if (err) { fails.push(genOf(node).title); lastErr = err; } else done++;
+    }
     setBusy(false);
-    if (err) { store.toast(err === "还没有结果" ? "这个节点还没有结果" : "存入失败：" + err); return; }
-    store.toast("已存入「" + targetLib.name + "」" + (target ? " · " + target.name : ""));
+    if (nodes.length === 1 && lastErr) { store.toast(lastErr === "还没有结果" ? "这个节点还没有结果" : "存入失败：" + lastErr); return; }
+    if (!done) { store.toast("存入失败：" + (lastErr || "未知错误")); return; }
+    const where = "「" + targetLib.name + "」" + (folder ? " · " + folder.name : "");
+    store.toast(nodes.length === 1 ? "已存入" + where : `已存入${where} ${done} 个${fails.length ? `，${fails.length} 个失败（${fails.slice(0, 3).join("、")}）` : ""}`, fails.length ? 6000 : 2600);
     onClose();
   };
   const makeFolder = async () => {
     const name = newName.trim(); if (!name || !lib) return;
-    const parent = sel ? rows.find((r) => r.name === sel) : null;
+    const parent = sel ? rows.find((r) => folderKeyOf(r) === sel) : null;
     const parentLib = (parent?.libraryId ? libs.find((l) => l.id === parent.libraryId) : null) || lib;
     const r = await cmd({ type: "canvas/assetLibrary/folderCreate", libraryId: parentLib.id, name, parentId: parent?.id }).catch(() => null);
     if (!r || !r.ok) { store.toast("新建文件夹失败：" + String(r?.detail || r?.error || "未知错误")); return; }
@@ -489,13 +490,13 @@ function SaveLibraryDialog({ ctl, node, onClose }: { ctl: Ctl; node: CanvasNode;
     const fresh = await cmd({ type: "canvas/globalAssets", limit: 1000, refresh: true }).catch(() => null);
     if (fresh && fresh.ok) setCats(applyLocalParents(fresh.categories || []));
     else setCats((prev) => [...prev, { id: String(r.folder?.id || "asset:" + name), name, count: 0, kind: "asset" }]);
-    setSel(name); setNewName(""); setCreating(false);
+    setSel(r.folder?.id ? "id:" + String(r.folder.id).replace(/^asset:/, "") : "name:" + name); setNewName(""); setCreating(false);
   };
   return <div className="save-lib">
-    <div className="slh"><b>保存到素材库</b><span className="sp" /><button className="linkbtn" onClick={() => setCreating(true)}><Icon name="plus" size="xs" />新建文件夹</button><button className="ib" aria-label="关闭" onClick={onClose}><Icon name="x" size="s" /></button></div>
+    <div className="slh"><b>{nodes.length > 1 ? "保存到素材库 · " + nodes.length + " 个" : "保存到素材库"}</b><span className="sp" /><button className="linkbtn" onClick={() => setCreating(true)}><Icon name="plus" size="xs" />新建文件夹</button><button className="ib" aria-label="关闭" onClick={onClose}><Icon name="x" size="s" /></button></div>
     <div className="lib-scope sl-scope"><button className={scope === "personal" ? "on" : ""} onClick={() => { setScope("personal"); setSel(""); }}>个人</button><button className={scope === "local" ? "on" : ""} onClick={() => { setScope("local"); setSel(""); }}>本地</button></div>
     {creating ? <div className="sl-newrow"><input autoFocus value={newName} placeholder="新文件夹名称" onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void makeFolder(); }} /><button className="btn solid" onClick={() => void makeFolder()}>新建</button><button className="btn" onClick={() => { setCreating(false); setNewName(""); }}>取消</button></div> : null}
-    <div className="sl-folders">{rows.map((r, i) => <button key={r.name + ":" + i} data-save-folder={r.name} className={"lib-row sl-frow" + (sel === r.name ? " on" : "")} style={{ paddingLeft: 6 + r.depth * 15 }} onClick={() => setSel(r.name)}><Icon name={r.name === "角色" ? "user" : r.name === "场景" ? "image" : r.name === "道具" ? "cube" : r.name === "风格" ? "palette" : r.name === "音效" ? "audio" : "folder"} size="s" /><span className="lib-name">{r.name}</span><em>{r.count}</em></button>)}</div>
+    <div className="sl-folders">{rows.map((r, i) => <button key={folderKeyOf(r) + ":" + i} data-save-folder={r.name} className={"lib-row sl-frow" + (sel === folderKeyOf(r) ? " on" : "")} style={{ paddingLeft: 6 + r.depth * 15 }} onClick={() => setSel(folderKeyOf(r))}><Icon name={r.name === "角色" ? "user" : r.name === "场景" ? "image" : r.name === "道具" ? "cube" : r.name === "风格" ? "palette" : r.name === "音效" ? "audio" : "folder"} size="s" /><span className="lib-name">{r.name}</span><em>{r.count}</em></button>)}</div>
     <div className="slf"><button className="btn" onClick={onClose}>取消</button><button className="btn solid" disabled={busy || !lib} onClick={() => void save()}>{busy ? "保存中…" : "保存"}</button></div>
   </div>;
 }
@@ -524,19 +525,15 @@ export async function saveNodeToLibrary(ctl: Ctl, n: CanvasNode, _anchor: { x: n
   const cmd = cmdOf(); const store = ctl.store; if (!cmd) return store.toast("资产库只在桌面版里可用");
   const o = outOf(n);
   if (!o?.url && !o?.text) { store.toast("这个节点还没有结果"); return; }
-  openModal((close) => <SaveLibraryDialog ctl={ctl} node={n} onClose={close} />, "save-lib-modal");
+  openModal((close) => <SaveLibraryDialog ctl={ctl} nodes={[n]} onClose={close} />, "save-lib-modal");
 }
 
 /** 多个节点一次存进同一个资产库（堆叠 / 多选「存素材库」） */
-export async function saveNodesToLibrary(ctl: Ctl, nodes: CanvasNode[], anchor: { x: number; y: number } | Element) {
+export async function saveNodesToLibrary(ctl: Ctl, nodes: CanvasNode[], _anchor: { x: number; y: number } | Element) {
   const cmd = cmdOf(); const store = ctl.store; if (!cmd) return store.toast("资产库只在桌面版里可用");
   const list = nodes.filter((n) => outOf(n)?.url || outOf(n)?.text);
   if (!list.length) return store.toast("选中的节点还没有结果");
-  const ok = await pickLibrary(cmd, anchor, (lib) => { void (async () => {
-    let done = 0; const fails: string[] = [];
-    for (const n of list) { const err = await saveOne(cmd, store, lib, n); if (err) fails.push(genOf(n).title); else done++; }
-    store.toast(`已存入「${lib.name}」${done} 个${fails.length ? `，${fails.length} 个失败（${fails.slice(0, 3).join("、")}）` : ""}`, fails.length ? 6000 : 2600);
-  })(); });
-  if (!ok) store.toast("没有可用的资产库");
+  // 和单个节点一样先选文件夹：以前不让选，图片全落到第一个图片分类（默认「角色」）
+  openModal((close) => <SaveLibraryDialog ctl={ctl} nodes={list} onClose={close} />, "save-lib-modal");
 }
 export { uid };

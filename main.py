@@ -40282,67 +40282,162 @@ def _agent_tool_use_asset_validate(args):
     return {"query": query, "kind": kind, "limit": limit}
 
 
+_AGENT_ASSET_EXTS = {
+    "image": (".png", ".jpg", ".jpeg", ".webp", ".gif"),
+    "video": (".mp4", ".mov", ".webm"),
+    "audio": (".mp3", ".wav", ".m4a"),
+}
+
+
+def _agent_asset_kind_of(name):
+    low = str(name or "").lower()
+    for kind, exts in _AGENT_ASSET_EXTS.items():
+        if low.endswith(exts):
+            return kind
+    return ""
+
+
+def _agent_asset_terms(query):
+    """把检索词拆成若干词：按空白/标点切；中文整句不切（靠「标签 ⊂ 检索词」匹配，见 _agent_asset_score）。"""
+    parts = re.split(r"[\s,，、;；/|]+", str(query or "").lower())
+    return [p for p in parts if p]
+
+
+def _agent_asset_tags(classification, limit=12):
+    """从 AI 分类结果里取出标签（去重、保序）。"""
+    if not isinstance(classification, dict):
+        return []
+    tags, seen = [], set()
+    for entry in (classification.get("flat") or []):
+        tag = str((entry or {}).get("tag") or "").strip() if isinstance(entry, dict) else ""
+        if tag and tag not in seen:
+            seen.add(tag)
+            tags.append(tag)
+    for tag in (classification.get("tags") or []):
+        tag = str(tag or "").strip()
+        if tag and tag not in seen:
+            seen.add(tag)
+            tags.append(tag)
+    return tags[:limit] if limit else tags
+
+
+def _agent_asset_score(terms, texts, tags):
+    """关键词打分：名称/摘要等文本里包含检索词得分；AI 标签既可被检索词包含、也可包含检索词。
+
+    「白色运动鞋」这种不带空格的中文检索词切不开，靠「标签（白色、运动鞋）是检索词的子串」来命中。
+    texts: [(文本, 权重)]；tags: 标签列表（权重 2）。没有任何命中返回 0。
+    """
+    score = 0
+    for term in terms:
+        hit = 0
+        for text, weight in texts:
+            if text and term in text:
+                hit = max(hit, weight)
+        for tag in tags:
+            low = tag.lower()
+            if term in low or (len(low) >= 2 and low in term):
+                hit += 2
+        score += hit
+    return score
+
+
 def _agent_tool_use_asset_run(args):
-    lib = load_asset_library()
-    query = args["query"].lower()
+    """检索素材：所有资产库 + 本地上传 + 画布上传目录，按名称 / AI 标签 / 摘要打分排序。
+
+    以前只看「当前激活的资产库」、只按文件名匹配、上传目录写死在程序目录（改过存储路径就失效），
+    这里统一修掉；返回值保持 total / items / results 结构，并附上 summary / tags / library / source。
+    """
+    terms = _agent_asset_terms(args["query"])
     kind = args["kind"]
-    hits = []
+    limit = args["limit"]
+    candidates = []
     seen = set()
-    for cat in (lib.get("categories") or []):
-        if not isinstance(cat, dict):
-            continue
-        cat_kind = str(cat.get("type") or "image").lower()
-        for item in (cat.get("items") or []):
-            if not isinstance(item, dict):
-                continue
-            url = str(item.get("url") or "")
-            if not url or url in seen:
-                continue
-            item_kind = str(item.get("kind") or cat_kind or "image").lower()
-            if kind and item_kind != kind:
-                continue
-            name = str(item.get("name") or "")
-            if query and query not in name.lower() and query not in url.lower():
-                continue
-            seen.add(url)
-            hits.append({"url": url, "name": name[:120], "kind": item_kind,
-                         "category": str(cat.get("name") or "")})
-            if len(hits) >= args["limit"]:
-                break
-        if len(hits) >= args["limit"]:
-            break
-    # 补充：画布上传的素材（assets/input/ 目录）——用户上传的素材也应可检索作参考
-    if len(hits) < args["limit"]:
+
+    def _add(url, name, item_kind, *, category="", library="", source="", classification=None,
+             caption="", created_at=0):
+        if not url or url in seen:
+            return
+        if kind and item_kind != kind:
+            return
+        tags = _agent_asset_tags(classification)
+        summary = str((classification or {}).get("summary") or "").strip() if isinstance(classification, dict) else ""
+        score = 0
+        if terms:
+            texts = [(str(name or "").lower(), 3), (summary.lower(), 2), (str(caption or "").lower(), 2),
+                     (str(category or "").lower(), 1), (url.lower(), 1)]
+            score = _agent_asset_score(terms, texts, tags)
+            if score <= 0:
+                return
+        seen.add(url)
         try:
-            in_dir = os.path.join(os.path.dirname(__file__), "assets", "input")
-            if os.path.isdir(in_dir):
-                for fn in sorted(os.listdir(in_dir)):
-                    if len(hits) >= args["limit"]:
-                        break
-                    if fn.startswith(".") or fn == "ai_ref":
-                        continue
-                    low = fn.lower()
-                    ext_ok = low.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", ".webm", ".mp3", ".wav", ".m4a"))
-                    if not ext_ok:
-                        continue
-                    if kind == "image" and not low.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
-                        continue
-                    if kind == "video" and not low.endswith((".mp4", ".mov", ".webm")):
-                        continue
-                    if kind == "audio" and not low.endswith((".mp3", ".wav", ".m4a")):
-                        continue
-                    url = f"/assets/input/{fn}"
-                    if url in seen:
-                        continue
-                    if query and query not in low:
-                        continue
-                    item_kind = "video" if low.endswith((".mp4", ".mov", ".webm")) else ("audio" if low.endswith((".mp3", ".wav", ".m4a")) else "image")
-                    if kind and item_kind != kind:
-                        continue
-                    seen.add(url)
-                    hits.append({"url": url, "name": fn[:120], "kind": item_kind, "category": "上传素材"})
-        except Exception as exc:
-            print(f"[Agent] use_asset 扫描上传素材失败: {exc}")
+            ts = float(created_at or 0)
+        except (TypeError, ValueError):
+            ts = 0.0
+        if ts > 1e11:  # 资产库是毫秒，本地文件是秒；统一成秒再比较新旧
+            ts /= 1000.0
+        hit = {"url": url, "name": str(name or "")[:120], "kind": item_kind, "category": category,
+               "library": library, "source": source}
+        if summary:
+            hit["summary"] = summary[:120]
+        if tags:
+            hit["tags"] = tags[:8]
+        candidates.append((score, ts, hit))
+
+    # 1) 所有资产库（不只是当前激活的那个）
+    lib = load_asset_library()
+    for library in (lib.get("libraries") or []):
+        if not isinstance(library, dict):
+            continue
+        lib_name = str(library.get("name") or "")
+        for cat in (library.get("categories") or []):
+            if not isinstance(cat, dict):
+                continue
+            cat_kind = str(cat.get("type") or "image").lower()
+            for item in (cat.get("items") or []):
+                if not isinstance(item, dict):
+                    continue
+                url = str(item.get("url") or "")
+                item_kind = str(item.get("kind") or cat_kind or "image").lower()
+                _add(url, item.get("name"), item_kind, category=str(cat.get("name") or ""), library=lib_name,
+                     source="library", classification=item.get("classification"),
+                     created_at=item.get("created_at"))
+
+    # 2) 本地上传（assets/uploads；画布生成物不算素材，跳过）
+    try:
+        _tree, local_items = _local_upload_tree_and_items()
+        for item in (local_items or []):
+            if not isinstance(item, dict) or str(item.get("source") or "") == "output":
+                continue
+            _add(str(item.get("url") or ""), item.get("name"), str(item.get("kind") or "image").lower(),
+                 category=str(item.get("folder") or "本地上传"), source="local",
+                 classification=item.get("classification"), caption=item.get("caption") or "",
+                 created_at=item.get("created_at"))
+    except Exception as exc:
+        print(f"[Agent] use_asset 扫描本地上传失败: {exc}")
+
+    # 3) 画布上传目录（跟随存储设置里的上传目录，不再写死程序目录）
+    try:
+        in_dir = OUTPUT_INPUT_DIR
+        if in_dir and os.path.isdir(in_dir):
+            for fn in os.listdir(in_dir):
+                if fn.startswith(".") or fn == "ai_ref":
+                    continue
+                item_kind = _agent_asset_kind_of(fn)
+                if not item_kind:
+                    continue
+                try:
+                    mtime = os.path.getmtime(os.path.join(in_dir, fn))
+                except OSError:
+                    mtime = 0
+                _add(f"/assets/input/{urllib.parse.quote(fn)}", fn, item_kind, category="画布上传",
+                     source="upload", created_at=mtime)
+    except Exception as exc:
+        print(f"[Agent] use_asset 扫描上传素材失败: {exc}")
+
+    # 有检索词按分数排，分数相同（或没检索词）按新旧排；资产库优先于上传目录
+    source_rank = {"library": 2, "local": 1, "upload": 0}
+    candidates.sort(key=lambda c: (c[0], source_rank.get(c[2]["source"], 0), c[1]), reverse=True)
+    hits = [c[2] for c in candidates[:limit]]
     return {"total": len(hits), "items": hits, "results": hits, "query": args["query"], "kind": args["kind"]}
 
 
@@ -43823,9 +43918,10 @@ AGENT_TOOLS = {
         "mutates_canvas": False,
     },
     "use_asset": {
-        "description": "从素材库检索素材（按关键词/类型过滤），返回 URL 列表供 generate_image 的 reference_urls 使用（只读，不修改素材库）。",
+        "description": "从素材库检索素材（所有资产库 + 本地上传 + 画布上传，按名称 / AI 标签 / 摘要匹配，例如「白色运动鞋」「女模特 全身」），"
+                       "返回 URL 列表（附摘要与标签，便于挑选）供 generate_image 的 reference_urls 使用（只读，不修改素材库）。",
         "schema": {"type": "object", "properties": {
-            "query": {"type": "string", "description": "关键词（按名称/URL 模糊匹配）"},
+            "query": {"type": "string", "description": "关键词，可空格分隔多个（匹配名称、AI 标签、摘要、文件夹名）"},
             "kind": {"type": "string", "enum": ["image", "video", "audio", "workflow"]},
             "limit": {"type": "integer", "default": 10}},
             "required": []},
