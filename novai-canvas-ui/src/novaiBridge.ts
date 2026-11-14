@@ -329,6 +329,10 @@ async function canvasCommand(input: Row): Promise<Row> {
     const cat = await imageCategory(String(input.libraryId || ""), String(input.folder || "未分组"));
     return commandOf("/api/asset-library/items/move", json({ library_id: String(input.libraryId || ""), target_category_id: cat.id, ids: [String(input.itemId || "")] }));
   }
+  if (type === "canvas/assetLibrary/products") {
+    const data = await request("/api/asset-library/products").catch(() => ({ products: [] }));
+    return { ok: true, products: Array.isArray(data?.products) ? data.products : [] };
+  }
   if (type === "canvas/assetLibrary/syncSources") return { ok: true };
   if (type === "canvas/saveExport") return saveExport(input);
   if (type === "canvas/models") return { ok: true, models: [] };
