@@ -111,6 +111,12 @@ class SkillGateTests(unittest.TestCase):
         main._agent_skill_gate_begin(types.SimpleNamespace(canvas_id="cv1", skill_id=""), "第二版")
         self.assertIsNone(self.check())
 
+    def test_repeated_block_escalates(self):
+        main._AGENT_RUN_GATE_BLOCKS.set([0])
+        main._agent_skill_gate_activate(SKILL)
+        self.assertNotIn("不要再调用", self.check()["error"])
+        self.assertIn("不要再调用任何生成工具", self.check("batch_generate")["error"])
+
     def test_answer_parser(self):
         self.assertTrue(main._agent_skill_gate_answer_confirms("先只做第一段试试"))
         self.assertTrue(main._agent_skill_gate_answer_confirms("可以，开始吧"))

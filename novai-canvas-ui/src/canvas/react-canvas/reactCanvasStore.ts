@@ -102,6 +102,14 @@ export function makeGroupNode(children: CanvasNode[]): CanvasNode {
   };
 }
 
+/** 节点框超上限时宽高按同一系数缩（以前各夹各的：1280×720 的视频被夹成 800×720，比例全变）。 */
+function fitNodeBox(rawW: unknown, rawH: unknown, maxW: number, size: { w: number; h: number }): { w: number; h: number } {
+  const w0 = typeof rawW === "number" && Number.isFinite(rawW) ? rawW : size.w;
+  const h0 = typeof rawH === "number" && Number.isFinite(rawH) ? rawH : size.h;
+  const scale = Math.min(1, maxW / Math.max(1, w0), 800 / Math.max(1, h0));
+  return { w: clampNumber(w0 * scale, 80, maxW, size.w), h: clampNumber(h0 * scale, 48, 800, size.h) };
+}
+
 function clampNumber(value: unknown, lo: number, hi: number, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
   return Math.min(hi, Math.max(lo, value));
@@ -168,13 +176,14 @@ export function sanitizeDoc(raw: unknown): CanvasDoc | null {
     const size = NODE_SIZE[kind];
     // 表格按输入通道数横向展开，会比普通节点宽得多，单独放宽到 1600（其它节点仍 800）
     const maxW = kind === "table" ? 1600 : 800;
+    const box = fitNodeBox(n.w, n.h, maxW, size);
     nodes.push({
       id,
       kind,
       x: clampNumber(n.x, -20000, 20000, 0),
       y: clampNumber(n.y, -20000, 20000, 0),
-      w: clampNumber(n.w, 80, maxW, size.w),
-      h: clampNumber(n.h, 48, 800, size.h),
+      w: box.w,
+      h: box.h,
       text: typeof n.text === "string" ? n.text.slice(0, MAX_NODE_TEXT_CHARS) : "",
       ...(typeof n.url === "string" && n.url.trim() ? { url: n.url.slice(0, MAX_NODE_URL_CHARS) } : {}),
       ...(typeof n.originalUrl === "string" && n.originalUrl.trim() ? { originalUrl: n.originalUrl.slice(0, MAX_NODE_URL_CHARS) } : {}),

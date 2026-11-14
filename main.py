@@ -44229,11 +44229,12 @@ AGENT_SKILL_GATES = {
         "confirm": True,
     },
 }
-_AGENT_SKILL_GATE_TOOLS = ("generate_image", "generate_video")
+_AGENT_SKILL_GATE_TOOLS = ("generate_image", "generate_video", "batch_generate", "run_batch")
 _AGENT_SKILL_GATE_YES = ("按方案做", "按这个方案", "先只做第一段", "满意", "继续", "确认", "同意", "开始做", "开始生成", "可以", "没问题", "就这样", "ok", "好的", "行")
 _AGENT_SKILL_GATE_NO = ("改方案", "我来改", "修改", "不要", "先别", "不行", "不对")
 _AGENT_RUN_SKILL_GATE = contextvars.ContextVar("novai_agent_run_skill_gate", default="")
 _AGENT_SKILL_GATE_LOCK = Lock()
+_AGENT_RUN_GATE_BLOCKS = contextvars.ContextVar("novai_agent_run_gate_blocks", default=None)
 
 
 def _agent_skill_gate_path():
@@ -44308,6 +44309,7 @@ def _agent_skill_gate_begin(ctx, instruction):
     不靠模型自己去 activate_skill）；这张画布之前已经挂过这个技能（闸门按画布生效，后续轮次不会掉）。
     上次问过方案、这次是用户的回答 → 记下是否确认。"""
     canvas_id = str(getattr(ctx, "canvas_id", "") or "")
+    _AGENT_RUN_GATE_BLOCKS.set([0])
     _agent_skill_gate_activate(getattr(ctx, "skill_id", ""))
     named = _agent_skill_gate_named(instruction)
     if named:
@@ -44387,9 +44389,17 @@ def _agent_skill_gate_check(tool_name, args):
         else:
             todo.append("再用 ask_user 把方案交给用户确认（选项至少有「按方案做」「先只做第一段试试」「我来改方案」），"
                         "用户确认之前不生成任何图片和视频")
-    return {"ok": False, "tool": tool_name, "code": "skill_gate_blocked", "status_code": 409,
-            "error": "技能「%s」的生成闸门：还不能生成。%s。不花钱的步骤（读视频、写分析、本机深度、审查）可以继续做。" %
-                     (gate.get("title") or skill_id, "；".join(todo))}
+    counter = _AGENT_RUN_GATE_BLOCKS.get()
+    if counter is None:
+        counter = [0]
+        _AGENT_RUN_GATE_BLOCKS.set(counter)
+    counter[0] += 1
+    error = "技能「%s」的生成闸门：还不能生成。%s。不花钱的步骤（读视频、写分析、本机深度、审查）可以继续做。" % (
+        gate.get("title") or skill_id, "；".join(todo))
+    if counter[0] >= 2:
+        error = ("本轮已被生成闸门拦下 %d 次：换提示词、换参数、换成别的生成工具都会被拦，不要再调用任何生成工具。"
+                 "下一步只能做上面缺的事（写节点 / ask_user）。" % counter[0]) + error
+    return {"ok": False, "tool": tool_name, "code": "skill_gate_blocked", "status_code": 409, "error": error}
 
 
 # ---------------------------------------------------------------------------
