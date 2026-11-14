@@ -364,13 +364,34 @@ export function TemplatePreview({ entry, onClose, onApply, onDeleteConfirm, onAg
 }
 
 const isVideoSrc = (s: string) => /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(s);
-/** 模板预览里的视频节点：能拿到 mp4 就显示首帧（#t=0.1），只存了首帧图就按图片显示 */
+/** 模板预览里的视频节点：首帧 + 播放按钮，点了才播（再点暂停）；只有首帧图就按图片显示 */
 function PreviewVideo({ src, poster }: { src: string; poster?: string }) {
-  return <div className="tplpv-im">{isVideoSrc(src)
-    ? <video src={src + (src.includes("#") ? "" : "#t=0.1")} poster={poster} muted playsInline preload="metadata" />
-    : <img src={src} alt="" draggable={false} />}</div>;
+  const ref = useRef<HTMLVideoElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  if (!isVideoSrc(src)) return <div className="tplpv-im"><img src={src} alt="" draggable={false} /></div>;
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const v = ref.current; if (!v) return;
+    if (v.paused) void v.play().catch(() => undefined); else v.pause();
+  };
+  return <div className="tplpv-im tplpv-playable" data-tplpv-play onClick={toggle} title={playing ? "暂停" : "播放"}>
+    <video ref={ref} src={src + (src.includes("#") ? "" : "#t=0.1")} poster={poster} playsInline preload="metadata"
+      onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
+    <span className={"tplpv-playbtn" + (playing ? " on" : "")}><Icon name={playing ? "pause" : "play"} size="s" /></span>
+  </div>;
 }
-/** 模板预览里的音频节点：至少显示图标 + 名称（<audio> 无画面） */
+/** 模板预览里的音频节点：点卡片才播（再点暂停） */
 function PreviewAudio({ src, title }: { src?: string; title?: string }) {
-  return <div className="tplpv-aud"><Icon name="audio" size="s" /><span>{title || "音频素材"}</span>{src ? <audio src={src} preload="metadata" /> : null}</div>;
+  const ref = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const a = ref.current; if (!a) return;
+    if (a.paused) void a.play().catch(() => undefined); else a.pause();
+  };
+  return <div className={"tplpv-aud tplpv-playable" + (playing ? " on" : "")} data-tplpv-play onClick={toggle} title={playing ? "暂停" : "播放"}>
+    <span className="tplpv-audbtn"><Icon name={playing ? "pause" : "play"} size="s" /></span>
+    <span>{title || "音频素材"}</span>
+    {src ? <audio ref={ref} src={src} preload="metadata" onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} /> : <Icon name="audio" size="s" />}
+  </div>;
 }

@@ -156,3 +156,9 @@
 .cn-root .tplpv-confirm .folder-dialog{width:min(380px,100%);background:var(--card);border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.42)}
 .cn-root .tplpv-aud{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--fg2);font-size:11.5px;text-align:center;padding:0 16px;border-radius:16px;background:var(--card-hi)}
 .cn-root .tplpv-aud audio{display:none}
+.cn-root .tplpv-playable{cursor:pointer}
+.cn-root .tplpv-playbtn{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:#000000a8;color:#fff;pointer-events:none;transition:opacity .12s,transform .12s}
+.cn-root .tplpv-playable:hover .tplpv-playbtn{transform:translate(-50%,-50%) scale(1.06)}
+.cn-root .tplpv-playbtn.on{opacity:0}
+.cn-root .tplpv-aud .tplpv-audbtn{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--sunken);color:var(--fg2)}
+.cn-root .tplpv-aud.on .tplpv-audbtn{background:var(--hover);color:var(--hi)}
