@@ -28471,8 +28471,10 @@ async def update_canvas_meta(canvas_id: str, payload: CanvasMetaUpdate, request:
     canvas = load_canvas(canvas_id)
     require_canvas_access(canvas, request, "edit")
     if payload.title is not None and (payload.title or "") != (canvas.get("title") or ""):
-        # editor 能改颜色/置顶等元数据，但不能重命名（重命名属于管理动作）
-        if not _canvas_perms.can(canvas_access_role(canvas, request), "manage"):
+        # editor 能改颜色/置顶等元数据，但不能重命名（重命名属于管理动作）。
+        # auth-off（本机单用户）没有登录用户，不能拿 None 去判 manage —— 以前这里恒为假，改名永远 403。
+        user = request_auth_user(request)
+        if user and not _canvas_perms.can(canvas_access_role(canvas, request), "manage"):
             raise HTTPException(status_code=403, detail="只有所有者或管理员可以重命名画布")
     if payload.title is not None:
         canvas["title"] = (payload.title or canvas.get("title") or "未命名画布")[:80]
@@ -44347,7 +44349,8 @@ AGENT_TOOLS = {
     },
     "generate_video": {
         "description": "一句话生成视频：在画布创建「提示词节点 → 视频节点」完整工作流并连线（ComfyUI 式管线，用户可见），立即发起真实视频生成任务（进 Task Engine），完成后结果自动落到视频节点。返回 node_id（视频节点）、prompt_node_id（提示词节点）与 task_id。动作迁移场景（让照片/角色图按参考视频的动作表演）请用 motion_transfer=true。"
-                       "时长策略：参考视频 ≤15 秒就在一段里做，不要拆分镜；>15 秒必须先让用户选——按 15 秒以内分镜，或换支持 30 秒的模型整条做，别自己决定。"
+                       "时长策略：参考视频 ≤15 秒就在一段里做，不要拆分镜（拆了掉连贯性）；>15 秒必须先让用户二选一——"
+                       "优先推荐换支持 30 秒的模型整条做（动作/光影/镜头最连贯），或按原片硬切点分镜（接缝可能对不上，也多花额度）；>30 秒只能分镜。别自己决定。"
                        "声音：参考视频带音轨时后端会自动把原声合流回成片（画质不重编码），结果里带「已自动贴上参考视频的原声」备注。",
         "schema": {"type": "object", "properties": {
             "canvas_id": {"type": "string"},
@@ -44853,7 +44856,8 @@ AGENT_TOOLS["analyze_video"] = {
 # 模块或模型不在时只返回「不可用 + 原因」，不报错，技能据此走备选来源。
 # ---------------------------------------------------------------------------
 
-AGENT_DEPTH_CAPTURE_MAX_SECONDS = 30.0
+# 助手调用深度捕捉的默认时长上限：0 = 不限（用户明确要求不要设上限；长片只是慢）
+AGENT_DEPTH_CAPTURE_MAX_SECONDS = 0.0
 
 
 def _agent_depth_capture_module():

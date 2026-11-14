@@ -63,7 +63,7 @@ export function Chrome() {
   return <>
     <div id="tl" className="float cap">
       <span className="logo"><img className="brand-logo" src="/static/images/logo.svg" alt="" draggable={false} /></span><span className="sep" />
-      {renaming ? <input className="ttl" id="ttlIn" autoFocus defaultValue={name} onBlur={(e) => { store.set({ name: e.target.value.trim() || name }); setRenaming(false); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setRenaming(false); }} />
+      {renaming ? <input className="ttl" id="ttlIn" autoFocus defaultValue={name} onBlur={(e) => { const next = e.target.value.trim() || name; setRenaming(false); void store.rename(next); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setRenaming(false); }} />
         : <span className="ttl" id="ttl" title="点击重命名" onClick={() => setRenaming(true)}>{name}</span>}
       <button className="ib tipB" style={{ width: 28, height: 28 }} id="canvasMenu" data-tip="切换画布 · 设置" onClick={(e) => canvasMenu(ctl, e.currentTarget, () => setRenaming(true))}><Icon name="down" size="s" /></button>
       <SaveStatus saving={saving} />

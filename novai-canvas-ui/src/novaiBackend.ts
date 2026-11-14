@@ -676,24 +676,16 @@ export function createNovaiBackend(): CanvasBackend {
     },
     loadDoc: load,
     async renameCanvas(canvasId, title) {
-      const current = await request(`/api/canvases/${encodeURIComponent(canvasId)}`);
-      const canvas = current.canvas || {};
-      const data = await request(`/api/canvases/${encodeURIComponent(canvasId)}`, {
-        method: "PUT",
+      // 只改标题走轻量 meta 接口：整份 PUT 会和自动保存的 base_updated_at 打架，还会把 updated_at 顶到列表最前。
+      // 顺带写进 metadata 缓存，否则下一次自动保存会把旧标题带回去。
+      const data = await request(`/api/canvases/${encodeURIComponent(canvasId)}/meta`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          icon: canvas.icon || "🧩",
-          nodes: canvas.nodes || [],
-          connections: canvas.connections || [],
-          viewport: canvas.viewport || {},
-          logs: canvas.logs || [],
-          settings: canvas.settings || {},
-          base_updated_at: Number(canvas.updated_at) || 0,
-        }),
+        body: JSON.stringify({ title }),
       });
-      if (data.canvas) metadata.set(canvasId, metaOf(data.canvas));
-      return data.canvas;
+      const canvas = data.canvas || {};
+      if (canvas.title) metadata.set(canvasId, { ...(metadata.get(canvasId) || metaOf(canvas)), ...metaOf(canvas) });
+      return canvas;
     },
     async readAuthoritativeDoc(canvasId) {
       const loaded = await load(canvasId);

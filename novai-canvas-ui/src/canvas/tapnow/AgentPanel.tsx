@@ -628,7 +628,11 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   function watchTask(m: AgentMsg, taskId: string, t0: number, threadId: string) {
     let refreshed = ""; let refreshOutcome: RefreshOutcome = "not_required";
     let terminalHandled = false;
+    let self: { stop?: () => void } | null = null;
     const watcher = subscribeAgentTask(store.backend, taskId, (snapshot) => {
+      // 同一条消息可能先后挂过两个任务（先出方案、再执行）。旧任务的 watcher 在宽限轮询里还会回来，
+      // 它会和新任务交替把 plan / heartbeat / busy 翻来翻去：卡片一出现一消失，整列消息上下跳。
+      if (m.task?.taskId && m.task.taskId !== taskId) { self?.stop?.(); return; }
       const settled = TASK_UI_SETTLED.has(snapshot.status);
       const firstTerminal = settled && !terminalHandled;
       const effect = settled ? "terminal" : snapshot.events.filter((e) => /side_effect\.succeeded|execution\.succeeded/.test(String(e.eventType))).map((e) => String(e.eventId)).join(",");
@@ -678,7 +682,12 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       // 收尾：有流式正文就用它（平台一次性给整段时也是同一条路径，不会「闪一下再重画」）；方案卡 / 兜底文案仍走 answer
       const nextText = settled ? (plan || !streamed ? (answer || m.text) : streamed) : (streamed || m.text);
       patch(m, { heartbeat: settled ? undefined : (heartbeat || m.heartbeat), suggestions: suggestions.length ? suggestions : m.suggestions, task: { taskId, status: snapshot.status, modelConfigId: snapshot.modelConfigId, stopRequested: m.task?.stopRequested, plan }, reviews: reviews.length ? reviews : m.reviews, tools: steps, webImages: images.length ? images : m.webImages, webSearch: searches.length ? searches : m.webSearch, usage: usage || m.usage, compactions: compactions.length ? compactions : m.compactions, reasoning: reasoning || m.reasoning, selfCheck: selfCheck || m.selfCheck, text: nextText, streaming: !settled && !!streamed, think, took: settled ? (firstTerminal ? Math.max(Number(m.took) || 0, (performance.now() - t0) / 1000) : m.took) : m.took });
-      a.setThreadBusy(threadId, !settled); a.setThreadStop(threadId, false); a.emit();
+      // 只有「当前线程最后一条」的 watcher 能改 busy：旧任务的 watcher 在宽限轮询里还会回来，
+      // 它会和正在跑的任务互相把 busy 翻成 true/false，面板跟着反复重排（上下抽动的真凶之一）。
+      const threadList = a.threadMessages(threadId);
+      const latest = threadList.length ? threadList[threadList.length - 1] : null;
+      if (!latest || latest.id === m.id) a.setThreadBusy(threadId, !settled);
+      a.setThreadStop(threadId, false); a.emit();
       // L5：结束后这一轮没有可见回复（快照里既没有流式正文也没有 done 文案）→ 直接读一次线程。
       // 后端在收尾时已经把回复落盘，读回来就能显示，不用让用户刷新页面。
       if (firstTerminal && !nextText && threadId && threadId !== "__new__") {
@@ -703,6 +712,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
         });
       }
     }, () => taskWatchers.current.delete(taskId));
+    self = watcher as unknown as { stop?: () => void };
     if (!watcher.settled()) taskWatchers.current.set(taskId, watcher.stop);
   }
 
@@ -851,6 +861,8 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
         return;
       }
       patch(m, { task: { taskId: res.taskId, status: res.status || "RUNNING" } });
+      // 执行任务接管这条消息：先把「出方案」那个任务的 watcher 停掉，避免两个任务交替刷新同一条消息
+      if (task.taskId) taskWatchers.current.get(task.taskId)?.();
       watchTask(m, res.taskId, performance.now(), threadId);
     } finally {
       if (!m.task || TASK_UI_SETTLED.has(m.task.status)) a.setThreadBusy(threadId, false);
@@ -949,7 +961,9 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       ...ctx.map((n) => ({ id: n.id, title: title(n), kind: n.kind, src: isGenKind(n.kind) ? srcOf(n) : undefined })),
       ...refs.map((r) => ({ id: r.id, title: r.title, kind: r.kind, src: r.kind === "asset" ? r.ref : undefined })),
     ].filter((x, i, arr) => arr.findIndex((y) => y.id === x.id) === i);
-    a.appendMessage({ id: mid(), role: "u", text, at: Date.now(), skill: skillName || undefined, ctx: msgCtx }, tId);
+    const userMsgId = mid();
+    a.appendMessage({ id: userMsgId, role: "u", text, at: Date.now(), skill: skillName || undefined, ctx: msgCtx }, tId);
+    if (!outgoing && !target) window.dispatchEvent(new CustomEvent("cn:agent-send", { detail: { id: userMsgId } }));
     if (!outgoing) { a.draft = ""; a.pinned = []; a.refs = []; a.skill = null; setWebPlugin(false); if (annChat.length) setAnnChat([]); }
     a.setThreadStop(tId, false); a.setThreadBusy(tId, true);
     const m: AgentMsg = { id: mid(), role: "a", text: "", at: Date.now(), think: { live: true, open: false, secs: "0", lines: [] }, ...(installSource ? { skillInstall: { status: "inspecting" as const, source: installSource } } : {}) }; a.appendMessage(m, tId); a.emit();
@@ -1242,7 +1256,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     return () => window.removeEventListener("cn:agent-drop-nodes", on);
   }, [store]);
   // 发出消息后跟随助手的最新回答（回答 / 卡片长出来就滚进视野；用户主动往上翻就停）
-  useFollowLatest(scrollRef, a.msgs);
+  useFollowLatest(scrollRef, a.msgs, a.activeThreadId);
   const full = ui.agentFull;
   const ctxItems = ctxNodes();
   /** 输入区胶囊角标：同类节点按出现顺序编号（图1 / 图2…），和节点编辑器的 @ 胶囊一致 */
@@ -1274,7 +1288,8 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
         </div>
         <button className="ib narrow-only ap2-hb" id="aClose" aria-label="收起 Agent" onClick={() => store.setUI({ agentOpen: false, agentFull: false })}><Icon name="x" size="s" /></button>
       </div>
-      <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+      {/* 跟随滚动只交给 useFollowLatest 一处：provider 的 autoScroll 会和它抢同一个 scrollTop（消息一多就上下跳） */}
+      <MessageScrollerProvider autoScroll={false} defaultScrollPosition="end">
         <MessageScroller className="ab ap2-scroller" id="aScroll" ref={scrollRef}>
           <MessageScrollerViewport className="ap2-viewport">
             <MessageScrollerContent className="acol ap2-content" id="aBody">
@@ -1310,6 +1325,9 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
         </MessageScroller>
       </MessageScrollerProvider>
       <div className="ai ap2-composer" id="aiBox" ref={boxRef}>
+        {/* 待发送队列 / 标注 / 上下文芯片统一浮在输入区上方：它们原来占正常布局，
+            一出现就把输入区顶高、消息区压矮（助手新建节点自动选中时最明显），看起来就是上下跳。 */}
+        <div className="ap2-composer-float">
         {a.queue.length ? <div className="ap2-queue" id="aQueue" aria-label="待发送消息队列">
           <div className="ap2-queue-hd">
             <span className="ap2-queue-title">待发送</span>
@@ -1358,6 +1376,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
           {ctxItems.some((x) => !x.pinned) ? <button className="linkbtn" id="aPin" onClick={() => { ctxItems.filter((x) => !x.pinned).forEach((x) => a.pinned.push(x.n.id)); a.emit(); store.toast("已固定到本次对话，取消选中也会保留"); }}><Icon name="plus" size="xs" />添加画布内容</button> : null}
           {ctxItems.some(({ n }) => n.kind === "image" && srcOf(n)) ? <button className="linkbtn" id="aReverse" title="用这张（或这几张里的第一张）找相似参考图" onClick={() => void reverseSearch(ctl, a)}><Icon name="search" size="xs" />以图搜图</button> : null}
           {ui.agentPick ? <span className="cchip">点画布上的节点加入上下文 · Esc 结束</span> : null}
+        </div>
         </div>
         {authCard ? <AutonomyCard busy={authBusy} initial={authCard.initial} models={models} reason={authCard.reason} onCancel={endAutonomy} onConfirm={confirmBudget} /> : null}
         <InputGroup className="ap2-input"><MentionInput id="aiInput" ref={edRef} value={a.draft}
@@ -1561,13 +1580,15 @@ function Msg({ m, i, isNew, a, ctl, models, onRetry, onBranch, onQ, onSkillInsta
     {m.results?.length ? <div className="mentions">{m.results.map((id) => <NodeMention key={id} id={id} ctl={ctl} />)}</div> : null}
     {m.acts ? <ButtonGroup className="ap2-qacts">{m.acts.map((q) => <Button className="ap2-qbtn" key={q} onClick={() => onQ(q)} size="sm" variant="outline">{q}</Button>)}</ButtonGroup> : null}
     <MessageTime at={m.at} />
-    {!m.think?.live && !m.streaming && !a.busy ? <TooltipProvider><ButtonGroup className="ap2-mact">
+    {/* 操作条常驻占位：忙碌/流式时只隐藏不卸载。以前是条件渲染，a.busy 每翻一次，所有助手消息就矮 31px，
+        整列消息跟着上下跳（实测 750ms 轮询与旧 watcher 抢 busy 时最明显）。 */}
+    <TooltipProvider><ButtonGroup className={"ap2-mact" + (m.think?.live || m.streaming || a.busy ? " is-ghost" : "")}>
       <Tooltip><TooltipTrigger render={<Button aria-label="复制" className="ap2-act" onClick={copy} size="icon-sm" variant="ghost"><Icon name="copy" size="xs" /></Button>} /><TooltipContent>复制</TooltipContent></Tooltip>
       <Tooltip><TooltipTrigger render={<Button aria-label="好评" aria-pressed={m.fb === "up"} className={"ap2-act" + (m.fb === "up" ? " on" : "")} onClick={() => { patch({ fb: m.fb === "up" ? undefined : "up" }); ctl.store.toast("感谢反馈"); }} size="icon-sm" variant="ghost"><Icon name="thumbup" size="xs" /></Button>} /><TooltipContent>好评</TooltipContent></Tooltip>
       <Tooltip><TooltipTrigger render={<Button aria-label="差评" aria-pressed={m.fb === "down"} className={"ap2-act" + (m.fb === "down" ? " on" : "")} onClick={() => { patch({ fb: m.fb === "down" ? undefined : "down" }); ctl.store.toast("已记录，会用来改进回答"); }} size="icon-sm" variant="ghost"><Icon name="thumbdown" size="xs" /></Button>} /><TooltipContent>差评</TooltipContent></Tooltip>
       <Tooltip><TooltipTrigger render={<Button aria-label="分支对话" className="ap2-act" onClick={onBranch} size="icon-sm" variant="ghost"><Icon name="branch" size="xs" /></Button>} /><TooltipContent>分支对话</TooltipContent></Tooltip>
       <Tooltip><TooltipTrigger render={<Button aria-label="重新生成" className="ap2-act" onClick={onRetry} size="icon-sm" variant="ghost"><Icon name="redo" size="xs" /></Button>} /><TooltipContent>重新生成</TooltipContent></Tooltip>
-    </ButtonGroup></TooltipProvider> : null}
+    </ButtonGroup></TooltipProvider>
   </div>;
 }
 

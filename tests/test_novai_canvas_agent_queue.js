@@ -178,7 +178,7 @@ const cssEnd = cssFile.indexOf('.cn-root #agent.ap2-agent .ap2-ctxrow');
 assert.ok(cssStart >= 0 && cssEnd > cssStart, 'agent-panel-v2.css 缺少队列样式段');
 const queueCss = cssFile.slice(cssStart, cssEnd);
 assert.ok(/\.ap2-queue\s*\{[^}]*border-radius:\s*14px/.test(queueCss), '队列圆角 14px');
-assert.ok(/\.ap2-queue\s*\{[^}]*color-mix\(in srgb, var\(--fg\) 5%, transparent\)/.test(queueCss), '队列软底用 color-mix');
+assert.ok(/\.ap2-queue\s*\{[^}]*background:\s*var\(--card\)/.test(queueCss), '队列浮层用卡片实底（不透明的浮层，避免背后消息透出来）');
 assert.ok(!/border:\s*1px/.test(queueCss), '队列样式不允许 1px 描边');
 assert.ok(!/inset 0 0 0 1px/.test(queueCss), '队列样式不允许 inset 发丝线');
 assert.ok(/\.ap2-queue-list\s*\{[^}]*max-height:\s*140px[^}]*overflow-y:\s*auto/.test(queueCss), '列表最大高度 + 内部滚动');

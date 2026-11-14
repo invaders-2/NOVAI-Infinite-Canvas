@@ -404,6 +404,7 @@
 
 /* ── 输入区：22 圆角卡 + 44 输入行 + 34 深色发送圆 ─────────────────── */
 .cn-root #agent.ap2-agent .ap2-composer {
+  position: relative; /* 待发送队列改成浮层，不能把输入区和消息区的高度顶来顶去 */
   flex: 0 0 auto;
   margin: 0 12px 12px;
   padding: 8px 8px 8px;
@@ -427,14 +428,22 @@
   background: color-mix(in srgb, var(--fg) 5%, #fff);
   box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05), 0 18px 40px rgba(15, 23, 42, 0.12);
 }
-/* ── 待发送消息队列：输入区上方，助手忙碌时 Enter 入队（软底，不画描边） ── */
+/* ── 待发送消息队列：输入区上方，助手忙碌时 Enter 入队（软底，不画描边） ──
+   用绝对定位浮在输入区上方：以前它在文档流里，每加/发走一条排队消息，整块输入区就长高/变矮，
+   消息区跟着被压缩，看起来就是上下抽动。 */
 .cn-root #agent.ap2-agent .ap2-queue {
-  width: 100%;
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 8px);
+  z-index: 4;
+  width: auto;
   min-width: 0;
   padding: 6px 8px;
   border: 0;
   border-radius: 14px;
-  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  background: var(--card);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.3);
 }
 .cn-root #agent.ap2-agent .ap2-queue-hd {
   display: flex;
@@ -2054,3 +2063,44 @@
 .cn-root #agent.ap2-agent .m-ment:hover { background: rgba(var(--ink), .12); }
 .cn-root #agent.ap2-agent .m-ment img { width: 18px; height: 18px; border-radius: 5px; object-fit: cover; flex: none; display: block; }
 .cn-root #agent.ap2-agent .m-ment .nv-i { width: 15px; height: 15px; flex: none; opacity: .8; }
+
+/* 消息行默认带 content-visibility:auto（离屏跳过渲染）：跑任务时面板频繁滚动、卡片一张张插进来，
+   离屏行会被反复跳过又重绘，看起来就是消息区一块块闪。面板只有 380px 宽，省这点渲染不值当。 */
+.cn-root #agent.ap2-agent .ap2-item { content-visibility: visible; contain-intrinsic-size: auto 6rem; }
+
+/* 消息区关掉浏览器的 scroll anchoring：流式时上面的卡片/骨架高度一变，浏览器会自动把 scrollTop 往回顶，
+   和「跟随最新」一起就表现为上下抽动；位置只由我们自己的跟随逻辑控制。 */
+.cn-root #agent.ap2-agent .ap2-viewport,
+.cn-root #agent.ap2-agent .ap2-content { overflow-anchor: none; }
+
+/* 操作条只隐藏不卸载：保持 31px 占位，避免忙碌态切换时整列消息上下跳 */
+.cn-root #agent.ap2-agent .ap2-mact.is-ghost { visibility: hidden; pointer-events: none; }
+
+/* 输入区上方的浮层（队列 / 标注 / 上下文芯片）：全部脱离文档流，输入区高度恒定 */
+.cn-root #agent.ap2-agent .ap2-composer-float {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 8px);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+.cn-root #agent.ap2-agent .ap2-composer-float > * { pointer-events: auto; }
+.cn-root #agent.ap2-agent .ap2-composer-float .ap2-queue {
+  position: static;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  width: auto;
+}
+.cn-root #agent.ap2-agent .ap2-composer-float .ap2-ctxrow,
+.cn-root #agent.ap2-agent .ap2-composer-float .ap2-annrow {
+  padding: 6px 8px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+}
+.cn-root #agent.ap2-agent .ap2-composer-float .ap2-ctxrow:empty { display: none; }

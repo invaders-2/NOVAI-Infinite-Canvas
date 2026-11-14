@@ -249,14 +249,14 @@ const { AgentState } = load('novai-canvas-ui/src/canvas/canvas-next/agent/state.
     assert.ok(!panel.includes('goalOf(m)'), '旧的全局 goalOf 已移除');
     assert.ok(panel.includes('async function send(fromQa = false, outgoing?: QueuedMsg["snap"], targetThreadId?: string)'), 'send 支持目标对话（后台队列自动发送）');
     assert.ok(panel.includes('let threadId = target || a.activeThreadId;'), 'send 一开始就捕获线程');
-    assert.ok(panel.includes('a.appendMessage({ id: mid(), role: "u"'), '用户消息写进捕获的线程');
+    assert.ok(panel.includes('const userMsgId = mid();') && panel.includes('a.appendMessage({ id: userMsgId, role: "u"'), '用户消息写进捕获的线程');
     assert.ok(panel.includes('a.appendMessage(m, tId)'), '助手消息写进捕获的线程');
     assert.ok(panel.includes('threadId: threadId || undefined, selectedNodeIds'), 'runAgentTask 带发起时的线程 id');
     assert.ok(panel.includes('watchTask(m, submitted.taskId, t0, tId)'), 'watchTask 绑定线程');
     assert.ok(panel.includes('watchTask(m2, res.taskId, t0, threadId)'), '重新生成同样绑定线程');
     assert.ok(panel.includes('watchTask(m, res.taskId, performance.now(), threadId)'), '方案执行同样绑定线程');
     assert.ok(panel.includes('function watchTask(m: AgentMsg, taskId: string, t0: number, threadId: string)'));
-    assert.ok(panel.includes('a.setThreadBusy(threadId, !settled); a.setThreadStop(threadId, false); a.emit();'), '任务快照只改自己线程的忙闲');
+    assert.ok(panel.includes('if (!latest || latest.id === m.id) a.setThreadBusy(threadId, !settled);'), '只有最后一条消息的 watcher 能改 busy（旧的不会把忙闲翻来翻去）');
     assert.ok(panel.includes('a.setThreadBusy(tId, false)'), '收尾只清自己线程的 busy');
     assert.ok(panel.includes('a.setThreadBusy(threadId, false)'), '方案 / 安装收尾按线程清 busy');
     assert.ok(panel.includes('a.pendingUrgent'), '立即发送挂在 AgentState 上');

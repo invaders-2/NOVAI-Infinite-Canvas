@@ -15,7 +15,8 @@ const emit = () => ls.forEach((l) => l());
 const sub = (l: () => void) => { ls.add(l); return () => { ls.delete(l); }; };
 
 export function openPop(anchor: Element | { x: number; y: number }, render: (close: () => void) => ReactNode, dir: "down" | "up" | "right" = "down", align: "left" | "right" = "left", cls?: string) {
-  const agent = anchor instanceof Element && !!anchor.closest("#agent");
+  // 二级弹层的锚点是上一个 #pop 自己：父弹层属于助手时，二级也要按助手区摆，否则会飘到面板标题栏上
+  const agent = (anchor instanceof Element && !!anchor.closest("#agent")) || (anchor instanceof Element && !!anchor.closest("#pop") && !!pop?.agent);
   // 弹层只有一个实例：二级弹层（右键「添加辅助工具」、节点「替换」）会顶掉父菜单，锚点随之从文档里卸载。
   // 锚点还在时先把矩形量下来，卸载后用它定位，否则 0×0 会把二级弹窗摆到左上角。
   const rect = anchor instanceof Element ? (() => { const r = anchor.getBoundingClientRect(); return r.width || r.height ? { x: r.left, y: r.top, width: r.width, height: r.height } : undefined; })() : undefined;
@@ -55,24 +56,31 @@ function Popover({ st }: { st: NonNullable<PopState> }) {
     const measure = () => {
       // 量「内容自然高度」：内联 maxHeight 是上一轮按旧内容算的，不清掉就会把弹层永久锁在初始高度，
       // 列表长了只能滚动整个弹层（连搜索框一起走），看着像错位、也看不到底下的模型
-      const prevMax = el.style.maxHeight;
-      if (prevMax) el.style.maxHeight = "none";
+      // 量自然尺寸时必须把上一轮的 maxHeight / maxWidth 一起清掉：只清高度的话，宽度会在「被限宽」和
+      // 「自然宽度」之间来回量，ResizeObserver 每帧改一次 maxWidth，弹层就会一直抖（并且可能超出面板）
+      const prevMax = el.style.maxHeight; const prevW = el.style.maxWidth;
+      el.style.maxHeight = "none"; el.style.maxWidth = "none";
       const pr = el.getBoundingClientRect();
-      if (prevMax) el.style.maxHeight = prevMax;
+      el.style.maxHeight = prevMax; el.style.maxWidth = prevW;
+      // 助手里的弹层只允许落在消息区内：以前按整个窗口算，模型/分辨率菜单会盖到面板标题栏和卡片标题上，看着像错位。
+      const host = st.agent ? document.querySelector<HTMLElement>("#agent .ap2-viewport") : null;
+      const hr = host?.getBoundingClientRect();
+      const bounds = hr && hr.width > 2 && hr.height > 2 ? hr : null;
+      const toLocal = (r: { x: number; y: number; width: number; height: number }) => bounds ? { x: r.x - bounds.x, y: r.y - bounds.y, width: r.width, height: r.height } : r;
       const anchor: PopRect = st.anchor instanceof Element
         ? (() => {
           const r = st.anchor.getBoundingClientRect();
           // 锚点还在文档里且量得到尺寸就跟着实时走（窗口缩放 / 滚动）；否则用打开时的快照
-          if (st.anchor.isConnected && (r.width || r.height)) return { x: r.left, y: r.top, width: r.width, height: r.height };
-          return st.rect ?? { x: r.left, y: r.top, width: r.width, height: r.height };
+          if (st.anchor.isConnected && (r.width || r.height)) return toLocal({ x: r.left, y: r.top, width: r.width, height: r.height });
+          return toLocal(st.rect ?? { x: r.left, y: r.top, width: r.width, height: r.height });
         })()
         : { x: st.anchor.x, y: st.anchor.y, width: 0, height: 0 };
       const placed = placePopover({
-        anchor, popup: pr, viewport: { width: innerWidth, height: innerHeight }, dir: st.dir, align: st.align, margin: 8, gap: 8,
+        anchor, popup: { x: 0, y: 0, width: pr.width, height: pr.height }, viewport: bounds ? { width: bounds.width, height: bounds.height } : { width: innerWidth, height: innerHeight }, dir: st.dir, align: st.align, margin: 8, gap: 8,
         // 助手里的卡片弹层（模型/参数/组合）：高度收到 min(420px, 55vh)，翻边按收小后的高度算，少挡卡片正文
-        capHeight: st.agent ? Math.min(420, innerHeight * 0.55) : undefined,
+        capHeight: st.agent ? Math.min(420, innerHeight * 0.55, (bounds ? bounds.height : innerHeight) - 16) : undefined,
       });
-      const next = { x: placed.x, y: placed.y, origin: placed.origin, menu: placed.menu, maxWidth: placed.maxWidth, maxHeight: placed.maxHeight, scrollX: placed.scrollX, scrollY: placed.scrollY };
+      const next = { x: placed.x + (bounds ? bounds.x : 0), y: placed.y + (bounds ? bounds.y : 0), origin: placed.origin, menu: placed.menu, maxWidth: placed.maxWidth, maxHeight: placed.maxHeight, scrollX: placed.scrollX, scrollY: placed.scrollY };
       // 子菜单（combobox）首帧的行高常比定稿矮几像素，只有位置真的变了才重排，避免无谓 re-render
       setPos((cur) => (cur && cur.x === next.x && cur.y === next.y && cur.menu === next.menu && cur.maxHeight === next.maxHeight && cur.maxWidth === next.maxWidth && cur.scrollY === next.scrollY && cur.scrollX === next.scrollX ? cur : next));
     };

@@ -153,6 +153,21 @@ export class CanvasStore {
   set(patch: Partial<CanvasState>) { if (this.disposed) return; this.state = { ...this.state, ...patch }; this.emit(); }
   setUI(patch: Partial<UIState>) { if (this.disposed) return; this.state = { ...this.state, ui: { ...this.state.ui, ...patch } }; this.emit(); }
   setView(v: View) { if (this.disposed) return; this.state = { ...this.state, view: v }; this.emit(); }
+  /** 顶栏改画布名：先更新界面，再落到后端 meta；失败回滚并提示（以前只改本地 name，刷新就丢） */
+  async rename(name: string) {
+    const next = String(name || "").trim().slice(0, 80);
+    if (!next || next === this.state.name) return;
+    const previous = this.state.name;
+    this.set({ name: next });
+    try {
+      if (!this.backend.renameCanvas) throw new Error("当前后端不支持重命名");
+      await this.backend.renameCanvas(this.state.canvasId, next);
+      this.toast("已重命名画布");
+    } catch (error) {
+      this.set({ name: previous });
+      this.toast("重命名失败：" + (error instanceof Error ? error.message : "未知错误"), 4200);
+    }
+  }
 
   /* ---------- 加载 / 保存 ---------- */
   async load() {

@@ -2,7 +2,7 @@
  * Markdown 显示走 streamdown（GFM、流式补齐、数学公式、表格 / 代码块工具、外链安全），
  * 全屏编辑器的 contentEditable 需要 HTML 字符串，仍用下面同一套块级解析生成。
  */
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 import { createMathPlugin } from "@streamdown/math";
 import { defaultRehypePlugins, Streamdown, type ControlsConfig, type StreamdownTranslations } from "streamdown";
 import { padCjkEmphasis } from "./markdownCjk";
@@ -376,7 +376,8 @@ const CONTROLS: ControlsConfig = {
 };
 const LINK_SAFETY = { enabled: false };
 
-export function Markdown({ text, className, streaming = false }: { text: string; className?: string; streaming?: boolean }) {
+/** 助手面板每次快照重渲染整块面板：没变的消息不该重新解析 Markdown（历史越长越明显） */
+export const Markdown = memo(function Markdown({ text, className, streaming = false }: { text: string; className?: string; streaming?: boolean }) {
   useEffect(() => { bindImagePreview(); }, []);
   return (
     <Streamdown
@@ -397,7 +398,7 @@ export function Markdown({ text, className, streaming = false }: { text: string;
       {prepareMarkdown(text)}
     </Streamdown>
   );
-}
+});
 
 const IMG_SELECTOR = 'img[data-streamdown="image"]';
 let imgBound = false;
