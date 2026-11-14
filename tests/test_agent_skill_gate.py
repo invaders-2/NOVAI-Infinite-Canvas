@@ -117,6 +117,18 @@ class SkillGateTests(unittest.TestCase):
         self.assertNotIn("不要再调用", self.check()["error"])
         self.assertIn("不要再调用任何生成工具", self.check("batch_generate")["error"])
 
+    def test_strong_yes_without_card_confirms_when_nodes_ready(self):
+        main._agent_skill_gate_update("cv1", SKILL, attached_at=1.0)
+        main._agent_skill_gate_begin(types.SimpleNamespace(canvas_id="cv1", skill_id=""), "按方案继续")
+        self.assertIsNotNone(self.check())          # 节点没齐：不算
+        self.canvas["nodes"] = [text_node("a", "视频分析与结构对比"), text_node("b", "分镜表")]
+        self.assertEqual(main._agent_skill_gate_confirm_only("cv1"), SKILL)
+        main._agent_skill_gate_begin(types.SimpleNamespace(canvas_id="cv1", skill_id=""), "好的")
+        self.assertIsNotNone(self.check())          # 弱同意不算
+        main._agent_skill_gate_begin(types.SimpleNamespace(canvas_id="cv1", skill_id=""), "按方案继续")
+        self.assertIsNone(self.check())
+        self.assertEqual(main._agent_skill_gate_confirm_only("cv1"), "")
+
     def test_answer_parser(self):
         self.assertTrue(main._agent_skill_gate_answer_confirms("先只做第一段试试"))
         self.assertTrue(main._agent_skill_gate_answer_confirms("可以，开始吧"))

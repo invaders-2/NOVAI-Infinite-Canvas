@@ -44231,6 +44231,9 @@ AGENT_SKILL_GATES = {
 }
 _AGENT_SKILL_GATE_TOOLS = ("generate_image", "generate_video", "batch_generate", "run_batch")
 _AGENT_SKILL_GATE_YES = ("按方案做", "按这个方案", "先只做第一段", "满意", "继续", "确认", "同意", "开始做", "开始生成", "可以", "没问题", "就这样", "ok", "好的", "行")
+_AGENT_SKILL_GATE_STRONG_YES = ("按方案", "按这个方案", "确认方案", "方案确认", "先只做第一段", "开始生成")
+_AGENT_SKILL_GATE_CONFIRM_QUESTIONS = [{"question": "按画布上的「产品结构对比」和「分镜表」开始生成吗？",
+                                        "options": ["按方案做", "先只做第一段试试", "我来改方案"]}]
 _AGENT_SKILL_GATE_NO = ("改方案", "我来改", "修改", "不要", "先别", "不行", "不对")
 _AGENT_RUN_SKILL_GATE = contextvars.ContextVar("novai_agent_run_skill_gate", default="")
 _AGENT_SKILL_GATE_LOCK = Lock()
@@ -44329,6 +44332,17 @@ def _agent_skill_gate_begin(ctx, instruction):
         state = _agent_skill_gate_state(canvas_id, skill_id)
         if state.get("attached_at") and not _AGENT_RUN_SKILL_GATE.get():
             _agent_skill_gate_activate(skill_id)
+        # 没出过确认卡，但用户看过画布上的方案、明确说了「按方案…」：分析节点齐了就算确认
+        if (state.get("attached_at") and not state.get("asked_at") and not state.get("confirmed_at")
+                and any(word in str(instruction or "") for word in _AGENT_SKILL_GATE_STRONG_YES)
+                and not any(word in str(instruction or "") for word in _AGENT_SKILL_GATE_NO)):
+            try:
+                canvas = load_canvas(canvas_id)
+            except HTTPException:
+                canvas = None
+            if canvas is not None and not _agent_skill_gate_missing(canvas, skill_id):
+                _agent_skill_gate_update(canvas_id, skill_id, asked_at=time.time(), answered_at=time.time(),
+                                         answer=str(instruction or "")[:200], confirmed_at=time.time())
         if state.get("asked_at") and not state.get("answered_at"):
             confirmed = _agent_skill_gate_answer_confirms(instruction)
             _agent_skill_gate_update(canvas_id, skill_id, answered_at=time.time(),
@@ -44360,6 +44374,20 @@ def _agent_skill_gate_missing(canvas, skill_id):
             continue
         heads.append((access.title(node) + "\n" + (access.text(node) or str(node.get("text") or ""))[:200]))
     return [label for keyword, label in gate.get("nodes") or () if not any(keyword in h for h in heads)]
+
+
+def _agent_skill_gate_confirm_only(canvas_id):
+    """当前挂着的闸门只差用户确认（分析节点都齐了）→ 返回技能 id，否则空串。"""
+    skill_id = _AGENT_RUN_SKILL_GATE.get()
+    if not skill_id or not canvas_id:
+        return ""
+    if _agent_skill_gate_state(canvas_id, skill_id).get("confirmed_at"):
+        return ""
+    try:
+        canvas = load_canvas(canvas_id)
+    except HTTPException:
+        return ""
+    return "" if _agent_skill_gate_missing(canvas, skill_id) else skill_id
 
 
 def _agent_skill_gate_check(tool_name, args):
@@ -54168,6 +54196,19 @@ async def _agent_run_producer(req, queue, bus=None):
                               (time.monotonic() - round_tools_started) * 1000.0, chat.get("model"))
             if budget_blocked:
                 break               # 已经发过 budget_required，本轮到此为止
+            # 技能闸门：本轮生成被拦、而且只差用户确认 → 服务端直接出确认卡结束本轮（实测模型被拦后只会换提示词重试）
+            if any(isinstance(r, dict) and r.get("code") == "skill_gate_blocked"
+                   for r in results[round_results_start:]):
+                gate_skill = _agent_skill_gate_confirm_only(str(context_id or ""))
+                if gate_skill:
+                    gate_title = (AGENT_SKILL_GATES.get(gate_skill) or {}).get("title") or gate_skill
+                    summary_text = ("「%s」的分析和分镜已经写在画布上（「产品结构对比」「分镜表」节点）。"
+                                    "生成要花额度，先请你确认方案。" % gate_title)
+                    _agent_skill_gate_record_ask(_AGENT_SKILL_GATE_CONFIRM_QUESTIONS, summary_text)
+                    emit("message", {"text": summary_text})
+                    status = "ok"
+                    message = _agent_message_with_questions(summary_text, _AGENT_SKILL_GATE_CONFIRM_QUESTIONS)
+                    break
             # BEAT：本轮交给画布跑的节点，等它们出结果（或失败）再进下一轮，模型才能看到结果接着做
             def _queued(obj, depth=0):
                 # canvas_cli 会把工具结果再包一层：往里找两层
