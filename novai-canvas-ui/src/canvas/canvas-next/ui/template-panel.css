@@ -162,3 +162,8 @@
 .cn-root .tplpv-playbtn.on{opacity:0}
 .cn-root .tplpv-aud .tplpv-audbtn{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--sunken);color:var(--fg2)}
 .cn-root .tplpv-aud.on .tplpv-audbtn{background:var(--hover);color:var(--hi)}
+.cn-root .tplpv-media{position:relative;width:100%;height:200px;border-radius:12px;overflow:hidden;background:var(--card-hi)}
+.cn-root .tplpv-media img,.cn-root .tplpv-media video{width:100%;height:100%;object-fit:contain;display:block}
+.cn-root .tplpv-media .tplpv-im{position:absolute;inset:0;border-radius:12px}
+.cn-root .tplpv-media.aud{height:auto;background:none}
+.cn-root .tplpv-media.aud .tplpv-aud{border-radius:10px;padding:10px 12px;justify-content:flex-start;flex-direction:row}

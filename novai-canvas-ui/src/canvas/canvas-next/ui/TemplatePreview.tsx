@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
+import { MENTION_RE } from "../mentions";
 import "./template-panel.css";
 
 /* ---------- 首页模板（web/src/pages/home/templates.js）的读取与适配 ---------- */
@@ -63,7 +64,7 @@ export async function loadHomeEntries(): Promise<{ entries: HomeEntry[]; cats: R
 
 /* ---------- 模板 → 画布 doc（应用模板用） ---------- */
 export type PreviewDocNode = {
-  id: string; kind: "text" | "image" | "video" | "audio" | "table";
+  id: string; kind: "text" | "image" | "video" | "audio" | "table" | "group";
   /** 真实媒体地址（个人模板保存的图片 / 视频 / 音频） */
   asset?: string;
   x: number; y: number; w: number; h: number; title: string; text: string; prompt: string;
@@ -300,7 +301,7 @@ export function TemplatePreview({ entry, onClose, onApply, onDeleteConfirm, onAg
             return <div key={n.id} className={"tplpv-nd t-" + kind + (n.type === "label" ? "" : "") + (sel === n.id ? " on" : "")}
               data-tplpv-node={n.id} data-tplpv-kind={kind} style={{ left: n.x, top: n.y, width: n.w, height: n.h }}
               onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => { e.stopPropagation(); setSel((cur) => (cur === n.id ? null : n.id)); }}
+              onClick={(e) => { e.stopPropagation(); const media = (e.target as Element).closest?.("[data-tplpv-play]"); setSel((cur) => (media ? n.id : cur === n.id ? null : n.id)); }}
             >
               {n.type === "label" ? <span className="tplpv-lbl">{raw.text || n.title}</span> : <>
                 <div className="tplpv-al">
@@ -332,10 +333,18 @@ export function TemplatePreview({ entry, onClose, onApply, onDeleteConfirm, onAg
         </div>
         {tip ? <div className="tplpv-tip">拖动空白处平移 · 滚轮缩放 · 点节点看详情</div> : null}
         {selected && panelStyle ? <div className="tplpv-panel" data-tplpv-panel style={panelStyle} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+          {(() => {
+            const src = selected.asset || selected.cover;
+            if (!src) return null;
+            if (selected.type === "video") return <div className="tplpv-media"><PreviewVideo src={src} poster={selected.cover && selected.cover !== src ? selected.cover : undefined} /></div>;
+            if (selected.type === "audio") return <div className="tplpv-media aud"><PreviewAudio src={src} title={selected.title} /></div>;
+            if (selected.type === "image") return <div className="tplpv-media"><img src={src} alt="" draggable={false} /></div>;
+            return null;
+          })()}
           <div className="tplpv-refs">
             {upstream.length ? upstream.map((u) => <span key={u.id} className="tplpv-ref"><Icon name={ICONS[entry.home ? u.type : u.type] || "image"} size="xs" />{u.title}</span>) : <span className="tplpv-ref muted">没有上游输入</span>}
           </div>
-          <p className="tplpv-prompt">{isGen(selected) ? (selected.prompt || "（运行时按上游输入生成）") : (selected.text || selected.prompt || "（无提示词）")}</p>
+          <p className="tplpv-prompt">{(() => { const nodes = entry.doc?.nodes || []; const t = selected.prompt || selected.text || ""; return t.replace(new RegExp(MENTION_RE.source, "g"), (_r, id: string) => { const n = nodes.find((x) => x.id === id); return n ? "@" + n.title : ""; }) || (isGen(selected) ? "（运行时按上游输入生成）" : "（无提示词）"); })()}</p>
           <div className="tplpv-bar">
             <Icon name={selected.video ? "video" : "image"} size="s" />
             <b>{isGen(selected) ? (selected.video ? "视频" : "图片") : selected.title}</b>
@@ -369,8 +378,7 @@ function PreviewVideo({ src, poster }: { src: string; poster?: string }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   const [playing, setPlaying] = useState(false);
   if (!isVideoSrc(src)) return <div className="tplpv-im"><img src={src} alt="" draggable={false} /></div>;
-  const toggle = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const toggle = () => {
     const v = ref.current; if (!v) return;
     if (v.paused) void v.play().catch(() => undefined); else v.pause();
   };
@@ -384,8 +392,7 @@ function PreviewVideo({ src, poster }: { src: string; poster?: string }) {
 function PreviewAudio({ src, title }: { src?: string; title?: string }) {
   const ref = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
-  const toggle = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const toggle = () => {
     const a = ref.current; if (!a) return;
     if (a.paused) void a.play().catch(() => undefined); else a.pause();
   };

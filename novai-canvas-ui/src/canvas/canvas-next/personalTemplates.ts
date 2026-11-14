@@ -59,6 +59,8 @@ export function templateDocument(doc: CanvasDoc): CanvasDoc {
       const tableTitle = table.title || node.text || "多维表格";
       return [{ ...node, title: (node as { title?: string }).title || tableTitle, text: tableTitle, data: { table: { title: tableTitle, columns: Array.isArray(table.columns) ? table.columns : [], rows: Array.isArray(table.rows) ? table.rows : [] } } } as unknown as CanvasNode];
     }
+    // 分组节点也要带上：提示词里可能 @ 了「堆叠」这个分组，丢了它套用后就会显示已删除
+    if (node.kind === "group") return [{ ...node } as unknown as CanvasNode];
     if (!["text", "image", "video", "audio"].includes(node.kind)) return [];
     const data = node.data && typeof node.data === "object" ? node.data as { gen?: { title?: string; prompt?: string; params?: AnyParams; hist?: Array<{ text?: string; url?: string; frame?: string }>; hi?: number } } : {};
     const gen = data.gen || {};

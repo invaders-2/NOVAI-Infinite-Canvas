@@ -27,7 +27,7 @@ import { runKeyOf, runnableIds, runNodes, saveAsTemplate } from "./StackNode";
 import { bounds, cloneParams, defaultParams, expandGroupInputs, genOf, NODE_TAG, inputsOf, isGenKind, outOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, type AnyParams, type GenKind, type TextParams, type VideoMode, type VideoParams } from "../model";
 import { emptyTable, withTable } from "../table";
 import { ThumbImg } from "./thumb";
-import { plainPrompt } from "../mentions";
+import { MENTION_RE, mentionToken, plainPrompt } from "../mentions";
 import { useCtl, useS, type Ctl } from "./ctx";
 import { EdgeBadge } from "./Edges";
 import { AnimateIcon } from "./AnimateIcon";
@@ -658,7 +658,7 @@ const TEMPLATES = [
 /* ---------- 模板面板（对齐 TapNow E12：贴左侧工具栏的浮层 + 公共/我的 + 搜索 + 3 列封面卡） ---------- */
 /** 公共模板只展示内置模板与个人模板；带 doc 的模板一次铺全部节点与连线。 */
 type TplNode = {
-  id: string; kind: "text" | "image" | "video" | "audio" | "table";
+  id: string; kind: "text" | "image" | "video" | "audio" | "table" | "group";
   x: number; y: number; w: number; h: number;
   title: string; text: string; prompt: string;
   params?: { output?: TextParams["output"]; ratio?: string; count?: number; dur?: number; mode?: VideoMode };
@@ -667,6 +667,8 @@ type TplNode = {
   cover?: string;
   /** 真实媒体地址（个人模板保存的已生成结果；视频/音频不能只用封面） */
   asset?: string;
+  /** 分组节点包含的成员 id */
+  children?: string[];
   /** 个人模板原样带过来的节点数据（历史结果 / 参数） */
   data?: { gen?: { title?: string; prompt?: string; params?: AnyParams; hist?: Array<{ text?: string; url?: string; frame?: string; w?: number; h?: number }>; hi?: number } };
 };
@@ -699,7 +701,7 @@ function personalEntry(item: { id: string; title: string; prompt: string; update
   const cover = item.cover || item.coverDataUrl || doc.nodes.find((n) => n.cover)?.cover || "";
   return { id: item.id, name: item.title, summary: item.prompt, tags: ["我的模板"], chips: [], category: "personal", steps: [], publishedAt: item.updatedAt, nodes: doc.nodes.length, edges: doc.edges.length, doc, personal: true, ...(cover ? { cover } : {}) };
 }
-const TPL_NODE_KINDS = ["text", "image", "video", "audio", "table"];
+const TPL_NODE_KINDS = ["text", "image", "video", "audio", "table", "group"];
 /** 卡片标签里没区分度的词：分类名 + 类型名（「模板」每条都有，挂上只是噪音） */
 const TPL_KIND_LABEL: Record<string, string> = { text: "文本", image: "图片", video: "视频", audio: "音频", table: "表格" };
 const TPL_TAG_NOISE = new Set(["模板"]);
@@ -731,6 +733,7 @@ function asTplDoc(value: unknown): TplDoc | null {
       ...(typeof n.cover === "string" && n.cover ? { cover: n.cover } : {}),
       ...(typeof n.asset === "string" && n.asset ? { asset: n.asset } : {}),
       ...(n.data && typeof n.data === "object" ? { data: n.data as TplNode["data"] } : {}),
+      ...(Array.isArray(n.children) ? { children: n.children.filter((c): c is string => typeof c === "string") } : {}),
     });
   }
   if (!nodes.length) return null;
@@ -795,6 +798,11 @@ function createFromTemplate(ctl: Ctl, tpl: TplEntry): { nodes: number; edges: nu
   const made: CanvasNode[] = [];
   for (const n of doc.nodes) {
     const id = idOf.get(n.id)!; const x = n.x + ox, y = n.y + oy; const title = n.title || tpl.nodeTitle || tpl.name;
+    if (n.kind === "group") {
+      const children = (n.children || []).map((c) => idOf.get(c)).filter((c): c is string => !!c);
+      made.push({ id, type: "smart-group", kind: "group", x, y, w: n.w, h: n.h, text: n.title || n.text || "分组", children } as unknown as CanvasNode);
+      continue;
+    }
     if (n.kind === "table") {
       // 上游文本节点：重新出表时更新同一张表（见 table.ts 的 sourceId）
       const up = doc.edges.filter((e) => e.to === n.id).map((e) => n.kind && doc.nodes.find((src) => src.id === e.from)).find((src) => src && src.kind === "text");
@@ -805,7 +813,10 @@ function createFromTemplate(ctl: Ctl, tpl: TplEntry): { nodes: number; edges: nu
     }
     const genData = n.data?.gen;
     const cur = genData?.hist?.[genData?.hi || 0];
-    const prompt = n.prompt || genData?.prompt || (n.kind === tpl.kind ? tpl.prompt || "" : "");
+    const rawPrompt = n.prompt || genData?.prompt || (n.kind === tpl.kind ? tpl.prompt || "" : "");
+    // 模板里的 @{旧节点id} 要换成新节点的 id，不然套用后编辑器里会显示「已删除节点」
+    // 模板里被丢掉的节点（旧模板没存分组）没有新 id：直接把引用去掉，避免套用后显示「已删除节点」
+    const prompt = rawPrompt.replace(new RegExp(MENTION_RE.source, "g"), (_raw: string, id: string, sec?: string) => { const nid = idOf.get(id); return nid ? mentionToken(nid, sec) : ""; });
     // 个人模板：图片/视频/音频按保存下来的真实地址还原结果；文本用历史文本；
     // 官方模板没有 asset，退回节点封面（image 的 cover 就是图本身）。
     const mediaUrl = n.asset || cur?.url || "";
