@@ -351,7 +351,7 @@ export function TimelineEditor({ node }: { node: CanvasNode }) {
 
     <div className="tle-mon"><canvas ref={screen} className="tle-screen" style={{ aspectRatio: `${w} / ${h}` }} />{!clips.length ? <span className="tle-hint">点上方「视频」「图片」「音频」添加素材，或把画布上的节点直接拖进来</span> : null}</div>
 
-    <div className="tle-ctl">
+    <div className="tle-ctl" onPointerDown={stopOnControl}>
       <button className="ib" data-tl="home" aria-label="跳到开头" onClick={() => seek(0)} disabled={!total}><Icon name="skipb" size="s" /></button>
       <button className="ib tle-play" data-tl="play" aria-label={playing ? "暂停" : "播放"} onClick={toggle} disabled={!total}><Icon name={playing ? "pause" : "play"} size="s" /></button>
       <button className="ib" data-tl="end" aria-label="跳到结尾" onClick={() => seek(total)} disabled={!total}><Icon name="skipf" size="s" /></button>
@@ -379,7 +379,7 @@ export function TimelineEditor({ node }: { node: CanvasNode }) {
       </div>
     </div>
 
-    <div className="tle-insp">
+    <div className="tle-insp" onPointerDown={stopOnControl}>
       {selClip ? (selClip.type === "subtitle"
         ? <>
           <Icon name="text" size="xs" /><input className="tle-text" data-tl="subtext" value={selClip.text || ""} placeholder="字幕文字" onChange={(e) => patchSel({ text: e.target.value })} onFocus={() => store.snapshot()} />

@@ -102,12 +102,15 @@ export function makeGroupNode(children: CanvasNode[]): CanvasNode {
   };
 }
 
-/** 节点框超上限时宽高按同一系数缩（以前各夹各的：1280×720 的视频被夹成 800×720，比例全变）。 */
-function fitNodeBox(rawW: unknown, rawH: unknown, maxW: number, size: { w: number; h: number }): { w: number; h: number } {
+/** 载入时保留用户调过的节点尺寸；只有脏到离谱的才按同系数收到上限（以前 800×800 的硬上限会把
+ *  用户拉大的节点在重开画布时缩回去，还会把 1280×720 的视频比例夹变形）。 */
+const MAX_NODE_W = 4000;
+const MAX_NODE_H = 4000;
+function fitNodeBox(rawW: unknown, rawH: unknown, _maxW: number, size: { w: number; h: number }): { w: number; h: number } {
   const w0 = typeof rawW === "number" && Number.isFinite(rawW) ? rawW : size.w;
   const h0 = typeof rawH === "number" && Number.isFinite(rawH) ? rawH : size.h;
-  const scale = Math.min(1, maxW / Math.max(1, w0), 800 / Math.max(1, h0));
-  return { w: clampNumber(w0 * scale, 80, maxW, size.w), h: clampNumber(h0 * scale, 48, 800, size.h) };
+  const scale = Math.min(1, MAX_NODE_W / Math.max(1, w0), MAX_NODE_H / Math.max(1, h0));
+  return { w: clampNumber(w0 * scale, 80, MAX_NODE_W, size.w), h: clampNumber(h0 * scale, 48, MAX_NODE_H, size.h) };
 }
 
 function clampNumber(value: unknown, lo: number, hi: number, fallback: number): number {
