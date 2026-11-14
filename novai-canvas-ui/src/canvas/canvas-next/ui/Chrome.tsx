@@ -717,17 +717,20 @@ function asTplDoc(value: unknown): TplDoc | null {
     const id = n && typeof n.id === "string" ? n.id.trim() : "";
     const kind = n ? String(n.kind || "") : "";
     if (!n || !id || !TPL_NODE_KINDS.includes(kind)) continue;
+    const data = n.data && typeof n.data === "object" ? (n.data as TplNode["data"]) : undefined;
+    const genPrompt = typeof data?.gen?.prompt === "string" ? data.gen.prompt : "";
     nodes.push({
       id, kind: kind as TplNode["kind"],
       x: Math.round(tplNum(n.x, 0)), y: Math.round(tplNum(n.y, 0)),
       w: Math.max(40, Math.round(tplNum(n.w, 260))), h: Math.max(40, Math.round(tplNum(n.h, 220))),
       title: typeof n.title === "string" ? n.title : "",
       text: typeof n.text === "string" ? n.text : "",
-      prompt: typeof n.prompt === "string" ? n.prompt : "",
-      params: n.params && typeof n.params === "object" ? (n.params as TplNode["params"]) : undefined,
+      prompt: typeof n.prompt === "string" && n.prompt ? n.prompt : genPrompt,
+      params: n.params && typeof n.params === "object" ? (n.params as TplNode["params"]) : (data?.gen?.params as TplNode["params"] | undefined),
       table: n.table && typeof n.table === "object" ? (n.table as TplNode["table"]) : null,
       ...(typeof n.cover === "string" && n.cover ? { cover: n.cover } : {}),
       ...(typeof n.asset === "string" && n.asset ? { asset: n.asset } : {}),
+      ...(n.data && typeof n.data === "object" ? { data: n.data as TplNode["data"] } : {}),
     });
   }
   if (!nodes.length) return null;
