@@ -278,8 +278,27 @@ export function PromptEditor(props: PromptEditorProps) {
     const tn = document.createTextNode(t); r.insertNode(tn); placeAfter(tn); emit();
   };
   const pick = (it: Item) => {
-    if (it.type === "node") return insertChip(it.node.id, it.section);
-    if (it.type === "element") return insertText("@" + it.el.name + " ");
+    if (it.type === "node") {
+      const live = store.node(node.id); if (!live) return;
+      const self = it.node.id === node.id;
+      const linked = inputsOf(store.state.doc, node.id).some((x) => x.node.id === it.node.id);
+      // @ 画布上任意节点：没连线就自动连成输入，再插引用
+      if (!self && !linked) connect(store, it.node.id, node.id, { quiet: true, select: false });
+      return insertChip(it.node.id, it.section);
+    }
+    if (it.type === "element") {
+      const live = store.node(node.id); if (!live) return;
+      const refs = it.el.refs.filter(Boolean).slice(0, 4);
+      if (!refs.length) return insertText("@" + it.el.name + " ");
+      // @素材库元素：把参考图作为图片节点放到当前节点左边，再逐张连成输入，最后在 @ 处插入引用
+      const w = 220; const h = Math.round(w * 0.75); const gap = 24;
+      const nodes = refs.map((url, i) => store.newNode("image", live.x - w - 140, live.y + 32 + i * (h + gap), { title: refs.length > 1 ? `${it.el.name} ${i + 1}` : it.el.name, uploaded: true, hist: [{ url }], w, h }));
+      const edges = nodes.map((n) => ({ id: uid("e"), from: n.id, to: node.id }));
+      store.addNodes(nodes, edges, { select: false });
+      nodes.forEach((n) => insertChip(n.id));
+      store.toast(`已把「${it.el.name}」的 ${nodes.length} 张参考图放到画布并连成输入`);
+      return;
+    }
     // 收藏的素材：复制一个上传节点放到左边、连进来，再在 @ 处插入它的引用
     const live = store.node(node.id); if (!live) return;
     const k = it.node.kind as GenKind; const o = genOf(it.node);
