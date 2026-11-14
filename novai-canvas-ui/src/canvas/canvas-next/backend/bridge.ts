@@ -688,10 +688,14 @@ export function createBridgeBackend(): CanvasBackend {
        * 断线用 after=lastSeq 续传；连不上就退回轮询并定期重连。stop/超时/收尾逻辑不变。
        */
       const TERMINAL = new Set(["SUCCEEDED", "COMPLETED", "FAILED", "CANCELLED", "STOPPED", "BLOCKED"]);
+      const REVIEW_GRACE_MS = 180000;
+      const REVIEW_GRACE_POLL_MS = 2000;
       let settled = false;
       let lastSeq = 0;
       let streamLive = false;
       let local: RunSnapshot | null = null;
+      let graceDeadline = 0;
+      let graceTimer: ReturnType<typeof setTimeout> | null = null;
       let pollTimer: ReturnType<typeof setTimeout> | null = null;
       let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
       let streamCtrl: AbortController | null = null;
@@ -720,10 +724,21 @@ export function createBridgeBackend(): CanvasBackend {
           if (TERMINAL.has(local.status)) settled = true;
           if (!lastSeq) lastSeq = lastSeqOf(local);
           publish();
+          if (settled && !graceDeadline) { graceDeadline = Date.now() + REVIEW_GRACE_MS; scheduleGrace(); }
         } finally {
           reading = false;
           if (queued) { queued = false; void refresh(); }
         }
+      };
+      const hasReview = () => !!local && local.events.some((event) => String(event.eventType || "") === "review");
+      const clearGrace = () => { if (graceTimer !== null) { clearTimeout(graceTimer); graceTimer = null; } };
+      const scheduleGrace = () => {
+        clearGrace();
+        if (!active || disposed || !graceDeadline || hasReview() || Date.now() >= graceDeadline) return;
+        graceTimer = setTimeout(() => {
+          graceTimer = null;
+          void refresh().then(() => { if (!hasReview()) scheduleGrace(); });
+        }, REVIEW_GRACE_POLL_MS);
       };
       const schedulePoll = () => {
         clearPoll();
@@ -797,6 +812,8 @@ export function createBridgeBackend(): CanvasBackend {
         active = false;
         clearPoll();
         clearReconnect();
+        clearGrace();
+        graceDeadline = 0;
         streamCtrl?.abort();
         if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisibility);
         off?.(); agentWatchStops.delete(stop);

@@ -6,6 +6,7 @@
 // 种子规格两边一致，由画布侧翻译成节点；旧智能画布（/static/smart-canvas.html）只剩历史画布与外链在用。
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
+import VendorLogo from '../../components/VendorLogo.vue';
 import NvVeilBg from '../../components/NvVeilBg.vue';
 import EffortSlider from '../../components/EffortSlider.vue';
 import { state, toast } from '../../lib/store.js';
@@ -971,6 +972,7 @@ onBeforeUnmount(() => {
                                     </button>
                                     <button v-for="g in modelVendors" :key="g.id" type="button" class="hp-mv" :class="{ on: modelVendor === g.id }"
                                             @pointerenter="showVendor(g.id, $event)" @click="clickVendor(g.id, $event)">
+                                        <VendorLogo class="hp-mv-logo" :name="g.name" :id="g.id" :size="16" />
                                         <span class="nm">{{ g.name }}</span>
                                         <NvIcon v-if="chatModel && chatModel.split('::')[0] === g.id" name="check" class="chk" />
                                         <span class="n">{{ g.models.length }} 个模型</span>
@@ -991,6 +993,7 @@ onBeforeUnmount(() => {
                                     <label v-if="activeVendor.models.length > 8" class="hp-search"><NvIcon name="search" /><input v-model="modelQ" placeholder="搜索模型" autocomplete="off" /></label>
                                     <div class="hp-list">
                                         <button v-for="m in activeModels" :key="m.id" type="button" class="hp-it" :class="{ cur: chatModel === m.id }" :title="m.id" @click="pickModel(m)">
+                                            <VendorLogo :name="activeVendor && activeVendor.name" :id="activeVendor && activeVendor.id" :model="m.name" :size="14" />
                                             <span class="tx"><b>{{ m.name }}</b></span>
                                             <NvIcon v-if="chatModel === m.id" name="check" class="chk" />
                                         </button>

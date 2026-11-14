@@ -266,14 +266,16 @@ class StreamEventTests(unittest.TestCase):
         events, _ = recorder()
         raw_mock = AsyncMock(return_value=NATIVE_RAW)
         stream_mock = AsyncMock(side_effect=AssertionError("开关关闭时不能走流式"))
+        # 流式默认已打开：这里显式写 0 才是在测「开关关闭」的老行为（env 里其它 NOVAI_AGENT_V2_* 照旧保留）
         env = {key: value for key, value in os.environ.items() if not key.startswith("NOVAI_AGENT_V2_STREAM")}
+        env["NOVAI_AGENT_V2_STREAM"] = "0"
         with run_context(events), patch.dict(os.environ, env, clear=True), \
                 patch.object(main, "chat_stream_with_think", new=stream_mock), \
                 patch.object(main, "_agent_run_chat_raw", new=raw_mock):
             decision = asyncio.run(main._agent_run_decide(chat_config(), "SYS", "用户指令", "c1", "[]", TOOLS))
+            self.assertFalse(main._agent_v2_stream_enabled())   # 断言要在开关仍然关闭的上下文里
         self.assertEqual(events, [], "开关关闭不能发任何增量事件")
         self.assertEqual(raw_mock.await_count, 1)
-        self.assertFalse(main._agent_v2_stream_enabled())
         self.assertEqual(decision["steps"][0]["tool"], "create_node")
 
 
@@ -284,6 +286,7 @@ class ThoughtLimitTests(unittest.TestCase):
             {"id": "c1", "type": "function",
              "function": {"name": "create_node", "arguments": "{}"}}]}}]}
         env = {key: value for key, value in os.environ.items() if not key.startswith("NOVAI_AGENT_V2_STREAM")}
+        env["NOVAI_AGENT_V2_STREAM"] = "0"          # 默认已打开，测「关」要显式写 0
         with patch.dict(os.environ, env, clear=True):
             off = main._agent_decision_from_native(raw, "c1", TOOLS)
             self.assertEqual(len(off["thought"]), 300)

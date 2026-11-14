@@ -48,6 +48,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response, StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.datastructures import Headers
 from starlette.middleware.gzip import GZipMiddleware
 
 # 智能体底座（注册表 / 通用文件工具 / 上下文提供者基类），无反向依赖 main
@@ -298,6 +299,10 @@ app.add_middleware(
 # 图片/视频二进制都不受影响；minimum_size 保证小响应不付压缩成本。
 # compresslevel 取 4：实测 canvas.js(1.14MB) level4=17.1ms/387KB、level6=27.5ms/374KB；
 # 大画布 JSON level4=4.9ms/79KB、level6=6.1ms/72KB —— level4 用 62% 的 CPU 拿到 96% 的压缩率。
+# 直接用 starlette 自带的 GZipMiddleware：1.6 的实现已经把 text/event-stream、image/*、video/*、
+# audio/*、font/woff*、application/zip 都写进排除表，SSE 不会被缓冲住。
+# 不要再自己包一层去碰 GZipResponder 的内部属性——0.41 那些属性挂在实例上，1.6 改成按响应创建的
+# _compressor，旧写法会让所有带 Accept-Encoding: gzip 的响应直接 500（整站打不开）。
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=4)
 
 # --- WebSocket 状态管理器 ---
@@ -19704,6 +19709,45 @@ class DepthCaptureRequest(BaseModel):
     keep_audio: bool = True       # 深度视频保留原音轨，便于当参考视频时对齐节奏
 
 
+class VideoMuxAudioRequest(BaseModel):
+    video_url: str = ""
+    audio_url: str = ""
+    start: Optional[float] = None
+    duration: Optional[float] = None
+
+
+@app.get("/api/video/audio/status")
+async def video_audio_status():
+    """本机套用原声能力自检：只依赖 ffmpeg。"""
+    from server.split_engine import video_audio
+    ready, reason = video_audio.available(ffmpeg_binary())
+    return {"ready": ready, "message": reason}
+
+
+@app.post("/api/video/mux-audio")
+async def video_mux_audio(payload: VideoMuxAudioRequest):
+    """把参考视频的声音贴到成片上：音乐整段裁到成片长度，或按镜头区间截取那一段。
+
+    生成侧不复刻声音（模型输出无音轨），这一步是本机补回去；画质不重编码，只换音轨。
+    """
+    from server.split_engine import video_audio
+    video_src = output_file_from_url((payload.video_url or "").strip())
+    audio_src = output_file_from_url((payload.audio_url or "").strip())
+    if not video_src or not os.path.isfile(video_src):
+        raise HTTPException(status_code=404, detail="成片文件不存在（只支持画布里的本地视频）")
+    if not audio_src or not os.path.isfile(audio_src):
+        raise HTTPException(status_code=404, detail="原声来源文件不存在（只支持画布里的本地视频）")
+    filename = f"mux_{uuid.uuid4().hex[:12]}.mp4"
+    output_path = output_path_for(filename, "output")
+    result, error = await asyncio.to_thread(
+        video_audio.mux, ffmpeg_binary(), video_src, audio_src, output_path,
+        start=payload.start, duration=payload.duration,
+    )
+    if error or not result:
+        raise HTTPException(status_code=400, detail=error or "套用原声失败")
+    return {"url": output_url_for(filename, "output"), "name": filename, "kind": "video", **result}
+
+
 @app.get("/api/video/depth-capture/status")
 async def video_depth_capture_status():
     """本机深度能力自检：模型和推理组件就绪才允许点。"""
@@ -19717,7 +19761,7 @@ async def video_depth_capture(payload: DepthCaptureRequest):
     """把画布里的视频逐帧转成深度视频：本机推理，不上传、不花额度。
 
     输出是灰度视频（越近越亮），直接当参考视频连到视频生成节点用；分辨率对齐源片，
-    时长上限 30 秒（和即梦一致），超过就让人先裁。
+    不设时长上限：整条视频照做（长片只是慢，别拦）。
     """
     raw_url = (payload.url or "").strip()
     if not raw_url:
@@ -26953,6 +26997,68 @@ def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
     suffix_text = " ".join(suffixes)
     return f"{text} {suffix_text}".strip() if text else suffix_text
 
+
+def _local_video_from_url(url):
+    """画布本地视频地址 → 磁盘路径；外链返回空（不外抓）。"""
+    text = str(url or "").strip()
+    if not text:
+        return ""
+    if text.startswith("/assets/") or text.startswith("/output/"):
+        path = _agent_local_image_path(text)
+        return path if path and os.path.isfile(path) else ""
+    return ""
+
+
+async def _auto_attach_reference_audio(payload, result):
+    """动作迁移 / 参考视频生成：模型输出没有音轨，自动把参考视频的原声贴回成片。
+
+    只在「有参考视频 + 参考视频真的带声音 + 成片是画布本地文件 + 没有让模型自己生成音频」时动手；
+    任何一步不满足就原样返回，绝不因为贴音频把生成结果弄丢。
+    """
+    try:
+        if not isinstance(result, dict) or bool(getattr(payload, "generate_audio", False)):
+            return result
+        refs = getattr(payload, "videos", None) or []
+        ref_url = ""
+        for item in refs:
+            ref_url = item.get("url") if isinstance(item, dict) else item
+            if ref_url:
+                break
+        ref_path = _local_video_from_url(ref_url)
+        if not ref_path:
+            return result
+        from server.split_engine import video_audio
+        ffmpeg = ffmpeg_binary() or ""
+        if not video_audio.available(ffmpeg)[0] or not video_audio.has_audio(ffmpeg, ref_path):
+            return result
+        items = result.get("video_items") or result.get("videos") or []
+        changed = False
+        for entry in items:
+            url = entry if isinstance(entry, str) else (entry.get("url") if isinstance(entry, dict) else "")
+            src = _local_video_from_url(url)
+            if not src:
+                continue
+            filename = "mux_%s.mp4" % uuid.uuid4().hex[:12]
+            output_path = output_path_for(filename, "output")
+            info, error = await asyncio.to_thread(video_audio.mux, ffmpeg, src, ref_path, output_path)
+            if error or not info:
+                print("[Video] 自动贴原声失败（保留原结果）: %s" % (error or "unknown"), flush=True)
+                continue
+            new_url = output_url_for(filename, "output")
+            if isinstance(entry, str):
+                items[items.index(entry)] = new_url
+            else:
+                entry["url"] = new_url
+            result.setdefault("notes", []).append("已自动贴上参考视频的原声（本机合流，画质没有重编码）")
+            changed = True
+        if changed:
+            result["audio_from_reference"] = True
+        return result
+    except Exception as exc:  # noqa: BLE001 - 贴音频失败不能影响生成结果
+        print("[Video] 自动贴原声异常（保留原结果）: %s" % exc, flush=True)
+        return result
+
+
 async def run_canvas_video_task(task_id: str, payload: CanvasVideoRequest):
     """视频生成任务执行器（Task Engine 调用；同步模式下由请求内联执行，异步模式由 worker 执行）。
     阶段：provider_processing（含素材上传/提交/轮询/下载）→ saving → succeeded/failed/jimeng_pending。
@@ -26983,6 +27089,7 @@ async def run_canvas_video_task(task_id: str, payload: CanvasVideoRequest):
         upstream = str(extract_task_id(raw) or "") if isinstance(raw, dict) else str(result.get("task_id") or "")
         request_id = str(raw.get("id") or "") if isinstance(raw, dict) else ""
     task_set_status(task_id, "saving")
+    result = await _auto_attach_reference_audio(payload, result)
     result = _attach_upstream_cost(result, result.get("raw") if isinstance(result, dict) else None)
     credits = _task_credit_settle(task_id, result=result)
     task_set_status(task_id, "succeeded", extra={
@@ -35369,6 +35476,7 @@ _AGENT_VIDEO_SETTING_KEYS = ("provider", "model", "ratio", "duration", "resoluti
 _AGENT_SETTING_ALIASES = {
     "provider_id": "provider", "platform": "provider", "aspect_ratio": "ratio", "aspect": "ratio",
     "n": "count", "seconds": "duration", "generate_audio": "audio",
+    "res": "resolution", "durations": "duration", "resolution_tier": "resolution",
 }
 _AGENT_IMAGE_SETTING_FIELDS = {"provider": "provider_id", "model": "model", "ratio": "ratio",
                                "resolution": "resolution", "count": "count", "quality": "quality"}
@@ -36101,6 +36209,22 @@ def _agent_check_reference_video_length(urls):
                 "再把返回的 clip_url 放进 reference_video。" % (url, seconds), code="reference_video_too_long")
 
 
+def _agent_reference_seconds(urls):
+    """参考视频的真实时长（秒）；读不到就返回 0。用来给待生成节点填正确时长。"""
+    for item in (urls or []):
+        url = item.get("url") if isinstance(item, dict) else item
+        text = str(url or "").strip()
+        if not text:
+            continue
+        try:
+            seconds = probe_local_video_duration_seconds(text)
+        except Exception:  # noqa: BLE001 - 探测失败不影响建节点
+            seconds = None
+        if seconds and seconds > 0:
+            return float(seconds)
+    return 0.0
+
+
 def _agent_beat_generate(args, kind):
     """generate_image / generate_video 在 BEAT 画布上：建好带提示词和参数的节点、接上参考素材，交给画布开跑。"""
     canvas_id = args["canvas_id"]
@@ -36118,9 +36242,17 @@ def _agent_beat_generate(args, kind):
         mode, need_adaptive = _agent_beat_pick_video_mode(args.get("provider"), args.get("model"), refs_n,
                                                           bool(args.get("reference_video")), args.get("mode") or "",
                                                           ratio or "")
+        # 时长：调用方没显式给就用参考视频的真实秒数（动作迁移必须和参考一致），夹在 1-15；
+        # 读不到才退回 5 秒默认值，别让用户在待生成卡片里手改。
+        want_dur = int(args.get("duration") or 0)
+        # 1 秒这种明显是模型瞎填的（参考视频动辄 8-20 秒）：有参考视频时按参考时长走
+        if (not want_dur or want_dur < 2) and args.get("reference_video"):
+            ref_seconds = _agent_reference_seconds(args.get("reference_video"))
+            if ref_seconds:
+                want_dur = max(1, min(15, int(round(ref_seconds))))
         params = {"model": _agent_beat_model_id(args.get("provider"), args.get("model"), "video_models"),
                   "mode": mode, "ratio": "adaptive" if need_adaptive or not ratio or _agent_auto_ratio(ratio) else ratio,
-                  "dur": int(args.get("duration") or 5), "times": max(1, min(count, 4))}
+                  "dur": want_dur or 5, "times": max(1, min(count, 4))}
         if args.get("resolution"):
             params["res"] = str(args["resolution"]).lower()
         if args.get("audio") is not None:
@@ -38128,6 +38260,17 @@ def _agent_tool_create_node_validate_classic(args):
     if params is not None and not isinstance(params, dict):
         raise AgentToolError("params 必须是对象", code="invalid_args")
     norm["params"] = dict(params or {})
+    # 现成素材直接落节点（截帧、首尾帧、clip_url）：url 写顶层或 params 都认，统一收进 params，
+    # 两条分支（classic / BEAT）都是读 params.url 建的节点，不会发起生成。
+    direct_url = str(args.get("url") or "").strip()
+    if direct_url:
+        norm["params"]["url"] = direct_url
+    # 没解析掉的占位符不能落成节点：会得到一个 url 是 "{first_frame_url}" 的坏节点，界面上看不出错
+    url_value = str(norm["params"].get("url") or "")
+    if "{" in url_value:
+        raise AgentToolError(
+            "url 里的步骤引用没解析：写成 {stepN.字段}（N 从 0 开始），例如 {step0.first_frame_url}",
+            code="invalid_args")
     norm["inputs"] = _agent_parse_inputs(args.get("inputs"))
     return norm
 
@@ -39307,6 +39450,15 @@ def _agent_tool_generate_video_validate(args):
                 norm_vids.append({"url": v.strip()})
             elif isinstance(v, dict) and str(v.get("url") or "").strip():
                 norm_vids.append({"url": str(v["url"]).strip()})
+    # 参考视频超过上游上限（2–15 秒）时自动截前 14.5 秒，别让「20 秒深度视频」这种必然超限的输入一路报错
+    trim_notes = []
+    for index, item in enumerate(norm_vids):
+        seconds = _agent_local_video_seconds(item["url"])
+        if seconds and seconds > AGENT_REFERENCE_VIDEO_MAX_SECONDS:
+            trimmed = volcengine_trim_video_to_seconds(item["url"], 15.2)
+            if trimmed and trimmed != item["url"]:
+                norm_vids[index] = {"url": trimmed}
+                trim_notes.append("参考视频 %.1f 秒超过上限，已自动截成前 14.5 秒" % seconds)
     provider, model, model_note = _agent_resolve_media_target(args, "video_models", _agent_pick_video_provider)
     if model_note:
         print(f"[Agent] generate_video 换模型：{model_note}", flush=True)
@@ -39324,12 +39476,22 @@ def _agent_tool_generate_video_validate(args):
                 f"{model} 不支持生成方式 {video_mode}；该模型支持：{'、'.join(supported_modes)}",
                 code="invalid_args")
     motion_transfer = bool(args.get("motion_transfer"))
+    # 动作迁移必须吃深度视频：模型常把原视频直接塞进 reference_video，结果等于没做迁移。
+    # 这里不硬报错（用户也可能只有一段 clip），但把警告回灌给模型，让它改用 depth_capture 的产物。
+    depth_warning = ""
+    if motion_transfer:
+        refs = args.get("reference_video") or []
+        if not any("depth_capture_" in str(r) for r in refs):
+            depth_warning = ("本轮的参考视频不是 depth_capture 的产物：动作迁移应该先把原视频转成深度动作通道，"
+                             "再拿 /assets/output/depth_capture_*.mp4 当 reference_video；直接喂原视频会把原片的人物、"
+                             "服装和产品一起照抄，等于没做迁移。")
     if motion_transfer:
         # 动作迁移：参考视频=动作骨架，参考图=外观；火山编辑任务强制 duration=-1 / ratio=adaptive
         if not norm_vids:
             raise AgentToolError("动作迁移需要 reference_video（动作参考视频，至少 1 个）", code="invalid_args")
         if not norm_refs:
-            raise AgentToolError("动作迁移需要 reference_urls（角色图/外观参考，至少 1 张）", code="invalid_args")
+            # 不硬拦：外观只靠提示词描述也能做，只是会打折；拦死会让模型反复重试同一条错误
+            trim_notes.append("动作迁移没给外观参考图（reference_urls），角色/产品只能靠提示词描述，效果会打折")
         norm = {
             "canvas_id": canvas_id,
             "prompt": prompt,
@@ -39343,13 +39505,23 @@ def _agent_tool_generate_video_validate(args):
             "mode": video_mode,
             "title": str(args.get("title") or "")[:120],
         }
+        if trim_notes:
+            norm["caps_notes"] = list(norm.get("caps_notes") or []) + trim_notes
         if model_note:
             norm["model_note"] = model_note
+        if depth_warning:
+            norm["depth_warning"] = depth_warning
         beat_inputs = _agent_beat_inputs_arg(args, canvas_id)
         if beat_inputs is not None:
             norm["inputs"] = beat_inputs
         return norm
-    duration = int(args.get("duration") or 5)
+    # 时长：显式给了就用；没给但有参考视频时按参考视频真实秒数取（动作迁移/视频编辑都要求对齐原片），
+    # 不再一律给 5 秒让用户去卡片里手改。
+    duration = int(args.get("duration") or 0)
+    if (not duration or duration < 2) and norm_vids:
+        ref_seconds = _agent_reference_seconds(norm_vids)
+        if ref_seconds:
+            duration = int(round(ref_seconds))
     if duration < 1:
         duration = 5
     if duration > 15:
@@ -39390,6 +39562,7 @@ def _agent_tool_generate_video_validate(args):
         norm["duration"] = converged["duration"]
     norm["count"] = converged["count"] or norm["count"]
     notes.extend(converged["notes"])
+    notes.extend(trim_notes)
     if notes:
         norm["caps_notes"] = notes
     if model_note:
@@ -39510,6 +39683,9 @@ async def _agent_tool_generate_video_run_classic(args):
                    + ("，方式 " + str(args["mode"]) if args.get("mode") else "")
                    + "），生成任务已提交，完成后自动落到视频节点",
     }
+    if args.get("depth_warning"):
+        result["warnings"] = [args["depth_warning"]]
+        result["message"] += "；⚠️ " + args["depth_warning"]
     if args.get("model_note"):
         result["model_note"] = args["model_note"]
     if args.get("caps_notes"):
@@ -42946,8 +43122,9 @@ def _agent_v2_transcript_enabled():
 def _agent_v2_stream_enabled():
     """阶段三：模型调用优先走流式，推理 / 正文 / 工具调用增量实时下发。
 
-    默认关闭：关闭时下面所有下发逻辑都不执行，模型调用与改造前逐字一致。"""
-    return _agent_v2_flag("STREAM") and _agent_stream is not None
+    默认打开（2026-11 起）：非流式要等整段回复返回才出字，用户第一次用分不清「在跑」还是「卡死」。
+    走不了流式的平台由 _agent_stream_available 的 TTL 名单自动回退；排查对比时设 NOVAI_AGENT_V2_STREAM=0。"""
+    return _agent_v2_flag("STREAM", default=True) and _agent_stream is not None
 
 
 def _agent_v2_reflect_enabled():
@@ -43694,6 +43871,7 @@ AGENT_TOOLS = {
                        "music=一条贯穿全片的配乐（音频节点 id 或真实音频地址），给了 music 会自动静音各镜头自带的声音，mute_video_audio 可单独控制；music 和 audio_nodes 不能同时给）。"
                        "inputs 填上游节点 ID 时会同时连好线（系统校验类型与方向），不用再单独 connect_nodes；"
                        "不填 x/y 时自动放在上游右侧、不和已有节点重叠。image/video 节点可带 settings（生成参数）；"
+                       "已经有现成素材（截出来的一帧、分析返回的 clip_url、用户的图）时填 url，直接把素材落成节点、不发起生成；"
                        "BEAT 的 table/batch 可用 input_modes 给每条输入通道指定 sequence(逐行)/all(全部)/shared(沿用)。"
                        "返回 node_id，后续步骤用 {stepN.node_id} 引用。",
         "schema": {"type": "object", "properties": {
@@ -43715,6 +43893,7 @@ AGENT_TOOLS = {
                             "否则每行每组只发 1 张、整组参考会丢。建表时就写，不要让用户事后点表头。"
                             "例：{\"input-1\": \"sequence\", \"input-2\": \"all\"}"},
             "title": {"type": "string"},
+            "url": {"type": "string", "description": "type=image / video 且素材已经存在时填它：例如 analyze_video 返回的 frames[].url、first_frame_url、last_frame_url、clip_url——直接把这段素材建成画布节点，不发起生成。也接受写在 params.url"},
             "prompt": {"type": "string", "description": "提示词（prompt/text 节点是正文；image/video 节点是节点自身的提示词）"},
             "inputs": {"type": "array", "items": {"type": "string"}, "description": "上游节点 ID（提示词节点、参考图节点），会自动连线"},
             "settings": {"type": "object", "description": "image：provider/model/ratio(1:1、3:4、16:9…)/resolution(1k/2k/4k)/count/quality；"
@@ -43821,21 +44000,26 @@ AGENT_TOOLS = {
         "mutates_canvas": True,
     },
     "generate_video": {
-        "description": "一句话生成视频：在画布创建「提示词节点 → 视频节点」完整工作流并连线（ComfyUI 式管线，用户可见），立即发起真实视频生成任务（进 Task Engine），完成后结果自动落到视频节点。返回 node_id（视频节点）、prompt_node_id（提示词节点）与 task_id。动作迁移场景（让照片/角色图按参考视频的动作表演）请用 motion_transfer=true。",
+        "description": "一句话生成视频：在画布创建「提示词节点 → 视频节点」完整工作流并连线（ComfyUI 式管线，用户可见），立即发起真实视频生成任务（进 Task Engine），完成后结果自动落到视频节点。返回 node_id（视频节点）、prompt_node_id（提示词节点）与 task_id。动作迁移场景（让照片/角色图按参考视频的动作表演）请用 motion_transfer=true。"
+                       "时长策略：参考视频 ≤15 秒就在一段里做，不要拆分镜；>15 秒必须先让用户选——按 15 秒以内分镜，或换支持 30 秒的模型整条做，别自己决定。"
+                       "声音：参考视频带音轨时后端会自动把原声合流回成片（画质不重编码），结果里带「已自动贴上参考视频的原声」备注。",
         "schema": {"type": "object", "properties": {
             "canvas_id": {"type": "string"},
             "prompt": {"type": "string", "description": "视频提示词（必填），描述画面内容/运镜/动作"},
             "reference_urls": {"type": "array", "items": {"type": "string"},
                                "description": "参考图 URL 列表（首图优先作外观参考；动作迁移时=角色图/主体外观）"},
             "reference_video": {"type": "array", "items": {"type": "string"},
-                                "description": "参考视频 URL 列表（作动作骨架/编辑源；动作迁移时=动作参考视频）"},
+                                "description": "参考视频 URL 列表（作动作骨架/编辑源；动作迁移时=动作参考视频）。"
+                                               "动作迁移必须传 depth_capture 产出的深度视频（/assets/output/depth_capture_*.mp4），"
+                                               "不要传原视频——传原视频等于没剥离外观，人物、衣服、原产品都会被照抄"},
             "motion_transfer": {"type": "boolean", "default": False,
-                                "description": "动作迁移模式：true 时参考视频提供动作骨架、参考图提供外观，自动使用动作迁移提示词模板，时长/比例由系统按编辑任务强制（duration=-1、ratio=adaptive）"},
+                                "description": "动作迁移模式：true 时参考视频提供动作骨架、参考图提供外观，自动使用动作迁移提示词模板，时长/比例由系统按编辑任务强制（duration=-1、ratio=adaptive）。"
+                                               "开了它 reference_video 必须是 depth_capture 的深度视频，不是原视频"},
             "provider": {"type": "string", "default": "comfly",
                          "description": "生视频平台 id（留空=按模型归属/配置顺序自动选）"},
             "model": {"type": "string",
                       "description": "模型名（留空=用平台默认模型；必须是该平台声明的生视频模型，不能写别的平台的模型名）"},
-            "duration": {"type": "integer", "default": 5, "description": "时长秒数 1-15（默认 5；motion_transfer 时忽略）"},
+            "duration": {"type": "integer", "default": 0, "description": "时长秒数 1-15。不传（或传 0）时按参考视频的真实时长自动取，最多 15 秒；motion_transfer 时由系统跟随参考视频"},
             "ratio": {"type": "string", "default": "adaptive", "description": "画面比例 adaptive/16:9/9:16/1:1（默认 adaptive）"},
             "mode": {"type": "string", "enum": list(VIDEO_MODE_VALUES),
                      "description": "可选：生成方式，明确按这种方式走（不传=按输入自动推断）。"
@@ -44243,7 +44427,8 @@ async def _agent_tool_analyze_video_run(args):
     if result.get("cuts"):
         notes.append("检测到 %d 个硬切点（cuts），分镜按真实切点划分" % len(result["cuts"]))
     if result.get("last_frame_url"):
-        notes.append("first_frame_url / last_frame_url 是整条视频真正的首帧 / 尾帧：接下一个连续镜头时，用上一个镜头的 last_frame_url 当下一个镜头的首帧")
+        notes.append("first_frame_url / last_frame_url 是整条视频真正的首帧 / 尾帧：接下一个连续镜头时，用上一个镜头的 last_frame_url 当下一个镜头的首帧；"
+                     "要把某一帧落到画布上就用 create_node(type=image, url=<first_frame_url 或 frames[].url>, title=…)——只在 create_node 里传 url，不要自己拼占位符")
     if result.get("audio_url"):
         notes.append("已导出这段原声 audio_url（可作为时间线的 music；原片音乐有版权，确认用户有权使用才用）")
     if result.get("clip_url"):
@@ -44275,6 +44460,211 @@ AGENT_TOOLS["analyze_video"] = {
     "validate": _agent_tool_analyze_video_validate,
     "run": _agent_tool_analyze_video_run,
     "preview": _agent_tool_analyze_video_preview,
+    "mutates_canvas": False,
+}
+
+
+# ---------------------------------------------------------------------------
+# 深度动作迁移：把画布上的参考视频转成「深度动作通道」（本机推理，不上传、不花额度）。
+# 和 analyze_video 一样是只读 + 产出一个 /output 文件，不写画布、不进确认闸门。
+# ---------------------------------------------------------------------------
+
+def _agent_tool_depth_capture_validate(args):
+    args = dict(args or {})
+    node_id = str(args.get("node_id") or "").strip()
+    url = str(args.get("url") or "").strip()
+    if not node_id and not url:
+        raise AgentToolError("node_id 和 url 至少给一个（要把哪个视频转成深度通道）", code="invalid_args")
+    canvas_id = str(args.get("canvas_id") or "").strip() or str(_AGENT_RUN_CANVAS_ID.get() or "").strip()
+    return {"canvas_id": canvas_id, "node_id": node_id, "url": url,
+            "keep_audio": args.get("keep_audio", True) is not False}
+
+
+def _agent_tool_depth_capture_preview(args, canvas=None):
+    target = args.get("node_id") or args.get("url") or "视频"
+    return "把 %s 转成深度动作通道：本机逐帧推理，视频不上传、不花额度，只产出一段灰度参考视频（越近越亮）。" % target
+
+
+async def _agent_tool_depth_capture_run(args):
+    """复用 /api/video/depth-capture 的同一条链路：只接受画布里的本地视频，不限时长。"""
+    from server.split_engine import depth_capture
+
+    url = args.get("url") or ""
+    label = "视频"
+    canvas = None
+    if args.get("canvas_id"):
+        try:
+            canvas = load_canvas(args["canvas_id"])
+        except HTTPException:
+            canvas = None
+    if args.get("node_id"):
+        if canvas is None:
+            raise AgentToolError("读不到当前画布，没法按 node_id 找视频", code="canvas_not_found", status_code=404)
+        url, label = _agent_video_node_url(canvas, args["node_id"])
+    src = _agent_local_image_path(str(url or "").strip())
+    if not src or not os.path.isfile(src):
+        raise AgentToolError("深度动作捕捉只处理画布里的本地视频：请先把参考视频拖进画布（或用画布上的视频节点），再用 node_id 调用",
+                             code="invalid_args")
+    ffmpeg = ffmpeg_binary() or ""
+    ready, reason = depth_capture.available(ffmpeg)
+    if not ready:
+        raise AgentToolError(reason or "本机深度能力未就绪", code="depth_unavailable")
+    filename = "depth_capture_%s.mp4" % uuid.uuid4().hex[:12]
+    output_path = output_path_for(filename, "output")
+    result, error = await asyncio.to_thread(
+        depth_capture.capture_video, ffmpeg, src, output_path,
+        keep_audio=bool(args.get("keep_audio", True)))
+    if error or not result:
+        raise AgentToolError(error or "深度视频生成失败", code="depth_failed")
+    seconds = float(result.get("elapsed") or 0)
+    return {
+        "url": output_url_for(filename, "output"),
+        "name": filename,
+        "kind": "video",
+        "video": label,
+        "source_url": url,
+        "width": result.get("width", 0),
+        "height": result.get("height", 0),
+        "frames": result.get("frames", 0),
+        "duration": result.get("duration", 0),
+        "seconds": round(seconds, 2),
+        "message": "已生成深度动作通道 %s（%s 帧 / %s 秒，本机推理没有上传视频）。"
+                   "它只保留动作、节奏、站位和空间关系，不带原片外观：把它当参考视频喂给视频生成节点，"
+                   "再配人物 / 产品参考图重生成；不要把灰度深度图当画面外观描述给用户。"
+                   % (label, result.get("frames", 0), result.get("duration", 0)),
+    }
+
+
+AGENT_TOOLS["depth_capture"] = {
+    "description": "把画布上的参考视频转成「深度动作通道」：本机逐帧推理，视频不上传、不花额度，产出一段灰度深度视频（越近越亮）。"
+                   "用途是做动作迁移 / 运镜复刻：深度视频只负责动作、节奏、站位和空间关系，人物与外观由参考图决定，"
+                   "不要把深度图的灰度外观继承到成片里。限制：只接受画布里的本地视频（用户上传或生成的视频节点），时长不限（长片会慢，按每帧推理时间估），"
+                   "超过就先裁剪或用 analyze_video 的 clip 截段。返回 url 可直接当 generate_video 的 reference_video。"
+                   "node_id 填画布上的视频节点；本机没装模型 / ffmpeg 时会明确告诉你原因。",
+    "schema": {"type": "object", "properties": {
+        "canvas_id": {"type": "string", "description": "不填就用当前画布"},
+        "node_id": {"type": "string", "description": "视频节点 id"},
+        "url": {"type": "string", "description": "没有节点时直接给画布里的本地视频路径（/assets/… 或 /output/…）"},
+        "keep_audio": {"type": "boolean", "default": True, "description": "是否保留源视频音轨（默认 true）"}}},
+    "validate": _agent_tool_depth_capture_validate,
+    "run": _agent_tool_depth_capture_run,
+    "preview": _agent_tool_depth_capture_preview,
+    "mutates_canvas": False,
+}
+
+
+# ---------------------------------------------------------------------------
+# 套用原声：生成出来的片子没有音轨（模型侧不复刻声音），这里本机把参考视频的
+# BGM / 旁白贴回去。只产出一个 /output 文件，不写画布、不花额度。
+# ---------------------------------------------------------------------------
+
+def _agent_tool_mux_audio_validate(args):
+    args = dict(args or {})
+    canvas_id = str(args.get("canvas_id") or "").strip() or str(_AGENT_RUN_CANVAS_ID.get() or "").strip()
+    video = str(args.get("video") or args.get("video_node") or args.get("url") or "").strip()
+    audio = str(args.get("audio") or args.get("audio_from") or args.get("source") or "").strip()
+    if not video:
+        raise AgentToolError("video 要给成片（节点 id 或地址）", code="invalid_args")
+    if not audio:
+        raise AgentToolError("audio 要给原声来源（参考视频的节点 id 或地址）", code="invalid_args")
+    out = {"canvas_id": canvas_id, "video": video, "audio": audio, "start": None, "duration": None}
+    for key in ("start", "duration"):
+        value = args.get(key)
+        if value is None or value == "":
+            continue
+        try:
+            out[key] = max(0.0, float(value))
+        except (TypeError, ValueError):
+            raise AgentToolError(key + " 必须是数字（秒）", code="invalid_args")
+    return out
+
+
+def _agent_tool_mux_audio_preview(args, canvas=None):
+    return "把 %s 的原声贴到 %s 上：本机换音轨，画质不重编码，不花额度。" % (
+        args.get("audio") or "参考视频", args.get("video") or "成片")
+
+
+def _agent_resolve_media_arg(canvas, value, label):
+    """节点 id / 画布本地路径 → (url, 名字)；拿不到就抛所有人都看得懂的错误。"""
+    text = str(value or "").strip()
+    if not text:
+        raise AgentToolError(label + " 不能为空", code="invalid_args")
+    if canvas is not None:
+        node = None
+        try:
+            node = _agent_find_node(canvas, text)
+        except Exception:  # noqa: BLE001 - 不是节点 id 就当地址处理
+            node = None
+        if node is not None:
+            url = _agent_node_media_url(node)
+            if url:
+                return url, (node.get("text") or label)
+    if _agent_local_image_path(text):
+        return text, label
+    raise AgentToolError(label + " 既不是画布节点，也不是画布里的本地文件：" + text, code="invalid_args")
+
+
+async def _agent_tool_mux_audio_run(args):
+    from server.split_engine import video_audio
+
+    canvas = None
+    if args.get("canvas_id"):
+        try:
+            canvas = load_canvas(args["canvas_id"])
+        except HTTPException:
+            canvas = None
+    video_url, video_label = _agent_resolve_media_arg(canvas, args.get("video"), "成片")
+    audio_url, audio_label = _agent_resolve_media_arg(canvas, args.get("audio"), "原声来源")
+    video_src = _agent_local_image_path(video_url)
+    audio_src = _agent_local_image_path(audio_url)
+    if not video_src or not os.path.isfile(video_src):
+        raise AgentToolError("成片只支持画布里的本地视频（/assets 或 /output）", code="invalid_args")
+    if not audio_src or not os.path.isfile(audio_src):
+        raise AgentToolError("原声来源只支持画布里的本地视频（/assets 或 /output）", code="invalid_args")
+    ffmpeg = ffmpeg_binary() or ""
+    ready, reason = video_audio.available(ffmpeg)
+    if not ready:
+        raise AgentToolError(reason or "本机音频处理未就绪", code="audio_unavailable")
+    filename = "mux_%s.mp4" % uuid.uuid4().hex[:12]
+    output_path = output_path_for(filename, "output")
+    started = time.time()
+    result, error = await asyncio.to_thread(
+        video_audio.mux, ffmpeg, video_src, audio_src, output_path,
+        start=args.get("start"), duration=args.get("duration"),
+    )
+    if error or not result:
+        raise AgentToolError(error or "套用原声失败", code="audio_failed", status_code=500)
+    seconds = round(time.time() - started, 2)
+    url = output_url_for(filename, "output")
+    return {
+        "url": url,
+        "name": filename,
+        "kind": "video",
+        "duration": result.get("duration", 0),
+        "video_duration": result.get("videoDuration", 0),
+        "seconds": seconds,
+        "message": "已把「%s」的原声贴到「%s」上（%s 秒，本机处理没有上传视频）。"
+                   "音轨按成片长度对齐：短了补静音、长了裁掉。需要落到画布就用 create_node(type=video, url=%s, title=…)。"
+                   "注意：动作迁移不保唇形，原片如果是正脸口播，贴回原人声会口型对不上；BGM / 画外旁白没问题。"
+                   % (audio_label, video_label, result.get("duration", 0), url),
+    }
+
+
+AGENT_TOOLS["mux_audio"] = {
+    "description": "把参考视频的声音贴到成片上（本机 ffmpeg，换音轨不重编码，不花额度）。"
+                   "复刻流程里生成出来的视频没有音轨——模型侧不复刻声音；要保留原片 BGM / 旁白就用它补回去。"
+                   "video 给成片（节点 id 或本地地址），audio 给原声来源（原参考视频节点）。"
+                   "可选 start/duration 只取原声里的那一段（按镜头切段时用）。返回 url 可直接 create_node 落到画布。"
+                   "口型提醒：动作迁移不保唇形，正脸口播贴回原声会穿帮，BGM 和画外旁白没问题。",
+    "schema": {"type": "object", "properties": {
+        "canvas_id": {"type": "string", "description": "不填就用当前画布"},
+        "video": {"type": "string", "description": "成片：视频节点 id，或画布里的本地视频路径"},
+        "audio": {"type": "string", "description": "原声来源：参考视频节点 id，或画布里的本地视频路径"},
+        "start": {"type": "number", "description": "可选：只取原声从第几秒开始"},
+        "duration": {"type": "number", "description": "可选：取多长（秒）"}}},
+    "validate": _agent_tool_mux_audio_validate,
+    "run": _agent_tool_mux_audio_run,
+    "preview": _agent_tool_mux_audio_preview,
     "mutates_canvas": False,
 }
 
@@ -44517,12 +44907,14 @@ def _agent_resolve_step_refs(args, results):
         if args.startswith("{step") and args.endswith("}"):
             raw = args[1:-1].replace("[", ".").replace("]", "")
             path = [p for p in raw.split(".") if p]
+            resolved = None
             try:
                 idx = int(path[0][4:])
             except (ValueError, IndexError):
-                return args
-            if idx < len(results) and results[idx].get("ok"):
+                idx = None
+            if idx is not None and idx < len(results) and results[idx].get("ok"):
                 cur = results[idx].get("result")
+                found = True
                 for part in path[1:]:
                     if part in ("result", "results") and isinstance(cur, dict) and part not in cur:
                         continue  # 兼容：跳过结果包装键
@@ -44531,8 +44923,23 @@ def _agent_resolve_step_refs(args, results):
                     elif isinstance(cur, list) and part.isdigit() and int(part) < len(cur):
                         cur = cur[int(part)]
                     else:
-                        return args
-                return cur if cur is not None else args
+                        found = False
+                        break
+                if found and cur is not None:
+                    resolved = cur
+            if resolved is not None:
+                return resolved
+        # 兜底：{first_frame_url} 这种没带步骤号的，以及 {step2.clip_url} 这种步骤号对不上/那一步没这字段的，
+        # 都按「最近一步含同名字段的结果」解析；还解析不出来就原样留着，交给具体工具报错，别静默写坏节点
+        if args.startswith("{") and args.endswith("}"):
+            key = args[1:-1].replace("[", ".").replace("]", "").split(".")[-1].strip()
+            if key:
+                for item in reversed(results or []):
+                    payload = item.get("result") if isinstance(item, dict) else None
+                    if item.get("ok") and isinstance(payload, dict) and key in payload:
+                        value = payload.get(key)
+                        if value not in (None, ""):
+                            return value
         return args
     if isinstance(args, dict):
         return {k: _agent_resolve_step_refs(v, results) for k, v in args.items()}
@@ -48693,7 +49100,7 @@ def agent_thread_append(canvas_id, records, touched=None, thread_id=""):
                 if not isinstance(rec, dict) or not str(rec.get("text") or "").strip():
                     continue
                 item = {"role": rec.get("role") or "assistant", "text": str(rec["text"])[:4000], "at": now}
-                for key in ("run_id", "actions", "think", "self_check", "plan", "plan_status", "nodes"):
+                for key in ("run_id", "actions", "think", "self_check", "plan", "plan_status", "nodes", "reviews"):
                     if rec.get(key):
                         item[key] = rec[key]
                 if rec.get("took") is not None:
@@ -48757,12 +49164,53 @@ def _agent_thread_mark_plan(canvas_id, thread_id, run_id, status=""):
         return False
 
 
+def _agent_thread_attach_reviews(canvas_id, thread_id, run_id, reviews):
+    """把审查结论挂到该 run 的 assistant 消息上：刷新 / 重开对话后审查卡还在。
+
+    返回是否写成功；线程或消息还没落盘时返回 False（由调用方重试）。"""
+    canvas_id = str(canvas_id or "").strip()
+    items = [dict(item) for item in (reviews or []) if isinstance(item, dict)]
+    if not canvas_id or not items:
+        return False
+    try:
+        with _AGENT_THREAD_LOCK:
+            doc = _agent_thread_doc_load(canvas_id)
+            thread = _agent_thread_find(doc, thread_id) if str(thread_id or "").strip() else _agent_thread_active(doc)
+            if not thread:
+                return False
+            for msg in reversed(thread.get("messages") or []):
+                if not isinstance(msg, dict) or msg.get("role") != "assistant":
+                    continue
+                if run_id and str(msg.get("run_id") or "") != str(run_id):
+                    continue
+                msg["reviews"] = items
+                _agent_thread_doc_save(canvas_id, doc)
+                return True
+            return False
+    except Exception as exc:
+        print(f"[Agent] 写审查结论到对话失败（不影响审查） {canvas_id}/{run_id}: {exc}", flush=True)
+        return False
+
+
+async def _agent_thread_attach_reviews_when_ready(canvas_id, thread_id, run_id, reviews):
+    """审查常在 done 之后才回来：线程记录可能还在写，短重试几次再补；失败只打日志。"""
+    if not reviews:
+        return False
+    for attempt in range(8):
+        if _agent_thread_attach_reviews(canvas_id, thread_id, run_id, reviews):
+            return True
+        if attempt < 7:
+            await asyncio.sleep(1.5)
+    print(f"[Agent] 审查结论没写进对话 {canvas_id}/{run_id}（线程记录可能还没落盘）", flush=True)
+    return False
+
+
 def _agent_thread_message_row(msg, text_field="text"):
     """线程消息对外形状：老字段不变，新增 steps/changes/run_id 等有才带（旧客户端兼容）。"""
     row = {"role": msg.get("role"), text_field: msg.get("text"), "at": msg.get("at")}
     for key in ("run_id", "actions", "steps", "changes", "truncated", "session_id", "rating",
                 "origin", "suggestions", "event", "canvas_id",
-                "think", "took", "self_check", "plan", "plan_status", "nodes"):
+                "think", "took", "self_check", "plan", "plan_status", "nodes", "reviews"):
         if key in msg and msg.get(key) is not None:
             row[key] = msg[key]
     return row
@@ -50020,6 +50468,41 @@ def _agent_stream_publish_content(parser, content_state, counters):
         _agent_stream_publish(pending, counters)
 
 
+_AGENT_COMMAND_PREVIEW_MAX = 120
+
+
+def _agent_command_preview(tool, args):
+    """把一次工具调用压成一行「真实命令」，给面板收起态那条实时行用。只做展示，不参与执行。"""
+    name = str(tool or "").strip()
+    if not name:
+        return ""
+    data = args if isinstance(args, dict) else {}
+    def _text(value):
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, ensure_ascii=False)
+        except Exception:
+            return str(value)
+    if name == "canvas_cli":
+        parts = ["canvas_cli" + ((" " + str(data.get("command") or "").strip()) if data.get("command") else "")]
+        for key, value in data.items():
+            if key in ("command", "canvas_id", "description") or value in (None, "", [], {}):
+                continue
+            parts.append("--%s %s" % (key, _text(value)[:40]))
+            if len(parts) >= 5:
+                break
+        return " ".join(parts)[:_AGENT_COMMAND_PREVIEW_MAX]
+    pairs = []
+    for key, value in data.items():
+        if key in ("canvas_id", "description") or value in (None, "", [], {}):
+            continue
+        pairs.append("%s=%s" % (key, _text(value)[:40]))
+        if len(pairs) >= 4:
+            break
+    return (name + ((" " + " ".join(pairs)) if pairs else ""))[:_AGENT_COMMAND_PREVIEW_MAX]
+
+
 def _agent_stream_publish(deltas, counters=None):
     """stream.py 的结构化增量 → 三类 SSE 事件；counters 跨 chunk 累计序号（保证 id 单调）。"""
     emit = _AGENT_RUN_EMIT.get()
@@ -50054,7 +50537,8 @@ def _agent_stream_publish(deltas, counters=None):
             counters["tool"] = int(counters.get("tool") or 0) + 1
             # 工具名一到就先发一条（描述要等参数收齐），前端先显示「正在准备：<tool>」
             emit("tool_call_delta", {"id": _agent_stream_event_id("tc", delta.get("index") or 0),
-                                     "round": round_no, "tool": name, "description": ""})
+                                     "round": round_no, "tool": name, "description": "",
+                                     "command": _agent_command_preview(name, delta.get("args") or {})})
             _AGENT_RUN_STREAM_OUT.set(True)
         elif kind == _agent_stream.DELTA_TOOL_DONE:
             description = _agent_stream_tool_description(delta.get("args"))
@@ -50063,7 +50547,8 @@ def _agent_stream_publish(deltas, counters=None):
             # 同一个工具调用共用同一个 id：前端按 id 把这一条更新到同一张卡上
             emit("tool_call_delta", {"id": _agent_stream_event_id("tc", delta.get("index") or 0),
                                      "round": round_no, "tool": str(delta.get("name") or ""),
-                                     "description": description})
+                                     "description": description,
+                                     "command": _agent_command_preview(delta.get("name"), delta.get("args"))})
             _AGENT_RUN_STREAM_OUT.set(True)
     return counters
 
@@ -50114,7 +50599,8 @@ def _agent_emit_stream_whole(raw):
             continue
         args = _agent_stream.parse_arguments(function.get("arguments"))
         emit("tool_call_delta", {"id": _agent_stream_event_id("tc", position), "round": round_no,
-                                 "tool": name, "description": _agent_stream_tool_description(args)})
+                                 "tool": name, "description": _agent_stream_tool_description(args),
+                                 "command": _agent_command_preview(name, args)})
         _AGENT_RUN_STREAM_OUT.set(True)
 
 
@@ -50195,8 +50681,8 @@ def _agent_model_call_failure_note(note):
 
 
 
-# 决策等待心跳：每 5 秒一条（不写转录、不计步、不影响状态），只在等待期间发。
-_AGENT_HEARTBEAT_SECONDS = float(os.getenv("NOVAI_AGENT_HEARTBEAT_SECONDS", "5"))
+# 决策等待心跳：每 2 秒一条（不写转录、不计步、不影响状态），只在等待期间发。
+_AGENT_HEARTBEAT_SECONDS = float(os.getenv("NOVAI_AGENT_HEARTBEAT_SECONDS", "2"))
 
 
 async def _agent_run_with_heartbeat(awaitable, emit, run_id, round_no, kind):
@@ -53001,7 +53487,8 @@ _AGENT_REVIEW_TASKS = set()
 
 
 async def _agent_review_background(chat, instruction, roadmap, to_review, transcript, emit,
-                                   run_id, round_no, review_counts, context_id, pending_reviews=None):
+                                   run_id, round_no, review_counts, context_id, pending_reviews=None,
+                                   thread_id="", run_reviews=None):
     started = time.monotonic()
     review = None
     try:
@@ -53022,12 +53509,18 @@ async def _agent_review_background(chat, instruction, roadmap, to_review, transc
                           "不要再拿它当参考图重跑；先问用户哪里不满意，不要自己重做）")
             if transcript is not None:
                 transcript.add_note("review", text)
-            emit("review", {"summary": review.get("summary") or "",
-                            "model": review.get("model") or "",
-                            "items": [{"label": v.get("label"), "node_id": v.get("node_id"),
-                                        "url": v.get("url"), "kind": v.get("kind"),
-                                        "ok": bool(v.get("ok")), "issues": v.get("issues") or [],
-                                        "revised_prompt": v.get("revised_prompt") or ""}]})
+        # 每批只发一条：前端一张「结果审查卡」对应一批结果（2.0.06 的契约）
+        payload = {"summary": review.get("summary") or "",
+                   "model": review.get("model") or "",
+                   "skipped": bool(review.get("skipped")),
+                   "items": [{"label": v.get("label"), "node_id": v.get("node_id"),
+                               "url": v.get("url"), "kind": v.get("kind"),
+                               "ok": bool(v.get("ok")), "issues": v.get("issues") or [],
+                               "revised_prompt": v.get("revised_prompt") or ""}
+                              for v in review.get("items") or []]}
+        emit("review", payload)
+        if isinstance(run_reviews, list):
+            run_reviews.append(payload)
         passed = _agent_regen_review_verdicts_ok(review)
         if passed:
             _agent_regen_reset_review_reruns(context_id, passed)
@@ -53040,11 +53533,19 @@ async def _agent_review_background(chat, instruction, roadmap, to_review, transc
             emit("thought", {"round": round_no, "kind": "reflect", "text": reflect_text})
         if isinstance(pending_reviews, list):
             pending_reviews.append(review)
+        reviews_payload = run_reviews if isinstance(run_reviews, list) else [payload]
+        if str(thread_id or "").strip():
+            await _agent_thread_attach_reviews_when_ready(
+                context_id, thread_id, run_id, reviews_payload)
+        else:
+            # 没有显式线程（老调用 / 测试桩）：只尝试一次，不为了等线程落盘拖住审查任务
+            _agent_thread_attach_reviews(context_id, "", run_id, reviews_payload)
     return review
 
 
 def _agent_schedule_review(chat, instruction, roadmap, to_review, transcript, emit,
-                           run_id, round_no, review_counts, context_id, pending_reviews=None):
+                           run_id, round_no, review_counts, context_id, pending_reviews=None,
+                           thread_id="", run_reviews=None):
     """把审查丢到后台并发跑；返回 task（调用方可在收尾前 await 一下，保证结论落转录）。"""
     run_started = float(_AGENT_RUN_STARTED_AT.get() or 0) or time.monotonic()
     emit("heartbeat", {"run_id": run_id, "round": round_no, "stage": "review",
@@ -53052,7 +53553,7 @@ def _agent_schedule_review(chat, instruction, roadmap, to_review, transcript, em
                        "kind": "review"})
     task = asyncio.create_task(_agent_review_background(
         chat, instruction, roadmap, to_review, transcript, emit, run_id, round_no,
-        review_counts, context_id, pending_reviews))
+        review_counts, context_id, pending_reviews, thread_id, run_reviews))
     _AGENT_REVIEW_TASKS.add(task)
     task.add_done_callback(_AGENT_REVIEW_TASKS.discard)
     return task
@@ -53164,6 +53665,7 @@ async def _agent_run_producer(req, queue, bus=None):
     pending_done = None        # 本轮同时给了 done 和步骤：先执行步骤，这一轮结束再按 done 收尾
     resume_review_ask = None   # 唤醒消费完本来有结果、审查完要停下问用户的那条消息
     pending_reviews = []       # 后台审查完成的结论：下一轮消费（做反思/约束），不挡当前回复
+    run_reviews = []           # 本次 run 的全部审查结论：落线程用，不随决策轮清空
     resume_pending_review = None
     # 阶段四·3：挂起 / 恢复（开关关闭时 suspended 一直 False，行为与现状逐字一致）
     suspended = False
@@ -53370,13 +53872,27 @@ async def _agent_run_producer(req, queue, bus=None):
             if beat_ctx and settled_outcomes:
                 to_review = [o for o in settled_outcomes if o.get("ok") and o.get("node_id")
                              and review_counts.get(o["node_id"], 0) < AGENT_BEAT_REVIEW_PER_NODE]
+                review_scheduled = False
                 if (AGENT_BEAT_REVIEW_ENABLED and to_review
                         and not (bus is not None and bus.get("cancel_requested"))):
+                    review_scheduled = True
                     _agent_schedule_review(chat, instruction, roadmap, to_review, transcript, emit,
-                                           run_id, rounds, review_counts, context_id, pending_reviews)
+                                           run_id, rounds, review_counts, context_id, pending_reviews,
+                                           thread_id=str(getattr(ctx, "thread_id", "") or ""),
+                                           run_reviews=run_reviews)
                 if autonomy == "collab":
                     # 协作档：先把结果回给用户，审查在后台跑（结论写转录，下一轮/下次运行可见）
-                    resume_review_ask = {"async": True, "outcomes": settled_outcomes}
+                    review_skip_reason = ""
+                    if not review_scheduled:
+                        if not AGENT_BEAT_REVIEW_ENABLED:
+                            review_skip_reason = "审查开关已关闭"
+                        elif bus is not None and bus.get("cancel_requested"):
+                            review_skip_reason = "运行已取消"
+                        else:
+                            review_skip_reason = "这批结果已经审查过"
+                    resume_review_ask = {"async": True, "outcomes": settled_outcomes,
+                                         "scheduled": review_scheduled,
+                                         "reason": review_skip_reason}
             # 事件消费完：清空 waiting_on，避免重复等同一个节点；这里只回到 running，
             # 由主循环继续决策（模型给 done 就正常收尾成 finished）。
             if canvas_run:
@@ -53391,8 +53907,15 @@ async def _agent_run_producer(req, queue, bus=None):
                 resume_review_ask = None
                 status = "ok"
                 if review_ask.get("async"):
-                    message = (f"已生成 {len(review_ask.get('outcomes') or [])} 个结果，"
-                               "审查在后台进行，结论会写进对话。")
+                    count = len(review_ask.get("outcomes") or [])
+                    if review_ask.get("scheduled", True):
+                        message = (f"已生成 {count} 个结果，"
+                                   "审查在后台进行，结论会写进对话。")
+                    else:
+                        reason = str(review_ask.get("reason") or "").strip()
+                        message = (f"已生成 {count} 个结果"
+                                   + (f"；{reason}，这次不再自动审查。" if reason
+                                      else "；这次没有自动审查。"))
                 else:
                     message = _agent_review_question_text(review_ask.get("review"),
                                                           review_ask.get("outcomes") or [])
@@ -53940,7 +54463,8 @@ async def _agent_run_producer(req, queue, bus=None):
                     continue
                 resolved_args = _agent_fill_batch_table_inputs(tool, resolved_args, results)
                 emit("step_start", {"index": index, "tool": tool, "args": resolved_args,
-                                    "description": description})
+                                    "description": description,
+                                    "command": _agent_command_preview(tool, resolved_args)})
                 before_snapshot = ctx.reload()
                 step_started = time.monotonic()
                 # BEAT：除了用户刚在待生成卡片上点了执行的那一批 / 托管档预算内的生成，一律只建好节点、不开跑
@@ -54099,7 +54623,9 @@ async def _agent_run_producer(req, queue, bus=None):
                 if AGENT_BEAT_REVIEW_ENABLED and to_review and not (bus is not None and bus.get("cancel_requested")):
                     review_scheduled = True
                     _agent_schedule_review(chat, instruction, roadmap, to_review, transcript, emit,
-                                           run_id, rounds, review_counts, context_id, pending_reviews)
+                                           run_id, rounds, review_counts, context_id, pending_reviews,
+                                           thread_id=str(getattr(ctx, "thread_id", "") or ""),
+                                           run_reviews=run_reviews)
                     if autonomy in ("auto", "managed") and not plan_mode and roadmap:
                         # 审查转后台后自动档照常推进；给面板一个明确信号（不再等视觉模型）
                         _v2_note("autonomy", "阶段完成：审查在后台进行，自动推进到下一阶段")
@@ -54349,6 +54875,8 @@ async def _agent_run_producer(req, queue, bus=None):
                 record = {"role": "assistant", "text": reply, "run_id": run_id,
                           "actions": action_lines, "steps": thread_steps,
                           "changes": thread_changes}
+                if run_reviews:
+                    record["reviews"] = list(run_reviews)
                 # K2：思考内容 + 时长、自检结果、待确认方案都跟着这条回复落线程，
                 # 刷新页面 / 换设备回来时面板能从历史把整张卡片重新长出来（不再只有一句话）
                 thoughts = (recorded.get("thoughts") or [])[-12:]     # 只留最近 12 条，别把线程文件撑大
@@ -54570,7 +55098,7 @@ def _agent_run_task_snapshot(bus):
                 "callId": f"step:{index}", "toolId": str(data.get("tool") or ""),
                 "description": str(data.get("description") or ""), "result": data.get("result"),
                 "error": data.get("error"), "code": data.get("code"),
-                "args": data.get("args"),
+                "args": data.get("args"), "command": str(data.get("command") or ""),
             }
         elif name == "plan":
             event["eventType"] = "harness.tool_proposed"
@@ -55242,6 +55770,45 @@ async def native_save(data: dict):
         raise HTTPException(status_code=500, detail=f"save dialog failed: {e}")
 
 
+def _start_parent_watchdog(parent_pid: int) -> None:
+    """桌面壳（Electron）带起来时，壳一消失就自己退出。
+
+    正常退出是壳去 taskkill 整棵进程树；但壳被强杀 / 崩溃 / 更新异常时没人来杀，
+    Windows 上就会一直挂着 NOVAI.exe（任务管理器里能看到，用户以为没退出）。
+    这里不看父进程链（PyInstaller 中间还隔一层引导进程），只用壳传进来的 pid 判活。
+    """
+    import threading as _threading
+
+    def _watch() -> None:
+        if os.name == "nt":
+            try:
+                import ctypes
+                SYNCHRONIZE = 0x00100000
+                INFINITE = 0xFFFFFFFF
+                kernel32 = ctypes.windll.kernel32
+                kernel32.OpenProcess.restype = ctypes.c_void_p
+                kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+                kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+                # 拿 SYNCHRONIZE 句柄等壳退出：句柄绑定的是那一个进程，PID 被复用也不会误判。
+                handle = kernel32.OpenProcess(SYNCHRONIZE, False, int(parent_pid))
+                if handle:
+                    try:
+                        kernel32.WaitForSingleObject(handle, INFINITE)
+                    finally:
+                        kernel32.CloseHandle(handle)
+                    os._exit(0)
+            except Exception:
+                pass
+        while True:
+            time.sleep(2.0)
+            try:
+                os.kill(int(parent_pid), 0)
+            except OSError:
+                os._exit(0)
+
+    _threading.Thread(target=_watch, name="novai-parent-watchdog", daemon=True).start()
+
+
 if __name__ == "__main__":
     import uvicorn
     # 端口来源优先级：命令行（--port N / -p N / --port=N / 位置参数 N）> 环境变量 NOVAI_PORT > 3000。
@@ -55271,6 +55838,13 @@ if __name__ == "__main__":
     # 命令行端口要回写到环境变量：/api/lan-info 的局域网地址/二维码和 server/appRegistry.py 的
     # App 能力内部回环都只读 NOVAI_PORT，不回写就会出现"服务在 3101、二维码和自调用打 3000"。
     os.environ["NOVAI_PORT"] = str(port)
+    # 桌面壳传了自己的 pid 才有看门狗；直接 python main.py / 传统安装版不走这条，行为不变。
+    try:
+        _parent_pid = int(os.environ.get("NOVAI_PARENT_PID") or 0)
+    except (TypeError, ValueError):
+        _parent_pid = 0
+    if _parent_pid > 0 and _parent_pid != os.getpid():
+        _start_parent_watchdog(_parent_pid)
     # 关闭服务端协议级 WebSocket ping：部分客户端（如 PS UXP 面板）不会自动回 pong，
     # 默认 20s ping/20s 超时会把这些连接每隔一会儿就踢掉造成"频繁断连"。
     # 客户端有自己的应用层心跳 + 断线重连兜底，这里禁用协议 ping 更稳。

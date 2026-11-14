@@ -975,6 +975,22 @@ export function createNovaiBackend(): CanvasBackend {
         seconds: Number(data.seconds) || undefined,
       };
     },
+    /** 本机套用原声：把 audio 节点的音轨贴到 video 上（可截取 start/duration 那一段），画质不重编码 */
+    async muxAudio(videoUrl, audioUrl, opts) {
+      const videoPath = await localMediaPath(videoUrl, "套用原声");
+      const audioPath = await localMediaPath(audioUrl, "套用原声");
+      const data = await request("/api/video/mux-audio", jsonBody({
+        video_url: videoPath, audio_url: audioPath,
+        start: opts?.start ?? null, duration: opts?.duration ?? null,
+      }));
+      const url = urlOf(data);
+      if (!url) throw new GenError("NO_OUTPUT", "套用原声后没有返回地址");
+      return {
+        url,
+        dur: Number(data.duration) || undefined,
+        seconds: Number(data.elapsed) || undefined,
+      };
+    },
     /** 本地超分：2k = 长边 2048、4k = 4096；skipped 表示原图已经够大，url 指回原图 */
     async upscaleLocal(sourceUrl, target): Promise<UpscaleResult> {
       const path = await localMediaPath(sourceUrl, "超分");

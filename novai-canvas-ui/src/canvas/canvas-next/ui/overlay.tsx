@@ -53,7 +53,12 @@ function Popover({ st }: { st: NonNullable<PopState> }) {
   useLayoutEffect(() => {
     const el = ref.current!;
     const measure = () => {
+      // 量「内容自然高度」：内联 maxHeight 是上一轮按旧内容算的，不清掉就会把弹层永久锁在初始高度，
+      // 列表长了只能滚动整个弹层（连搜索框一起走），看着像错位、也看不到底下的模型
+      const prevMax = el.style.maxHeight;
+      if (prevMax) el.style.maxHeight = "none";
       const pr = el.getBoundingClientRect();
+      if (prevMax) el.style.maxHeight = prevMax;
       const anchor: PopRect = st.anchor instanceof Element
         ? (() => {
           const r = st.anchor.getBoundingClientRect();
@@ -85,7 +90,16 @@ function Popover({ st }: { st: NonNullable<PopState> }) {
   // 弹层外按下关闭（按在锚点上交给锚点自己的 onClick 切换）
   useLayoutEffect(() => {
     if (st.closing) return;
-    const onDown = (e: PointerEvent) => { const t = e.target as Node; if (ref.current?.contains(t)) return; if ((t as Element).closest?.(".model-flyout")) return; if (st.anchor instanceof Element && st.anchor.contains(t)) return; closePop(); };
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t)) return;
+      if ((t as Element).closest?.(".model-flyout")) return;
+      // 选择面板（@ 提及 / 斜杠）是「跟着输入框里的触发字符活的」：点到锚点范围内的空白也要收掉，
+      // 否则面板会一直挂在输入区上方，等一个用户并不想做的选择
+      const palette = /(^| )palette( |$)/.test(st.cls || "");
+      if (!palette && st.anchor instanceof Element && st.anchor.contains(t)) return;
+      closePop();
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); closePop(); } };
     document.addEventListener("pointerdown", onDown, true); document.addEventListener("keydown", onKey, true);
     return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey, true); };

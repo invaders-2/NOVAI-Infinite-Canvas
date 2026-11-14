@@ -70,12 +70,16 @@ def build_mac():
         if os.path.isfile(p):
             add_data.append(f'--add-data "{p}:."')
     
+    # 必须用当前解释器的 PyInstaller：直接调 PATH 上的 pyinstaller 可能来自别的 venv，
+    # 那个环境里没有 onnxruntime，收集会静默跳过，打出来的包深度动作捕捉就缺组件
     cmd = (
-        f'pyinstaller --onefile --console -y '
+        f'"{sys.executable}" -m PyInstaller --onefile --console -y '
         f'--name={APP_NAME} '
         f'--hidden-import=uvicorn.logging '
         f'--hidden-import=uvicorn.loops.auto '
         f'--hidden-import=uvicorn.protocols.http.auto '
+        f'--collect-all onnxruntime '
+        f'--hidden-import=onnxruntime '
         f'{" ".join(add_data)} '
         f'{os.path.join(ROOT, "main.py")}'
     )

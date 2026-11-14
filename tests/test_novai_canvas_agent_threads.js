@@ -271,7 +271,7 @@ const { AgentState } = load('novai-canvas-ui/src/canvas/canvas-next/agent/state.
     assert.ok(panel.includes('await send(false, item.snap, tId)'), '自动发送用目标对话发送');
     assert.ok(panel.includes('queueFlushing.current.has(tId)') && panel.includes('queueFlushing.current.add(tId)'), 'queueFlushing 按对话隔离');
     assert.ok(panel.includes('function scheduleFlush(threadId: string)'), '按对话安排 260ms 自动发送');
-    assert.ok(panel.includes('if (settled) { void a.loadThreads(); scheduleFlush(threadId); }'), '后台对话结束也安排自己的自动发送');
+    assert.ok(panel.includes('if (firstTerminal) { void a.loadThreads(); scheduleFlush(threadId); }'), '后台对话结束也安排自己的自动发送（终态只收尾一次，审查宽限刷新不重复）');
     assert.ok(panel.includes('const switched = !!lastThread.current && lastThread.current !== a.activeThreadId;'), '切对话后重新判断忙闲（首次加载不算）');
     assert.ok(panel.includes('if (!becameIdle && !(switched && !a.busy)) return;'), '切到空闲且有队列的对话也触发自动发送');
     assert.ok(panel.includes('scheduleFlush(a.activeThreadId);'), '当前对话兜底安排自动发送');

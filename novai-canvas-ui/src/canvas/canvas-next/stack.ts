@@ -130,9 +130,18 @@ export function takeFromStack(store: CanvasStore, sid: string, id: string, at?: 
 
 export type StackCard = { id: string; kind: string; title: string; src: string; text: string; w: number; h: number };
 /** 成员的展示信息：标题、画面（图片地址 / 视频封面）、文本摘要、尺寸 */
+/** 视频封面：帧图优先，没有就拿视频地址换成后端抽帧接口（ThumbImage 只画得了图片，mp4 解不出来） */
+function coverSrc(n: CanvasNode, out: ReturnType<typeof outOf> | null): string {
+  if (n.kind === "image") return out?.url || "";
+  if (n.kind !== "video") return "";
+  const raw = out?.frame || out?.url || "";
+  if (!raw) return "";
+  return /^\/(?:assets|output)\//i.test(raw) ? "/api/media-preview?w=768&url=" + encodeURIComponent(raw) : raw;
+}
+
 export function cardOf(n: CanvasNode): StackCard {
   const o = isGenKind(n.kind) ? outOf(n) : null;
-  return { id: n.id, kind: n.kind, title: isGenKind(n.kind) ? genOf(n).title : n.text || n.kind, src: n.kind === "image" ? o?.url || "" : n.kind === "video" ? o?.frame || "" : "", text: n.kind === "text" ? (o?.text || "").slice(0, 160) : "", w: n.w, h: n.h };
+  return { id: n.id, kind: n.kind, title: isGenKind(n.kind) ? genOf(n).title : n.text || n.kind, src: coverSrc(n, o), text: n.kind === "text" ? (o?.text || "").slice(0, 160) : "", w: n.w, h: n.h };
 }
 /** 叠封面：最上面 3 个成员（第 1 张在最前，第 2 张露在右边，第 3 张露在左边） */
 export function stackCover(doc: CanvasDoc, s: CanvasNode): StackCard[] {

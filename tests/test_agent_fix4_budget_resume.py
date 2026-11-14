@@ -522,6 +522,11 @@ class ResumeDecisionParseTests(unittest.TestCase):
             return json.dumps({"thought": "唤醒后继续", "done": True, "message": "恢复完成"},
                               ensure_ascii=False)
 
+        async def fake_raw(chat, messages, tools=None):
+            # 原生工具 / 原始 JSON 分支（2026-11 起默认可能走这里）返回同一份决策
+            return {"choices": [{"message": {"role": "assistant", "content": json.dumps(
+                {"thought": "唤醒后继续", "done": True, "message": "恢复完成"}, ensure_ascii=False)}}]}
+
         messages, pending, patches = run_with_patches(
             req, bus, pending,
             wait_outcomes=[{"ok": True, "node_id": "n1", "url": "/a.png", "kind": "image",
@@ -536,7 +541,8 @@ class ResumeDecisionParseTests(unittest.TestCase):
                              run_state.STATUS_WAITING_GENERATION)
 
             async def scenario():
-                with patch.object(main, "_agent_beat_review", new=AsyncMock(return_value=review_ok())):
+                with patch.object(main, "_agent_beat_review", new=AsyncMock(return_value=review_ok())), \
+                        patch.object(main, "_agent_run_chat_raw", new=fake_raw):
                     result = await main._agent_run_resume(req["run_id"], {"node_ids": ["n1"]})
                     resumed_bus = main._agent_run_bus_get(req["run_id"])
                     task = resumed_bus.get("task") if isinstance(resumed_bus, dict) else None

@@ -33,6 +33,6 @@ export function OptimizeButton({ node, draft, setDraft, className }: { node: Can
   };
 
   return <button className={className + " tipT" + (busy ? " busy" : "")} data-p="optimize" data-tip={busy ? "停止优化" : "优化提示词"} aria-label={busy ? "停止优化" : "优化提示词"} onClick={run}>
-    {busy ? <i className="opt-spin" /> : <Icon name="sparkle" size="s" />}
+    {busy ? <i className="opt-spin" /> : <Icon name="wand" size="s" />}
   </button>;
 }

@@ -139,7 +139,9 @@ export function cloneWorkflowForImport(doc: CanvasDoc, center: { x: number; y: n
     const table = data && "table" in data ? data.table as { sourceId?: unknown } | undefined : undefined;
     if (data && gen) data.gen = { ...gen, ...(gen.params ? { params: cloneParams(gen.params as AnyParams) } : {}), prompt: remapPrompt(String(gen.prompt || "")) };
     if (data && table?.sourceId) data.table = { ...table, sourceId: idOf.get(String(table.sourceId)) || table.sourceId };
-    return { ...node, id: idOf.get(node.id)!, x: node.x + ox, y: node.y + oy, ...(node.children ? { children: node.children.map((id) => idOf.get(id) || id) } : {}), ...(data ? { data } : {}) };
+    // 成员没一起导出（旧文件 / 只导了容器）时丢掉悬空引用：留一串不存在的 id，堆叠会显示「堆叠 4」却没有封面
+    const children = node.children ? node.children.map((id) => idOf.get(id)).filter((id): id is string => !!id) : null;
+    return { ...node, id: idOf.get(node.id)!, x: node.x + ox, y: node.y + oy, ...(children ? { children } : {}), ...(data ? { data } : {}) };
   });
   const edges = doc.edges.flatMap((edge) => {
     const from = idOf.get(edge.from), to = idOf.get(edge.to);

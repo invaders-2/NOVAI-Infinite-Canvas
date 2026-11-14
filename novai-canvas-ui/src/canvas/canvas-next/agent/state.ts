@@ -12,6 +12,8 @@ export type ToolStep = {
     provisional?: boolean;
     /** 工具名（占位行与正式行靠它对齐） */
     tool?: string;
+    /** 这次调用的「真实命令」一行（tool_call_delta.command，或由 step_start 的 args 拼出来）：收起态实时行 + 展开后每步下面那行等宽字 */
+    cmd?: string;
 };
 export type AgentMsg = {
   id: string;
@@ -154,6 +156,29 @@ export function historyMessage(raw: Record<string, any>, index: number): AgentMs
       .filter((item: any) => item && String(item.text || "").trim())
       .map((item: any) => ({ text: String(item.text || ""), ok: item.ok === true, status: typeof item.status === "string" ? item.status : undefined }));
     if (items.length) msg.selfCheck = { round: Number(savedCheck.round) || 0, passed: savedCheck.passed === true, items };
+  }
+  // 自动审查的结论：刷新 / 重开对话后和实时一样把审查卡长回来
+  const savedReviews = Array.isArray(raw.reviews) ? raw.reviews : null;
+  if (savedReviews) {
+    const reviews = savedReviews
+      .filter((row: any) => row && typeof row === "object")
+      .map((row: any) => ({
+        summary: String(row.summary || ""),
+        model: String(row.model || ""),
+        skipped: row.skipped === true,
+        items: (Array.isArray(row.items) ? row.items : [])
+          .filter((item: any) => item && typeof item === "object")
+          .map((item: any) => ({
+            label: String(item.label || ""),
+            node_id: String(item.node_id || ""),
+            url: typeof item.url === "string" ? item.url : "",
+            kind: typeof item.kind === "string" ? item.kind : "",
+            ok: item.ok === true,
+            issues: Array.isArray(item.issues) ? item.issues.map((x: unknown) => String(x || "")) : [],
+            revised_prompt: typeof item.revised_prompt === "string" ? item.revised_prompt : "",
+          })),
+      }));
+    if (reviews.length) msg.reviews = reviews;
   }
   const savedPlan = raw.plan && typeof raw.plan === "object" ? raw.plan as Record<string, any> : null;
   if (savedPlan && Array.isArray(savedPlan.steps) && savedPlan.steps.length && String(raw.run_id || "").trim()) {

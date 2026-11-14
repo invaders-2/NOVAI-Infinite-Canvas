@@ -13,6 +13,7 @@ import { clamp, clampTrim, genOf, outOf, uid, withGen, type GenOutput, type Mode
 import { fitMediaBox } from "../../mediaFit";
 import type { CanvasStore } from "../../store";
 import { useCtl, useS, type Ctl } from "../ctx";
+import { VendorLogo } from "../VendorLogo";
 import { Icon } from "../Icon";
 import { closeModal, ModalHead, openModal, openPop } from "../overlay";
 import { useAssetUrl } from "../useAsset";
@@ -462,7 +463,6 @@ function MoreMenu({ ctl, id, n, close }: { ctl: Ctl; id: string; n: CanvasNode; 
     ...(fly.pos?.right != null ? { right: fly.pos.right } : { left: fly.pos?.left ?? 0 }),
   };
   return <>
-    <button className="mi" data-k="markup" onClick={() => { close(); setEd({ type: "markup", id }); }}><Icon name="pencil" size="s" />涂鸦 / 文字 / 马赛克<span className="k">本地</span></button>
     <button className="mi" data-k="open-outpaint" onClick={() => { close(); setEd({ type: "outpaint", id }); }}><Icon name="outpaint" size="s" />扩图</button>
     <button className="mi" onClick={() => { close(); setEd({ type: "mask", id, mode: "erase" }); }}><Icon name="eraser" size="s" />擦除</button>
     <button className="mi" onClick={() => { close(); setEd({ type: "mask", id, mode: "annot" }); }}><Icon name="annot" size="s" />标注</button>
@@ -773,7 +773,7 @@ function WhiteModelEditor({ ctl, n, rect, onClose }: { ctl: Ctl; n: CanvasNode; 
           items={all.filter((m) => vendorOf(m) === pick.vendor)}
           label={(m) => m.name}
           onPick={(m) => { setModelId(m.id); setPick(null); }}
-          renderItem={(m) => <span style={{ flex: 1 }}><span style={{ display: "flex", gap: 6, alignItems: "center" }}>{m.name}</span><span className="d">{m.vendor}{m.i2i ? " · 最多 " + m.maxRefs + " 张参考图" : " · 仅文生图"}</span></span>}
+          renderItem={(m) => <><VendorLogo name={m.vendor} model={m.name} size={14} /><span style={{ flex: 1 }}><span style={{ display: "flex", gap: 6, alignItems: "center" }}>{m.name}</span><span className="d">{m.vendor}{m.i2i ? " · 最多 " + m.maxRefs + " 张参考图" : " · 仅文生图"}</span></span></>}
         /> : <ComboMenu
           autoFocus searchable searchPlaceholder="搜索供应商" onEscape={() => setPick(null)}
           empty={<span>还没有配置图片模型</span>}
@@ -783,7 +783,7 @@ function WhiteModelEditor({ ctl, n, rect, onClose }: { ctl: Ctl; n: CanvasNode; 
           items={vendors}
           label={(v) => v}
           onPick={(v) => setPick({ ...pick, vendor: v })}
-          renderItem={(v) => <><span style={{ flex: 1 }}>{v}<span className="d">{all.filter((m) => vendorOf(m) === v).length} 个模型</span></span><Icon name="right" size="s" /></>}
+          renderItem={(v) => <><VendorLogo name={v} size={16} /><span style={{ flex: 1 }}>{v}<span className="d">{all.filter((m) => vendorOf(m) === v).length} 个模型</span></span><Icon name="right" size="s" /></>}
         />}
       </div>
     </> : null}

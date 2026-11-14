@@ -160,7 +160,7 @@ def _normalize(depth: np.ndarray, low: float | None = None, high: float | None =
     return (scaled * 255.0).astype(np.uint8)
 
 
-def capture_video(ffmpeg: str, src: str, dst: str, *, max_seconds: float = 30.0,
+def capture_video(ffmpeg: str, src: str, dst: str, *, max_seconds: float = 0.0,
                   out_size: tuple[int, int] | None = None, keep_audio: bool = True,
                   on_progress: Callable[[int, int], None] | None = None) -> tuple[dict | None, str]:
     """把源视频逐帧转成深度视频（灰度，越近越亮），返回 (结果, 失败原因)。
@@ -176,7 +176,8 @@ def capture_video(ffmpeg: str, src: str, dst: str, *, max_seconds: float = 30.0,
         return None, "源视频不存在（%s）" % src
     info = probe(ffmpeg, src)
     duration = float(info.get("duration") or 0)
-    if duration > max_seconds + 0.05:
+    # max_seconds=0 表示不设上限：整条视频照做（长片只是慢，不拦）
+    if max_seconds and duration > max_seconds + 0.05:
         return None, "视频时长 %0.1f 秒超过 %d 秒上限，请先裁剪" % (duration, int(max_seconds))
     fps = float(info.get("fps") or 24)
     width = int(info.get("width") or 0)

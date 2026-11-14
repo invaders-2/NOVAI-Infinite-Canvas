@@ -291,7 +291,7 @@
 .cn-root .mb-btn.danger{color:var(--bad)}
 .cn-root .mb-btn:disabled{opacity:.45;cursor:not-allowed}
 .cn-root .mb-btn.icon-only{width:26px;height:26px;padding:0;justify-content:center}
-.cn-root #gp.gp-video{width:min(480px,calc(100vw - 32px));padding:10px}
+.cn-root #gp.gp-video{width:min(640px,calc(100vw - 32px));padding:10px}
 .cn-root .vp-top{display:flex;align-items:center;gap:6px;padding:2px 0 8px}
 .cn-root .vp-pick{flex:none;width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:var(--sunken);color:var(--fg2)}
 .cn-root .vp-pick:hover,.cn-root .vp-pick.on{background:var(--hover);color:var(--hi)}
@@ -351,7 +351,7 @@
 .cn-root .est{font-size:12px;color:var(--fg2);padding:0 6px;white-space:nowrap}
 .cn-root .mic.rec{color:var(--hi);background:#ff453a2e}
 .cn-root .mic.rec svg{stroke:var(--bad)}
-.cn-root #pop,.cn-root #ctx{position:fixed;z-index:60;min-width:200px;max-width:min(380px,calc(100vw - 24px));max-height:min(560px,calc(100vh - 24px));overflow:auto;padding:6px;border-radius:16px;background:var(--menu);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 0 0 1px rgba(var(--ink),.06) inset,0 16px 40px #00000080}
+.cn-root #pop,.cn-root #ctx{position:fixed;z-index:60;min-width:200px;max-width:min(380px,calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;padding:6px;border-radius:16px;background:var(--menu);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);box-shadow:0 0 0 1px rgba(var(--ink),.06) inset,0 16px 40px #00000080}
 .cn-root .mh{font-size:11px;color:var(--fg3);padding:8px 10px 4px}
 .cn-root .mi{width:100%;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;text-align:left;min-height:36px}
 .cn-root .mi:hover:not(:disabled){background:var(--hover)}
@@ -2456,7 +2456,7 @@ html.agent-layer-open .cn-root #agent{backdrop-filter:none;-webkit-backdrop-filt
 .cn-root #pop.combo-pop.closing{animation:comboOut .18s cubic-bezier(.215,.61,.355,1) forwards;pointer-events:none}
 .cn-root .model-flyout.combo-flyout{display:flex;flex-direction:column;overflow:hidden;padding:5px;max-height:min(500px,calc(100vh - 16px));animation:comboIn .22s cubic-bezier(.215,.61,.355,1)}
 .cn-root .model-flyout.combo-flyout.closing{animation:comboOut .18s cubic-bezier(.215,.61,.355,1) forwards;pointer-events:none}
-.cn-root .combo{display:flex;flex-direction:column;min-height:0;max-height:min(460px,calc(100vh - 48px))}
+.cn-root .combo{display:flex;flex-direction:column;min-height:0;max-height:calc(min(420px,55vh) - 12px)}
 .cn-root .combo-flyout .combo{flex:1 1 auto;max-height:none}
 .cn-root .combo-view{display:flex;flex-direction:column;min-height:0}
 .cn-root .combo-s{flex:none;display:flex;align-items:center;gap:8px;height:30px;padding:0 9px;margin:0 2px 4px;border-radius:9px;background:var(--sunken);color:var(--fg3)}
@@ -2464,9 +2464,11 @@ html.agent-layer-open .cn-root #agent{backdrop-filter:none;-webkit-backdrop-filt
 .cn-root .combo-in::placeholder{color:var(--fg3)}
 /* 短动作菜单不放搜索框，但要留一个能聚焦的输入框承接 ↑↓/Enter（视觉隐藏，仍可聚焦） */
 .cn-root .combo-in-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.cn-root .combo-scroll{position:relative;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:none;-ms-overflow-style:none}
-.cn-root .combo-scroll::-webkit-scrollbar{display:none;width:0;height:0}
-.cn-root .combo-list{display:flex;flex-direction:column}
+.cn-root .combo-scroll{position:relative;flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scroll-padding:4px;scrollbar-width:thin;scrollbar-color:rgba(var(--ink),.22) transparent}
+.cn-root .combo-scroll::-webkit-scrollbar{display:block;width:6px;height:6px}
+.cn-root .combo-scroll::-webkit-scrollbar-thumb{background:rgba(var(--ink),.2);border-radius:3px}
+.cn-root .combo-scroll::-webkit-scrollbar-track{background:transparent}
+.cn-root .combo-list{display:flex;flex-direction:column;padding:2px 0}
 .cn-root .combo-hl{position:absolute;left:6px;right:6px;top:0;z-index:0;height:0;border-radius:8px;background:var(--hover);opacity:0;pointer-events:none;transition:transform .22s cubic-bezier(.22,1,.36,1),height .22s cubic-bezier(.22,1,.36,1),opacity .2s cubic-bezier(.22,1,.36,1)}
 .cn-root .combo-hl[data-shown="true"]{opacity:1}
 .cn-root .combo-item{position:relative;z-index:1;cursor:pointer;outline:none}
@@ -2634,3 +2636,8 @@ html.agent-layer-open .cn-root #agent{backdrop-filter:none;-webkit-backdrop-filt
 .cn-root .splitnode .rz:before{content:"";position:absolute;left:4px;top:4px;width:22px;height:22px;border-radius:7px;background:color-mix(in srgb,var(--panel) 78%,transparent);-webkit-backdrop-filter:blur(10px) saturate(140%);backdrop-filter:blur(10px) saturate(140%);box-shadow:0 6px 16px rgba(0,0,0,.28)}
 .cn-root .splitnode .rz:after{right:8px;bottom:8px;width:14px;height:14px}
 .cn-root .splitmiss{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--fg3);font-size:12px}
+
+/* 供应商 logo：字母兜底块圆角 + 菜单行里与第一行标题对齐（行内是两/三行文字，居中会掉到中间行） */
+.cn-root .vlogo-fb{display:inline-flex;align-items:center;justify-content:center;border-radius:22%;font-family:var(--font-sans);font-weight:600;letter-spacing:0;flex:none;line-height:1}
+.cn-root .mi > .vlogo,.cn-root .mi > .vlogo-fb,.cn-root .combo-item > .vlogo,.cn-root .combo-item > .vlogo-fb{align-self:center}
+.cn-root .mi:has(.d) > .vlogo,.cn-root .mi:has(.d) > .vlogo-fb,.cn-root .combo-item:has(.d) > .vlogo,.cn-root .combo-item:has(.d) > .vlogo-fb{align-self:flex-start;margin-top:3px}

@@ -7,6 +7,7 @@
  */
 import type { ReactNode } from "react";
 import { ComboMenu } from "../ui/combo";
+import { VendorLogo } from "../ui/VendorLogo";
 import { Icon } from "../ui/Icon";
 import { OptCards, ratioShape } from "../ui/OptCards";
 import { openPop } from "../ui/overlay";
@@ -44,7 +45,7 @@ export function PlanModelField({ models, value, busy, onChange }: {
     itemClassName={(m) => "mi combo-item" + (m.id === value ? " on" : "")}
     itemAttrs={(m) => ({ "data-model": m.id })}
     onPick={(m) => { close(); onChange(m.id); }}
-    renderItem={(m) => <span style={{ flex: 1 }}>{m.name}<span className="d">{vendorOf(m)}</span></span>}
+    renderItem={(m) => <><VendorLogo name={vendorOf(m)} model={m.name} size={14} /><span style={{ flex: 1 }}>{m.name}<span className="d">{vendorOf(m)}</span></span></>}
   />, "up", "left", "model-pop combo-pop gen-pop");
   return <PlanField label="模型" busy={busy} disabled={!models.length} text={hit ? hit.name : "跟随助手默认"} title={hit ? vendorOf(hit) + " · " + hit.name : "跟随助手默认"}
     render={() => {
@@ -61,7 +62,7 @@ export function PlanModelField({ models, value, busy, onChange }: {
         itemAttrs={(v) => ({ "data-vendor": v || "default" })}
         onPick={(v) => { if (!v) { onChange(""); return; } showModels(document.getElementById("pop")!, v); }}
         renderItem={(v) => v
-          ? <><span style={{ flex: 1 }}>{v}<span className="d">{models.filter((m) => vendorOf(m) === v).length} 个模型</span></span><Icon name="right" size="s" /></>
+          ? <><VendorLogo name={v} size={16} /><span style={{ flex: 1 }}>{v}<span className="d">{models.filter((m) => vendorOf(m) === v).length} 个模型</span></span><Icon name="right" size="s" /></>
           : <><span style={{ flex: 1 }}>跟随助手默认<span className="d">用运行上下文的默认模型</span></span></>}
       />;
     }} />;

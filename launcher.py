@@ -1202,6 +1202,14 @@ def main():
                     log(f"tray on_show error: {e}")
 
             def on_quit(icon, item):
+                # 托盘菜单回调跑在 pystray 自己的线程里：wins[0].destroy() 是跨线程操作
+                # WinForms 窗口，可能抛错或直接卡住；卡住时 webview.start() 永不返回，
+                # 进程就一直挂在任务管理器里（用户看到的「托盘退出没关掉 novai.exe」）。
+                # 所以先起一个定时强制退出的兜底，再尝试优雅销毁。
+                threading.Thread(
+                    target=lambda: (time.sleep(2.0), os._exit(0)),
+                    daemon=True,
+                ).start()
                 try:
                     icon.stop()
                     wins = webview.windows
@@ -1209,6 +1217,8 @@ def main():
                         wins[0].destroy()
                 except Exception as e:
                     log(f"tray on_quit error: {e}")
+                finally:
+                    os._exit(0)
 
             menu = pystray.Menu(
                 pystray.MenuItem("显示窗口", on_show, default=True),

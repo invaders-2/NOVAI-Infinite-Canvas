@@ -5,7 +5,7 @@
  *   · 拖片段：视频轨、音频轨调整先后（吸附，不留空），字幕轨自由挪；修剪 / 字幕拖动会吸附到播放头和其它片段边缘（可关）
  *   · 拖片段两端：修剪入点 / 出点（不超过素材长度）
  *   · 点刻度尺或拖播放头定位；滚轮平移，⌘/Ctrl+滚轮缩放，Alt 拖动平移，播放时时间线跟着走
- *   · C（或 S）切开，Q / E 剪掉播放头左 / 右，D 复制片段，M 静音，Delete 删除，空格播放，← → 逐帧（⇧ 一秒），Home / End 跳到首尾
+ *   · C（或 S）切开，Q / E 剪掉播放头左 / 右，D 复制片段，M 静音，Delete 删除，Esc 取消选中，空格播放，← → 逐帧（⇧ 一秒），Home / End 跳到首尾
  *   · 片段属性：音量、变速（0.25–4×）、声音淡入淡出、进场转场（黑场淡入 / 交叉溶解）、图片时长、字幕文字与起止时间
  *   · 字幕样式（字号 / 位置）、12 种画幅、720p–4K 清晰度同时作用于预览和导出
  *   · 导出：MP4（NOVAI 后端 ffmpeg 渲染，或桌面版媒体服务）/ WebM（浏览器录制），或直接作为新视频节点放回画布
@@ -29,6 +29,10 @@ import { resolveMediaUrl, useAssetUrl } from "./useAsset";
 import { useThumbBg } from "./thumb";
 
 const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+/** 工具条只有按在控件上才拦（按钮 / 下拉 / 输入），按在条的空白处不算交互，交给画布拖节点 */
+const stopOnControl = (e: React.PointerEvent) => {
+  if ((e.target as HTMLElement).closest("button,input,select,textarea,label")) e.stopPropagation();
+};
 const LAB = 56; // 轨道标签宽度（px）
 const TRACKS: Array<{ t: Track; label: string; icon: "video" | "audio" | "text"; h: number }> = [
   { t: "video", label: "画面", icon: "video", h: 46 }, { t: "audio", label: "音频", icon: "audio", h: 34 }, { t: "subtitle", label: "字幕", icon: "text", h: 28 },
@@ -220,7 +224,8 @@ export function TimelineEditor({ node }: { node: CanvasNode }) {
   };
   const scrub = (e: React.PointerEvent) => {
     if (e.altKey || e.button === 1) { startPan(e); return; }
-    e.stopPropagation(); e.preventDefault(); setSel(null); focus(); seek(timeAt(e.clientX));
+    // 只挪播放头，不动已选中的片段：以前这里顺手 setSel(null)，用户挪完播放头再按 Delete 就什么都不删
+    e.stopPropagation(); e.preventDefault(); focus(); seek(timeAt(e.clientX));
     const move = (ev: PointerEvent) => seek(timeAt(ev.clientX));
     const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
     addEventListener("pointermove", move); addEventListener("pointerup", up);
@@ -239,6 +244,7 @@ export function TimelineEditor({ node }: { node: CanvasNode }) {
     else if (e.key === "Home") { e.preventDefault(); seek(0); }
     else if (e.key === "End") { e.preventDefault(); seek(total); }
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); remove(); }
+    else if (e.key === "Escape") { setSel(null); }
     else if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); seek(t + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1 : 1 / 30)); }
   };
 
@@ -305,8 +311,10 @@ export function TimelineEditor({ node }: { node: CanvasNode }) {
   const numIn = (label: string, value: number, onChange: (v: number) => void, o: { min: number; max: number; step: number; unit?: string; key: string }) =>
     <label className="tle-f"><span className="tle-fl">{label}</span><input className="tle-num tnum" type="number" data-tl={o.key} min={o.min} max={o.max} step={o.step} value={value} onFocus={() => store.snapshot()} onChange={(e) => { const v = Number(e.target.value); if (Number.isFinite(v)) onChange(Math.max(o.min, Math.min(o.max, v))); }} />{o.unit ? <span className="tle-unit">{o.unit}</span> : null}</label>;
 
-  return <div className="tle" ref={root} data-act="timeline" tabIndex={0} onPointerDown={stop} onWheel={stop} onKeyDown={onKey} onDoubleClick={stop}>
-    <div className="tle-bar">
+  /* 不再整块吞掉 pointerdown：编辑器里各控件（片段、标尺、按钮、输入框）自己会 stopPropagation，
+     其余空白处交给画布，按住就能拖整个节点——以前只有标题栏能拖 */
+  return <div className="tle" ref={root} data-act="timeline" data-drag="" tabIndex={0} onWheel={stop} onKeyDown={onKey} onDoubleClick={stop}>
+    <div className="tle-bar" onPointerDown={stopOnControl}>
       <button className="pill" data-tl="add-video" onClick={(e) => addMenu(e, "video")}><Icon name="video" size="xs" />视频</button>
       <button className="pill" data-tl="add-image" onClick={(e) => addMenu(e, "image")}><Icon name="image" size="xs" />图片</button>
       <button className="pill" data-tl="add-audio" onClick={(e) => addMenu(e, "audio")}><Icon name="audio" size="xs" />音频</button>
@@ -376,7 +384,7 @@ export function TimelineEditor({ node }: { node: CanvasNode }) {
         : <span className="tle-dim">选中片段可调音量、变速、淡入淡出和转场 · 拖两端修剪 · C 切开 · D 复制 · Q / E 剪掉播放头左 / 右 · 右键更多</span>}
     </div>
 
-    <div className="tle-bar">
+    <div className="tle-bar" onPointerDown={stopOnControl}>
       <span className="tle-dim tnum">{visualCount} 段 · {fmt(total)} · {out.width}×{out.height}</span>
       <span className="grow" />{busy ? <span className="tle-busy" data-tl-busy><i className="tle-spin" />{busy}</span> : null}
       {mp4Available ? <button className="pill" data-tl="mp4" disabled={!total || !!busy} onClick={() => void exportIt("mp4")}><Icon name="download" size="xs" />导出 MP4</button> : null}

@@ -57,6 +57,17 @@ export function sliceWorkflowDoc(doc: CanvasDoc, selectedIds?: Iterable<string> 
   const picked = new Set<string>();
   if (selectedIds) for (const id of selectedIds) if (known.has(id)) picked.add(id);
   if (!picked.size) return { doc, selected: false, nodeCount: all.length, edgeCount: edges.length };
+  // 分组 / 堆叠是容器：只选容器时成员必须一起带走。否则导回来的 children 全指向不存在的 id，
+  // 堆叠只剩一个「堆叠 4」的空壳（导出前看着正常，导入后封面全丢）。
+  const byId = new Map(all.map((node) => [node.id, node]));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const id of [...picked]) {
+      for (const child of byId.get(id)?.children || []) {
+        if (known.has(child) && !picked.has(child)) { picked.add(child); changed = true; }
+      }
+    }
+  }
   const nodes = all.filter((node) => picked.has(node.id));
   const inner = edges.filter((edge) => picked.has(edge.from) && picked.has(edge.to));
   return { doc: { nodes, edges: inner, comments: [] }, selected: true, nodeCount: nodes.length, edgeCount: inner.length };

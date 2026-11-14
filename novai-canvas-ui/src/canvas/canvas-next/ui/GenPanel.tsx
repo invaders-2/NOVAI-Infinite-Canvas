@@ -12,7 +12,7 @@ import { mentionable, mentionedIds, unmentionedInputs } from "../mentions";
 import { PromptEditor } from "./PromptEditor";
 import { requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRole, stopNode } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
-import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, newNode, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatOptions, outputFormatShortLabel, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
+import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, withGen, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, newNode, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatOptions, outputFormatShortLabel, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchInputWarnings, batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, ownRefCount, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS, type Ctl } from "./ctx";
 import { isSplitNode } from "./SplitNode";
@@ -20,12 +20,13 @@ import { openSplitEditor } from "./editors/SplitEditor";
 import { startVoiceCapture, transcribeVoice, voiceErrorText, type VoiceCapture, type VoicePhase } from "../voiceInput";
 import { keyHint } from "./shortcuts";
 import { ratioDisplayLabel, sourceBoxForNode, sourceSizeForTier, type RatioParams, type SourceBox } from "../originalRatio";
-import { isAdaptiveRatio } from "../mediaFit";
+import { fitSourceBox, isAdaptiveRatio } from "../mediaFit";
 import { ComboMenu } from "./combo";
 import { FloatMenuBar, FloatMenuButton } from "./FloatMenu";
 import { Icon, type IconName } from "./Icon";
 import { download } from "./menus";
 import { saveNodeToLibrary } from "./Library";
+import { VendorLogo } from "./VendorLogo";
 import { openPop } from "./overlay";
 import { ThumbImg } from "./thumb";
 import { OptCards, normRatio, ratioShape } from "./OptCards";
@@ -116,7 +117,7 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
     B("smartclip", "split", "智能切镜：按镜头拆成多个节点", "", () => void smartClip(store, node)),
     <FloatMenuButton key="vai" icon="wand" label="AI 编辑" title="AI 编辑：替换 / 移除 / 续写 / 重拍" data={{ "data-tb": "vai", "data-tip": "AI 编辑：替换 / 移除 / 续写 / 重拍" }} onClick={(e) => videoAiMenu(store, node, e.currentTarget)} />,
     B("frame", "frame", "截帧（快捷键 1）", "截帧"),
-    <FloatMenuButton key="vmore" icon="more" label="更多" title="更多" data={{ "data-tb": "vmore", "data-tip": "更多" }} onClick={(e) => videoMore(store, node, e.currentTarget)} />,
+    <FloatMenuButton key="vmore" icon="more" label="更多" title="更多" data={{ "data-tb": "vmore", "data-tip": "更多" }} onClick={(e) => videoMore(ctl, node, e.currentTarget)} />,
     <span key="s1" className="vsep" />, tagBtn(), <span key="s2" className="vsep" />,
     B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)),
     B("dl", "download", "下载", "", () => void download(node, store)),
@@ -376,8 +377,6 @@ function GenPanel({ node }: { node: CanvasNode }) {
     {warns.map((w) => <div key={w} className="gp-warn"><Icon name="alert" size="s" /><span>{w}</span></div>)}
       {preview ? <div className="gp-prev"><pre>{JSON.stringify(previewOf(ctl, node), null, 2)}</pre></div> : null}
       <div className="vp-foot">
-        {promptOnly ? null : <button className={"vp-audio tipT" + (vp.sound ? " on" : "")} data-p="vaudio" data-tip={vp.sound ? "音频：开" : "音频：关"} disabled={busy || !m?.audio} onClick={() => set({ sound: !vp.sound })}><Icon name="audio" size="s" /></button>}
-        <OptimizeButton node={node} draft={draft} setDraft={setDraft} className="vp-audio opt" />
         <button className="vp-model" data-p="model" onClick={(e) => paramPop(ctl, node, "model", e.currentTarget)} title={m?.name || (store.modelsOf(kind).length ? "选择模型" : "未配置模型")}>{m?.name || (store.modelsOf(kind).length ? "选择模型" : "未配置模型")}</button>
         <span className="vp-between" />
         {promptOnly
@@ -392,6 +391,8 @@ function GenPanel({ node }: { node: CanvasNode }) {
           <span data-vval="dur">{videoDurLabel(vp.dur)}</span>
         </button>}
         <span className="grow" />
+        {promptOnly ? null : <button className={"vp-audio tipT" + (vp.sound ? " on" : "")} data-p="vaudio" data-tip={vp.sound ? "音频：开" : "音频：关"} disabled={busy || !m?.audio} onClick={() => set({ sound: !vp.sound })}><Icon name="audio" size="s" /></button>}
+        <OptimizeButton node={node} draft={draft} setDraft={setDraft} className="vp-audio opt" />
         {promptOnly ? null : <button className="vp-times tnum" data-p="vtimes" disabled={busy || !m || (m.times || [1]).length < 2} onClick={(e) => paramPop(ctl, node, "vtimes", e.currentTarget)}>{videoTimesLabel(vp.times)}</button>}
         {run
           ? <button className="vp-send busy" data-p="stop" title="停止生成" onClick={() => stopNode(store, node.id)}><span className="sqr" /></button>
@@ -524,7 +525,9 @@ async function runDepthCapture(store: CanvasStore, n: CanvasNode) {
     store.setRun(n.id, null);
     // 接口没有中止参数：点停止只是丢掉结果，后端那趟仍会跑完
     if (abort.signal.aborted) return;
-    const w = out.w || n.w, h = out.h || n.h;
+    // 深度视频和源视频可能不是同一个画幅（竖版源片被塞进横框就是这样）：按深度视频的真实像素定框，别沿用源节点尺寸
+    const box = out.w && out.h ? fitSourceBox(out.w, out.h) : null;
+    const w = box?.w || n.w, h = box?.h || n.h;
     const made = newNode("video", n.x + n.w + 120, n.y, {
       title: (n.text || "视频") + " · 深度动作捕捉",
       hist: [{ url: out.url, w, h, dur: out.dur, meta: { model: "深度动作捕捉", at: Date.now() } }],
@@ -539,8 +542,38 @@ async function runDepthCapture(store: CanvasStore, n: CanvasNode) {
   }
 }
 
+/**
+ * 套用原声：生成侧不复刻声音（模型输出无音轨），这里把来源视频的音轨本机贴到成片上。
+ * 结果作为这个节点的一条新历史，不新建节点——下游连线不用重接，旧版本还在历史里可回退。
+ */
+async function applyAudio(ctl: Ctl, node: CanvasNode, source: CanvasNode) {
+  const store = ctl.store;
+  const video = outOf(node)?.url;
+  const audio = outOf(source)?.url;
+  if (!video) { store.toast("这个节点还没有成片，先出片再套原声"); return; }
+  if (!audio) { store.toast("选中的参考视频没有画面，读不到声音"); return; }
+  const be = store.backend;
+  if (!be.muxAudio) { store.toast("当前后端没有本机音频处理，更新到最新安装包再试"); return; }
+  const started = Date.now();
+  store.setRun(node.id, { status: "running", progress: .05, abort: new AbortController(), startedAt: started });
+  try {
+    const out = await be.muxAudio(video, audio, {});
+    store.setRun(node.id, null);
+    store.updateNode(node.id, (n) => {
+      const g = genOf(n);
+      const hist = [...(g.hist || []), { url: out.url, dur: out.dur, meta: { model: "套用原声", at: Date.now() } }];
+      return withGen(n, { hist, hi: hist.length - 1 });
+    }, { history: true });
+    store.toast("已套用「" + (genOf(source).title || "参考视频") + "」的声音，用了 " + Math.max(1, Math.round((Date.now() - started) / 1000)) + " 秒");
+  } catch (err) {
+    store.setRun(node.id, null);
+    store.toast(err instanceof Error ? err.message : "套用原声失败");
+  }
+}
+
 /** 视频结果动作的「更多」：首帧/尾帧截帧、设为视频封面、应用到画布、下载、全屏（对齐 TapNow） */
-function videoMore(store: CanvasStore, node: CanvasNode, anchor: Element) {
+function videoMore(ctl: Ctl, node: CanvasNode, anchor: Element) {
+  const store = ctl.store;
   openPop(anchor, (close) => {
     const fire = (kind: string) => () => { close(); window.dispatchEvent(new CustomEvent("cn:editor", { detail: { kind, id: node.id } })); };
     return <>
@@ -551,20 +584,30 @@ function videoMore(store: CanvasStore, node: CanvasNode, anchor: Element) {
       <button className="mi" data-tbk="setcover" onClick={fire("setcover")}><Icon name="star" size="s" />设为视频封面</button>
       <button className="mi" data-tbk="applycanvas" onClick={fire("applycanvas")}><Icon name="libadd" size="s" />应用到画布</button>
       <div className="msep" />
-      <div className="msep" />
       <div className="mh">参考视频</div>
       <button className="mi" data-tbk="depthcapture" onClick={() => { close(); void runDepthCapture(store, node); }}><Icon name="layers" size="s" /><span style={{ flex: 1 }}>深度动作捕捉</span><span className="k">本机</span></button>
+      <div className="msep" />
+      <div className="mh">声音</div>
+      <button className="mi" data-tbk="audio" onClick={(e) => openPop(e.currentTarget, (close2) => {
+        const doc = store.state.doc;
+        const upstream = (doc.edges || []).filter((edge) => edge.to === node.id).map((edge) => store.node(edge.from));
+        const others = doc.nodes.filter((n) => n.kind === "video" && n.id !== node.id);
+        const seen = new Set<string>();
+        const picked = [...upstream, ...others].filter((n): n is CanvasNode => !!n && !!outOf(n)?.url && !seen.has(n.id) && (seen.add(n.id), true)).slice(0, 6);
+        return <>
+          <div className="mh">套用哪个视频的原声<span className="d"> · 本机贴音轨，画质不动</span></div>
+          {picked.length ? picked.map((src) => (
+            <button key={src.id} className="mi" data-audio-from={src.id} onClick={() => { close2(); close(); void applyAudio(ctl, node, src); }}>
+              <Icon name="audio" size="s" /><span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{genOf(src).title || "视频"}</span>
+            </button>
+          )) : <div className="mh" style={{ whiteSpace: "normal", lineHeight: 1.5 }}>画布上还没有带画面的参考视频</div>}
+          <div className="mh" style={{ whiteSpace: "normal", lineHeight: 1.5 }}>整段音乐按成片长度裁；原片说话的话口型对不上，慎用</div>
+        </>;
+      }, "up")}><Icon name="audio" size="s" /><span style={{ flex: 1 }}>套用原声</span><span className="k">本机</span></button>
       <div className="msep" />
       <div className="mh">编辑当前帧</div>
       <button className="mi" data-tbk="cropframe" onClick={fire("cropframe")}><Icon name="crop" size="s" />裁剪画面<span className="k">先截帧</span></button>
       <button className="mi" data-tbk="eraseframe" onClick={fire("eraseframe")}><Icon name="eraser" size="s" />擦除画面<span className="k">先截帧</span></button>
-      <div className="msep" />
-      <button className="mi" data-tbk="dl" onClick={() => { close(); void download(node, store); }}><Icon name="download" size="s" />下载</button>
-      <button className="mi" data-tbk="full" onClick={() => { close(); window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })); }}><Icon name="expand" size="s" />全屏</button>
-      <div className="mh">暂未接入</div>
-      <button className="mi" data-tbk="hd" disabled title="需要逐帧超分，当前没有接入"><Icon name="sparkle" size="s" /><span style={{ flex: 1 }}>高清</span><span className="k">要逐帧超分</span></button>
-      <button className="mi" data-tbk="motion" disabled title="需要模型支持运动控制参数"><Icon name="branch" size="s" /><span style={{ flex: 1 }}>运动控制</span><span className="k">模型未提供</span></button>
-      <button className="mi" data-tbk="fps" disabled title="需要重新转码改写帧率"><Icon name="monitor" size="s" /><span style={{ flex: 1 }}>帧率</span><span className="k">要重新转码</span></button>
     </>;
   }, "up");
 }
@@ -658,9 +701,9 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
       items={list.filter((x) => vendorOf(x) === vendor)}
       label={(x) => x.name}
       onPick={(x) => { close(); store.rememberModel(kind, x.id); store.patchGen(node.id, (gg) => ({ params: clampParams(kind, gg.params, x) })); if (kind === "video") afterInputsChanged(store, node.id); }}
-      renderItem={(x) => <span style={{ flex: 1 }}><span style={{ display: "flex", gap: 6, alignItems: "center" }}>{x.name}{x.tags.map((t) => <span key={t} className={"tag" + (t === "NEW" ? " new" : "")}>{t}</span>)}{x.specSource === "guess" ? <span className="tag" data-spec-source="guess" title="服务商没有提供该模型的参数规格，下面的比例 / 档位 / 选项是按模型名推断的，以实际生成为准">未验证</span> : null}</span>
+      renderItem={(x) => <><VendorLogo name={x.vendor} model={x.name} size={14} /><span style={{ flex: 1 }}><span style={{ display: "flex", gap: 6, alignItems: "center" }}>{x.name}{x.tags.map((t) => <span key={t} className={"tag" + (t === "NEW" ? " new" : "")}>{t}</span>)}{x.specSource === "guess" ? <span className="tag" data-spec-source="guess" title="服务商没有提供该模型的参数规格，下面的比例 / 档位 / 选项是按模型名推断的，以实际生成为准">未验证</span> : null}</span>
         {kind === "video" ? <span className="mtags">{x.res?.length && !x.tags.some((t) => t.toLowerCase() === x.res![x.res!.length - 1].toLowerCase()) ? <span className="tag">{x.res[x.res.length - 1]}</span> : null}{x.durs?.length ? <span className="tag tnum">{videoDurationTagLabel(x.durs)}</span> : null}{x.audio ? <span className="tag"><Icon name="audio" size="xs" /></span> : null}<span className="tag">{(x.modes || []).length} 种方式</span></span> : null}
-        <span className="d">{x.vendor}{kind === "image" ? ` · ${x.i2i ? "最多 " + x.maxRefs + " 张参考图" : "仅文生图"}` : kind === "video" ? "" : kind === "text" ? (x.vision ? " · 能读图" : " · 只读文字") : ""}{x.specSource === "guess" ? " · 参数按名字推断" : ""}</span></span>}
+        <span className="d">{x.vendor}{kind === "image" ? ` · ${x.i2i ? "最多 " + x.maxRefs + " 张参考图" : "仅文生图"}` : kind === "video" ? "" : kind === "text" ? (x.vision ? " · 能读图" : " · 只读文字") : ""}{x.specSource === "guess" ? " · 参数按名字推断" : ""}</span></span></>}
       searchPlaceholder="搜索模型"
       searchable
     />, "up", "left", "model-pop combo-pop");
@@ -676,7 +719,7 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
       items={vendors}
       label={(vendor) => vendor}
       onPick={(vendor) => showModels(vendor)}
-      renderItem={(vendor) => <><span style={{ flex: 1 }}>{vendor}<span className="d">{list.filter((x) => vendorOf(x) === vendor).length} 个模型</span></span>{vendor === currentVendor ? null : <Icon name="right" size="s" />}</>}
+      renderItem={(vendor) => <><VendorLogo name={vendor} size={16} /><span style={{ flex: 1 }}>{vendor}<span className="d">{list.filter((x) => vendorOf(x) === vendor).length} 个模型</span></span>{vendor === currentVendor ? null : <Icon name="right" size="s" />}</>}
       searchPlaceholder="搜索供应商"
       searchable
     />, "up", "left", "model-pop combo-pop");

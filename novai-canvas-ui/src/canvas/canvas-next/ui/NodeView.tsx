@@ -196,7 +196,7 @@ function Body(p: NodeViewProps & { out: GenOutput | null; running: boolean; hove
   if (running && node.kind === "text") return p.run?.stream ? <div className="ntext md-wrap streaming"><Markdown streaming text={p.run.stream} /></div> : <TextSkeleton />;
   if (running) return <><Loading /><span className="nl-lab tnum">{p.run?.batch ? `逐行生成 ${p.run.batch.done}/${p.run.batch.total}` : "生成中"}</span></>;
   if (node.kind === "image") {
-    if (out?.url) return <MediaImg src={out.url} alpha={false} px={node.w} play={p.hover} />;
+    if (out?.url) return <MediaImg src={out.url} alpha={false} px={node.w} play={p.hover} nodeId={node.id} nodeW={node.w} nodeH={node.h} />;
     return <div className="ph" data-short={node.h < PH_SHORT_H ? "" : undefined}><Icon name="image" /><span>{g.uploaded ? "拖入或上传图片" : "选中后在下方描述要生成的画面"}</span></div>;
   }
   if (node.kind === "text") {
@@ -213,8 +213,9 @@ function Body(p: NodeViewProps & { out: GenOutput | null; running: boolean; hove
   return <div className="ph" data-short={node.h < PH_SHORT_H ? "" : undefined}><Icon name="audio" /><span>音乐、配音或音效</span></div>;
 }
 
-function MediaImg({ src, alpha, px, play }: { src: string; alpha: boolean; px: number; play: boolean }) {
+function MediaImg({ src, alpha, px, play, nodeId, nodeW, nodeH }: { src: string; alpha: boolean; px: number; play: boolean; nodeId?: string; nodeW?: number; nodeH?: number }) {
   const url = useThumbnailUrl(src, px); const [fresh, setFresh] = useState(true);
+
   // 缩略图接口拿不到（老后端 / 素材被移走）时回退原图，别让节点变「资源不可用」
   const [fallback, setFallback] = useState(false);
   // 静态缩略图自己加载失败：GIF 不能退到原图（那就是动画），改退自绘首帧
@@ -266,6 +267,19 @@ function VideoBody({ node, out, res, hover }: { node: CanvasNode; out: GenOutput
   const mounted = pinned || (hover && !closed);
   const media = useMediaUrl(out.url || "", mounted); const url = media.url;
   const vref = useRef<HTMLVideoElement>(null);
+  // 视频节点的框也要跟真实画面对上：助手生成 / 上传的视频常见竖版本被塞进 16:9 横框（或反过来），
+  // 封面图和 <video> 元数据都能拿到真实宽高，差超过 6% 就按画面比例改一次框高（宽度不动）
+  const fittedKey = useRef("");
+  const fitToMedia = (mw: number, mh: number) => {
+    if (!mw || !mh) return;
+    const want = mw / mh;
+    const cur = node.w / node.h;
+    if (Math.abs(want - cur) <= 0.06) return;
+    const key = node.id + ":" + Math.round(want * 100);
+    if (fittedKey.current === key) return;
+    fittedKey.current = key;
+    store.updateNode(node.id, (n) => ({ ...n, h: Math.max(80, Math.round(node.w / want)) }), { history: false });
+  };
   const resText = res ? videoResLabel(res) : "";
   // 没设过区间也要显示（整段），拖过之后按版本存；dur 未知时按 10s 兜底
   const trim = clampTrim(out.dur, out.trim);
@@ -320,13 +334,13 @@ function VideoBody({ node, out, res, hover }: { node: CanvasNode; out: GenOutput
   </>;
   return <>
     {mounted && url ? <video ref={vref} src={url} poster={cover || undefined} playsInline muted={muted} preload="metadata" loop={!pinned}
-      onLoadedMetadata={(e) => learnDur(e.currentTarget)}
+      onLoadedMetadata={(e) => { learnDur(e.currentTarget); fitToMedia(e.currentTarget.videoWidth, e.currentTarget.videoHeight); }}
       onPlay={() => setPaused(false)} onPause={() => setPaused(true)}
       onEnded={() => { setPaused(true); setNow(length); }}
       onError={() => media.onError()}
       onClick={(e) => { e.stopPropagation(); onSurface(); }}
       style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-      : cover ? <img src={cover} alt="" draggable={false} decoding="async" onClick={(e) => { e.stopPropagation(); if (out.url) setPinned(true); }} /> : null}
+      : cover ? <img src={cover} alt="" draggable={false} decoding="async" onLoad={(e) => fitToMedia(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} onClick={(e) => { e.stopPropagation(); if (out.url) setPinned(true); }} /> : null}
     {!pinned ? <button className="play" data-act="play" onPointerDown={(e) => { e.stopPropagation(); if (out.url) setPinned(true); }}><Icon name="play" /></button> : null}
     {chips}
     {pinned ? <VideoControls now={now || 0} length={length} paused={paused} muted={muted} trimOpen={trimOpen}

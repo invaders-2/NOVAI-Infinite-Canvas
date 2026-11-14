@@ -8,12 +8,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CanvasNode } from "../react-canvas/reactCanvasStore";
 import { addFiles, title } from "../canvas-next/actions";
-import { clampThinkLevel, genOf, isGenKind, srcOf, thinkLevelLabel, thinkLevelsFor, TYPE_ICON, type GenKind, type ModelSpec } from "../canvas-next/model";
+import { clampThinkLevel, genOf, isGenKind, srcOf, thinkLevelsFor, TYPE_ICON, type GenKind, type ModelSpec } from "../canvas-next/model";
 import { useCtl, useS, type Ctl } from "../canvas-next/ui/ctx";
 import { ComboMenu, prefersReduced } from "../canvas-next/ui/combo";
 import { BeatAvatar } from "../canvas-next/ui/BeatAvatar";
 import { useBeatActivity } from "../canvas-next/ui/useBeatActivity";
 import { publishAgentBeat } from "../canvas-next/ui/useOrbActivity";
+import { VendorLogo } from "../canvas-next/ui/VendorLogo";
 import { Icon } from "../canvas-next/ui/Icon";
 import { EffortSlider } from "../canvas-next/ui/EffortSlider";
 import { closeModal, closePop, ModalHead, openModal, openPop } from "../canvas-next/ui/overlay";
@@ -355,8 +356,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   const activeModel = chatModels.find((model) => model.id === activeModelId);
   const thinkLevels = thinkLevelsFor(activeModel);
   const thinkLevelsKey = thinkLevels.join(",");
-  const thinkLabel = thinkLevel ? thinkLevelLabel(thinkLevel) : "";
-  // 换模型 / 模型列表刷新后收敛：新模型不支持就清空，档位不在新列表里就收到第一个合法档位
+    // 换模型 / 模型列表刷新后收敛：新模型不支持就清空，档位不在新列表里就收到第一个合法档位
   useEffect(() => {
     // 模型列表 / 默认模型都解析完再收敛：否则会拿「列表第一个」把用户存的档位误清掉
     if (!activeModelId || !defaultModelReady) return;
@@ -627,8 +627,10 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
 
   function watchTask(m: AgentMsg, taskId: string, t0: number, threadId: string) {
     let refreshed = ""; let refreshOutcome: RefreshOutcome = "not_required";
+    let terminalHandled = false;
     const watcher = subscribeAgentTask(store.backend, taskId, (snapshot) => {
       const settled = TASK_UI_SETTLED.has(snapshot.status);
+      const firstTerminal = settled && !terminalHandled;
       const effect = settled ? "terminal" : snapshot.events.filter((e) => /side_effect\.succeeded|execution\.succeeded/.test(String(e.eventType))).map((e) => String(e.eventId)).join(",");
       if (effect && effect !== refreshed && (snapshot.status === "SUCCEEDED" || snapshot.status === "COMPLETED")) refreshOutcome = "pending";
       // 待确认的方案：状态是「跑完了」但一步都没执行，必须说清「还没动画布」并给出执行入口
@@ -646,7 +648,10 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       const thoughtRows = taskThoughtRows(snapshot);
       const thoughts = thoughtRows.length ? thoughtRows.map((row) => row.text) : (m.think?.lines || []);
       const kinds = thoughtRows.length ? thoughtRows.map((row) => row.kind) : m.think?.kinds;
-      const think = { live: !settled, open: false, secs: ((performance.now() - t0) / 1000).toFixed(1), lines: thoughts, kinds };
+      // 终态后的审查宽限刷新只更新审查卡，思考时长/展开状态保持第一次终态的样子
+      const think = settled && !firstTerminal
+        ? m.think
+        : { live: !settled, open: false, secs: ((performance.now() - t0) / 1000).toFixed(1), lines: thoughts, kinds };
       // 阶段三·3：完成前自检（self_check 事件，在最终 message 之前）；没有事件就保持原值 = 不渲染
       const selfCheck = taskSelfCheck(snapshot);
       // 阶段四：托管额度用完 / 将尽 → 弹授权卡（补额度或结束）；同一条事件只弹一次
@@ -672,18 +677,20 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       const compactions = contextCompactionsOf(snapshot.events);
       // 收尾：有流式正文就用它（平台一次性给整段时也是同一条路径，不会「闪一下再重画」）；方案卡 / 兜底文案仍走 answer
       const nextText = settled ? (plan || !streamed ? (answer || m.text) : streamed) : (streamed || m.text);
-      patch(m, { heartbeat: settled ? undefined : (heartbeat || m.heartbeat), suggestions: suggestions.length ? suggestions : m.suggestions, task: { taskId, status: snapshot.status, modelConfigId: snapshot.modelConfigId, stopRequested: m.task?.stopRequested, plan }, reviews: reviews.length ? reviews : m.reviews, tools: steps, webImages: images.length ? images : m.webImages, webSearch: searches.length ? searches : m.webSearch, usage: usage || m.usage, compactions: compactions.length ? compactions : m.compactions, reasoning: reasoning || m.reasoning, selfCheck: selfCheck || m.selfCheck, text: nextText, streaming: !settled && !!streamed, think, took: settled ? (performance.now() - t0) / 1000 : m.took });
+      patch(m, { heartbeat: settled ? undefined : (heartbeat || m.heartbeat), suggestions: suggestions.length ? suggestions : m.suggestions, task: { taskId, status: snapshot.status, modelConfigId: snapshot.modelConfigId, stopRequested: m.task?.stopRequested, plan }, reviews: reviews.length ? reviews : m.reviews, tools: steps, webImages: images.length ? images : m.webImages, webSearch: searches.length ? searches : m.webSearch, usage: usage || m.usage, compactions: compactions.length ? compactions : m.compactions, reasoning: reasoning || m.reasoning, selfCheck: selfCheck || m.selfCheck, text: nextText, streaming: !settled && !!streamed, think, took: settled ? (firstTerminal ? Math.max(Number(m.took) || 0, (performance.now() - t0) / 1000) : m.took) : m.took });
       a.setThreadBusy(threadId, !settled); a.setThreadStop(threadId, false); a.emit();
       // L5：结束后这一轮没有可见回复（快照里既没有流式正文也没有 done 文案）→ 直接读一次线程。
       // 后端在收尾时已经把回复落盘，读回来就能显示，不用让用户刷新页面。
-      if (settled && !nextText && threadId && threadId !== "__new__") {
+      if (firstTerminal && !nextText && threadId && threadId !== "__new__") {
         void a.loadThreadMessages(threadId).then((ok) => { if (ok) a.emit(); });
       }
       // 这一轮结束时后端已经把问答追加进线程：刷新列表里的条数 / 时间
       // 该对话还有排队消息就在它自己的线程里 260ms 后自动发下一条（当前看的是别的对话也照发）
-      if (settled) { void a.loadThreads(); scheduleFlush(threadId); }
+      if (firstTerminal) { void a.loadThreads(); scheduleFlush(threadId); }
       // 回复结束后按 5s/15s/40s/90s/180s 的退避节奏找记忆候选（后台摘要可能要几分钟）；卡片挂在这条回复下面
-      if (settled && threadId === (a.activeThreadId || "__new__") && ui.agentOpen) startMemoryPoll(threadId === "__new__" ? "" : threadId, m.id);
+      if (firstTerminal && threadId === (a.activeThreadId || "__new__") && ui.agentOpen) startMemoryPoll(threadId === "__new__" ? "" : threadId, m.id);
+      // 终态后的审查宽限刷新只补审查结论，收尾动作已经跑过一次了
+      if (settled) terminalHandled = true;
       if (effect && effect !== refreshed) {
         refreshed = effect;
         // 助手建的节点只在 refreshAuthoritative 换掉文档之后才出现：先记下刷新前的 id，刷新落地再对比补焦点
@@ -1202,11 +1209,13 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     slashPaletteOpen.current = true;
     openPop(box, (close) => <Palette a={a} onClose={() => { slashPaletteOpen.current = false; close(); }} onPick={(s) => { slashPaletteOpen.current = false; close(); a.skill = s; a.emit(); edRef.current?.insertMention({ kind: "skill", id: s, title: s, icon: "sparkle", badge: "技能" }); }} onPlugin={(on) => { slashPaletteOpen.current = false; close(); setWebPlugin(on); edRef.current?.dropTrigger(); }} webOn={webOn} webPlugin={webPlugin} width={box.offsetWidth} />, "up", "left", "palette");
   };
-  /** 输入框里的 / 被删掉 / 替换：斜杠面板跟着关；@ 的提及面板不受影响 */
+  /** 输入框里的 / 或 @ 被删掉 / 替换：对应的选择面板跟着关（@ 面板不再赖着不走） */
   const onTriggerGone = () => {
-    if (!slashPaletteOpen.current) return;
+    const slashOpen = slashPaletteOpen.current;
     slashPaletteOpen.current = false;
-    if (document.querySelector('#pop:not(.closing) [data-slash-palette]')) closePop();
+    if (!slashOpen && !document.querySelector('#pop:not(.closing) .ap2-mention')) return;
+    // 斜杠面板只在它自己开着时关；提及面板只要存在就关
+    if (document.querySelector('#pop:not(.closing) [data-slash-palette], #pop:not(.closing) .ap2-mention')) closePop();
   };
   const mentionMenu = () => openPop(boxRef.current!, (close) => <MentionPalette nodes={store.state.doc.nodes} onNode={(n) => { close(); insertNodeChip(n); }} onRef={(ref) => { close(); insertRefChip(ref); }} />, "up", "left", "palette");
   /** 光标前刚打出 @ / 斜杠：开对应的选择面板 */
@@ -1246,7 +1255,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     a.emit();
   };
   return (
-    <aside id="agent" data-mac-lights={MAC_LIGHTS ? "1" : undefined} className={(ui.agentOpen ? "" : "closed") + (full ? " full" : "") + " ap2-agent"}>
+    <aside id="agent" data-mac-lights={MAC_LIGHTS ? "1" : undefined} data-busy={a.busy ? "1" : undefined} className={(ui.agentOpen ? "" : "closed") + (full ? " full" : "") + " ap2-agent"}>
       <div className="ah ap2-ah">
         {/* mac 桌面端全屏时给系统红绿灯让位：这 88px 是空的，同时充当窗口拖拽区（CSS 只在 #agent.full[data-mac-lights] 下显示） */}
         <span className="ap2-lights-gap" aria-hidden="true" />
@@ -1365,17 +1374,6 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
           <button className={"pill ghost tipT ap2-pill" + (full ? "" : " icon")} id="aThink" data-thinking={a.thinking} aria-label={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} data-tip={"思考强度：" + THINKING.find(([k]) => k === a.thinking)?.[1]} onClick={(e) => openPop(e.currentTarget, (close) => <><div className="mh">思考强度</div>{THINKING.map(([k, t, d]) => <button key={k} className={"mi" + (a.thinking === k ? " on" : "")} data-t={k} onClick={() => { close(); a.setThinking(k); }}><span className="ic"><Icon name="brain" size="s" /></span><span>{t}<span className="d">{d}</span></span>{a.thinking === k ? <span className="k"><Icon name="check" size="s" /></span> : null}</button>)}</>, "up")}><Icon name="brain" size="s" />{full ? THINKING.find(([k]) => k === a.thinking)?.[1] : null}{a.thinking === "off" ? null : <i className={"thk l" + THINKING.findIndex(([k]) => k === a.thinking)} />}</button>
           <span className="sp" />
           <ContextMeter model={a.model} usage={liveUsage} estimate={ctxBreak()} memOn={a.memOn} onCompact={() => compact(ctl, a)} onMemory={() => memoryModal(a)} />
-          {/* 模型强度 pill：窄面板只显示档位、全屏带「模型强度」；弹层由下面的 EffortSlider 接管 */}
-          {thinkLevels.length > 1 ? <button className={"pill ghost tipT ap2-pill" + (!full && !thinkLabel ? " icon" : "")} id="aThinkLevel" data-think-level={thinkLevel || "default"}
-            aria-label={"模型强度：" + (thinkLabel || "默认") + "，点击选择"} data-tip={"模型强度：" + (thinkLabel || "默认")}
-            onClick={(e) => openPop(e.currentTarget, () => <>
-              {/* 弹层换成和模型菜单同一个 EffortSlider：删掉原来那列档位 + 「默认」行，
-                  触发 pill / data-think-level / localStorage / 「默认」行为都留在外面的按钮上 */}
-              <EffortSlider levels={thinkLevels} value={thinkLevel} onChange={setThinkLevel} />
-            </>, "up", "left", "think-pop")}>
-            {/* 窄面板空间紧：只显示档位本身（图标在 title / aria-label 里说明），全屏才带「模型强度」字样 */}
-            {full ? <><Icon name="gauge" size="s" />{thinkLabel ? "模型强度 " + thinkLabel : "模型强度"}</> : thinkLabel ? <span>{thinkLabel}</span> : <Icon name="gauge" size="s" />}
-          </button> : null}
           <button className="pill ghost tipT ap2-pill" id="aModel" aria-label={modelHint} data-tip={modelHint} onClick={(e) => modelMenu(e.currentTarget, e.detail === 0)}><Icon name="sparkle" size="s" /><span className="amodel-name ap2-amodel">{modelLabel}</span></button>
           {/* 录音/转写时 #aMic 原位变身成胶囊（方案 7）：红点 + 计时；不额外占一行，其它按钮位置保持 */}
           <button className={"ib ap2-btn" + (voicePhase === "idle" ? "" : " voice-live") + (voicePhase === "recording" ? " rec" : "")} id="aMic" aria-label={voicePhase === "recording" ? "结束语音输入" : voicePhase === "transcribing" ? "正在转写" : "语音输入"} aria-pressed={voicePhase === "recording"} data-voice-phase={voicePhase} disabled={voicePhase === "transcribing"} onClick={() => void toggleVoice()}>
@@ -1462,7 +1460,7 @@ function AgentModelMenu({ models, defaultModelId, selectedModelId, thinkLevels, 
         const options = optionsOf(vendor);
         const open = active?.vendor === vendor;
         return <div key={vendor} className={"model-vendor" + (open ? " open" : "")}>
-          <button className={"mi" + (open ? " open" : "")} data-agent-vendor={vendor} aria-expanded={open} aria-controls={open ? "agent-model-options" : undefined} aria-haspopup="menu" onPointerEnter={(e) => show(vendor, e.currentTarget)} onClick={(e) => show(vendor, e.currentTarget, e.detail === 0)}><span className="nm">{vendor}</span><span className="n">{options.length} 个模型</span><Icon name="right" size="s" /></button>
+          <button className={"mi" + (open ? " open" : "")} data-agent-vendor={vendor} aria-expanded={open} aria-controls={open ? "agent-model-options" : undefined} aria-haspopup="menu" onPointerEnter={(e) => show(vendor, e.currentTarget)} onClick={(e) => show(vendor, e.currentTarget, e.detail === 0)}><VendorLogo name={vendor} size={16} /><span className="nm">{vendor}</span><span className="n">{options.length} 个模型</span><Icon name="right" size="s" /></button>
         </div>;
       })}
       {!models.length ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>还没有配置对话模型</span></div> : null}
@@ -1484,7 +1482,7 @@ function AgentModelMenu({ models, defaultModelId, selectedModelId, thinkLevels, 
           label={(m) => m.name}
           onEscape={hide}
           onPick={(m) => { close(); onChoose(m.id); }}
-          renderItem={(m) => <span className="nm">{m.name}</span>}
+          renderItem={(m) => <><VendorLogo name={m.vendor} model={m.name} size={14} /><span className="nm">{m.name}</span></>}
           resetKey={active.vendor}
           searchPlaceholder="搜索模型"
           searchable={optionsOf(active.vendor).length > 8}
@@ -1533,7 +1531,7 @@ function Msg({ m, i, isNew, a, ctl, models, onRetry, onBranch, onQ, onSkillInsta
     const ctx = m.ctx?.length ? m.ctx : inferCtxFromText(ctl.store, m.text || "");
     return <div className={"msg u" + nw} data-i={i} data-msg-id={m.id}>
       {ctx.length || m.skill ? <div className="ctxs">{m.skill ? <span className="skchip"><Icon name="sparkle" size="xs" />{m.skill}</span> : null}{ctx.map((c) => <CtxThumb key={c.id} c={c} />)}</div> : null}
-      <Bubble className="ap2-bub-u" variant="secondary"><BubbleContent className="ap2-bub-body">{m.text}</BubbleContent></Bubble><MessageTime at={m.at} /><div className="mact"><button title="复制" onClick={copy}><Icon name="copy" size="xs" /></button></div></div>;
+      <Bubble className="ap2-bub-u" variant="secondary"><BubbleContent className="ap2-bub-body"><MessageText text={m.text || ""} ctx={ctx} ctl={ctl} /></BubbleContent></Bubble><MessageTime at={m.at} /><div className="mact"><button title="复制" onClick={copy}><Icon name="copy" size="xs" /></button></div></div>;
   }
   const patch = (p: Partial<AgentMsg>) => a.patchMessage(m, p);
   return <div className={"msg a" + nw} data-i={i} data-msg-id={m.id}>
@@ -1588,7 +1586,8 @@ function HeartbeatLine({ hb }: { hb: NonNullable<AgentMsg["heartbeat"]> }) {
     const timer = window.setInterval(() => setElapsed((value) => value + 1000), 1000);
     return () => window.clearInterval(timer);
   }, [hb.elapsedMs, hb.stage]);
-  const label = hb.stage === "review" ? "审查中" : hb.stage === "tools" ? "执行工具中" : "正在思考";
+  // 进程行（ap2-proc-live）已经写着「正在思考」，这里再写一次就出现两行相同的字；改成「运行中」区分开
+  const label = hb.stage === "review" ? "审查中" : hb.stage === "tools" ? "执行工具中" : "运行中";
   return <div className="ap2-hb-line" data-heartbeat={hb.stage}><i className="dot" /><span>{label + " · 已 " + Math.max(0, Math.floor(elapsed / 1000)) + " 秒"}</span></div>;
 }
 
@@ -1610,6 +1609,19 @@ function SelfCheckLine({ check }: { check: SelfCheckResult }) {
   </div>;
 }
 
+/** 工具名 → 人话（收起态那行只给用户看「它在做什么」，不暴露内部工具名） */
+const STEP_LABEL: Record<string, string> = {
+  read_node: "读取节点", search_canvas: "查找节点", read_table: "读取表格", canvas_diff: "对比画布改动",
+  view_image: "查看图片", recall_step: "取回步骤结果", create_node: "新建节点", update_node: "修改节点",
+  delete_node: "删除节点", connect_nodes: "连接节点", disconnect_nodes: "断开连线", move_nodes: "移动节点",
+  analyze_video: "分析视频", depth_capture: "深度动作捕捉", generate_image: "生成图片", generate_video: "生成视频",
+  batch_generate: "批量生成", run_generation: "执行生成", lipsync_video: "视频对口型", query_models: "查询可用模型",
+  activate_skill: "启用技能", list_skills: "查看技能", write_html_report: "生成网页报告", write_xlsx: "生成表格文件",
+  annotate_node: "标注节点", crop_image: "裁剪图片", edit_image: "编辑图片", upscale_image: "放大图片",
+};
+/** 已知的内部工具名集合：label 恰好等于工具名时不当作人话 */
+const TOOL_NAMES = new Set(Object.keys(STEP_LABEL));
+
 /** 这一条思考是不是「反思」：后端 thought 事件的 kind=reflect（老数据没有 kinds 就一律不标） */
 const isReflect = (th: AgentMsg["think"], index: number) => String(th?.kinds?.[index] || "") === "reflect";
 
@@ -1620,16 +1632,35 @@ function Proc({ m, patch }: { m: AgentMsg; patch: (p: Partial<AgentMsg>) => void
   const live = !!th?.live || tools.some((t) => t.state === "run") || !!m.streaming && !m.took;
   const done = tools.filter((t) => t.state === "done").length;
   const fmt = (s: number) => (s >= 60 ? Math.floor(s / 60) + "m " + Math.round(s % 60) + "s" : (s < 10 ? s.toFixed(1) : Math.round(s)) + "s");
-  /** 用户手动收过（procOpen === false）就不再被 live 抢开；没动过就跟着 run 自动展开 */
-  const open = m.procOpen === true || (live && m.procOpen !== false);
-  const thinking = !!th && !th.live && !!m.procOpen && !!th.lines.length;
+  /** 默认收起：收起态给一条「现在在跑什么」的实时命令行，点开才看完整思考与每步的真实参数 */
+  const open = m.procOpen === true;
+  const thinking = !!th && !!m.procOpen && !!th.lines.length;
+  /* 收起态那行显示什么：正在跑的那一步在做什么 → 最近一步 → 推理最后一行（还没开始动工具时） */
+  const runningCmd = (() => {
+    const rows = [...tools].reverse();
+    const hit = rows.find((t) => t.state === "run") || rows[0];
+    if (hit) {
+      // 占位行的 label 是「正在准备：xxx」，主语已经是「正在思考」，前缀要去掉
+      const label = String(hit.label || "").trim().replace(/^正在准备：/, "");
+      // label 是后端给的这步在干什么；拿不到就按工具名翻成中文，别再显示 read_node 这种内部名
+      if (label && !TOOL_NAMES.has(label)) return label;
+      const zh = STEP_LABEL[String(hit.tool || "")];
+      if (zh) return zh;
+      if (hit.cmd) return String(hit.cmd).slice(0, 60);
+    }
+    // 还没开始动工具时不给内容：推理原文多半是英文/半句话，塞在这行既难看也没信息量
+    return "";
+  })();
   return (
     <Collapsible className={"ap2-proc" + (live ? " is-live" : "")} onOpenChange={(v) => patch({ procOpen: v })} open={open}>
       {live ? (
-        /* 运行中这一行本身也是「展开 / 收起」的开关：用户手动收起后，后续 delta 不会再把它抢开 */
+        /* 收起态也在干活：左边转圈 +「正在思考」，右边跟一条真实命令（随事件跳动），点整行展开 */
         <CollapsibleTrigger aria-live="polite" className="ap2-proc-live">
           <Spinner className="ap2-spin" size="sm" />
-          <span className="ap2-proc-live-text ap2-shimmer">正在思考<i aria-hidden="true" className="ap2-dots"><b /><b /><b /></i></span>
+          <span className="ap2-proc-live-text ap2-shimmer">正在思考</span>
+          {runningCmd
+            ? <span className="ap2-proc-cmd" title={runningCmd}>{runningCmd}</span>
+            : <i aria-hidden="true" className="ap2-dots"><b /><b /><b /></i>}
           <span className="ap2-proc-caret"><Icon name="right" size="xs" /></span>
         </CollapsibleTrigger>
       ) : (
@@ -1639,9 +1670,6 @@ function Proc({ m, patch }: { m: AgentMsg; patch: (p: Partial<AgentMsg>) => void
           <span className="ap2-proc-caret"><Icon name="right" size="xs" /></span>
         </CollapsibleTrigger>
       )}
-      {live && th?.lines.length ? (
-        <div className="ap2-think-text is-live">{th.lines.slice(-2).map((l, k) => <p key={k}>{isReflect(th, th.lines.length - Math.min(2, th.lines.length) + k) ? <span className="ap2-reflect">反思</span> : null}{l}</p>)}</div>
-      ) : null}
       <CollapsibleContent className="ap2-proc-body">
         {/* 阶段三：原生推理（reasoning_delta）逐字追加；运行中带一层很轻的 shimmer，结束后就是普通正文 */}
         {reasoning ? <div className={"ap2-think-reason" + (th?.live ? " is-live" : "")} data-think-reason aria-live={th?.live ? "polite" : undefined}>{reasoning}</div> : null}
@@ -1652,7 +1680,10 @@ function Proc({ m, patch }: { m: AgentMsg; patch: (p: Partial<AgentMsg>) => void
             <ItemMedia className="ap2-step-chip">
               {t.state === "run" ? <Spinner size="sm" /> : <Icon name={t.state === "error" ? "alert" : t.state === "skip" ? "right" : toolIcon(t.label)} size="xs" />}
             </ItemMedia>
-            <ItemContent><ItemTitle className="ap2-step-text">{t.label}</ItemTitle></ItemContent>
+            <ItemContent>
+              <ItemTitle className="ap2-step-text">{t.label}</ItemTitle>
+              {t.cmd ? <div className="ap2-step-cmd" title={t.cmd}>{t.cmd}</div> : null}
+            </ItemContent>
             <ItemActions className="ap2-step-secs">
               {t.state === "done" ? (t.secs != null ? t.secs + "s" : "") : t.state === "skip" || t.state === "error" || t.state === "wait" ? <Badge className="ap2-step-badge">{t.state === "skip" ? "跳过" : t.state === "error" ? "失败" : "待执行"}</Badge> : null}
             </ItemActions>
@@ -1669,7 +1700,54 @@ function NodeMention({ id, ctl }: { id: string; ctl: Ctl }) {
   if (!n) return null;
   return <button className="mention" onClick={() => { if (ctl.store.state.ui.agentFull) ctl.store.setUI({ agentFull: false }); setTimeout(() => ctl.focusNode(id), 60); }}>{src ? <ThumbImg src={src} width={14} fallback={<Icon name={n.kind === "table" ? "grid" : TYPE_ICON[n.kind as GenKind] || "layers"} size="xs" />} /> : <Icon name={n.kind === "table" ? "grid" : TYPE_ICON[n.kind as GenKind] || "layers"} size="xs" />}<span>{title(n)}</span></button>;
 }
-function CtxThumb({ c }: { c: { title: string; kind: string; src?: string } }) { return c.src ? <ThumbImg className="cthumb" src={c.src} width={30} title={c.title} fallback={<span className="cchip"><Icon name={c.kind === "table" ? "grid" : TYPE_ICON[c.kind as GenKind] || "layers"} size="xs" />{c.title}</span>} /> : <span className="cchip"><Icon name={c.kind === "table" ? "grid" : TYPE_ICON[c.kind as GenKind] || "layers"} size="xs" />{c.title}</span>; }
+function CtxThumb({ c }: { c: { id?: string; title: string; kind: string; src?: string } }) {
+    // 优先拿「画布上这个节点现在的图」：历史消息只存了文字快照，里面那个 src 可能是空的、
+    // 也可能指向已经换掉/失效的地址；节点还在就按 id 实时取，节点没了再退回快照里的 src
+    const n = useS((s) => (c.id ? s.doc.nodes.find((x) => x.id === c.id) : undefined));
+    const src = n && isGenKind(n.kind) ? srcOf(n) : (c.src || "");
+    const icon = <Icon name={c.kind === "table" ? "grid" : TYPE_ICON[c.kind as GenKind] || "layers"} size="xs" />;
+    return src ? <ThumbImg className="cthumb" src={src} width={30} title={c.title} fallback={<span className="cchip">{icon}{c.title}</span>} /> : <span className="cchip">{icon}{c.title}</span>;
+}
+/** 消息文字里的 @引用：内联成小胶囊（缩略图 + 名字），点一下定位到画布节点 */
+function MentionInline({ c, ctl }: { c: { id?: string; title: string; kind: string; src?: string }; ctl: Ctl }) {
+    const n = useS((s) => (c.id ? s.doc.nodes.find((x) => x.id === c.id) : undefined));
+    const src = n && isGenKind(n.kind) ? srcOf(n) : (c.src || "");
+    const icon = <Icon name={c.kind === "table" ? "grid" : TYPE_ICON[c.kind as GenKind] || "layers"} size="xs" />;
+    // 只要缩略图，不带节点名：名字放在 title 里悬停可见
+    return <button type="button" className="m-ment" title={c.title} onClick={() => { if (c.id) { if (ctl.store.state.ui.agentFull) ctl.store.setUI({ agentFull: false }); setTimeout(() => ctl.focusNode(c.id!), 60); } }}>
+        {src ? <ThumbImg src={src} width={16} fallback={icon} /> : icon}
+    </button>;
+}
+
+/** 把消息文本里的「@节点名」换成内联胶囊；找不到的 @ 原样留着 */
+function MessageText({ text, ctx, ctl }: { text: string; ctx: NonNullable<AgentMsg["ctx"]>; ctl: Ctl }) {
+    if (!text) return null;
+    if (!ctx.length || !text.includes("@")) return <>{text}</>;
+    const hits: Array<{ start: number; end: number; c: (typeof ctx)[number] }> = [];
+    for (const c of ctx) {
+        const t = String(c.title || "").trim();
+        if (t.length < 2) continue;
+        let from = 0;
+        for (;;) {
+            const at = text.indexOf("@" + t, from); if (at < 0) break;
+            const after = text[at + 1 + t.length] || "";
+            if (!after || /[\s，。,.!?、;；:：)）\]】]/.test(after)) hits.push({ start: at, end: at + 1 + t.length, c });
+            from = at + 1;
+        }
+    }
+    if (!hits.length) return <>{text}</>;
+    hits.sort((a, b) => a.start - b.start);
+    const parts: React.ReactNode[] = []; let cur = 0;
+    for (const h of hits) {
+        if (h.start < cur) continue;
+        if (h.start > cur) parts.push(text.slice(cur, h.start));
+        parts.push(<MentionInline key={"m" + h.start} c={h.c} ctl={ctl} />);
+        cur = h.end;
+    }
+    if (cur < text.length) parts.push(text.slice(cur));
+    return <>{parts}</>;
+}
+
 function ResultCard({ id, ctl }: { id: string; ctl: Ctl }) {
   const n = useS((s) => s.doc.nodes.find((x) => x.id === id)); const src = n && isGenKind(n.kind) ? srcOf(n) : "";
   if (!n) return null;

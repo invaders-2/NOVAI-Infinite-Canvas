@@ -5,6 +5,7 @@ import AIcon from './AIcon.vue';
 import { t } from '../../../../lib/store.js';
 import { modelListKey } from '../core/constants.js';
 import { modelDisplayName, providerSupportsModelProtocol, inferredModelProtocol, inferVideoVendor } from '../core/helpers.js';
+import VendorLogo from '../../../../components/VendorLogo.vue';
 
 const props = defineProps({ kind: String, title: String, hint: String });
 const store = inject('apiStore');
@@ -59,6 +60,7 @@ function add() {
         </div>
         <TransitionGroup tag="div" name="mrow" class="rows">
             <div v-for="r in rows" v-show="r.hit" :key="r.key" class="mrow">
+                <VendorLogo class="mlogo" :name="it && it.name" :id="it && it.id" :model="r.raw || r.label" :size="14" />
                 <label class="id">
                     <i v-if="r.label">{{ r.label }}</i>
                     <input :value="r.model" spellcheck="false" :aria-label="title + ' ID'" placeholder="手动填写模型 ID" @input="store.updateModel(kind, r.index, $event.target.value)">
@@ -95,6 +97,7 @@ function add() {
 .add { height: 26px; padding: 0 8px; flex: none; }
 .rows { position: relative; display: flex; flex-direction: column; gap: 6px; }
 .mrow { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; border-radius: 9px; background: var(--solid); min-width: 0; min-height: 36px; }
+.mlogo { opacity: .9; }
 .id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; cursor: text; }
 .id i { font: normal 400 10.5px/13px var(--font-sans); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .id input { width: 100%; height: 20px; border: 0; outline: 0; padding: 0; background: transparent; font: 400 11.5px/20px var(--font-mono); color: var(--ink); text-overflow: ellipsis; }

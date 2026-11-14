@@ -68,16 +68,33 @@ WRITE_REPLIES = [
 ]
 
 
+def stream_unsupported(*args, **kwargs):
+    """流式默认打开后，这些总线/事件契约测试统一按「平台不支持流式」走：立刻抛错 → 回退非流式。"""
+    raise main.AgentRunError("测试环境不走流式", code="stream_unsupported")
+
+
+def raw_replies(replies):
+    """非流式接口返回的是「chat completion 原始 JSON」，不是纯文本：决策 JSON 塞进 content。"""
+    return AsyncMock(side_effect=[
+        {"choices": [{"message": {"role": "assistant", "content": json.dumps(r, ensure_ascii=False)}}]}
+        for r in replies
+    ])
+
+
 def drive(bus, replies, execute=None, run_id="run_test"):
     """在打桩环境里把 bus 对应的 producer 跑完。"""
     execute = execute or AsyncMock(return_value={"ok": True, "result": {"nodes": []}, "message": "执行成功"})
     model = AsyncMock(side_effect=[json.dumps(r, ensure_ascii=False) for r in replies])
+    raw_model = raw_replies(replies)
 
     async def go():
         with contextlib.redirect_stdout(io.StringIO()), \
                 patch.object(main, "load_canvas", return_value=canvas()), \
                 patch.object(main, "agent_session_save"), \
                 patch.object(main, "_agent_run_chat", new=model), \
+                patch.object(main, "_agent_run_chat_raw", new=raw_model), \
+                patch.object(main, "_agent_run_stream_text", new=stream_unsupported), \
+                patch.object(main, "_agent_run_stream_chat", new=stream_unsupported), \
                 patch.object(main, "agent_execute_step", new=execute):
             await main._agent_run_bus_drive(agent_request(run_id), bus)
 
@@ -235,6 +252,7 @@ class EndpointTests(unittest.TestCase):
         """走真实的 agent_run 处理函数，把 StreamingResponse 的流整段读出来。"""
         execute = execute or AsyncMock(return_value={"ok": True, "result": {"nodes": []}, "message": "执行成功"})
         model = AsyncMock(side_effect=[json.dumps(r, ensure_ascii=False) for r in replies])
+        raw_model = raw_replies(replies)
         payload = main.AgentRunRequest(canvas_id="c1", instruction="看看画布", mode="run")
 
         async def go():
@@ -242,6 +260,9 @@ class EndpointTests(unittest.TestCase):
                     patch.object(main, "load_canvas", return_value=canvas()), \
                     patch.object(main, "agent_session_save"), \
                     patch.object(main, "_agent_run_chat", new=model), \
+                    patch.object(main, "_agent_run_chat_raw", new=raw_model), \
+                    patch.object(main, "_agent_run_stream_text", new=stream_unsupported), \
+                    patch.object(main, "_agent_run_stream_chat", new=stream_unsupported), \
                     patch.object(main, "_agent_run_resolve_chat", return_value=chat_config()), \
                     patch.object(main, "agent_execute_step", new=execute):
                 resp = await main.agent_run(payload, object())

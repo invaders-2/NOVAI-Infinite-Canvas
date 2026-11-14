@@ -136,7 +136,7 @@ const flushFn = topLevelFunction(main, 'flushSourceCookies');
 ok(!!flushFn && /cookies\.flushStore\(\)/.test(flushFn) && /catch\(\(\) => \{\}\)/.test(flushFn), 'flushStore 异常被 catch 掉');
 const createWinFn = topLevelFunction(main, 'createWindow');
 ok(/mainWindow\.on\('closed'[\s\S]{0,240}destroySourceView\(\)/.test(createWinFn), '主窗口关闭时销毁视图');
-ok(/before-quit[\s\S]{0,140}destroySourceView\(\)/.test(main), '退出时销毁视图');
+ok(/before-quit[\s\S]{0,600}destroySourceView\(\)/.test(main), '退出时销毁视图');
 const setBoundsFn = topLevelFunction(main, 'setSourceViewBounds');
 ok(!!setBoundsFn && /applySourceViewBounds\(rect\)/.test(setBoundsFn), 'setBounds 动作走 applySourceViewBounds');
 const normFn = topLevelFunction(main, 'normalizeSourceViewRect');

@@ -3,6 +3,8 @@ import type { ToolStep } from "./state";
 
 export const TASK_PERSISTENT_TERMINAL = new Set(["SUCCEEDED", "COMPLETED", "FAILED", "CANCELLED", "STOPPED"]);
 export const TASK_UI_SETTLED = new Set([...TASK_PERSISTENT_TERMINAL, "BLOCKED"]);
+/** 终态后继续收审查结论的宽限期：审查在 done 之后才回来，后端 run 总线保留 600s */
+export const REVIEW_GRACE_MS = 180000;
 
 export function taskStatusText(status: string): string {
   return ({
@@ -25,6 +27,37 @@ export function taskPendingPlan(snapshot: AgentTaskSnapshot): AgentTaskPlan | nu
 }
 
 const textOf = (value: unknown): string => (typeof value === "string" ? value : typeof value === "number" ? String(value) : "");
+
+/**
+ * 把一次工具调用压成一行「真实命令」（和后端 `_agent_command_preview` 同口径）：
+ * canvas_cli 展开成 `canvas_cli <command> --k v`，其它工具 `tool k=v`。
+ * 老服务端没有 `command` 字段时用它从 `args` 兜底，收起态那行才有真东西可显示。
+ */
+export function commandPreview(tool: string, args: unknown): string {
+  const name = String(tool || "").trim();
+  const data = args && typeof args === "object" && !Array.isArray(args) ? args as Record<string, unknown> : {};
+  if (!name) return "";
+  const text = (value: unknown): string => (typeof value === "string" ? value : (() => { try { return JSON.stringify(value); } catch { return String(value); } })());
+  const empty = (value: unknown): boolean => value === null || value === undefined || value === "" || (Array.isArray(value) && !value.length);
+  const parts: string[] = [];
+  if (name === "canvas_cli") {
+    const command = String(data.command || "").trim();
+    parts.push("canvas_cli" + (command ? " " + command : ""));
+    for (const [key, value] of Object.entries(data)) {
+      if (["command", "canvas_id", "description"].includes(key) || empty(value)) continue;
+      parts.push("--" + key + " " + text(value).slice(0, 40));
+      if (parts.length >= 5) break;
+    }
+    return parts.join(" ").slice(0, 120);
+  }
+  const pairs: string[] = [];
+  for (const [key, value] of Object.entries(data)) {
+    if (["canvas_id", "description"].includes(key) || empty(value)) continue;
+    pairs.push(key + "=" + text(value).slice(0, 40));
+    if (pairs.length >= 4) break;
+  }
+  return (name + (pairs.length ? " " + pairs.join(" ") : "")).slice(0, 120);
+}
 
 /** 阶段三流式：原生推理逐字（reasoning_delta，开关 NOVAI_AGENT_V2_STREAM 才发） */
 export function taskReasoning(snapshot: AgentTaskSnapshot): string {
@@ -89,13 +122,15 @@ export function taskToolSteps(snapshot: AgentTaskSnapshot): ToolStep[] {
       const description = textOf(payload.description) || tool || "工具";
       const key = "delta:" + (textOf(payload.id) || steps.length);
       let row = byCall.get(key);
+      const cmd = textOf(payload.command) || commandPreview(tool, payload.args);
       if (!row) {
-        row = { label: "正在准备：" + description, state: "run", callId: key, tool, provisional: true };
+        row = { label: "正在准备：" + description, state: "run", callId: key, tool, provisional: true, cmd };
         byCall.set(key, row);
         steps.push(row);
       } else {
         row.label = "正在准备：" + description;
         row.tool = tool || row.tool;
+        if (cmd) row.cmd = cmd;
       }
       continue;
     }
@@ -123,6 +158,8 @@ export function taskToolSteps(snapshot: AgentTaskSnapshot): ToolStep[] {
         steps.push(step);
       }
     }
+    const stepCmd = textOf(payload.command) || commandPreview(tool || step.tool || "", payload.args);
+    if (stepCmd) step.cmd = stepCmd;
     if (/waiting_approval|approval_required/.test(type)) step.state = "wait";
     else if (/execution_started|execution\.started|verification_started/.test(type)) step.state = "run";
     else if (/succeeded|verification_passed|verification_applied/.test(type)) step.state = "done";
@@ -243,12 +280,25 @@ export function taskSelfCheck(snapshot: AgentTaskSnapshot): SelfCheckResult | nu
 
 export function subscribeAgentTask(backend: Pick<CanvasBackend, "watchAgentTask">, taskId: string, onSnapshot: (snapshot: AgentTaskSnapshot) => void, onSettled: () => void) {
   let cleanup: (() => void) | null = null;
-  let settled = false;
-  const stop = () => { if (settled) return; settled = true; cleanup?.(); onSettled(); };
-  const off = backend.watchAgentTask?.(taskId, (snapshot) => { onSnapshot(snapshot); if (TASK_UI_SETTLED.has(snapshot.status)) stop(); }) || null;
+  let stopped = false;
+  let graceTimer: ReturnType<typeof setTimeout> | null = null;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
+    cleanup?.();
+    onSettled();
+  };
+  const off = backend.watchAgentTask?.(taskId, (snapshot) => {
+    onSnapshot(snapshot);
+    if (stopped || !TASK_UI_SETTLED.has(snapshot.status)) return;
+    // 审查在 done 之后才回来：终态后先别停，收到 review 立即停；等不到就按宽限期收摊。
+    if (snapshot.events.some((event) => String(event.eventType || "") === "review")) { stop(); return; }
+    if (!graceTimer) graceTimer = setTimeout(stop, REVIEW_GRACE_MS);
+  }) || null;
   cleanup = off;
-  if (settled) cleanup?.();
-  return { stop, settled: () => settled };
+  if (stopped) cleanup?.();
+  return { stop, settled: () => stopped };
 }
 
 export type RefreshOutcome = "pending" | "refreshed" | "skipped" | "failed" | "not_required";

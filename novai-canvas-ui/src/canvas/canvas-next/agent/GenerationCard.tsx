@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { AgentTaskPlan } from "../backend/types";
 import type { ModelSpec } from "../model";
+import { VendorLogo } from "../ui/VendorLogo";
 import { Icon } from "../ui/Icon";
 import { ratioDisplayLabel } from "../originalRatio";
 import { Badge } from "@/components/hexta/badge";
@@ -90,7 +91,7 @@ function ModelPicker({ list, busy, value, onChange, placeholder }: { list: Model
     itemClassName={(m) => "mi combo-item" + (m.id === value ? " on" : "")}
     itemAttrs={(m) => ({ "data-model": m.id })}
     onPick={(m) => { close(); onChange(m.id); }}
-    renderItem={(m) => <span style={{ flex: 1 }}>{m.name}<span className="d">{vendorOf(m)}</span></span>}
+    renderItem={(m) => <><VendorLogo name={vendorOf(m)} model={m.name} size={14} /><span style={{ flex: 1 }}>{m.name}<span className="d">{vendorOf(m)}</span></span></>}
   />, "up", "left", "model-pop combo-pop gen-pop");
   return <button type="button" className={"gen-select gen-param gen-model" + (value ? "" : " is-empty")} disabled={busy || !list.length} aria-label={placeholder}
     onClick={(e) => {
@@ -106,7 +107,7 @@ function ModelPicker({ list, busy, value, onChange, placeholder }: { list: Model
         itemClassName={(vendor) => "mi combo-item" + (vendor === currentVendor ? " on" : "")}
         itemAttrs={(vendor) => ({ "data-vendor": vendor })}
         onPick={(vendor) => showModels(anchor, vendor)}
-        renderItem={(vendor) => <><span style={{ flex: 1 }}>{vendor}<span className="d">{list.filter((m) => vendorOf(m) === vendor).length} 个模型</span></span>{vendor === currentVendor ? null : <Icon name="right" size="s" />}</>}
+        renderItem={(vendor) => <><VendorLogo name={vendor} size={16} /><span style={{ flex: 1 }}>{vendor}<span className="d">{list.filter((m) => vendorOf(m) === vendor).length} 个模型</span></span>{vendor === currentVendor ? null : <Icon name="right" size="s" />}</>}
       />, "up", "left", "model-pop combo-pop gen-pop");
     }}>
     <span className="gen-model-text">{hit ? <><em>{currentVendor}</em>{hit.name}</> : placeholder}</span>

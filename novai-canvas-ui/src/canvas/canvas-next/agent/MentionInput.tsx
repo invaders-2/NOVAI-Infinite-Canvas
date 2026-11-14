@@ -314,7 +314,8 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(fu
     if (el.querySelector("div,p")) { paint(serialize(el)); caretToEnd(); }
     if (t && !alive) {
       trigger.current = null;
-      if (t.ch === "/") propsRef.current.onTriggerGone?.();
+      // @ 和 / 一样：触发字符被删掉/替换就通知外面收面板，别留一个没有触发源的选择框
+      propsRef.current.onTriggerGone?.();
     }
     detectTrigger();
   };

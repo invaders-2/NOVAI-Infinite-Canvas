@@ -31,8 +31,46 @@ let appBaseUrl = '';
 let isQuitting = false;
 // 主动停后端（更新重启/正常退出）期间不把退出当崩溃报错；每次 startBackend 都会复位。
 let backendStopExpected = false;
+// 后端进程树已经杀过（退出钩子跑了两次：before-quit + will-quit）。
+let backendStopped = false;
 let backendLog = [];
 let dataDir = '';
+
+// ---------- 后端 pid 记账 ----------
+// 后端由本进程 spawn 时把 pid 记到 userData：正常退出会 taskkill 整棵树，
+// 但壳被强杀 / 崩溃 / 更新异常时退出钩子跑不到，下次启动只能靠这份记录认出「这是自己的残留」。
+function backendPidFile() {
+  try { return path.join(app.getPath('userData'), 'backend.pid'); } catch (_) { return ''; }
+}
+
+function rememberBackendPid(pid) {
+  const file = backendPidFile();
+  if (!file || !pid) return;
+  try {
+    fs.writeFileSync(file, JSON.stringify({ pid: Number(pid), port: Number(backendPort) || 0, at: Date.now() }));
+  } catch (err) {
+    clog('boot', '记录后端 pid 失败（不影响运行）: ' + ((err && err.message) || err));
+  }
+}
+
+function readBackendPid() {
+  const file = backendPidFile();
+  if (!file) return null;
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const pid = Number(raw && raw.pid);
+    if (!pid) return null;
+    return { pid: pid, port: Number(raw && raw.port) || 0 };
+  } catch (_) {
+    return null;
+  }
+}
+
+function forgetBackendPid() {
+  const file = backendPidFile();
+  if (!file) return;
+  try { fs.unlinkSync(file); } catch (_) {}
+}
 
 // ---------- 日志文件（便于真机排查） ----------
 let logFile = '';
@@ -421,6 +459,7 @@ function resolvePython(cwd, backendEnv) {
 function startBackend(port) {
   return new Promise(async (resolve, reject) => {
     backendStopExpected = false;
+    backendStopped = false;
     backendPort = port;
     const mainPy = resolveMainPy();
     const binary = resolveBackendBinary();
@@ -434,6 +473,8 @@ function startBackend(port) {
         : path.dirname(mainPy || ''),
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",
+      // 后端自带看门狗：壳一消失（强杀/崩溃/kill 漏掉）就自杀，Windows 上不会再留 NOVAI.exe。
+      NOVAI_PARENT_PID: String(process.pid),
     });
     // Win/Linux 安装根目录传给后端：新装且安装目录可写时数据根就是安装目录（程序装在哪，
     // 数据就在哪）；只读安装目录（AppImage / deb 装到 /usr）由后端按同一规则回落用户目录。
@@ -508,6 +549,7 @@ function startBackend(port) {
         }
       });
       clog('boot', '启动 bundled 后端: ' + binary + ' port ' + port + ' dataDir ' + backendEnv.NOVAI_DATA_DIR);
+      rememberBackendPid(backendProc.pid);
       return resolve(backendProc);
     }
 
@@ -529,20 +571,44 @@ function startBackend(port) {
       }
     });
     clog('boot', '启动 Python 后端: ' + pythonCmd + ' ' + mainPy + ' port ' + port + ' cwd ' + cwd + ' dataDir ' + backendEnv.NOVAI_DATA_DIR);
+    rememberBackendPid(backendProc.pid);
     resolve(backendProc);
   });
 }
 
 // ---------- 清理 ----------
 // Windows 上 PyInstaller 是“引导进程 + 同名子进程”，只 kill 父进程会留下子进程占住安装目录里的 exe。
+function killProcessTree(pid) {
+  const target = Number(pid);
+  if (!target) return false;
+  try {
+    if (process.platform === 'win32') {
+      // 必须同步：退出钩子里异步 spawn 的 taskkill 有可能在壳退出之后才轮到它，
+      // 一旦失败（权限/时序）就再没人收拾，任务管理器里就会一直挂着 NOVAI.exe。
+      const result = spawnSync('taskkill', ['/F', '/T', '/PID', String(target)], { windowsHide: true, timeout: 8000 });
+      if (result.error) clog('boot', 'taskkill ' + target + ' 失败: ' + (result.error.message || result.error));
+      return !result.error;
+    }
+    process.kill(target, 'SIGKILL');
+    return true;
+  } catch (err) {
+    clog('boot', '结束后端进程 ' + target + ' 失败: ' + ((err && err.message) || err));
+    return false;
+  }
+}
+
+// 退出/更新前结束自己 spawn 的后端进程树。幂等：可重复调用（before-quit + will-quit 都会走）。
 function shutdownBackend() {
   backendStopExpected = true;
-  if (!backendProc || backendProc.killed) return;
-  if (process.platform === 'win32') {
-    try { spawn('taskkill', ['/F', '/T', '/PID', String(backendProc.pid)], { stdio: 'ignore' }); } catch (_) {}
-    return;
-  }
-  try { backendProc.kill(); } catch (_) {}
+  if (backendStopped) return true;
+  if (!backendProc || backendProc.killed) return false;
+  const pid = backendProc.pid;
+  if (!pid) return false;
+  // 先杀干净再删记录：杀失败时保留 pid 文件，下次启动 cleanupStaleBackend 还能认出来。
+  if (!killProcessTree(pid)) return false;
+  backendStopped = true;
+  forgetBackendPid();
+  return true;
 }
 
 // 从 Windows netstat -ano 输出里解析在指定端口 LISTENING 的 PID。
@@ -572,9 +638,10 @@ function parseNetstatListenPids(text, port) {
 
 // 安装前彻底释放后端端口：backendProc 为空（复用外部/上次残留的后端）时，
 // 这个外部 Python 进程同样会占住安装目录里的文件，导致 Windows 安装器覆盖失败。
-function freeBackendPort(timeoutMs) {
+function freeBackendPort(timeoutMs, portOverride) {
   const limit = timeoutMs || 8000;
-  const port = backendPort;
+  // 启动早期清理残留时 backendPort 还没赋值，端口由调用方显式给。
+  const port = Number(portOverride) || backendPort;
   if (process.platform !== 'win32') return Promise.resolve(true);
   if (!port) {
     clog('updater', '本次没有使用本地后端端口，跳过端口释放');
@@ -661,6 +728,45 @@ function stopBackendForUpdate(timeoutMs) {
   });
   // 即使 backendProc 为空（复用了外部/残留后端）也必须释放端口，这是 Windows 覆盖安装的前提。
   return stopOwnedProc.then(() => freeBackendPort(Math.min(limit, 8000)));
+}
+
+// 上一次运行被强杀 / 崩溃 / 更新异常时，自己 spawn 的后端可能还活着并占着端口。
+// 不清掉它，这一轮就会「复用」它：它不归本次进程所有，退出时也不杀，于是永远关不干净。
+// 只处理 pid 文件记着、且确实是该端口上的 NOVAI 后端 —— 用户自己起的服务（没有 pid 记录）一律不动。
+function cleanupStaleBackend() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve(false);
+    const record = readBackendPid();
+    forgetBackendPid();
+    if (!record || !record.pid || !record.port) return resolve(false);
+    if (record.pid === process.pid) return resolve(false);
+    clog('boot', '发现上次残留的后端记录：PID ' + record.pid + ' 端口 ' + record.port + '，先确认再清理');
+    isPortInUse(record.port).then((inUse) => {
+      if (!inUse) {
+        clog('boot', '残留记录对应的端口 ' + record.port + ' 已空闲，无需清理');
+        return resolve(false);
+      }
+      return looksLikeNovaiBackend(record.port).then((isNovai) => {
+        if (!isNovai) {
+          clog('boot', '端口 ' + record.port + ' 上的服务不是 NOVAI 后端，保留不动');
+          return resolve(false);
+        }
+        execFile('netstat', ['-ano'], { timeout: 5000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+          const listenPids = err ? [] : parseNetstatListenPids(stdout, record.port);
+          // PID 会被系统复用：只有「记录里的 pid 正好是那个端口的监听者」才敢杀，宁可留着也不误杀。
+          if (listenPids.indexOf(record.pid) < 0) {
+            clog('boot', '端口 ' + record.port + ' 的监听进程不是记录的 PID ' + record.pid + '（' + listenPids.join(',') + '），不清理');
+            return resolve(false);
+          }
+          clog('boot', '清理上次残留的后端进程树 PID ' + record.pid);
+          freeBackendPort(6000, record.port).then(() => resolve(true));
+        });
+      });
+    }).catch((err) => {
+      clog('boot', '检查残留后端失败（不影响启动）: ' + ((err && err.message) || err));
+      resolve(false);
+    });
+  });
 }
 
 // ---------- 托盘 ----------
@@ -4635,6 +4741,9 @@ if (!gotLock) {
       return;
     }
 
+    // 先收拾上一次运行留下的、属于自己的后端，避免这一轮「复用」一个没人管的残留进程。
+    await cleanupStaleBackend();
+
     // 端口 3000 上若已有 NOVAI 后端（正式版/网页版正在运行）则直接复用——
     // 数据目录相同，再起一个后端写同一数据目录会互相踩踏。
     let port = requested;
@@ -4691,9 +4800,25 @@ if (!gotLock) {
     isQuitting = true;
     closeSplash();
     // 退出前收敛更新状态：已经下好的包装在退出时静默装掉，mac 先起替换脚本。
-    convergeUpdateOnQuit();
-    destroySourceView();
-    shutdownBackend();
+    // 用 try 包住：这里任何一个动作抛错都会中断整个退出钩子，后端就没人杀了。
+    try { convergeUpdateOnQuit(); } catch (err) {
+      clog('lifecycle', '退出时收敛更新状态失败: ' + ((err && err.message) || err));
+    }
+    try { destroySourceView(); } catch (err) {
+      clog('lifecycle', '退出时销毁内嵌视图失败: ' + ((err && err.message) || err));
+    }
+    const stopped = shutdownBackend();
+    clog('lifecycle', stopped ? '退出：后端进程树已结束' : '退出：没有本进程管理的后端（复用的外部后端保持运行）');
+  });
+
+  // 兜底：before-quit 之后如果还有窗口没关（异步 destroy 卡住），Electron 仍会走 will-quit。
+  // 这里再确认一次后端已经死透，避免「托盘退出后还挂着 NOVAI.exe」。
+  app.on('will-quit', () => {
+    isQuitting = true;
+    if (backendProc && !backendProc.killed && !backendStopped) {
+      clog('lifecycle', 'will-quit：后端仍在，再结束一次 PID ' + backendProc.pid);
+      shutdownBackend();
+    }
   });
   app.on('window-all-closed', () => {
     // macOS 本来就常驻；Windows/Linux 只要托盘还在就保持进程，用户能从托盘再次打开。

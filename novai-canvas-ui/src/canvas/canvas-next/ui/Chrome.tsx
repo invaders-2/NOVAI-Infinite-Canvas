@@ -536,7 +536,7 @@ function DefaultModelsPanel({ ctl }: { ctl: Ctl }) {
     return <div className="cset-opts" data-model-opts={kind}>
       {autoItem(!valid, { "data-model-auto": kind }, "用列表里第一个可用模型", () => pick(""))}
       {list.length ? list.map((m) => <button type="button" key={m.id} className={"cset-opt" + (valid === m.id ? " on" : "")} data-model-opt={m.id} aria-pressed={valid === m.id} onClick={() => pick(m.id)}>
-        <span className="nm">{m.name}<small> · {m.vendor || "未命名供应商"}{kind === "text" && m.vision ? " · 能读图" : ""}</small></span>
+        <VendorLogo name={m.vendor} model={m.name} size={14} /><span className="nm">{m.name}<small> · {m.vendor || "未命名供应商"}{kind === "text" && m.vision ? " · 能读图" : ""}</small></span>
         {valid === m.id ? <span className="ck"><Icon name="check" size="xs" /></span> : null}
       </button>) : <div className="cset-opt-empty">还没有配置「{TYPE_LABEL[kind]}」模型</div>}
       {ctl.host.openModelSettings ? <button type="button" className="cset-opt more" data-model-settings onClick={() => { setOpen(null); ctl.host.openModelSettings?.(); }}><Icon name="settings" size="s" /><span className="nm">打开模型设置</span></button> : null}
@@ -548,7 +548,7 @@ function DefaultModelsPanel({ ctl }: { ctl: Ctl }) {
     return <div className="cset-opts" data-opt-opts>
       {autoItem(!optModel, { "data-opt-auto": "1" }, "用文本默认模型", () => pick(""))}
       {textModels.length ? textModels.map((m) => <button type="button" key={m.id} className={"cset-opt" + (optModel?.id === m.id ? " on" : "")} data-opt-opt={m.id} aria-pressed={optModel?.id === m.id} onClick={() => pick(m.id)}>
-        <span className="nm">{m.name}<small> · {m.vendor || "未命名供应商"}{m.vision ? " · 能读图" : ""}</small></span>
+        <VendorLogo name={m.vendor} model={m.name} size={14} /><span className="nm">{m.name}<small> · {m.vendor || "未命名供应商"}{m.vision ? " · 能读图" : ""}</small></span>
         {optModel?.id === m.id ? <span className="ck"><Icon name="check" size="xs" /></span> : null}
       </button>) : <div className="cset-opt-empty">还没有配置「文本」模型</div>}
     </div>;

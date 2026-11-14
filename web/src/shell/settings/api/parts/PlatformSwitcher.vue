@@ -2,6 +2,7 @@
 // 平台切换下拉（旧左侧平台栏）：搜索、分组列表（自定义 / CLI 可拖拽排序）、新增平台（类型菜单）、推荐 API、CLI 快捷添加、存储设置入口、设为首选
 import { ref, computed, inject, watch, nextTick, onMounted } from 'vue';
 import AIcon from './AIcon.vue';
+import VendorLogo from '../../../../components/VendorLogo.vue';
 import { t } from '../../../../lib/store.js';
 import { isFixedProvider, hasUsableKey } from '../core/helpers.js';
 import { providerGroupOf } from '../core/useApiStore.js';
@@ -94,7 +95,7 @@ onMounted(() => { if (!props.inline) setTimeout(() => searchEl.value && searchEl
                          @click="pick(p.id)" @keydown.enter.prevent="pick(p.id)"
                          @dragstart="dragStart($event, p)" @dragover="dragOver($event, p)" @drop="drop($event, p)" @dragend="dragEnd" @dragleave="overId = overId === p.id ? '' : overId">
                         <span v-if="!isFixedProvider(p)" class="grip" aria-hidden="true"><AIcon name="grip" /></span>
-                        <span v-if="!isFixedProvider(p)" class="mk"><AIcon :name="g.key === 'cli' ? 'terminal' : 'key'" /></span>
+                        <span class="mk"><AIcon v-if="g.key === 'cli'" name="terminal" /><VendorLogo v-else :name="p.name" :id="p.id" :size="16" /></span>
                         <span class="nm"><b>{{ p.name || p.id }}</b><span v-if="!isFixedProvider(p)">{{ meta(p) }}</span></span>
                         <span v-if="p.primary" class="prim">{{ t('api.primaryBadge', '首选') }}</span>
                         <button v-else type="button" class="setprim" :title="t('api.setPrimary', '设为首选')" :aria-label="t('api.setPrimary', '设为首选')" @click.stop="store.setPrimary(p.id)"><AIcon name="star" /></button>

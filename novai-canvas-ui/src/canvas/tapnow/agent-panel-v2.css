@@ -19,6 +19,13 @@
   box-shadow: var(--glass-shadow);
   overflow: hidden;
 }
+.cn-root #agent.ap2-agent[data-busy] {
+  /* 跑任务时消息区逐字重绘、发送按钮反复换态：磨砂背景每帧都要重新采样背后的画布再合成，
+     macOS 上就会看到气泡区和发送按钮整块闪。运行期间换实色底（不采样背景），任务结束恢复磨砂。 */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--panel);
+}
 .cn-root #agent.ap2-agent.closed {
   /* 拖宽后（--agent-w，见 static/css/canvas-agent-resize.css）要跟着宽度一起推出去：
      面板宽 + 左 margin 12 全部收掉，右侧不留缝；默认宽 380 时等价于旧常量 -392px */
@@ -864,11 +871,42 @@
   display: flex;
   align-items: center;
   gap: 7px;
+  width: 100%;
+  min-width: 0;
   color: var(--fg2);
   font-size: 12px;
   line-height: 18px;
 }
-.cn-root #agent.ap2-agent .ap2-proc-live-text { display: inline-flex; align-items: center; gap: 2px; }
+.cn-root #agent.ap2-agent .ap2-proc-live .ap2-proc-caret { margin-left: auto; flex: none; }
+.cn-root #agent.ap2-agent .ap2-proc-live-text { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+/* 收起态那句「在做什么」：紧跟在「正在思考」后面的一句话，普通字体、单行省略，
+   用间距和淡色跟主语分开，不占满整行（占满会把它顶到中间，看着像标题） */
+.cn-root #agent.ap2-agent .ap2-proc-cmd {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 62%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--fg3);
+}
+.cn-root #agent.ap2-agent .ap2-proc-cmd::before {
+  content: "·";
+  margin: 0 6px 0 2px;
+  color: var(--fg4, var(--fg3));
+  opacity: .7;
+}
+.cn-root #agent.ap2-agent .ap2-step-cmd {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  line-height: 15px;
+  color: var(--fg3);
+}
 .cn-root #agent.ap2-agent .ap2-dots { display: inline-flex; gap: 2px; margin-left: 2px; }
 .cn-root #agent.ap2-agent .ap2-dots b {
   width: 3px;
@@ -1997,3 +2035,22 @@
 @media (prefers-reduced-motion: reduce) {
   .cn-root #agent.ap2-agent .ap2-hb-line .dot { animation: none; opacity: .8; }
 }
+
+/* 消息文字里的 @引用：内联小胶囊（缩略图 + 名字），和正文同一行 */
+.cn-root #agent.ap2-agent .m-ment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 2px;
+  padding: 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  line-height: 0;
+  vertical-align: -4px;
+  cursor: pointer;
+}
+.cn-root #agent.ap2-agent .m-ment:hover { background: rgba(var(--ink), .12); }
+.cn-root #agent.ap2-agent .m-ment img { width: 18px; height: 18px; border-radius: 5px; object-fit: cover; flex: none; display: block; }
+.cn-root #agent.ap2-agent .m-ment .nv-i { width: 15px; height: 15px; flex: none; opacity: .8; }

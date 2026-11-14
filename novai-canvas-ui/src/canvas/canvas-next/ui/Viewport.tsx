@@ -294,7 +294,9 @@ export function Viewport() {
     }
     if (nodeEl) {
       const id = nodeEl.dataset.id!;
-      if (t.closest("[data-act]")) return; // 节点内按钮自己处理
+      // 节点内的交互区默认不拖节点（按钮/输入框自己处理）；标了 data-drag 的区域例外，
+      // 用来给「整块都是交互组件、但需要能按住拖动」的节点（剪辑时间线）留拖动入口
+      if (t.closest("[data-act]") && !t.closest("[data-drag]")) return;
       if (t.closest("textarea:not([readonly]),input:not([readonly])")) return;
       // ⌥ / Alt 拖动 = 复制一份（再按住 ⇧ 时保留输入连线），与旧画布一致
       if (e.altKey) {

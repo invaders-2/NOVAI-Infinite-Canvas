@@ -14,6 +14,7 @@ import { defaultParams, type ImageParams, type ModelSpec } from "../model";
 import { useStore } from "../store";
 import type { Ctl } from "./ctx";
 import { CHARACTER_OPTIONS } from "./characterOptions";
+import { VendorLogo } from "./VendorLogo";
 import { Icon } from "./Icon";
 import { ImageViewer, type ViewItem } from "./ImageViewer";
 import { openPop } from "./overlay";
@@ -456,7 +457,7 @@ export function GenerateCharacter({ ctl, defaultEra, jobId, onClose, onSaved }: 
     openPop(anchor, (done) => <>
       <div className="mh">供应商</div>
       <button type="button" className={"mi" + (vendor ? "" : " on")} data-ch-vendor-option="" onClick={() => { done(); setVendorSel(""); }}>全部<span className="k">{models.length} 个模型</span></button>
-      {vendors.map(([v, n]) => <button type="button" key={v} className={"mi" + (vendor === v ? " on" : "")} data-ch-vendor-option={v} onClick={() => { done(); setVendorSel(v); }}>{v}<span className="k">{n} 个模型</span></button>)}
+      {vendors.map(([v, n]) => <button type="button" key={v} className={"mi" + (vendor === v ? " on" : "")} data-ch-vendor-option={v} onClick={() => { done(); setVendorSel(v); }}><VendorLogo name={v} size={16} />{v}<span className="k">{n} 个模型</span></button>)}
     </>, "down", "left", "chgen-vendor-pop");
   };
   const pickModel = (anchor: HTMLButtonElement) => {
@@ -542,7 +543,7 @@ function ModelMenu({ models, currentId, onPick }: { models: ModelSpec[]; current
   return <>
     <div className="mh">模型</div>
     {models.map((m) => <button type="button" key={m.id} className={"mi" + (m.id === currentId ? " on" : "")} data-ch-model-option={m.id} onClick={() => onPick(m)}>
-      <span className="ic"><Icon name="image" size="s" /></span>
+      <span className="ic"><VendorLogo name={vendorOf(m)} model={m.name} size={16} /></span>
       <span>{m.name}<span className="d">{has4K(m) ? "4K · " : ""}{vendorOf(m)} · {refOk(m) ? "支持参考图" + (m.maxRefs ? " ×" + m.maxRefs : "") : "不支持参考图"}</span></span>
     </button>)}
     {models.length ? null : <div className="mh">这个供应商没有图片模型</div>}

@@ -724,7 +724,7 @@ export const NODE_TAG: Array<[string, string]> = [["red", "#e25c5c"], ["orange",
 export const bgColor = (key?: string) => NODE_BG.find((c) => c[0] === key)?.[1] || null;
 export const tagColor = (key?: string) => NODE_TAG.find((c) => c[0] === key)?.[1] || null;
 export const outOf = (node: CanvasNode): GenOutput | null => { const g = genOf(node); return g.hist[g.hi] || null; };
-export const srcOf = (node: CanvasNode): string => { const o = outOf(node); return node.kind === "video" ? o?.frame || "" : node.kind === "image" ? o?.url || "" : ""; };
+export const srcOf = (node: CanvasNode): string => { const o = outOf(node); return node.kind === "video" ? o?.frame || o?.url || "" : node.kind === "image" ? o?.url || "" : ""; };
 export const textOf = (node: CanvasNode): string => (node.kind === "text" ? outOf(node)?.text || "" : "");
 
 /** 把生成数据写回节点：同时同步通用字段，旧版组件 / 导出 / 资源引用也能读到当前结果 */

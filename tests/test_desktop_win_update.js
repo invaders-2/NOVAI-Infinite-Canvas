@@ -198,8 +198,13 @@ function loadFreeBackendPort(options) {
     ok(/if \(!proc \|\| proc\.killed \|\| !proc\.pid\) return resolve\(\);/.test(stopSrc), 'backendProc 为空只跳过第一步，不跳过端口释放');
     ok(/spawn\('taskkill', \['\/F', '\/T', '\/PID', String\(proc\.pid\)\]/.test(stopSrc), 'Windows 先按进程树结束自己 spawn 的后端');
     const shutdownFn = topLevelFunction(main, 'shutdownBackend');
-    ok(/process\.platform === 'win32'/.test(shutdownFn), 'shutdownBackend 区分 Windows');
-    ok(/spawn\('taskkill', \['\/F', '\/T', '\/PID', String\(backendProc\.pid\)\]/.test(shutdownFn), 'Windows 退出按进程树结束（不留 PyInstaller 子进程）');
+    const killTreeFn = topLevelFunction(main, 'killProcessTree');
+    ok(/killProcessTree\(pid\)/.test(shutdownFn), 'shutdownBackend 统一交给 killProcessTree 结束整棵进程树');
+    ok(/if \(backendStopped\) return true;/.test(shutdownFn), 'shutdownBackend 幂等（before-quit + will-quit 都走）');
+    ok(/forgetBackendPid\(\)/.test(shutdownFn) && shutdownFn.indexOf('killProcessTree') < shutdownFn.indexOf('forgetBackendPid'), '杀成功后才删 pid 记录（失败留给下次启动清理）');
+    ok(/process\.platform === 'win32'/.test(killTreeFn), 'killProcessTree 区分 Windows');
+    ok(/spawnSync\('taskkill', \['\/F', '\/T', '\/PID', String\(target\)\]/.test(killTreeFn), 'Windows 退出按进程树同步结束（异步 spawn 来不及跑，会留下 PyInstaller 子进程）');
+    ok(/process\.kill\(target, 'SIGKILL'\)/.test(killTreeFn), '其它平台仍是 SIGKILL');
     const startFn = topLevelFunction(main, 'startBackend');
     ok(/backendPort = port;/.test(startFn), '启动后端时记录 backendPort');
     const reuseAt = main.indexOf('if (reuseExisting) {');

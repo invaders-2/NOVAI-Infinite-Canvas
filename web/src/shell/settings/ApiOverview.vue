@@ -10,6 +10,7 @@ import PlatformSwitcher from './api/parts/PlatformSwitcher.vue';
 import ProtocolUpdateDialog from './api/parts/ProtocolUpdateDialog.vue';
 import { createApiStore, providerGroupOf } from './api/core/useApiStore.js';
 import { hasUsableKey, isCliProtocol } from './api/core/helpers.js';
+import VendorLogo from '../../components/VendorLogo.vue';
 
 const store = createApiStore();
 const S = store.S;
@@ -72,7 +73,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true));
                 <template v-else><div class="nv-skel"></div><div class="nv-skel"></div><div class="nv-skel"></div></template>
             </div>
             <button v-for="p in list" v-else :key="p.id" type="button" class="row" @click="openProvider(p.id)">
-                <span class="lead"><NvIcon :name="providerGroupOf(p) === 'cli' ? 'terminal' : 'key'" /></span>
+                <span class="lead">
+                    <NvIcon v-if="providerGroupOf(p) === 'cli'" name="terminal" />
+                    <VendorLogo v-else :name="p.name" :id="p.id" :size="18" />
+                </span>
                 <span class="tx">
                     <b>
                         {{ p.name || p.id }}<span v-if="p.primary" class="prim"><NvIcon name="star" />首选</span>
