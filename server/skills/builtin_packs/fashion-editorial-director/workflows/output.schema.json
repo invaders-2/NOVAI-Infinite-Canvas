@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "novai://skills/fashion-editorial-director/output.schema.json",
+  "title": "Fashion Editorial Campaign Package",
+  "type": "object",
+  "required": [
+    "mode",
+    "project",
+    "status"
+  ],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": [
+        "ANALYZE",
+        "CONCEPT",
+        "FULL_PRODUCTION",
+        "PROMPT_ONLY",
+        "COMPARE",
+        "REVISION",
+        "IMAGE_GENERATION"
+      ]
+    },
+    "project": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "brand_or_product": {
+          "type": "string"
+        },
+        "theme": {
+          "type": "string"
+        },
+        "aspect_ratio": {
+          "type": "string"
+        },
+        "image_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "references": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^REF-[0-9]{2,}$"
+          },
+          "user_role": {
+            "type": "string"
+          },
+          "visible_facts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "inferences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "creative_recommendations": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "concept": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "art_direction": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "locks": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "shot_list": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "shot_id",
+          "title"
+        ],
+        "properties": {
+          "shot_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "prompts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "shot_id"
+        ],
+        "properties": {
+          "shot_id": {
+            "type": "string"
+          },
+          "prompt_zh": {
+            "type": "string"
+          },
+          "prompt_en": {
+            "type": "string"
+          },
+          "negative_prompt": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "revision": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "PASS_WITH_NOTES",
+        "BLOCKED"
+      ]
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "open_questions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "additionalProperties": true
+}

@@ -99,7 +99,8 @@ class RealPackTests(PackCase):
         self.assertEqual(skill["icon"], "film")
         self.assertEqual(skill["tags"], ["服装", "大片", "胶片", "lookbook", "一致性"])
         self.assertEqual(skill["skill_type"], "system")
-        self.assertTrue(skill["enabled"])
+        # 官方技能包默认不启用：新装后在应用市场点「添加」才真正可用
+        self.assertFalse(skill["enabled"])
         self.assertTrue(skill["available"])
         self.assertEqual(skill["builtin_pack"], SKILL_ID)
 
@@ -114,7 +115,8 @@ class RealPackTests(PackCase):
         self.assertEqual(definition["skill_type"], "system")
         self.assertEqual(definition["builtin_pack"], SKILL_ID)
         self.assertEqual(definition["pack_version"], registry._pack_version(str(REAL_PACK)))
-        self.assertTrue(definition["enabled"])
+        # 同上：定义落盘时也是未启用，等用户在市场添加
+        self.assertFalse(definition["enabled"])
         self.assertTrue(definition["available"])
 
     def test_prompt_uses_installed_absolute_path(self):

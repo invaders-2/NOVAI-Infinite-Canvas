@@ -1,0 +1,17 @@
+{
+  "display_name": "时尚大片创意总监",
+  "category": "时尚大片",
+  "icon": "film",
+  "runtime": "canvas",
+  "tags": [
+    "时尚大片",
+    "Editorial",
+    "Campaign",
+    "参考图分析",
+    "分镜",
+    "生图提示词",
+    "Lookbook",
+    "出图回修"
+  ],
+  "description": "参考图拆解 → 创意分镜 → 逐张中文生图提示词，含出图看图回修与成本档位"
+}

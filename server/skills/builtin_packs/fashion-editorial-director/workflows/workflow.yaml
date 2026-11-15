@@ -1,0 +1,119 @@
+workflow_id: fashion-editorial-director-main
+version: 1.0.0
+name: 时尚大片创意策划闭环
+default_language: zh-CN
+
+input:
+  accepts:
+    - text
+    - image
+    - multiple_images
+  optional_fields:
+    - brand_or_product
+    - campaign_theme
+    - intended_use
+    - target_audience
+    - aspect_ratio
+    - desired_image_count
+    - model_preferences
+    - product_constraints
+    - reference_roles
+    - target_image_model
+
+mode_router:
+  - mode: ANALYZE
+    when: 用户只要求分析图片或参考风格
+    stages: [register_references, analyze_images, summarize_findings]
+  - mode: CONCEPT
+    when: 用户要求构思主题或创意方向
+    stages: [register_references, analyze_images, develop_concept, quality_check]
+  - mode: FULL_PRODUCTION
+    when: 用户要求完整时尚大片策划
+    stages: [register_references, analyze_images, reference_matrix, develop_concept, art_direction, photography_plan, storyboard, continuity_check, quality_check, deliver]
+  - mode: PROMPT_ONLY
+    when: 用户只需要生图提示词
+    stages: [load_confirmed_brief, load_storyboard, build_reference_mapping, generate_prompts, prompt_quality_check, deliver]
+  - mode: COMPARE
+    when: 用户要求多张参考图对比或融合
+    stages: [register_references, analyze_images, compare_references, resolve_conflicts, deliver]
+  - mode: REVISION
+    when: 用户要求修改已有方案
+    stages: [load_project_locks, identify_change_scope, revise_affected_items, continuity_check, update_revision_log, deliver]
+  - mode: IMAGE_GENERATION
+    when: 用户明确要求生成图片且存在可用图像生成工具
+    stages: [load_confirmed_prompt, validate_tool_availability, invoke_image_generation, inspect_result_if_supported, report_result]
+
+stages:
+  register_references:
+    output: reference_registry
+    rules:
+      - 每张图片分配 REF-01 起的稳定编号
+      - 记录用户明确指定的参考角色
+      - 不得虚构无法读取的图片内容
+  analyze_images:
+    reads: references/reference-image-analysis.md
+    output: reference_analysis
+    rules:
+      - 区分可见事实、视觉推断、创意建议
+      - 对镜头焦段和现场器材只作谨慎视觉推断
+  reference_matrix:
+    output: reference_usage_matrix
+    rules:
+      - 明确采用、改造、排除
+      - 冲突按用户优先级处理
+  develop_concept:
+    reads: references/creative-direction.md
+    output: creative_concept
+  art_direction:
+    reads: references/creative-direction.md
+    output: art_direction_plan
+  photography_plan:
+    reads: references/fashion-photography.md
+    output: photography_plan
+  storyboard:
+    reads: references/series-continuity.md
+    template: templates/shot-list.md
+    output: shot_list
+  continuity_check:
+    reads: references/series-continuity.md
+    output: continuity_report
+  generate_prompts:
+    reads: references/prompt-engineering.md
+    template: templates/image-prompt-package.md
+    output: image_prompt_package
+    rules:
+      - 每张图输出独立完整提示词
+      - 默认中文与英文双语
+      - 按实际模型适配，不编造模型参数
+  quality_check:
+    reads: references/quality-gate.md
+    output: quality_status
+  revise_affected_items:
+    template: templates/revision-log.md
+    output: revised_items_and_change_summary
+  invoke_image_generation:
+    requires_capability: image_generation
+    rules:
+      - 仅用户明确要求时调用
+      - 工具不可用时转为 PROMPT_ONLY
+  deliver:
+    output: structured_campaign_package
+
+state:
+  scope: current_project_or_conversation
+  persist:
+    - confirmed_locks
+    - reference_registry
+    - selected_concept
+    - shot_list_ids
+    - revision_summary
+  do_not_persist:
+    - unconfirmed_assumptions_as_user_preferences
+    - sensitive_personal_inferences
+
+fallbacks:
+  no_vision_capability: 说明不能读取图像像素，不能假装完成参考图分析
+  no_image_generation_tool: 输出完整提示词，不声称已生成图像
+  no_file_export_tool: 以结构化 Markdown 输出完整方案
+  missing_noncritical_input: 使用合理默认值并明确标注
+  missing_critical_input: 只询问一个最关键问题
