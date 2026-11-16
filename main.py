@@ -1,3 +1,12 @@
+import sys
+
+# --mcp：主程序自己充当 MCP stdio 服务（安装版没打包 novai_mcp_server.py，客户端只能 spawn 本程序）。
+# 必须待在所有重 import 与任何启动日志之前：stdout 是协议通道，混进一行 print 客户端就解析失败。
+if "--mcp" in sys.argv:
+    from server.mcp.stdio_entry import run_stdio
+
+    sys.exit(run_stdio())
+
 import json
 import uuid
 import base64
@@ -23,6 +32,7 @@ import glob
 import asyncio
 import contextlib
 import contextvars
+import copy
 import logging
 import requests
 import zipfile
@@ -35,7 +45,7 @@ import html
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional, Tuple, Callable
 from types import SimpleNamespace
-from threading import Lock, Thread
+from threading import Lock, RLock, Thread
 import httpx
 import ssl
 from PIL import Image, ImageOps
@@ -49,7 +59,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse, JSONRes
 from pydantic import BaseModel, Field, field_validator
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import Headers
-from starlette.middleware.gzip import GZipMiddleware
+from starlette.middleware.gzip import GZipMiddleware, GZipResponder
 
 # 智能体底座（注册表 / 通用文件工具 / 上下文提供者基类），无反向依赖 main
 from server.agents.context import AgentRunContext as _AgentRunContext
@@ -295,16 +305,63 @@ app.add_middleware(
 )
 
 # 静态资源（canvas.js 1.14MB）与画布 JSON（最大 1.19MB）都是明文下发，文本压缩率 3-13 倍。
-# starlette 的 GZipMiddleware 自带排除表：text/event-stream、image/*、video/*、audio/*、
-# font/woff*、application/zip 不压缩，所以 SSE 流（/api/canvas-llm/stream 等）和已压缩的
-# 图片/视频二进制都不受影响；minimum_size 保证小响应不付压缩成本。
+# 本机 starlette 0.41.3 的 GZipMiddleware 只看 Accept-Encoding，没有 content-type 排除表：
+# SSE（text/event-stream）一旦进 gzip，zlib 会攒满缓冲才吐，逐字增量、心跳全憋到流结束。
+# 所以这里用 SSEExemptGZipMiddleware：content-type 是 text/event-stream 就整条响应透传，
+# 其余响应仍走 starlette 原实现（minimum_size=1024、compresslevel=4，行为不变）。
 # compresslevel 取 4：实测 canvas.js(1.14MB) level4=17.1ms/387KB、level6=27.5ms/374KB；
 # 大画布 JSON level4=4.9ms/79KB、level6=6.1ms/72KB —— level4 用 62% 的 CPU 拿到 96% 的压缩率。
-# 直接用 starlette 自带的 GZipMiddleware：1.6 的实现已经把 text/event-stream、image/*、video/*、
-# audio/*、font/woff*、application/zip 都写进排除表，SSE 不会被缓冲住。
-# 不要再自己包一层去碰 GZipResponder 的内部属性——0.41 那些属性挂在实例上，1.6 改成按响应创建的
-# _compressor，旧写法会让所有带 Accept-Encoding: gzip 的响应直接 500（整站打不开）。
-app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=4)
+# 实现依赖 0.41.3 的 GZipResponder（start 先缓存、body 走 send_with_gzip）；升级 starlette 前
+# 先跑 tests/test_sse_gzip_no_buffering.py 与 tests/test_sse_not_gzipped.py，确认排除逻辑仍生效。
+class _SSEExemptGZipResponder(GZipResponder):
+    """GZipResponder 的子类：content-type 是 text/event-stream 时整条流原样透传。
+
+    父类本来就会先把 http.response.start 缓存到 initial_message，这里先看一眼 content-type：
+    SSE 立即发出 start，后续 body 一律直接转发（不压缩、不攒缓冲）；其余响应原样交给父类。
+    """
+
+    _SSE_MEDIA_TYPE = "text/event-stream"
+
+    def __init__(self, app, minimum_size, compresslevel=9):
+        super().__init__(app, minimum_size=minimum_size, compresslevel=compresslevel)
+        self._method_decided = False
+        self._passthrough = False
+
+    async def send_with_gzip(self, message):
+        if not self._method_decided:
+            self._method_decided = True
+            if message.get("type") == "http.response.start":
+                try:
+                    content_type = Headers(raw=message.get("headers", [])).get("content-type", "")
+                except Exception:
+                    # 头解析失败按不压缩兜底：宁可多传几 KB，也不能让响应 500 或卡住
+                    self._passthrough = True
+                    content_type = ""
+                if not self._passthrough:
+                    media_type = content_type.split(";", 1)[0].strip().lower()
+                    self._passthrough = media_type == self._SSE_MEDIA_TYPE
+        if self._passthrough:
+            # 不丢 start、不重复发：start 在决策时立刻发出，后续每一条 body 原样转发
+            await self.send(message)
+        else:
+            await super().send_with_gzip(message)
+
+
+class SSEExemptGZipMiddleware(GZipMiddleware):
+    """补上 starlette 0.41.3 缺失的 SSE 排除：text/event-stream 不压缩、不缓冲，其余响应照旧。"""
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            headers = Headers(scope=scope)
+            if "gzip" in headers.get("accept-encoding", ""):
+                responder = _SSEExemptGZipResponder(
+                    self.app, minimum_size=self.minimum_size, compresslevel=self.compresslevel)
+                await responder(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(SSEExemptGZipMiddleware, minimum_size=1024, compresslevel=4)
 
 # --- WebSocket 状态管理器 ---
 class ConnectionManager:
@@ -471,6 +528,19 @@ async def startup_event():
     except Exception as exc:
         print(f"Storyboard 启动失败: {exc}")
     sync_static_html_versions()
+    # 历史智能分类数据一次性清理（幂等）：分类旁车 / 资产库 classification 字段 / 分类提示词归到 _migrated。
+    # 清完写 .classification-cleanup-v1.done，之后启动直接跳过；失败只打日志，绝不阻断启动。
+    try:
+        from server.classification_cleanup import run as _run_classification_cleanup
+        from server.classification_cleanup import summary_line as _classification_cleanup_line
+        _cleanup_summary = await asyncio.to_thread(
+            _run_classification_cleanup, _DATA_ROOT, apply=True,
+            uploads_dir=LOCAL_UPLOAD_DIR, library_path=ASSET_LIBRARY_PATH,
+            prompt_path=os.path.join(DATA_DIR, "asset_classification_prompt.txt"),
+        )
+        print(_classification_cleanup_line(_cleanup_summary), flush=True)
+    except Exception as exc:
+        print(f"[分类清理] 失败（不影响启动）：{exc}")
     # 启动时整理资产库：给所有图片分组（含默认角色/场景）建好文件夹，并把根目录里的旧素材归整进去。
     try:
         await asyncio.to_thread(migrate_asset_library_into_dirs)
@@ -1278,6 +1348,8 @@ CONVERSATION_DIR = os.path.join(DATA_DIR, "conversations")
 CANVAS_DIR = os.path.join(DATA_DIR, "canvases")
 MEDIA_PREVIEW_DIR = os.path.join(DATA_DIR, "media_previews")
 ASSET_LIBRARY_PATH = os.path.join(DATA_DIR, "asset_library.json")
+# 素材归属一次性迁移标记（认领时间 / 首个账号 / 机器级旧上传的归属账号）；与资产库分开存，读写都很轻。
+ASSET_OWNERSHIP_PATH = os.path.join(DATA_DIR, "asset_ownership.json")
 # V2 Phase 2：画布版本快照目录 + 画布资产注册表（Asset 对象化，JSON 文件，无数据库）
 CANVAS_VERSIONS_DIR = os.path.join(DATA_DIR, "canvas_versions")
 CANVAS_ASSETS_REGISTRY_PATH = os.path.join(DATA_DIR, "assets_registry.json")
@@ -6283,7 +6355,8 @@ def find_asset_registry_record(registry, url="", asset_id=""):
 def asset_library_id_for_url(url):
     """在 asset_library.json 中按 URL 找已有条目的 id（引用复用：素材库已有条目时复用其 id）。"""
     try:
-        lib = load_asset_library()
+        owner = current_asset_owner_id()
+        lib = visible_asset_library(owner) if owner is not None else load_asset_library()
         for cat in lib.get("categories", []):
             for item in (cat.get("items") or []):
                 if isinstance(item, dict) and item.get("url") == url and item.get("id"):
@@ -6607,8 +6680,17 @@ def list_deleted_canvases(owner_id=None):
 
 # --- 云端数据隔离（M2）：画布归属 ------------------------------------------
 def request_auth_user(request):
-    """auth 关闭时中间件不会写 auth_user，这里恒为 None（老行为原样保留）。"""
+    """当前登录用户：required 与 optional 都会写入（optional 只用来记归属），auth 关闭时为 None。"""
     return getattr(getattr(request, "state", None), "auth_user", None)
+
+
+def auth_isolation(request):
+    """本次请求要不要按账号隔离：**登录了就隔离**（任意模式，含 optional），没登录 = 本机模式全量。
+
+    2026-11 新规则：账号彼此独立、不给管理员特权——登录后画布只看到自己的 + 别人共享给自己的；
+    不登录（本机模式）保持原来「看到全部、照常能用」。素材隔离暂不跟这套规则走。
+    """
+    return bool(request_auth_user(request))
 
 
 def _canvas_owner_id(canvas):
@@ -6622,7 +6704,7 @@ def _canvas_owner_id(canvas):
 
 
 def canvas_access_role(canvas, request):
-    """当前用户对画布的角色：owner / admin / editor / viewer / None。"""
+    """当前用户对画布的角色：owner / editor / viewer / None（管理员没有通吃特权）。"""
     user = request_auth_user(request)
     if not user:
         return None
@@ -6632,7 +6714,12 @@ def canvas_access_role(canvas, request):
 
 
 def require_canvas_access(canvas, request, need="view"):
-    """auth-off 直接放行；auth-on 按 owner/admin/editor/viewer 判定（need: view/edit/manage）。"""
+    """登录了就按 owner / editor / viewer 判定；没登录（本机模式）直接放行。
+
+    2026-11：管理员不再通吃，和普通账号一样只能访问自己的 + 被共享的画布。
+    """
+    if not auth_isolation(request):
+        return
     user = request_auth_user(request)
     if not user:
         return
@@ -6649,30 +6736,24 @@ def current_canvas_owner_id(request):
 
 
 def canvas_list_owner_filter(request):
-    """回收站过滤：返回 (user, owner_id)。auth-off → (None, None)；admin 带 ?all=1 → 全部。"""
+    """回收站过滤：返回 (user, owner_id)。没登录 → (None, None)；登录了只看自己的（管理员也一样）。"""
     user = request_auth_user(request)
     if not user:
         return None, None
-    if str(user.get("role")) == "admin":
-        all_flag = str(request.query_params.get("all") or "").strip().lower()
-        if all_flag in ("1", "true", "yes", "on"):
-            return user, None
     return user, int(user["id"])
 
 
 def list_canvases_for_request(request):
-    """画布列表：auth-off 全量；auth-on 自己 + 被共享，带 access_role / owner_username。"""
+    """画布列表：登录了 = 自己的 + 被共享的（带 access_role / owner_username）；没登录 = 本机全量。"""
     user = request_auth_user(request)
     if not user:
         return list_canvases()
 
     user_id = int(user["id"])
-    is_admin = str(user.get("role")) == "admin"
     scope = str(request.query_params.get("scope") or "all").strip().lower()
     if scope not in ("mine", "shared", "all"):
         raise HTTPException(status_code=400, detail="scope 只能是 mine/shared/all")
-    all_flag = str(request.query_params.get("all") or "").strip().lower() in ("1", "true", "yes", "on")
-    admin_all = is_admin and all_flag
+    # 管理员没有「看全部」特权：可选的 ?all=1 不再放大范围（保留参数只为老前端不报错）
     shares = _canvas_perms.shared_roles_for_user(user_id)
     names = _canvas_perms.user_names()
     records = []
@@ -6680,9 +6761,7 @@ def list_canvases_for_request(request):
         owner_id = record.get("owner_id")
         is_owner = owner_id is not None and int(owner_id) == user_id
         share_role = shares.get(str(record.get("id")))
-        if admin_all:
-            include = True
-        elif scope == "mine":
+        if scope == "mine":
             include = is_owner
         elif scope == "shared":
             include = share_role is not None
@@ -6690,13 +6769,7 @@ def list_canvases_for_request(request):
             include = is_owner or share_role is not None
         if not include:
             continue
-        if is_owner:
-            access_role = "owner"
-        elif is_admin:
-            access_role = "admin"
-        else:
-            access_role = share_role
-        record["access_role"] = access_role
+        record["access_role"] = "owner" if is_owner else share_role
         record["owner_username"] = names.get(int(owner_id), "") if owner_id is not None else ""
         records.append(record)
     records.sort(key=lambda item: (
@@ -6704,6 +6777,58 @@ def list_canvases_for_request(request):
         -int(item.get("updated_at") or item.get("created_at") or 0),
     ))
     return records
+
+def claim_unowned_canvases(user) -> int:
+    """登录 / 注册成功后：把当前仍无 owner_id、未删除的画布认领给这个账号。
+
+    - 每次登录都扫一次，只认领「当次仍无归属」的，已有归属（别人或自己）一律不碰；
+    - 原子写文件 + 失效列表缓存，不动 created_at / updated_at（不改变列表排序）；
+    - 返回认领数量；失败只让 auth 侧打日志，不影响登录。
+    """
+    if not user or user.get("id") is None:
+        return 0
+    user_id = int(user["id"])
+    claimed: List[str] = []
+    with CANVAS_LOCK:
+        try:
+            names = os.listdir(CANVAS_DIR)
+        except OSError:
+            return 0
+        for name in names:
+            if not name.endswith(".json"):
+                continue
+            path = os.path.join(CANVAS_DIR, name)
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    doc = json.load(fh)
+            except Exception:
+                continue
+            if not isinstance(doc, dict) or doc.get("deleted_at"):
+                continue
+            value = doc.get("owner_id")
+            if value is not None and value != "":
+                continue
+            doc["owner_id"] = user_id
+            try:
+                write_json_atomic(path, doc, ensure_ascii=False, indent=_CANVAS_JSON_INDENT)
+            except Exception as exc:
+                print("[canvas] 认领画布写入失败 %s：%s" % (path, exc), flush=True)
+                continue
+            _invalidate_canvas_record(name)
+            claimed.append(str(doc.get("id") or name[:-5]))
+    if not claimed:
+        return 0
+    print("[canvas] 已把 %d 张无归属画布认领给账号 %s（%s）" % (
+        len(claimed), user.get("username") or user_id, ",".join(claimed[:10])), flush=True)
+    try:
+        _auth_service.store.audit(
+            "canvas_claim_unowned", user, "", "ok",
+            "count=%d ids=%s" % (len(claimed), ",".join(claimed[:50])),
+        )
+    except Exception:
+        pass
+    return len(claimed)
+
 
 def canvas_asset_url_value(value):
     if isinstance(value, str):
@@ -7028,7 +7153,8 @@ def generation_meta_for_url(url):
     return {}
 
 def _local_upload_generation_path(filename):
-    return os.path.splitext(os.path.join(LOCAL_UPLOAD_DIR, filename))[0] + ".generation.json"
+    rel_path, path, _prefix = _local_upload_resolve(filename)
+    return os.path.splitext(path)[0] + ".generation.json"
 
 def _write_local_upload_generation(filename, meta):
     if not meta:
@@ -9962,11 +10088,11 @@ def current_tenant_user_id():
         return None
 
 def output_storage(category="output"):
-    """生成/上传落盘目录。auth-on 时按用户分目录：assets/users/{uid}/input|output。"""
+    """生成/上传落盘目录。登录后按用户分目录：assets/users/{uid}/input|output。"""
     subdir = "input" if category == "input" else "output"
     user_id = current_tenant_user_id()
     if user_id is not None:
-        return os.path.join(ASSETS_DIR, "users", str(int(user_id)), subdir), "users/%d/%s" % (int(user_id), subdir)
+        return os.path.join(_assets_root(), "users", str(int(user_id)), subdir), "users/%d/%s" % (int(user_id), subdir)
     return (OUTPUT_INPUT_DIR, "input") if category == "input" else (OUTPUT_OUTPUT_DIR, "output")
 
 def output_url_for(filename, category="output"):
@@ -10192,17 +10318,17 @@ def local_media_file_by_basename(name: str):
     safe = os.path.basename(urllib.parse.unquote(str(name or "")))
     if not safe:
         return None
-    roots = [
-        OUTPUT_OUTPUT_DIR,
-        OUTPUT_INPUT_DIR,
-        os.path.join(ASSETS_DIR, "output"),
-        os.path.join(ASSETS_DIR, "input"),
-        os.path.join(ASSETS_DIR, "library"),
-    ]
     user_id = current_tenant_user_id()
     if user_id is not None:
-        base = os.path.join(ASSETS_DIR, "users", str(int(user_id)))
-        roots[0:0] = [os.path.join(base, "output"), os.path.join(base, "input")]
+        base = _user_assets_root(user_id)
+        roots = [os.path.join(base, "output"), os.path.join(base, "input"),
+                 os.path.join(base, "library"), os.path.join(base, "uploads")]
+        if _asset_owner_int(legacy_asset_owner_id()) == int(user_id):
+            roots.extend([OUTPUT_OUTPUT_DIR, OUTPUT_INPUT_DIR, ASSET_LIBRARY_DIR, LOCAL_UPLOAD_DIR])
+    else:
+        roots = [OUTPUT_OUTPUT_DIR, OUTPUT_INPUT_DIR,
+                 os.path.join(ASSETS_DIR, "output"), os.path.join(ASSETS_DIR, "input"),
+                 ASSET_LIBRARY_DIR, LOCAL_UPLOAD_DIR]
     for root in roots:
         path = os.path.abspath(os.path.join(root, safe))
         root_abs = os.path.abspath(root)
@@ -10456,9 +10582,10 @@ def unique_asset_category_dir(library, base_name: str) -> str:
         str(c.get("dir")) for c in (library.get("categories") or [])
         if isinstance(c, dict) and c.get("dir")
     }
+    library_root = asset_library_dir()
     candidate = base
     i = 2
-    while candidate in existing or os.path.exists(os.path.join(ASSET_LIBRARY_DIR, candidate)):
+    while candidate in existing or os.path.exists(os.path.join(library_root, candidate)):
         candidate = f"{base}_{i}"
         i += 1
     return candidate
@@ -10481,50 +10608,30 @@ def make_asset_library_item(src: str, name: str = "", subdir: str = "") -> Tuple
         safe_name += ext
     dest_name = f"lib_{uuid.uuid4().hex[:12]}_{safe_name}"
     subdir = str(subdir or "").strip("/").strip()
+    library_root = asset_library_dir()
+    url_prefix = asset_library_url_prefix().rstrip("/")
     if subdir:
-        dest_dir = os.path.join(ASSET_LIBRARY_DIR, subdir)
+        dest_dir = os.path.join(library_root, subdir)
         os.makedirs(dest_dir, exist_ok=True)
         dest_path = os.path.join(dest_dir, dest_name)
         rel = f"{subdir}/{dest_name}"
     else:
-        dest_path = os.path.join(ASSET_LIBRARY_DIR, dest_name)
+        os.makedirs(library_root, exist_ok=True)
+        dest_path = os.path.join(library_root, dest_name)
         rel = dest_name
     shutil.copy2(src, dest_path)
     item = {
         "id": f"asset_{uuid.uuid4().hex[:12]}",
         "name": os.path.splitext(safe_name)[0][:120],
-        "url": "/assets/library/" + urllib.parse.quote(rel, safe="/"),
+        "url": url_prefix + "/" + urllib.parse.quote(rel, safe="/"),
         "kind": kind,
         "created_at": now_ms(),
     }
+    owner = current_tenant_user_id()
+    if owner is not None:
+        item["owner_id"] = int(owner)
     return dest_name, item
     return lib
-
-ASSET_CLASSIFICATION_PROMPT = """请识别这张图片，输出严格 JSON，不要 Markdown，不要解释。
-目标是给素材库做非常全面的筛选分类。所有字段都用中文短标签数组，尽量具体但不要虚构。
-JSON 结构：
-{
-  "summary": "一句话描述",
-  "categories": {
-    "environment": ["室内/室外/自然/城市/棚拍/商业空间等环境大类"],
-    "scene": ["室内/室外/棚拍/街景/自然/商业空间等"],
-    "space": ["卧室/餐厅/客厅/厨房/浴室/办公室/店铺/展厅/户外道路等"],
-    "subject": ["人物/模特/产品/家具/建筑/食物/动物/车辆/植物等"],
-    "model": ["无人/单人模特/多人模特/男性模特/女性模特/儿童模特/半身模特/全身模特/手部模特等"],
-    "people": ["无人/单人/多人/男性/女性/儿童/半身/全身/手部特写等"],
-    "style": ["写实/摄影/插画/3D/极简/奢华/复古/现代/电商/电影感等"],
-    "lighting": ["自然光/硬光/柔光/逆光/侧光/夜景/暖光/冷光/高对比/低对比等"],
-    "color": ["白色/黑色/暖色/冷色/高饱和/低饱和/莫兰迪/金属色等"],
-    "composition": ["近景/中景/远景/俯拍/仰拍/正面/侧面/居中/留白/对称/特写等"],
-    "mood": ["温馨/高级/清爽/科技/自然/浪漫/神秘/活力/安静等"],
-    "use_case": ["广告/电商主图/海报/社媒/样机/参考图/背景/角色参考/空间参考等"],
-    "objects": ["画面中重要物体"],
-    "materials": ["木材/金属/玻璃/布料/皮革/石材/陶瓷等"],
-    "quality": ["高清/模糊/低清/噪点/水印/截图/透明背景等"]
-  },
-  "tags": ["综合关键词，20个以内"]
-}
-要求：只返回可解析 JSON；每个数组最多 8 项；如果不确定就省略该标签。"""
 
 ASSET_CLASSIFICATION_DIMENSION_NAMES = {
     "environment": "环境",
@@ -10545,7 +10652,11 @@ ASSET_CLASSIFICATION_DIMENSION_NAMES = {
 }
 
 def _local_upload_classification_path(filename):
-    return os.path.splitext(os.path.join(LOCAL_UPLOAD_DIR, filename))[0] + ".classification.json"
+    try:
+        rel_path, path, _prefix = _local_upload_resolve(filename)
+    except Exception:
+        path = os.path.join(local_upload_dir(), str(filename or ""))
+    return os.path.splitext(path)[0] + ".classification.json"
 
 def _safe_asset_tag(value, limit=24):
     text = re.sub(r"\s+", " ", str(value or "").strip())
@@ -10607,19 +10718,6 @@ def normalize_asset_classification(raw):
         "updated_at": now_ms(),
     }
 
-def parse_asset_classification_text(text):
-    value = str(text or "").strip()
-    if not value:
-        return normalize_asset_classification({})
-    value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.IGNORECASE).strip()
-    value = re.sub(r"\s*```$", "", value).strip()
-    try:
-        data = json.loads(value)
-    except Exception:
-        match = re.search(r"\{.*\}", value, re.S)
-        data = json.loads(match.group(0)) if match else {}
-    return normalize_asset_classification(data)
-
 def _read_local_upload_classification(filename):
     path = _local_upload_classification_path(filename)
     if not os.path.isfile(path):
@@ -10628,36 +10726,6 @@ def _read_local_upload_classification(filename):
         with open(path, "r", encoding="utf-8") as f:
             return normalize_asset_classification(json.load(f))
     except Exception:
-        return None
-
-def _write_local_upload_classification(filename, classification):
-    path = _local_upload_classification_path(filename)
-    write_json_atomic(path, normalize_asset_classification(classification), ensure_ascii=False, indent=2)
-
-def asset_classification_prompt(extra_prompt=""):
-    extra = str(extra_prompt or "").strip()
-    if not extra:
-        return ASSET_CLASSIFICATION_PROMPT
-    return ASSET_CLASSIFICATION_PROMPT + "\n\n用户补充分类要求：\n" + extra[:4000]
-
-async def classify_image_with_provider(abs_path, provider_id="", model="", ms_model="", prompt=""):
-    text, resolved_model = await caption_image_with_provider(
-        abs_path,
-        asset_classification_prompt(prompt),
-        provider_id or get_primary_provider_id(),
-        model,
-        ms_model,
-    )
-    classification = parse_asset_classification_text(text)
-    classification["model"] = resolved_model
-    classification["provider"] = provider_id or get_primary_provider_id()
-    return classification
-
-async def classify_asset_image_best_effort(abs_path, provider_id="", model="", ms_model="", prompt=""):
-    try:
-        return await classify_image_with_provider(abs_path, provider_id, model, ms_model, prompt)
-    except Exception as exc:
-        print(f"素材智能分类失败: {exc}")
         return None
 
 def migrate_asset_library_into_dirs():
@@ -10707,8 +10775,8 @@ def migrate_asset_library_into_dirs():
         except Exception as exc:
             print(f"资产库分组整理：保存失败 {exc}")
 
-def asset_library_workflow_category(lib, library_id="", category_id=""):
-    library = find_asset_library(lib, library_id)
+def asset_library_workflow_category(lib, library_id="", category_id="", owner_id=None):
+    library = owned_asset_library(lib, library_id, owner_id)
     if not library:
         raise HTTPException(status_code=404, detail="资产库不存在")
     categories = library.setdefault("categories", [])
@@ -10723,8 +10791,10 @@ def asset_library_workflow_category(lib, library_id="", category_id=""):
         cat = next((c for c in categories if c.get("type") == "workflow"), None)
     if not cat:
         cat = {"id": f"wf_{uuid.uuid4().hex[:12]}", "name": "工作流", "type": "workflow", "items": []}
+        if owner_id is not None:
+            cat["owner_id"] = int(owner_id)
         categories.append(cat)
-    lib["active_library_id"] = library.get("id") or lib.get("active_library_id")
+    set_active_asset_library(lib, library.get("id"), owner_id)
     return library, cat
 
 def make_workflow_library_item_from_bytes(raw: bytes, filename: str, name: str = "") -> Dict[str, Any]:
@@ -10736,30 +10806,473 @@ def make_workflow_library_item_from_bytes(raw: bytes, filename: str, name: str =
         safe_filename += ".zip"
         ext = ".zip"
     dest_name = f"workflow_{uuid.uuid4().hex[:12]}_{safe_filename}"
-    dest_path = os.path.join(ASSET_LIBRARY_DIR, dest_name)
-    os.makedirs(ASSET_LIBRARY_DIR, exist_ok=True)
+    library_root = asset_library_dir()
+    dest_path = os.path.join(library_root, dest_name)
+    os.makedirs(library_root, exist_ok=True)
     with open(dest_path, "wb") as f:
         f.write(raw)
     display_name = sanitize_asset_name(name or os.path.splitext(safe_filename)[0], "工作流")
-    return {
+    item = {
         "id": f"wf_{uuid.uuid4().hex[:12]}",
         "name": display_name[:120],
-        "url": f"/assets/library/{dest_name}",
+        "url": asset_library_url_prefix().rstrip("/") + "/" + dest_name,
         "kind": "workflow",
         "type": "workflow",
         "format": "zip" if ext == ".zip" else "json",
         "size": len(raw),
         "created_at": now_ms(),
     }
+    owner = current_tenant_user_id()
+    if owner is not None:
+        item["owner_id"] = int(owner)
+    return item
 
 def save_asset_library(lib):
-    lib = normalize_asset_library(lib)
-    sort_asset_library_items(lib)
-    lib["updated_at"] = now_ms()
-    os.makedirs(DATA_DIR, exist_ok=True)
-    write_json_atomic(ASSET_LIBRARY_PATH, lib, ensure_ascii=False, indent=2)
+    with ASSET_LIBRARY_LOCK:
+        lib = normalize_asset_library(lib)
+        sort_asset_library_items(lib)
+        lib["updated_at"] = now_ms()
+        os.makedirs(DATA_DIR, exist_ok=True)
+        write_json_atomic(ASSET_LIBRARY_PATH, lib, ensure_ascii=False, indent=2)
     if GLOBAL_LOOP:
         asyncio.run_coroutine_threadsafe(manager.broadcast_asset_library_updated(int(lib["updated_at"])), GLOBAL_LOOP)
+
+
+ASSET_LIBRARY_LOCK = RLock()
+_LEGACY_ASSET_OWNER_CACHE: Dict[str, Any] = {}
+
+
+def _asset_owner_int(value):
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def current_asset_owner_id():
+    """当前素材归属账号：登录了（含 optional）就是账号 id，没登录 = None（本机模式）。"""
+    return current_tenant_user_id()
+
+
+def _assets_root():
+    """当前素材根目录：优先用 auth 绑定的 assets 目录（测试/自定义存储会改），否则 main.ASSETS_DIR。"""
+    try:
+        from server.auth import tenant as _tenant
+        base = str(_tenant.assets_dir() or "")
+    except Exception:
+        base = ""
+    return base or ASSETS_DIR
+
+
+def _user_assets_root(user_id):
+    return os.path.join(_assets_root(), "users", str(int(user_id)))
+
+
+def _user_asset_library_dir(user_id):
+    return os.path.join(_user_assets_root(user_id), "library")
+
+
+def asset_library_dir():
+    uid = current_tenant_user_id()
+    if uid is not None:
+        return _user_asset_library_dir(uid)
+    return ASSET_LIBRARY_DIR
+
+
+def asset_library_url_prefix():
+    uid = current_tenant_user_id()
+    if uid is not None:
+        return "/assets/users/%d/library" % int(uid)
+    return "/assets/library"
+
+
+def local_upload_dir():
+    uid = current_tenant_user_id()
+    if uid is not None:
+        return os.path.join(_user_assets_root(uid), "uploads")
+    return LOCAL_UPLOAD_DIR
+
+
+def local_upload_url_prefix():
+    uid = current_tenant_user_id()
+    if uid is not None:
+        return "/assets/users/%d/uploads" % int(uid)
+    return "/assets/uploads"
+
+
+def local_upload_roots():
+    """本地上传的候选根：登录=自己的 users/{uid}/uploads；首个认领账号额外挂机器级旧目录。"""
+    uid = current_tenant_user_id()
+    if uid is None:
+        return [(LOCAL_UPLOAD_DIR, "/assets/uploads")]
+    roots = [(local_upload_dir(), local_upload_url_prefix())]
+    if _asset_owner_int(legacy_asset_owner_id()) == int(uid):
+        roots.append((LOCAL_UPLOAD_DIR, "/assets/uploads"))
+    return roots
+
+
+def local_output_roots():
+    uid = current_tenant_user_id()
+    if uid is None:
+        return [(OUTPUT_OUTPUT_DIR, "/assets/output")]
+    roots = [(os.path.join(_user_assets_root(uid), "output"), "/assets/users/%d/output" % int(uid))]
+    if _asset_owner_int(legacy_asset_owner_id()) == int(uid):
+        roots.append((OUTPUT_OUTPUT_DIR, "/assets/output"))
+    return roots
+
+
+def load_asset_ownership():
+    try:
+        if os.path.isfile(ASSET_OWNERSHIP_PATH):
+            with open(ASSET_OWNERSHIP_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception as exc:
+        print("[asset] 读取素材归属标记失败: %s" % exc)
+    return {}
+
+
+def save_asset_ownership(data):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    write_json_atomic(ASSET_OWNERSHIP_PATH, data if isinstance(data, dict) else {}, ensure_ascii=False, indent=2)
+
+
+def legacy_asset_owner_id():
+    """机器级旧上传/生成物归谁：首个认领账号；没跑过迁移 / 本机模式为空。"""
+    try:
+        stat = os.stat(ASSET_OWNERSHIP_PATH)
+        key = (stat.st_mtime_ns, stat.st_size)
+        if _LEGACY_ASSET_OWNER_CACHE.get("key") == key:
+            return _LEGACY_ASSET_OWNER_CACHE.get("value")
+        value = _asset_owner_int(load_asset_ownership().get("legacy_upload_owner_id"))
+    except OSError:
+        value = None
+        key = None
+    _LEGACY_ASSET_OWNER_CACHE.clear()
+    _LEGACY_ASSET_OWNER_CACHE.update({"key": key, "value": value})
+    return value
+
+
+def set_active_asset_library(lib, library_id, owner_id=None):
+    library_id = str(library_id or "").strip()
+    if not library_id:
+        return
+    if owner_id is None:
+        lib["active_library_id"] = library_id
+        return
+    amap = lib.get("active_library_ids") if isinstance(lib.get("active_library_ids"), dict) else {}
+    amap[str(int(owner_id))] = library_id
+    lib["active_library_ids"] = amap
+
+
+def can_read_other_user_asset(owner_uid, url):
+    """非本人读 users/{uid} 文件：本机模式放行；登录态走共享画布素材的既有 ACL。"""
+    me = current_tenant_user_id()
+    if me is None:
+        return True
+    try:
+        if int(owner_uid) == int(me):
+            return True
+    except (TypeError, ValueError):
+        return False
+    try:
+        from server import asset_acl
+        return asset_acl.can_read_asset(int(owner_uid), url, {"id": int(me), "role": "user"})
+    except Exception:
+        return False
+
+
+def visible_asset_library(owner_id=None, loader=None):
+    """素材库视图：没登录=全量（本机模式）；登录=只保留自己的库 + 自己的产品档案。
+
+    loader 供路由层传入 deps 绑定版（测试/替换实现可注入）；默认读真实存储。
+    """
+    lib = loader() if callable(loader) else load_asset_library()
+    if owner_id is None:
+        return lib
+    owner = int(owner_id)
+    libraries = [l for l in (lib.get("libraries") or []) if _asset_owner_int(l.get("owner_id")) == owner]
+    view = {k: v for k, v in lib.items() if k not in ("libraries", "categories", "products")}
+    view["libraries"] = copy.deepcopy(libraries)
+    for library in view["libraries"]:
+        library["access_role"] = "owner"
+    view["products"] = copy.deepcopy([p for p in (lib.get("products") or [])
+                                      if _asset_owner_int(p.get("owner_id")) == owner])
+    amap = lib.get("active_library_ids") if isinstance(lib.get("active_library_ids"), dict) else {}
+    active = str(amap.get(str(owner)) or "")
+    if not any(l.get("id") == active for l in libraries):
+        active = libraries[0].get("id") if libraries else ""
+    view["active_library_id"] = active or ""
+    active_library = next((l for l in libraries if l.get("id") == active), None)
+    view["categories"] = copy.deepcopy((active_library or {}).get("categories") or [])
+    view["updated_at"] = int(lib.get("updated_at") or now_ms())
+    return view
+
+
+def owned_asset_library(lib, library_id="", owner_id=None):
+    """按 id 找库；登录态下只认自己的（没登录 = 本机模式全部可见）。找不到返回 None。
+
+    刻意不做 normalize：写接口只是校验归属，不要因为一次查找给库补默认分类。
+    """
+    if not isinstance(lib, dict):
+        return None
+    wanted = str(library_id or "").strip()
+    if not wanted:
+        amap = lib.get("active_library_ids") if isinstance(lib.get("active_library_ids"), dict) else {}
+        wanted = str(amap.get(str(int(owner_id))) if owner_id is not None else lib.get("active_library_id") or "")
+    libraries = lib.get("libraries") or []
+    library = next((item for item in libraries if str(item.get("id") or "") == wanted), None)
+    if library is None and not wanted:
+        library = libraries[0] if libraries else None
+    if library is None:
+        return None
+    if owner_id is not None and _asset_owner_int(library.get("owner_id")) != int(owner_id):
+        return None
+    return library
+
+
+def owned_asset_category(lib, category_id, library_id="", owner_id=None):
+    if not isinstance(lib, dict):
+        return None, None
+    category_id = str(category_id or "").strip()
+    if not category_id:
+        return None, None
+    preferred = str(library_id or "").strip()
+    libraries = lib.get("libraries") or []
+    if preferred:
+        libraries = [l for l in libraries if str(l.get("id") or "") == preferred] or libraries
+    for library in libraries:
+        for cat in library.get("categories") or []:
+            if str(cat.get("id") or "") == category_id:
+                if owner_id is not None and _asset_owner_int(library.get("owner_id")) != int(owner_id):
+                    return None, None
+                return library, cat
+    return None, None
+
+
+def owned_asset_item(lib, item_id, library_id="", owner_id=None):
+    if not isinstance(lib, dict):
+        return None, None, None
+    library, cat, item = _asset_meta.find_item(lib, item_id=str(item_id or "").strip())
+    if not item:
+        return None, None, None
+    if library_id:
+        preferred = str(library_id or "").strip()
+        if str((library or {}).get("id") or "") != preferred:
+            return None, None, None
+    if owner_id is not None and _asset_owner_int((library or {}).get("owner_id")) != int(owner_id):
+        return None, None, None
+    return library, cat, item
+
+
+def _new_personal_asset_library(lib, owner_id):
+    owner = int(owner_id)
+    root = _user_asset_library_dir(owner)
+    library_id = "lib_%s" % uuid.uuid4().hex[:12]
+    existing_ids = {str(l.get("id") or "") for l in (lib.get("libraries") or [])}
+    while library_id in existing_ids:
+        library_id = "lib_%s" % uuid.uuid4().hex[:12]
+    used_dirs = {str(c.get("dir") or "") for l in (lib.get("libraries") or [])
+                 if _asset_owner_int(l.get("owner_id")) == owner
+                 for c in (l.get("categories") or [])}
+    base_dir = "未分组"
+    dir_name = base_dir
+    index = 2
+    while dir_name in used_dirs or os.path.exists(os.path.join(root, dir_name)):
+        dir_name = "%s_%d" % (base_dir, index)
+        index += 1
+    image_cat = {"id": "cat_%s" % uuid.uuid4().hex[:12], "name": "未分组", "type": "image",
+                 "parent_id": "", "items": [], "owner_id": owner, "dir": dir_name}
+    wf_cat = {"id": "wf_%s" % uuid.uuid4().hex[:12], "name": "工作流", "type": "workflow",
+              "parent_id": "", "items": [], "owner_id": owner}
+    library = {"id": library_id, "name": "我的素材库", "type": "asset", "owner_id": owner,
+               "categories": [image_cat, wf_cat], "created_at": now_ms()}
+    try:
+        os.makedirs(os.path.join(root, dir_name), exist_ok=True)
+    except OSError as exc:
+        print("[asset] 创建个人库目录失败: %s" % exc)
+    lib.setdefault("libraries", []).append(library)
+    return library
+
+
+def claim_unowned_assets(user) -> Dict[str, Any]:
+    """登录/注册后认领无归属素材（与画布认领同一时机）：只做一次，之后每个账号自动建空库。"""
+    result = {"libraries": 0, "items": 0, "prompt_libraries": 0, "created_library": False}
+    if not user or user.get("id") is None:
+        return result
+    owner = int(user["id"])
+    with ASSET_LIBRARY_LOCK:
+        lib = load_asset_library()
+        changed = False
+        marker = load_asset_ownership()
+        first = not marker
+        prompt_changed = False
+        if first:
+            for library in lib.get("libraries") or []:
+                if _asset_owner_int(library.get("owner_id")) is not None:
+                    continue
+                library["owner_id"] = owner
+                result["libraries"] += 1
+                for cat in library.get("categories") or []:
+                    if _asset_owner_int(cat.get("owner_id")) is None:
+                        cat["owner_id"] = owner
+                    for item in cat.get("items") or []:
+                        if isinstance(item, dict) and _asset_owner_int(item.get("owner_id")) is None:
+                            item["owner_id"] = owner
+                            result["items"] += 1
+                changed = True
+            for product in lib.get("products") or []:
+                if isinstance(product, dict) and _asset_owner_int(product.get("owner_id")) is None:
+                    product["owner_id"] = owner
+                    changed = True
+            try:
+                prompt_data = load_prompt_libraries()
+                public_ids = {"system", "community"}
+                for plib in prompt_data.get("libraries") or []:
+                    if str(plib.get("id") or "") in public_ids:
+                        continue
+                    if _asset_owner_int(plib.get("owner_id")) is None:
+                        plib["owner_id"] = owner
+                        result["prompt_libraries"] += 1
+                        prompt_changed = True
+                if prompt_changed:
+                    save_prompt_libraries(prompt_data)
+            except Exception as exc:
+                print("[asset] 认领提示词库失败（不影响登录）: %s" % exc)
+            save_asset_ownership({
+                "claimed_at": now_ms(),
+                "claimed_by": owner,
+                "claimed_username": str(user.get("username") or ""),
+                "legacy_upload_owner_id": owner,
+            })
+        libraries = [l for l in (lib.get("libraries") or []) if _asset_owner_int(l.get("owner_id")) == owner]
+        if not libraries:
+            new_library = _new_personal_asset_library(lib, owner)
+            libraries = [new_library]
+            result["created_library"] = True
+            changed = True
+        set_active_asset_library(lib, libraries[0].get("id"), owner)
+        if changed:
+            save_asset_library(lib)
+    if result["libraries"] or result["prompt_libraries"] or result["created_library"]:
+        print("[asset] 素材归属：账号 %s 认领库=%d 条目=%d 提示词库=%d 新建我的素材库=%s" % (
+            user.get("username") or owner, result["libraries"], result["items"],
+            result["prompt_libraries"], result["created_library"]), flush=True)
+        try:
+            _auth_service.store.audit("asset_claim_unowned", user, "", "ok",
+                                      "libraries=%d items=%d prompt_libraries=%d created=%s" % (
+                                          result["libraries"], result["items"],
+                                          result["prompt_libraries"], result["created_library"]))
+        except Exception:
+            pass
+    return result
+
+
+def _count_user_asset_files(user_id):
+    root = _user_assets_root(user_id)
+    total = 0
+    if not os.path.isdir(root):
+        return 0
+    for _dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            if not filename.startswith("."):
+                total += 1
+    return total
+
+
+def asset_account_impact(user_id) -> Dict[str, int]:
+    owner = int(user_id)
+    counts = {"asset_libraries": 0, "asset_items": 0, "prompt_libraries": 0,
+              "asset_files": _count_user_asset_files(owner)}
+    try:
+        lib = load_asset_library()
+        for library in lib.get("libraries") or []:
+            if _asset_owner_int(library.get("owner_id")) != owner:
+                continue
+            counts["asset_libraries"] += 1
+            for cat in library.get("categories") or []:
+                counts["asset_items"] += len([it for it in (cat.get("items") or []) if isinstance(it, dict)])
+    except Exception as exc:
+        print("[asset] 注销清单统计资产库失败: %s" % exc)
+    try:
+        data = load_prompt_libraries()
+        counts["prompt_libraries"] = len([l for l in (data.get("libraries") or [])
+                                          if _asset_owner_int(l.get("owner_id")) == owner])
+    except Exception:
+        pass
+    return counts
+
+
+def purge_user_asset_data(user_id) -> Dict[str, int]:
+    """注销：删该账号名下的资产库/条目/产品/提示词库 + assets/users/{uid}，机器级旧文件不动。"""
+    owner = int(user_id)
+    counts = {"asset_libraries": 0, "asset_items": 0, "prompt_libraries": 0, "asset_files": 0}
+    with ASSET_LIBRARY_LOCK:
+        try:
+            lib = load_asset_library()
+            kept = []
+            removed = False
+            for library in lib.get("libraries") or []:
+                if _asset_owner_int(library.get("owner_id")) == owner:
+                    counts["asset_libraries"] += 1
+                    for cat in library.get("categories") or []:
+                        counts["asset_items"] += len([it for it in (cat.get("items") or []) if isinstance(it, dict)])
+                    removed = True
+                    continue
+                kept.append(library)
+            if removed:
+                lib["libraries"] = kept
+            products = [p for p in (lib.get("products") or [])
+                        if not (isinstance(p, dict) and _asset_owner_int(p.get("owner_id")) == owner)]
+            if len(products) != len(lib.get("products") or []):
+                lib["products"] = products
+                removed = True
+            amap = lib.get("active_library_ids")
+            if isinstance(amap, dict) and str(owner) in amap:
+                amap.pop(str(owner), None)
+                removed = True
+            if lib.get("libraries"):
+                remaining = [l for l in lib["libraries"] if _asset_owner_int(l.get("owner_id")) == owner]
+                if not remaining and lib.get("active_library_id") and not any(
+                        str(l.get("id") or "") == str(lib.get("active_library_id")) for l in lib["libraries"]):
+                    lib["active_library_id"] = lib["libraries"][0].get("id")
+            if removed:
+                save_asset_library(lib)
+        except Exception as exc:
+            print("[asset] 注销清理资产库失败（账号已注销，不回滚）: %s" % exc)
+        try:
+            data = load_prompt_libraries()
+            kept = []
+            removed = False
+            for plib in data.get("libraries") or []:
+                if _asset_owner_int(plib.get("owner_id")) == owner:
+                    counts["prompt_libraries"] += 1
+                    removed = True
+                    continue
+                kept.append(plib)
+            if removed:
+                data["libraries"] = kept
+                amap = data.get("active_library_ids")
+                if isinstance(amap, dict):
+                    amap.pop(str(owner), None)
+                save_prompt_libraries(data)
+        except Exception as exc:
+            print("[asset] 注销清理提示词库失败: %s" % exc)
+        root = _user_assets_root(owner)
+        counts["asset_files"] = _count_user_asset_files(owner)
+        try:
+            shutil.rmtree(root, ignore_errors=True)
+        except Exception as exc:
+            print("[asset] 删除账号素材目录失败 %s: %s" % (root, exc))
+    try:
+        from server import asset_acl
+        asset_acl.clear_cache()
+    except Exception:
+        pass
+    return counts
+
 
 def find_asset_category(lib, category_id):
     for cat in lib.get("categories", []):
@@ -11060,15 +11573,18 @@ def normalize_prompt_libraries(data):
             "id": lib_id,
             "name": sanitize_asset_name(raw.get("name") or default_name, default_name),
             "type": "prompt",
-            "readonly": False,
+            "readonly": is_system or lib_id == "community",
             "system": is_system,
+            "owner_id": _asset_owner_int(raw.get("owner_id")),
             "categories": normalize_prompt_template_categories(raw_categories, include_defaults=is_system),
             "items": items,
         })
     active = str(data.get("active_library_id") or "system")
     if not any(lib["id"] == active for lib in libraries):
         active = "system" if any(lib["id"] == "system" for lib in libraries) else (libraries[0]["id"] if libraries else "system")
-    return {"active_library_id": active, "libraries": libraries, "updated_at": int(data.get("updated_at") or now_ms())}
+    active_ids = data.get("active_library_ids") if isinstance(data.get("active_library_ids"), dict) else {}
+    return {"active_library_id": active, "active_library_ids": dict(active_ids),
+            "libraries": libraries, "updated_at": int(data.get("updated_at") or now_ms())}
 
 def load_prompt_libraries():
     if not os.path.exists(PROMPT_LIBRARY_PATH):
@@ -11107,6 +11623,54 @@ def find_prompt_library(data, library_id=""):
     libraries = data.get("libraries") if isinstance(data.get("libraries"), list) else []
     library_id = str(library_id or data.get("active_library_id") or "").strip()
     return next((item for item in libraries if item.get("id") == library_id), None) or (libraries[0] if libraries else None)
+
+
+PROMPT_PUBLIC_LIBRARY_IDS = frozenset({"system", "community"})
+
+
+def prompt_library_writable(library, owner_id=None) -> bool:
+    """写权限：未登录（本机模式）全可写；登录后只写自己的库，system/community 公共只读。"""
+    if owner_id is None:
+        return True
+    if not isinstance(library, dict):
+        return False
+    if str(library.get("id") or "") in PROMPT_PUBLIC_LIBRARY_IDS:
+        return False
+    return _asset_owner_int(library.get("owner_id")) == int(owner_id)
+
+
+def set_active_prompt_library(data, library_id, owner_id=None):
+    library_id = str(library_id or "").strip()
+    if not library_id:
+        return
+    if owner_id is None:
+        data["active_library_id"] = library_id
+        return
+    amap = data.get("active_library_ids") if isinstance(data.get("active_library_ids"), dict) else {}
+    amap[str(int(owner_id))] = library_id
+    data["active_library_ids"] = amap
+
+
+def visible_prompt_libraries(owner_id=None):
+    data = load_prompt_libraries()
+    if owner_id is None:
+        return data
+    owner = int(owner_id)
+    libraries = [l for l in (data.get("libraries") or [])
+                 if str(l.get("id") or "") in PROMPT_PUBLIC_LIBRARY_IDS
+                 or _asset_owner_int(l.get("owner_id")) == owner]
+    view = dict(data)
+    view["libraries"] = copy.deepcopy(libraries)
+    for library in view["libraries"]:
+        public = str(library.get("id") or "") in PROMPT_PUBLIC_LIBRARY_IDS
+        library["readonly"] = bool(public)
+        library["access_role"] = "public" if public else "owner"
+    amap = data.get("active_library_ids") if isinstance(data.get("active_library_ids"), dict) else {}
+    active = str(amap.get(str(owner)) or "")
+    if not any(l.get("id") == active for l in libraries):
+        active = libraries[0].get("id") if libraries else "system"
+    view["active_library_id"] = active or "system"
+    return view
 
 # ══════════════════════════════════════════════════════════════════════
 # 系统角色库（persona）
@@ -21264,16 +21828,34 @@ def _local_upload_rel_path(value):
         raise HTTPException(status_code=400, detail="非法路径")
     return norm
 
-def _local_upload_abs(rel):
+def _local_upload_resolve(rel):
+    """把相对路径解析到当前账号可用的上传根：自己的 users/{uid}/uploads 优先，首个认领账号再挂机器旧目录。"""
     rel_path = _local_upload_rel_path(rel)
-    path = os.path.abspath(os.path.join(LOCAL_UPLOAD_DIR, rel_path))
-    root = os.path.abspath(LOCAL_UPLOAD_DIR)
+    for root, prefix in local_upload_roots():
+        root_abs = os.path.abspath(root)
+        path = os.path.abspath(os.path.join(root_abs, rel_path))
+        try:
+            common = os.path.commonpath([root_abs, path])
+        except ValueError:
+            raise HTTPException(status_code=400, detail="非法路径")
+        if common != root_abs:
+            raise HTTPException(status_code=400, detail="非法路径")
+        if os.path.exists(path) or not rel_path:
+            return rel_path, path, prefix
+    root, prefix = local_upload_roots()[0]
+    root_abs = os.path.abspath(root)
+    path = os.path.abspath(os.path.join(root_abs, rel_path))
     try:
-        common = os.path.commonpath([root, path])
+        common = os.path.commonpath([root_abs, path])
     except ValueError:
         raise HTTPException(status_code=400, detail="非法路径")
-    if common != root:
+    if common != root_abs:
         raise HTTPException(status_code=400, detail="非法路径")
+    return rel_path, path, prefix
+
+
+def _local_upload_abs(rel):
+    rel_path, path, _prefix = _local_upload_resolve(rel)
     return rel_path, path
 
 def _local_upload_safe_path(name):
@@ -21302,7 +21884,8 @@ def _local_upload_safe_file_stem(name):
     return cleaned[:120]
 
 def _local_upload_caption_path(filename):
-    return os.path.splitext(os.path.join(LOCAL_UPLOAD_DIR, filename))[0] + ".txt"
+    rel_path, path, _prefix = _local_upload_resolve(filename)
+    return os.path.splitext(path)[0] + ".txt"
 
 def _read_local_upload_caption(filename):
     caption_path = _local_upload_caption_path(filename)
@@ -21319,8 +21902,7 @@ def _read_local_upload_caption(filename):
     return text, os.path.basename(caption_path)
 
 def _local_upload_item(filename):
-    path = os.path.join(LOCAL_UPLOAD_DIR, filename)
-    rel = _local_upload_rel_path(filename)
+    rel, path, url_prefix = _local_upload_resolve(filename)
     try:
         stat = os.stat(path)
         size = stat.st_size
@@ -21333,7 +21915,7 @@ def _local_upload_item(filename):
         "id": rel,
         "file": rel,
         "name": _local_upload_display_name(rel),
-        "url": f"/assets/uploads/{urllib.parse.quote(rel, safe='/')}",
+        "url": url_prefix + "/" + urllib.parse.quote(rel, safe="/"),
         "kind": kind or "image",
         "size": size,
         "created_at": created_at,
@@ -21402,10 +21984,12 @@ def _local_scan_is_link(path):
         return True
     return False
 
-def _local_output_item(filename):
-    """assets/output 里的画布生成物：作为「本地素材」的只读条目（不改名 / 不删除 / 不移动）。
-    生成物和上传物放一起，用户才能在素材库里看到 BEAT / 旧画布生成出来的图片和视频。"""
-    path = os.path.join(OUTPUT_OUTPUT_DIR, filename)
+def _local_output_item(filename, root=None, url_prefix=None):
+    """画布生成物：作为「本地素材」的只读条目（不改名 / 不删除 / 不移动）。
+    登录后生成物落 users/{uid}/output；首个认领账号额外能看到机器旧 output。"""
+    root = root or OUTPUT_OUTPUT_DIR
+    url_prefix = (url_prefix or "/assets/output").rstrip("/")
+    path = os.path.join(root, filename)
     kind, _ = _local_upload_kind_ext(filename, "")
     if kind is None:
         return None
@@ -21420,7 +22004,7 @@ def _local_output_item(filename):
         "id": "output:" + filename,
         "file": "",
         "name": filename,
-        "url": "/assets/output/" + urllib.parse.quote(filename, safe=""),
+        "url": url_prefix + "/" + urllib.parse.quote(filename, safe=""),
         "kind": kind,
         "size": size,
         "created_at": created_at,
@@ -21430,29 +22014,34 @@ def _local_output_item(filename):
     }
 
 def _local_output_items(limit=LOCAL_SCAN_MAX_ENTRIES, scan=None):
-    """assets/output 只扫一层（生成物都落在这一层），同样跳过链接并按剩余预算截断。"""
-    try:
-        names = sorted(os.listdir(OUTPUT_OUTPUT_DIR), key=str.lower)
-    except OSError:
-        return []
+    """画布生成物只扫一层（生成物都落在这一层），同样跳过链接并按剩余预算截断。"""
     out = []
-    for name in names:
-        if name.startswith(".") or name.startswith("._"):
+    seen = set()
+    for root, url_prefix in local_output_roots():
+        try:
+            names = sorted(os.listdir(root), key=str.lower)
+        except OSError:
             continue
-        if limit and len(out) >= limit:
-            if scan is not None:
-                scan["truncated"] = True
-            break
-        full = os.path.join(OUTPUT_OUTPUT_DIR, name)
-        if _local_scan_is_link(full):
-            if scan is not None:
-                scan["skipped_links"] += 1
-            continue
-        if not os.path.isfile(full):
-            continue
-        item = _local_output_item(name)
-        if item:
-            out.append(item)
+        for name in names:
+            if name.startswith(".") or name.startswith("._"):
+                continue
+            if limit and len(out) >= limit:
+                if scan is not None:
+                    scan["truncated"] = True
+                return out
+            if name in seen:
+                continue
+            full = os.path.join(root, name)
+            if _local_scan_is_link(full):
+                if scan is not None:
+                    scan["skipped_links"] += 1
+                continue
+            if not os.path.isfile(full):
+                continue
+            item = _local_output_item(name, root, url_prefix)
+            if item:
+                seen.add(name)
+                out.append(item)
     return out
 
 def _append_local_output_items(root_node, items, scan=None):
@@ -21494,8 +22083,10 @@ def _local_upload_tree_and_items():
     root_node["scan"] = scan
     folder_map = {"": root_node}
     items = []
-    uploads_root = LOCAL_UPLOAD_DIR
-    if os.path.isdir(uploads_root):
+    seen_ids = set()
+    for uploads_root, _url_prefix in local_upload_roots():
+        if not os.path.isdir(uploads_root):
+            continue
         for current, dirs, files in os.walk(uploads_root, followlinks=False):
             if len(items) >= LOCAL_SCAN_MAX_ENTRIES:
                 scan["truncated"] = True
@@ -21523,9 +22114,11 @@ def _local_upload_tree_and_items():
                 folder_map[rel_dir] = node
             for dirname in dirs:
                 child_rel = f"{rel_dir}/{dirname}".lstrip("/")
-                child = _local_upload_folder_node(child_rel)
-                folder_map[child_rel] = child
-                node["children"].append(child)
+                child = folder_map.get(child_rel)
+                if child is None:
+                    child = _local_upload_folder_node(child_rel)
+                    folder_map[child_rel] = child
+                    node["children"].append(child)
             for name in sorted(files, key=str.lower):
                 if name.startswith(".") or name.startswith("._"):
                     continue
@@ -21541,7 +22134,10 @@ def _local_upload_tree_and_items():
                 kind, _ = _local_upload_kind_ext(name, "")
                 if kind is None:
                     continue
+                if rel_file in seen_ids:
+                    continue
                 item = _local_upload_item(rel_file)
+                seen_ids.add(rel_file)
                 node["items"].append(item)
                 items.append(item)
     _append_local_output_items(root_node, items, scan)
@@ -23562,28 +24158,6 @@ async def api_set_storage_settings(request: Request):
 
     return await storage_settings_payload()
 
-
-@app.get("/api/asset/classification-prompt")
-async def api_get_classification_prompt():
-    """返回素材分类 Prompt 的完整内容和维度名称映射，供前端渲染分类界面。"""
-    return {
-        "prompt": ASSET_CLASSIFICATION_PROMPT,
-        "dimension_names": ASSET_CLASSIFICATION_DIMENSION_NAMES,
-    }
-
-class ClassificationPromptPayload(BaseModel):
-    extra_prompt: str = ""
-
-@app.put("/api/asset/classification-prompt")
-async def api_update_classification_prompt(payload: ClassificationPromptPayload):
-    """更新素材分类 Prompt 的补充要求部分（追加在默认 Prompt 之后）。"""
-    extra = str(payload.extra_prompt or "").strip()
-    result = asset_classification_prompt(extra)
-    return {
-        "prompt": result,
-        "extra_prompt": extra,
-        "dimension_names": ASSET_CLASSIFICATION_DIMENSION_NAMES,
-    }
 
 @app.post("/api/image/detect-media-url")
 async def api_detect_image_media_url(payload: Dict[str, Any]):
@@ -28476,7 +29050,7 @@ async def update_canvas_meta(canvas_id: str, payload: CanvasMetaUpdate, request:
     require_canvas_access(canvas, request, "edit")
     if payload.title is not None and (payload.title or "") != (canvas.get("title") or ""):
         # editor 能改颜色/置顶等元数据，但不能重命名（重命名属于管理动作）。
-        # auth-off（本机单用户）没有登录用户，不能拿 None 去判 manage —— 以前这里恒为假，改名永远 403。
+        # 没登录（本机模式）改名始终放行；登录后只有所有者能改名（管理员也没有特权）。
         user = request_auth_user(request)
         if user and not _canvas_perms.can(canvas_access_role(canvas, request), "manage"):
             raise HTTPException(status_code=403, detail="只有所有者或管理员可以重命名画布")
@@ -28508,13 +29082,16 @@ async def get_canvas(canvas_id: str, request: Request):
 
 @app.post("/api/canvases/{canvas_id}/claim")
 async def claim_canvas(canvas_id: str, request: Request):
-    """旧画布过渡：admin 把无主画布认领到自己名下。"""
+    """把无主画布认领到自己名下：登录用户都可以（登录时也会自动认领，这里保留手动入口）。"""
     user = request_auth_user(request)
-    if not user or str(user.get("role")) != "admin":
-        raise HTTPException(status_code=403, detail="仅管理员可认领画布")
+    if not user:
+        raise HTTPException(status_code=403, detail="登录后才能认领画布")
     canvas = load_canvas_any(canvas_id)
     if canvas.get("deleted_at"):
         raise HTTPException(status_code=400, detail="画布在回收站，不能认领")
+    owner = _canvas_owner_id(canvas)
+    if owner is not None and owner != int(user["id"]):
+        raise HTTPException(status_code=403, detail="这张画布已属于别人的账号")
     canvas["owner_id"] = int(user["id"])
     save_canvas(canvas)
     try:
@@ -28536,9 +29113,10 @@ class CanvasMemberRoleRequest(BaseModel):
 
 
 def _canvas_permission_actor(request):
+    # 登录后都能用画布共享（含 optional）；没登录 = 本机模式，不提供共享入口
     user = request_auth_user(request)
     if not user:
-        raise HTTPException(status_code=403, detail="登录体系未启用，画布权限不可用")
+        raise HTTPException(status_code=403, detail="登录后才能共享画布")
     return user
 
 
@@ -29418,15 +29996,16 @@ async def export_canvas_workflow_to_library(payload: CanvasWorkflowExportRequest
     filename = sanitize_export_filename(payload.filename or "canvas-workflow.zip", "canvas-workflow.zip")
     if not filename.lower().endswith(".zip"):
         filename += ".zip"
+    owner = current_asset_owner_id()
     lib = load_asset_library()
-    _, cat = asset_library_workflow_category(lib, payload.library_id, payload.category_id)
+    _, cat = asset_library_workflow_category(lib, payload.library_id, payload.category_id, owner)
     item = make_workflow_library_item_from_bytes(archive, filename, payload.name or os.path.splitext(filename)[0])
     item["node_count"] = meta.get("node_count") or len(payload.nodes or [])
     item["connection_count"] = meta.get("connection_count") or len(payload.connections or [])
     item["resource_count"] = len(meta.get("resources") or [])
     cat.setdefault("items", []).append(item)
     save_asset_library(lib)
-    return {"library": lib, "item": item}
+    return {"library": visible_asset_library(owner), "item": item}
 
 
 @app.post("/api/canvas-workflows/import")
@@ -33089,8 +33668,6 @@ STORAGE_SETTINGS_FILE = os.path.join(DATA_DIR, "storage_settings.json")
 
 STORAGE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif"}
 
-ASSET_CLASSIFICATION_PROMPT_FILE = os.path.join(DATA_DIR, "asset_classification_prompt.txt")
-
 JIMENG_UPSCALE_RESOLUTIONS = {"2k", "4k", "8k"}
 
 JIMENG_VIDEO_MODELS_BY_COMMAND = {
@@ -33850,42 +34427,6 @@ def storage_file_item(kind, root, path):
         pass
     return item
 
-
-@app.get("/api/asset-classification-prompt")
-async def get_asset_classification_prompt():
-    current = load_asset_classification_prompt()
-    return {
-        "prompt": current,
-        "default_prompt": ASSET_CLASSIFICATION_PROMPT,
-        "custom": current.strip() != ASSET_CLASSIFICATION_PROMPT.strip(),
-    }
-
-@app.patch("/api/asset-classification-prompt")
-async def update_asset_classification_prompt(payload: Dict[str, str]):
-    prompt = save_asset_classification_prompt((payload or {}).get("prompt") or "")
-    return {"prompt": prompt, "custom": True}
-
-def load_asset_classification_prompt():
-    try:
-        if os.path.isfile(ASSET_CLASSIFICATION_PROMPT_FILE):
-            with open(ASSET_CLASSIFICATION_PROMPT_FILE, "r", encoding="utf-8-sig") as f:
-                text = f.read().strip()
-                if text:
-                    return text
-    except Exception as exc:
-        print(f"读取素材分类规则失败: {exc}")
-    return ASSET_CLASSIFICATION_PROMPT
-
-def save_asset_classification_prompt(text):
-    value = str(text or "").strip()
-    if not value:
-        raise HTTPException(status_code=400, detail="分类规则不能为空")
-    if len(value) > 20000:
-        raise HTTPException(status_code=400, detail="分类规则过长")
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(ASSET_CLASSIFICATION_PROMPT_FILE, "w", encoding="utf-8") as f:
-        f.write(value)
-    return value
 
 def openai_video_proxy_local_image_path(ref) -> str:
     raw = ref.get("url", "") if isinstance(ref, dict) else ref
@@ -35501,13 +36042,48 @@ def _agent_ratio_setting(kind, value):
     raise AgentToolError(f"图片比例 {value} 不支持，可选：{'/'.join(_AGENT_SMART_RATIO_KEYS)}", code="invalid_args")
 
 
-_AGENT_IMAGE_SETTING_KEYS = ("provider", "model", "ratio", "resolution", "count", "quality")
-_AGENT_VIDEO_SETTING_KEYS = ("provider", "model", "ratio", "duration", "resolution", "count", "audio", "mode")
+# 助手能改的生成参数：与 canvas-next/model.ts 的参数类型逐项对齐（图片 ImageParams / 视频 VideoParams /
+# 文本 TextParams / 音频 AudioParams），键名就是画布节点 data.gen.params 里的字段名。
+_AGENT_IMAGE_SETTING_KEYS = ("provider", "model", "ratio", "resolution", "count", "quality",
+                             "thinking", "outputFormat", "frameCount", "frameDuration",
+                             "background", "search", "style", "camera", "mj")
+_AGENT_VIDEO_SETTING_KEYS = ("provider", "model", "ratio", "duration", "resolution", "count", "audio", "mode",
+                             "times", "genMode", "turbo", "draft", "multiShot")
+_AGENT_TEXT_SETTING_KEYS = ("provider", "model", "output", "think", "search")
+_AGENT_AUDIO_SETTING_KEYS = ("provider", "model", "kind", "dur")
+_AGENT_SETTING_KEYS = {"image": _AGENT_IMAGE_SETTING_KEYS, "video": _AGENT_VIDEO_SETTING_KEYS,
+                       "text": _AGENT_TEXT_SETTING_KEYS, "audio": _AGENT_AUDIO_SETTING_KEYS}
+_AGENT_SETTING_LABELS = {"image": "图片", "video": "视频", "text": "文本", "audio": "音频"}
+# provider/model 校验用哪个模型清单（/api/config 的字段名）
+_AGENT_SETTING_MODEL_FIELDS = {"image": "image_models", "video": "video_models",
+                               "text": "chat_models", "audio": "audio_models"}
+# 可选参数：「默认 / 不传」用这些值表示，落到节点上就是把 params 里的键删掉
+_AGENT_SETTING_CLEAR_VALUES = ("", "default", "none", "static", "auto_default")
+# 可以显式清空的参数（其它参数清空 = 忽略，沿用旧行为）
+_AGENT_SETTING_CLEARABLE = frozenset(("quality", "thinking", "outputFormat", "background", "style",
+                                      "camera", "mj", "genMode", "turbo", "draft", "multiShot", "think"))
+_AGENT_SETTING_BOOL_KEYS = frozenset(("audio", "thinking", "search", "turbo", "draft", "multiShot"))
 _AGENT_SETTING_ALIASES = {
     "provider_id": "provider", "platform": "provider", "aspect_ratio": "ratio", "aspect": "ratio",
     "n": "count", "seconds": "duration", "generate_audio": "audio",
     "res": "resolution", "durations": "duration", "resolution_tier": "resolution",
 }
+
+
+def _agent_setting_key_table(kind):
+    """键名归一表：忽略大小写 / 下划线 / 连字符（output_format 与 outputFormat 都认）。"""
+    return {re.sub(r"[^a-z0-9]", "", str(key).lower()): key
+            for key in _AGENT_SETTING_KEYS.get(kind) or _AGENT_IMAGE_SETTING_KEYS}
+
+
+_AGENT_SETTING_KEY_TABLES = {kind: _agent_setting_key_table(kind) for kind in _AGENT_SETTING_KEYS}
+_AGENT_SETTING_FIELD_KEYS = {"image": "image", "video": "video", "text": "text", "audio": "audio"}
+
+
+def _agent_setting_key(kind, key):
+    """外部传进来的键 → 规范键名；不认识的返回空串。"""
+    text = _AGENT_SETTING_ALIASES.get(str(key or "").strip().lower(), str(key or "").strip().lower())
+    return _AGENT_SETTING_KEY_TABLES.get(kind, {}).get(re.sub(r"[^a-z0-9]", "", text), "")
 _AGENT_IMAGE_SETTING_FIELDS = {"provider": "provider_id", "model": "model", "ratio": "ratio",
                                "resolution": "resolution", "count": "count", "quality": "quality"}
 _AGENT_VIDEO_SETTING_FIELDS = {"provider": "videoProvider", "model": "videoModel", "ratio": "videoAspect",
@@ -37559,7 +38135,17 @@ def _agent_node_reference_items(canvas, node, exclude_self=False):
         if (owner_id and index is not None and f"{owner_id}|{index}" in blocked) or f"url|{url}" in blocked:
             return
         seen.add(url)
-        out.append({"url": url, "kind": _agent_item_kind(item), "name": str(item.get("name") or "")[:80]})
+        # 文档里记着的真实像素（前端写结果时带上）：远程链接读不到文件也能按原图比例算尺寸
+        entry = {"url": url, "kind": _agent_item_kind(item), "name": str(item.get("name") or "")[:80]}
+        try:
+            # 画布文档里结果图记的是 width/height（老字段），画布内部用的是 w/h，两种都认
+            width = int(item.get("width") or item.get("w") or 0)
+            height = int(item.get("height") or item.get("h") or 0)
+        except (TypeError, ValueError):
+            width, height = 0, 0
+        if width > 0 and height > 0:
+            entry["w"], entry["h"] = width, height
+        out.append(entry)
 
     def add_refs(refs):
         for owner, item, index in refs:
@@ -37779,9 +38365,9 @@ def _agent_effective_run_settings(canvas, node):
 
 
 def _agent_settings_kind(node):
-    """节点的生成参数按哪套写：image / video；批量节点看它出图还是出视频；其它节点没有生成参数返回空串。"""
+    """节点的生成参数按哪套写：image / video / text / audio；批量节点看它出图还是出视频；其它节点没有生成参数返回空串。"""
     kind = _agent_node_kind(node)
-    if kind in ("image", "video"):
+    if kind in ("image", "video", "text", "audio"):
         return kind
     if _agent_node_type(node) == "smart-batch":
         return "video" if node.get("tableBatchVideo") else "image"
@@ -37809,21 +38395,90 @@ def _agent_node_settings_view(canvas, node):
     return {k: v for k, v in view.items() if v not in (None, "")}
 
 
+def _agent_setting_bool(value):
+    """布尔参数：字符串认 1/true/yes/on/开/是，其余按 Python 真值。"""
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on", "开", "是")
+    return bool(value)
+
+
+def _agent_setting_int(value, name, low, high):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise AgentToolError(f"{name} 必须是整数", code="invalid_args")
+    if not low <= number <= high:
+        raise AgentToolError(f"{name} 超出范围 {low}-{high}", code="invalid_args")
+    return number
+
+
+def _agent_setting_camera(value):
+    """摄影机：true/false 只表示开关（组合沿用节点现有的），对象 = {on, body, lens, focal, aperture}。"""
+    if isinstance(value, bool):
+        return {"on": value}
+    if isinstance(value, dict):
+        out = {"on": _agent_setting_bool(value.get("on", True))}
+        for key in ("body", "lens", "focal", "aperture"):
+            if value.get(key) is not None:
+                try:
+                    out[key] = max(0, int(value[key]))
+                except (TypeError, ValueError):
+                    raise AgentToolError(f"camera.{key} 必须是整数", code="invalid_args")
+        return out
+    text = str(value).strip().lower()
+    if text in _AGENT_SETTING_CLEAR_VALUES or text in ("off", "关"):
+        return {}
+    if text in ("on", "开", "true"):
+        return {"on": True}
+    raise AgentToolError("camera 传 true/false，或 {on, body, lens, focal, aperture}", code="invalid_args")
+
+
+def _agent_setting_mj(value):
+    """Midjourney 参数 {version, speed, hd, stylize}；字符串当版本名，空 / default = 清空。"""
+    if not isinstance(value, dict):
+        text = str(value if value is not None else "").strip()
+        if text.lower() in _AGENT_SETTING_CLEAR_VALUES or text in ("off", "关"):
+            return {}
+        if not text:
+            return {}
+        return {"version": text[:40]}
+    out = {}
+    for key in ("version", "speed"):
+        text = str(value.get(key) or "").strip()
+        if text:
+            out[key] = text[:40]
+    if value.get("hd") is not None:
+        out["hd"] = _agent_setting_bool(value.get("hd"))
+    if value.get("stylize") is not None:
+        try:
+            out["stylize"] = int(value["stylize"])
+        except (TypeError, ValueError):
+            raise AgentToolError("mj.stylize 必须是整数", code="invalid_args")
+    return out
+
+
 def _agent_validate_settings(raw, kind):
     """校验助手要写的生成参数，返回规范化后的 {provider, model, ratio, ...}；不合法时给出可选值，方便模型自己改。"""
     if raw is None:
         return {}
     if not isinstance(raw, dict):
         raise AgentToolError("settings 必须是对象", code="invalid_args")
+    kind = kind if kind in _AGENT_SETTING_KEYS else "image"
     is_video = kind == "video"
-    allowed = _AGENT_VIDEO_SETTING_KEYS if is_video else _AGENT_IMAGE_SETTING_KEYS
-    label = "视频" if is_video else "图片"
+    allowed = _AGENT_SETTING_KEYS[kind]
+    label = _AGENT_SETTING_LABELS[kind]
     out = {}
     for key, value in raw.items():
-        name = _AGENT_SETTING_ALIASES.get(str(key).strip().lower(), str(key).strip().lower())
-        if name not in allowed:
+        name = _agent_setting_key(kind, key)
+        if not name:
             raise AgentToolError(f"settings 不支持 {key}；{label}节点可改：{'/'.join(allowed)}", code="invalid_args")
-        if value is None or (isinstance(value, str) and not value.strip()):
+        if value is None:
+            continue
+        if isinstance(value, str) and (not value.strip() or value.strip().lower() in _AGENT_SETTING_CLEAR_VALUES):
+            # 空串 / default / none 都是「跟随默认」：只有可清空参数有意义（落到节点上就是删键），其余沿用旧行为忽略。
+            # 布尔键（thinking / turbo / draft / multiShot）必须在这里先接住，否则 default 会被当真值转成 false / 报错。
+            if name in _AGENT_SETTING_CLEARABLE:
+                out[name] = ""
             continue
         if name == "ratio":
             ratio_value = _agent_ratio_setting("video" if is_video else "image", value)
@@ -37848,15 +38503,61 @@ def _agent_validate_settings(raw, kind):
             out[name] = number
         elif name == "quality":
             text = str(value).strip().lower()
-            if text not in ("auto", "low", "medium", "high"):
+            if text in _AGENT_SETTING_CLEAR_VALUES or text in ("默认",):
+                out["quality"] = ""
+            elif text not in ("auto", "low", "medium", "high"):
                 raise AgentToolError("quality 可选：auto/low/medium/high", code="invalid_args")
-            out["quality"] = text
-        elif name == "audio":
-            out["audio"] = bool(value) if not isinstance(value, str) else value.strip().lower() in ("1", "true", "yes", "on", "是")
+            else:
+                out["quality"] = text
+        elif name in _AGENT_SETTING_BOOL_KEYS:
+            out[name] = _agent_setting_bool(value)
+        elif name == "times":
+            out["times"] = _agent_setting_int(value, "times", 1, 4)
+        elif name in ("frameCount", "frameDuration"):
+            low, high = (2, 16) if name == "frameCount" else (20, 2000)
+            out[name] = _agent_setting_int(value, name, low, high)
+        elif name == "background":
+            text = str(value).strip().lower()
+            if text in _AGENT_SETTING_CLEAR_VALUES or text in ("默认", "无"):
+                out["background"] = ""
+            elif text in ("transparent", "透明", "透明背景"):
+                out["background"] = "transparent"
+            else:
+                raise AgentToolError("background 可选：transparent / default（不透明）", code="invalid_args")
+        elif name == "outputFormat":
+            text = str(value).strip().lower()
+            if text in _AGENT_SETTING_CLEAR_VALUES or text in ("默认", "png"):
+                out["outputFormat"] = ""
+            elif text in ("gif", "svg"):
+                out["outputFormat"] = text
+            else:
+                raise AgentToolError("outputFormat 可选：gif / svg / default（静态图）", code="invalid_args")
+        elif name == "style":
+            text = str(value).strip()
+            out["style"] = "" if text.lower() in _AGENT_SETTING_CLEAR_VALUES else text[:40]
+        elif name == "genMode":
+            text = str(value).strip()
+            out["genMode"] = "" if text.lower() in _AGENT_SETTING_CLEAR_VALUES else text[:40]
+        elif name == "camera":
+            out["camera"] = _agent_setting_camera(value)
+        elif name == "mj":
+            out["mj"] = _agent_setting_mj(value)
+        elif name == "output":
+            text = str(value).strip().lower()
+            if text not in ("text", "table", "storyboard"):
+                raise AgentToolError("output 可选：text / table / storyboard", code="invalid_args")
+            out["output"] = text
+        elif name == "think":
+            text = _thinking.normalize_think_level(value)
+            if not text:
+                raise AgentToolError(f"think 可选：{'/'.join(_thinking.THINK_LEVELS)}", code="invalid_args")
+            out["think"] = text
+        elif name in ("kind", "dur"):
+            out[name] = str(value).strip()[:20]
         else:
             out[name] = str(value).strip()
     if "provider" in out or "model" in out:
-        field = "video_models" if is_video else "image_models"
+        field = _AGENT_SETTING_MODEL_FIELDS[kind]
         provider, model = out.get("provider", ""), out.get("model", "")
         if provider:
             try:
@@ -37865,7 +38566,7 @@ def _agent_validate_settings(raw, kind):
                 raise AgentToolError(f"{exc.detail}；可用平台见「平台与模型清单」", code="invalid_args")
             out["provider"] = cfg["id"]
             declared = _agent_declared_models(cfg, field)
-            if not is_video:
+            if kind == "image":
                 declared += [str(item or "").strip() for item in (cfg.get("models") or []) if str(item or "").strip()]
             if model and declared and model.lower() not in {item.lower() for item in declared}:
                 raise AgentToolError(f"平台 {cfg['id']} 没有声明{label}模型 {model}；可选：{'、'.join(list(dict.fromkeys(declared))[:12])}",
@@ -38588,6 +39289,22 @@ def _agent_classic_ratio(value):
     return _AGENT_SMART_RATIO_LABELS.get(text, text)
 
 
+def _agent_classic_write_optional(params, key, value, changed):
+    """可选参数写进 node params：显式清空（空串 / default / none / static）= 删掉这个键，其余按值写入。"""
+    if isinstance(value, str) and value.strip().lower() in _AGENT_SETTING_CLEAR_VALUES:
+        if key in params:
+            params.pop(key, None)
+            changed.append(key)
+        return
+    if value in (None, "", {}, []):
+        if key in params:
+            params.pop(key, None)
+            changed.append(key)
+        return
+    params[key] = value
+    changed.append(key)
+
+
 def _agent_classic_apply_settings(node, kind, settings):
     """把规范化后的生成参数写进经典画布节点。
 
@@ -38595,7 +39312,7 @@ def _agent_classic_apply_settings(node, kind, settings):
     图片 size 是 1K/2K 档位、视频是 res/dur），同时保留顶层兼容字段（ratio / aspectRatio / duration），
     这样画布上立刻能看到新比例/分辨率，节点自己的 gen 参数也不会被冲掉。
     """
-    if not settings or kind not in ("image", "video"):
+    if not settings or kind not in ("image", "video", "text", "audio"):
         return []
     gen = node.get("data") if isinstance(node.get("data"), dict) else None
     gen_obj = gen.get("gen") if isinstance(gen, dict) and isinstance(gen.get("gen"), dict) else None
@@ -38619,6 +39336,16 @@ def _agent_classic_apply_settings(node, kind, settings):
         if "audio" in settings:
             params["sound"] = bool(settings["audio"])
             changed.append("audio")
+        if "times" in settings:
+            params["times"] = int(settings["times"])
+            changed.append("times")
+        for flag in ("turbo", "draft", "multiShot"):
+            if flag in settings:
+                value = settings[flag]
+                cleared = isinstance(value, str) and value.strip().lower() in _AGENT_SETTING_CLEAR_VALUES
+                _agent_classic_write_optional(params, flag, "" if cleared else bool(value), changed)
+        if "genMode" in settings:
+            _agent_classic_write_optional(params, "genMode", settings["genMode"], changed)
         if settings.get("mode"):
             label = _agent_beat_video_mode_label(settings["mode"])
             if label:
@@ -38628,7 +39355,7 @@ def _agent_classic_apply_settings(node, kind, settings):
         if params.get("mode") in ("首帧", "首尾帧") and str(params.get("ratio") or "") not in ("adaptive", "auto", "自适应"):
             params["ratio"] = "adaptive"
             node["aspectRatio"] = "adaptive"
-    else:
+    elif kind == "image":
         if "ratio" in settings:
             ratio = _agent_classic_ratio(settings["ratio"])
             if ratio:
@@ -38639,9 +39366,69 @@ def _agent_classic_apply_settings(node, kind, settings):
             params["size"] = str(settings["resolution"]).strip().upper()
             changed.append("resolution")
         if "quality" in settings:
-            params["quality"] = settings["quality"]
-            changed.append("quality")
-    if "count" in settings:
+            quality = str(settings["quality"] or "").strip().lower()
+            if quality and quality not in _AGENT_SETTING_CLEAR_VALUES:
+                params["quality"] = quality
+                changed.append("quality")
+            elif "quality" in params:
+                params.pop("quality", None)
+                changed.append("quality")
+        if "thinking" in settings:
+            thinking = settings["thinking"]
+            if isinstance(thinking, str) and thinking.strip().lower() in _AGENT_SETTING_CLEAR_VALUES:
+                if "thinking" in params:
+                    params.pop("thinking", None)
+                    changed.append("thinking")
+            else:
+                params["thinking"] = bool(thinking)
+                changed.append("thinking")
+        if "search" in settings:
+            params["search"] = bool(settings["search"])
+            changed.append("search")
+        if "style" in settings:
+            _agent_classic_write_optional(params, "style", settings["style"], changed)
+        if "outputFormat" in settings:
+            _agent_classic_write_optional(params, "outputFormat", settings["outputFormat"], changed)
+        if "background" in settings:
+            _agent_classic_write_optional(params, "background", settings["background"], changed)
+        if "frameCount" in settings:
+            _agent_classic_write_optional(params, "frameCount", int(settings["frameCount"]), changed)
+        if "frameDuration" in settings:
+            _agent_classic_write_optional(params, "frameDuration", int(settings["frameDuration"]), changed)
+        if "camera" in settings:
+            value = settings["camera"] if isinstance(settings["camera"], dict) else {}
+            if value:
+                current = params.get("camera") if isinstance(params.get("camera"), dict) else {}
+                params["camera"] = {**current, **value}
+                changed.append("camera")
+            elif "camera" in params:
+                params.pop("camera", None)
+                changed.append("camera")
+        if "mj" in settings:
+            value = settings["mj"] if isinstance(settings["mj"], dict) else {}
+            if value:
+                params["mj"] = dict(value)
+                changed.append("mj")
+            elif "mj" in params:
+                params.pop("mj", None)
+                changed.append("mj")
+    elif kind == "text":
+        if "output" in settings:
+            params["output"] = str(settings["output"] or "text")
+            changed.append("output")
+        if "search" in settings:
+            params["search"] = bool(settings["search"])
+            changed.append("search")
+        if "think" in settings:
+            _agent_classic_write_optional(params, "think", settings["think"], changed)
+    elif kind == "audio":
+        if "kind" in settings:
+            params["kind"] = str(settings["kind"])
+            changed.append("kind")
+        if "dur" in settings:
+            params["dur"] = str(settings["dur"])
+            changed.append("dur")
+    if "count" in settings and kind in ("image", "video"):
         params["count"] = int(settings["count"])
         changed.append("count")
     provider = str(settings.get("provider") or "").strip()
@@ -38692,7 +39479,7 @@ def _agent_tool_update_node_validate_classic(args):
     if args.get("settings") is not None:
         settings_kind = _agent_settings_kind(node)
         if not settings_kind:
-            raise AgentToolError("这个节点没有生成参数，settings 只能用在图片/视频节点", code="invalid_args")
+            raise AgentToolError("这个节点没有生成参数，settings 只能用在图片/视频/文本/音频节点", code="invalid_args")
         raw_settings = args["settings"]
         if not isinstance(raw_settings, dict):
             raise AgentToolError("settings 必须是对象", code="invalid_args")
@@ -39836,7 +40623,14 @@ def _agent_source_size_from_refs(refs, resolution="1k"):
     读不到像素（远程/非本地素材）返回空串，调用方保持原兜底。"""
     long_side = {"1k": 1536, "2k": 2048, "4k": 3840}.get(str(resolution or "1k").lower(), 1536)
     for ref in (refs or []):
-        raw = image_size_from_reference(ref if isinstance(ref, dict) else {"url": str(ref or "")})
+        item = ref if isinstance(ref, dict) else {"url": str(ref or "")}
+        # 先认节点文档里记的像素（远程素材也有），读不到再去啃本地文件
+        try:
+            known_w = int(item.get("width") or item.get("w") or 0)
+            known_h = int(item.get("height") or item.get("h") or 0)
+        except (TypeError, ValueError):
+            known_w, known_h = 0, 0
+        raw = ("%dx%d" % (known_w, known_h)) if known_w > 0 and known_h > 0 else image_size_from_reference(item)
         matched = re.fullmatch(r"(\d+)x(\d+)", str(raw or ""))
         if not matched:
             continue
@@ -40307,7 +41101,7 @@ def _agent_tool_update_node_validate(args):
     if args.get("settings") is not None:
         skind = _agent_settings_kind(node)
         if not skind:
-            raise AgentToolError(f"{kind} 节点没有生成参数，settings 只能用在图片/视频/批量节点", code="invalid_args")
+            raise AgentToolError(f"{kind} 节点没有生成参数，settings 只能用在图片/视频/文本/音频/批量节点", code="invalid_args")
         settings = dict(args["settings"]) if isinstance(args["settings"], dict) else args["settings"]
         if kind == "batch" and isinstance(settings, dict):
             settings.pop("count", None)
@@ -40487,6 +41281,9 @@ async def _agent_generate_smart(args, kind):
     ratio_value = _agent_ratio_setting(kind, args.get("ratio"))
     if ratio_value:
         settings["ratio"] = ratio_value
+    elif str(args.get("ratio") or "").strip():
+        # 显式选了「原图比例」：把节点上可能残留的旧比例清空，否则旧值会把方图带回来
+        settings["ratio"] = ""
     node_args = {"canvas_id": canvas_id, "type": kind, "smart": True, "title": base_title, "prompt": "",
                  "x": None, "y": None, "settings": {}, "inputs": [prompt_res["node_id"]]}
     node_res = _agent_tool_create_node_run(node_args)
@@ -40748,29 +41545,10 @@ def _agent_asset_terms(query):
     return [p for p in parts if p]
 
 
-def _agent_asset_tags(classification, limit=12):
-    """从 AI 分类结果里取出标签（去重、保序）。"""
-    if not isinstance(classification, dict):
-        return []
-    tags, seen = [], set()
-    for entry in (classification.get("flat") or []):
-        tag = str((entry or {}).get("tag") or "").strip() if isinstance(entry, dict) else ""
-        if tag and tag not in seen:
-            seen.add(tag)
-            tags.append(tag)
-    for tag in (classification.get("tags") or []):
-        tag = str(tag or "").strip()
-        if tag and tag not in seen:
-            seen.add(tag)
-            tags.append(tag)
-    return tags[:limit] if limit else tags
+def _agent_asset_score(terms, texts):
+    """关键词打分：名称/说明/文件夹等文本里包含检索词得分（取最高权重）。
 
-
-def _agent_asset_score(terms, texts, tags):
-    """关键词打分：名称/摘要等文本里包含检索词得分；AI 标签既可被检索词包含、也可包含检索词。
-
-    「白色运动鞋」这种不带空格的中文检索词切不开，靠「标签（白色、运动鞋）是检索词的子串」来命中。
-    texts: [(文本, 权重)]；tags: 标签列表（权重 2）。没有任何命中返回 0。
+    texts: [(文本, 权重)]。没有任何命中返回 0。
     """
     score = 0
     for term in terms:
@@ -40778,19 +41556,15 @@ def _agent_asset_score(terms, texts, tags):
         for text, weight in texts:
             if text and term in text:
                 hit = max(hit, weight)
-        for tag in tags:
-            low = tag.lower()
-            if term in low or (len(low) >= 2 and low in term):
-                hit += 2
         score += hit
     return score
 
 
 def _agent_tool_use_asset_run(args):
-    """检索素材：所有资产库 + 本地上传 + 画布上传目录，按名称 / AI 标签 / 摘要打分排序。
+    """检索素材：所有资产库 + 本地上传 + 画布上传目录，按名称 / 说明 / 文件夹打分排序。
 
     以前只看「当前激活的资产库」、只按文件名匹配、上传目录写死在程序目录（改过存储路径就失效），
-    这里统一修掉；返回值保持 total / items / results 结构，并附上 summary / tags / library / source。
+    这里统一修掉；返回值保持 total / items / results 结构，并附上 library / source / use 等字段。
     """
     terms = _agent_asset_terms(args["query"])
     kind = args["kind"]
@@ -40798,13 +41572,14 @@ def _agent_tool_use_asset_run(args):
     use_filter = args.get("use") or ""
     candidates = []
     seen = set()
-    lib = load_asset_library()
+    owner = current_asset_owner_id()
+    lib = visible_asset_library(owner)
 
     # 指定产品档案：直接返回它的各个角度（技能「换产品」要多角度参考就走这里）
     if args.get("product"):
-        product = _asset_meta.find_product(lib, product_id=args["product"], name=args["product"])
+        product = _asset_meta.find_product(lib, product_id=args["product"], name=args["product"], owner_id=owner)
         if not product:
-            names = [str(p.get("name") or "") for p in _asset_meta.products(lib) if isinstance(p, dict)]
+            names = [str(p.get("name") or "") for p in _asset_meta.visible_products(lib, owner) if isinstance(p, dict)]
             return {"total": 0, "items": [], "results": [], "query": args["query"], "kind": kind,
                     "product": None, "available_products": names[:20],
                     "hint": "没有这个产品档案" + ("；现有：" + "、".join(names[:20]) if names else "；素材库里还没有产品档案")}
@@ -40815,23 +41590,21 @@ def _agent_tool_use_asset_run(args):
                 "product": {"id": view["id"], "name": view["name"], "selling_points": view["selling_points"],
                             "angle_count": view["angle_count"]}}
 
-    def _add(url, name, item_kind, *, category="", library="", source="", classification=None,
+    def _add(url, name, item_kind, *, category="", library="", source="",
              caption="", created_at=0, item=None):
         if not url or url in seen:
             return
         if kind and item_kind != kind:
             return
         use = _asset_meta.effective_use(item, category) if isinstance(item, dict) else \
-            _asset_meta.infer_use({"kind": item_kind, "name": name, "classification": classification}, category)
+            _asset_meta.infer_use({"kind": item_kind, "name": name}, category)
         if use_filter and use != use_filter:
             return
-        tags = _agent_asset_tags(classification)
-        summary = str((classification or {}).get("summary") or "").strip() if isinstance(classification, dict) else ""
         score = 0
         if terms:
-            texts = [(str(name or "").lower(), 3), (summary.lower(), 2), (str(caption or "").lower(), 2),
+            texts = [(str(name or "").lower(), 3), (str(caption or "").lower(), 2),
                      (str(category or "").lower(), 1), (url.lower(), 1)]
-            score = _agent_asset_score(terms, texts, tags)
+            score = _agent_asset_score(terms, texts)
             if score <= 0:
                 return
         seen.add(url)
@@ -40852,10 +41625,6 @@ def _agent_tool_use_asset_run(args):
                 hit["product_id"] = str(item["product_id"])
             if item.get("derived_from"):
                 hit["derived_from"] = str(item["derived_from"])
-        if summary:
-            hit["summary"] = summary[:120]
-        if tags:
-            hit["tags"] = tags[:8]
         candidates.append((score, ts, hit))
 
     # 1) 所有资产库（不只是当前激活的那个）
@@ -40873,8 +41642,7 @@ def _agent_tool_use_asset_run(args):
                 url = str(item.get("url") or "")
                 item_kind = str(item.get("kind") or cat_kind or "image").lower()
                 _add(url, item.get("name"), item_kind, category=str(cat.get("name") or ""), library=lib_name,
-                     source="library", classification=item.get("classification"),
-                     created_at=item.get("created_at"), item=item)
+                     source="library", created_at=item.get("created_at"), item=item)
 
     # 2) 本地上传（assets/uploads；画布生成物不算素材，跳过）
     try:
@@ -40884,8 +41652,7 @@ def _agent_tool_use_asset_run(args):
                 continue
             _add(str(item.get("url") or ""), item.get("name"), str(item.get("kind") or "image").lower(),
                  category=str(item.get("folder") or "本地上传"), source="local",
-                 classification=item.get("classification"), caption=item.get("caption") or "",
-                 created_at=item.get("created_at"))
+                 caption=item.get("caption") or "", created_at=item.get("created_at"))
     except Exception as exc:
         print(f"[Agent] use_asset 扫描本地上传失败: {exc}")
 
@@ -40970,7 +41737,7 @@ def _agent_tool_save_asset_run(args):
     added = [item for _entry, item in pairs]
     product_view = None
     if args["product"] and pairs:
-        product = _asset_meta.upsert_product(lib, name=args["product"], append=True,
+        product = _asset_meta.upsert_product(lib, name=args["product"], append=True, owner_id=current_asset_owner_id(),
                                              angles=[{"item_id": it["id"], "label": e.get("label") or ""} for e, it in pairs])
         save_asset_library(lib)
         product_view = _asset_meta.product_view(lib, product)
@@ -41012,20 +41779,23 @@ def _agent_tool_save_product_validate(args):
 
 
 def _agent_tool_save_product_run(args):
+    owner = current_asset_owner_id()
+    visible = visible_asset_library(owner)
     lib = load_asset_library()
     missing = []
     angles = None
     if args["angles"] is not None:
         angles = []
         for row in args["angles"]:
-            _, _, item = _asset_meta.find_item(lib, item_id=row["item_id"], url=row["url"])
+            _, _, item = _asset_meta.find_item(visible, item_id=row["item_id"], url=row["url"])
             if item:
                 angles.append({"item_id": item["id"], "label": row["label"]})
             else:
                 missing.append(row["url"] or row["item_id"])
     try:
         product = _asset_meta.upsert_product(lib, product_id=args["product_id"], name=args["name"],
-                                             selling_points=args["selling_points"], angles=angles, append=args["append"])
+                                             selling_points=args["selling_points"], angles=angles, append=args["append"],
+                                             owner_id=owner)
     except ValueError as exc:
         raise AgentToolError(str(exc), code="invalid_args")
     save_asset_library(lib)
@@ -42267,8 +43037,8 @@ _AGENT_TEMPLATE_STRIP_KEYS = (
 
 
 def _agent_template_items():
-    """资产库里所有工作流条目（跨资产库）。"""
-    lib = load_asset_library()
+    """当前账号可见资产库里的工作流条目（登录后只含自己的）。"""
+    lib = visible_asset_library(current_asset_owner_id())
     out, seen = [], set()
     libraries = lib.get("libraries") or [{"id": "", "categories": lib.get("categories") or []}]
     for library in libraries:
@@ -42301,7 +43071,8 @@ def _agent_template_find(name):
 
 
 def _agent_template_path(item):
-    return os.path.join(ASSET_LIBRARY_DIR, os.path.basename(str(item.get("url") or "")))
+    raw = urllib.parse.unquote(str(item.get("url") or "").split("?", 1)[0])
+    return os.path.join(asset_library_dir(), os.path.basename(raw))
 
 
 def _agent_template_read(item, extract=False):
@@ -42453,8 +43224,9 @@ def _agent_tool_save_template_run(args):
     req = CanvasWorkflowExportRequest(nodes=nodes, connections=conns, include_resources=True,
                                       filename=f"{args['name']}.zip", name=args["name"])
     archive, meta = build_canvas_workflow_archive(req)
+    owner = current_asset_owner_id()
     lib = load_asset_library()
-    _, cat = asset_library_workflow_category(lib)
+    _, cat = asset_library_workflow_category(lib, owner_id=owner)
     if args["overwrite"]:
         cat["items"] = [it for it in (cat.get("items") or []) if str(it.get("name") or "") != args["name"]]
     item = make_workflow_library_item_from_bytes(archive, f"{args['name']}.zip", args["name"])
@@ -44885,8 +45657,13 @@ def _agent_tool_depth_capture_validate(args):
         max_seconds = float(raw_max) if raw_max not in (None, "") else AGENT_DEPTH_CAPTURE_MAX_SECONDS
     except (TypeError, ValueError):
         raise AgentToolError("max_seconds 必须是数字（0 表示不限时长）", code="invalid_args")
+    raw_keep_audio = args.get("keep_audio")
+    if raw_keep_audio is None:
+        keep_audio = True                  # 默认保留原声：动作迁移成片要把原声贴回去
+    else:
+        keep_audio = bool(raw_keep_audio)
     return {"canvas_id": canvas_id, "node_id": node_id, "url": url, "check_only": check_only,
-            "keep_audio": bool(args.get("keep_audio")), "max_seconds": max(0.0, max_seconds)}
+            "keep_audio": keep_audio, "max_seconds": max(0.0, max_seconds)}
 
 
 def _agent_tool_depth_capture_preview(args, canvas=None):
@@ -44957,7 +45734,7 @@ async def _agent_tool_depth_capture_run(args):
 AGENT_TOOLS["depth_capture"] = {
     "description": "本机深度动作捕捉：把画布上的本地视频逐帧转成灰度深度通道视频（越近越亮），去掉颜色、纹理、人物长相，只留动作和空间层次；"
                    "本地推理、不上传、不花额度。用途是做动作迁移 / 运镜复刻：深度视频只负责动作、节奏、站位和空间关系，人物与外观由参考图决定，"
-                   "不要把深度图的灰度外观继承到成片里。默认最长 30 秒（max_seconds 可调，0 = 不限）；check_only=true 只查本机能不能用（模型 / 依赖是否就绪）。"
+                   "不要把深度图的灰度外观继承到成片里。默认不限时长（max_seconds 默认 0，设了才截）；check_only=true 只查本机能不能用（模型 / 依赖是否就绪）。"
                    "限制：只接受画布里的本地视频（上传或生成的视频节点）；深度里仍保留原物体轮廓（产品形状会被锁住），平面内容（画、文字、屏幕）在深度里是一片平灰，"
                    "暗片整体偏暗，快切和粒子转场处深度是糊的。返回 url / depth_url 可直接当 generate_video 的 reference_video。",
     "schema": {"type": "object", "properties": {
@@ -44965,8 +45742,9 @@ AGENT_TOOLS["depth_capture"] = {
         "node_id": {"type": "string", "description": "视频节点 id"},
         "url": {"type": "string", "description": "没有节点时直接给画布里的本地视频路径（/assets/… 或 /output/…）"},
         "check_only": {"type": "boolean", "default": False, "description": "只检查本机深度捕捉是否可用，不转换"},
-        "max_seconds": {"type": "number", "description": "最长处理多少秒（默认 30；0 = 不限，长片会慢）"},
-        "keep_audio": {"type": "boolean", "default": False, "description": "是否保留源视频音轨（默认不要）"}}},
+        "max_seconds": {"type": "number", "description": "默认 0 = 不限时长（长片会慢）"},
+        "keep_audio": {"type": "boolean", "default": True,
+                       "description": "是否保留源视频音轨（默认保留：动作迁移出片后要把原声贴回成片）；只有用户明确说不要原声才传 false"}}},
     "validate": _agent_tool_depth_capture_validate,
     "run": _agent_tool_depth_capture_run,
     "preview": _agent_tool_depth_capture_preview,
@@ -47358,6 +48136,9 @@ class AgentRunStep(BaseModel):
 class AgentRunRequest(BaseModel):
     canvas_id: str
     instruction: str = Field(min_length=1, max_length=4000)
+    # 线程里给用户看的那句（可能带 @skill{…} 记号，面板要按用户当时的位置渲染行内技能胶囊）；
+    # 空 = 沿用 instruction。只影响线程记录，不进当轮的模型提示。
+    thread_text: str = Field("", max_length=4000)
     focus: Optional[AgentRunFocus] = None
     history: List[AgentRunHistoryItem] = []
     provider: str = "comfly"
@@ -48698,7 +49479,9 @@ def _agent_message_with_questions(message, questions, kind="", extra=None):
 
 
 def _agent_beat_gen_settings(node):
-    """节点上已有的比例 / 分辨率 / 张数 / 时长，作为待生成卡片的初始值（模型故意留空，让用户自己选）。"""
+    """节点上已有的生成参数，作为待生成卡片的初始值（模型故意留空，让用户自己选）。
+
+    键名与 canvas-next/model.ts 的参数类型一致，卡片按同一套键读写；只列有值的项。"""
     data = node.get("data") if isinstance(node.get("data"), dict) else {}
     gen = data.get("gen") if isinstance(data.get("gen"), dict) else {}
     params = gen.get("params") if isinstance(gen.get("params"), dict) else {}
@@ -48710,11 +49493,61 @@ def _agent_beat_gen_settings(node):
             out["resolution"] = tier
         if params.get("count"):
             out["count"] = int(params.get("count") or 1)
+        if params.get("quality"):
+            out["quality"] = str(params["quality"])
+        if params.get("thinking") is not None:
+            out["thinking"] = bool(params["thinking"])
+        if params.get("outputFormat"):
+            out["outputFormat"] = str(params["outputFormat"])
+        if params.get("frameCount"):
+            out["frameCount"] = int(params["frameCount"])
+        if params.get("frameDuration"):
+            out["frameDuration"] = int(params["frameDuration"])
+        if params.get("background"):
+            out["background"] = str(params["background"])
+        if params.get("search"):
+            out["search"] = True
+        if params.get("style") not in (None, "", "无"):
+            out["style"] = str(params["style"])
+        if isinstance(params.get("camera"), dict):
+            out["camera"] = dict(params["camera"])
+        if isinstance(params.get("mj"), dict) and params["mj"]:
+            out["mj"] = dict(params["mj"])
         return out
     if kind == "video":
         out = {"ratio": str(params.get("ratio") or "adaptive"), "duration": int(params.get("dur") or 5)}
         if params.get("res"):
             out["resolution"] = str(params["res"])
+        if params.get("mode"):
+            out["mode"] = str(params["mode"])
+        if params.get("times"):
+            out["times"] = int(params["times"])
+        if params.get("sound"):
+            out["audio"] = True
+        if params.get("genMode"):
+            out["genMode"] = str(params["genMode"])
+        if params.get("turbo"):
+            out["turbo"] = True
+        if params.get("draft"):
+            out["draft"] = True
+        if params.get("multiShot"):
+            out["multiShot"] = True
+        return out
+    if kind == "text":
+        out = {}
+        if params.get("output"):
+            out["output"] = str(params["output"])
+        if params.get("think"):
+            out["think"] = str(params["think"])
+        if params.get("search"):
+            out["search"] = True
+        return out
+    if kind == "audio":
+        out = {}
+        if params.get("kind"):
+            out["kind"] = str(params["kind"])
+        if params.get("dur"):
+            out["dur"] = str(params["dur"])
         return out
     return {}
 
@@ -49472,6 +50305,12 @@ AGENT_THREADS_DIR = os.path.join(DATA_DIR, "agent_threads")
 # 一条对话最多存多少条消息：长对话往上翻要能看到最早的，超出才丢最旧的（面板分页加载，每页 60）
 AGENT_THREAD_MAX_MESSAGES = 2000
 AGENT_THREAD_RECENT_LIMIT = 12
+# 单条回复的原生推理正文上限（线程文件是整份 JSON，超长截断并标 reasoning_truncated）
+AGENT_THREAD_REASONING_MAX_CHARS = 8000
+# 单条线程全部 assistant 消息的推理正文总预算（约 128K 字符，按 len(reasoning) 计）。
+# 单条已限 8000、线程已限 2000 条，但两者相乘仍有 1600 万字；超出预算后从最老的消息开始删 reasoning，
+# 只删正文（thinking_duration_ms / think / reasoning_truncated 保留，接口仍能用 think.lines 回退）。
+AGENT_THREAD_REASONING_BUDGET_CHARS = 131072
 _AGENT_THREAD_LOCK = Lock()
 
 
@@ -49838,6 +50677,37 @@ def _agent_thread_completed_lines(history, limit=3):
     return lines
 
 
+def _agent_thread_trim_reasoning(thread):
+    """线程级思考预算：从最新往回累计 reasoning 字数，超预算后删掉更老消息的 reasoning。
+
+    只删 reasoning 这一个键：thinking_duration_ms / think / reasoning_truncated / 正文原样保留，
+    接口仍能用 think.lines 回退出短句、标题仍能显示「已思考 Ns」。最新一条 assistant 的推理永远保留。
+    返回被修剪的消息条数（0 表示没动）。"""
+    messages = thread.get("messages") if isinstance(thread, dict) else None
+    if not isinstance(messages, list):
+        return 0
+    used = 0
+    trimmed = 0
+    newest_seen = False
+    for msg in reversed(messages):
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            continue
+        reasoning = msg.get("reasoning")
+        size = len(str(reasoning)) if reasoning is not None else 0
+        if size <= 0:
+            continue
+        if not newest_seen:
+            newest_seen = True
+            used += size
+            continue
+        if used + size <= AGENT_THREAD_REASONING_BUDGET_CHARS:
+            used += size
+            continue
+        msg.pop("reasoning", None)
+        trimmed += 1
+    return trimmed
+
+
 def agent_thread_append(canvas_id, records, touched=None, thread_id=""):
     """往当前线程（或 thread_id 指定的线程）追加消息并更新「最近改动的节点」；失败只打日志，不影响主流程。
     带 thread_id 时精确写那条线程：线程已被删掉就丢掉这次写入，绝不回退到 active（否则并行会话互相串线）。"""
@@ -49857,7 +50727,8 @@ def agent_thread_append(canvas_id, records, touched=None, thread_id=""):
                 if not isinstance(rec, dict) or not str(rec.get("text") or "").strip():
                     continue
                 item = {"role": rec.get("role") or "assistant", "text": str(rec["text"])[:4000], "at": now}
-                for key in ("run_id", "actions", "think", "self_check", "plan", "plan_status", "nodes", "reviews"):
+                for key in ("run_id", "actions", "think", "self_check", "plan", "plan_status", "nodes", "reviews",
+                            "reasoning", "reasoning_truncated", "thinking_duration_ms", "skill"):
                     if rec.get(key):
                         item[key] = rec[key]
                 if rec.get("took") is not None:
@@ -49877,6 +50748,10 @@ def agent_thread_append(canvas_id, records, touched=None, thread_id=""):
                     item["truncated"] = True
                 thread["messages"].append(item)
             thread["messages"] = thread["messages"][-AGENT_THREAD_MAX_MESSAGES:]
+            trimmed = _agent_thread_trim_reasoning(thread)
+            if trimmed:
+                print(f"[Agent] 思考预算超限：修剪 {trimmed} 条旧消息的 reasoning {canvas_id}/{thread.get('id')}",
+                      flush=True)
             recent = [a for a in (touched or []) if a]
             for a in thread.get("recent") or []:
                 if a not in recent:
@@ -49962,15 +50837,141 @@ async def _agent_thread_attach_reviews_when_ready(canvas_id, thread_id, run_id, 
     return False
 
 
+def _agent_think_text(data):
+    """思考事件正文：dict 取 text，兼容旧 thinking 直接给字符串。"""
+    if isinstance(data, str):
+        return data
+    if isinstance(data, dict):
+        return str(data.get("text") or "")
+    return ""
+
+
+def _agent_think_track(recorded, event, data):
+    """K2：累计本轮思考——原生推理正文 + 首个 / 最后一次思考事件的时间。
+
+    reasoning 只装原生推理（reasoning_delta），多轮之间按 round 变化换行分隔；
+    thought / 旧 thinking 只参与时长统计，短句形状仍由 recorded["thoughts"] 保持原样。"""
+    text = _agent_think_text(data)
+    if event in ("thought", "thinking"):
+        text = text.strip()
+    if not text:
+        return
+    now = time.monotonic()
+    if recorded.get("think_first_at") is None:
+        recorded["think_first_at"] = now
+    recorded["think_last_at"] = now
+    if event != "reasoning_delta" or recorded.get("reasoning_truncated"):
+        return
+    used = int(recorded.get("reasoning_chars") or 0)
+    if used >= AGENT_THREAD_REASONING_MAX_CHARS:
+        recorded["reasoning_truncated"] = True
+        return
+    kept = text[:AGENT_THREAD_REASONING_MAX_CHARS - used]
+    round_no = data.get("round") if isinstance(data, dict) else None
+    recorded.setdefault("reasoning_parts", []).append((round_no, kept))
+    recorded["reasoning_chars"] = used + len(kept)
+    if len(kept) < len(text):
+        recorded["reasoning_truncated"] = True
+
+
+def _agent_think_reasoning_text(recorded):
+    """本轮记录里的原生推理正文：多轮之间用换行分隔（thought 短句不混进来）。"""
+    out, previous, has_part = [], None, False
+    for round_no, text in recorded.get("reasoning_parts") or []:
+        if has_part and round_no != previous:
+            out.append("\n")
+        out.append(text)
+        previous = round_no
+        has_part = True
+    return "".join(out)
+
+
+def _agent_think_duration_ms(recorded, ended_at):
+    """首个→最后一个思考事件间隔（毫秒）；只有一条思考事件时算到 run 结束。
+
+    没有任何思考事件返回 None（调用方据此不写字段）。"""
+    first = recorded.get("think_first_at")
+    if first is None:
+        return None
+    last = recorded.get("think_last_at")
+    if last is None or last <= first:
+        last = max(float(ended_at or first), first)
+    return max(1, int((last - first) * 1000))
+
+
+def _agent_think_record_fields(recorded, ended_at):
+    """本轮思考 → 线程记录字段：有原生推理才写 reasoning，没有思考事件整组不写。"""
+    fields = {}
+    text = _agent_think_reasoning_text(recorded)
+    if text:
+        fields["reasoning"] = text[:AGENT_THREAD_REASONING_MAX_CHARS]
+        if recorded.get("reasoning_truncated") or len(text) > AGENT_THREAD_REASONING_MAX_CHARS:
+            fields["reasoning_truncated"] = True
+    duration = _agent_think_duration_ms(recorded, ended_at)
+    if duration:
+        fields["thinking_duration_ms"] = duration
+    return fields
+
+
+def _agent_thread_thinking_text(msg):
+    """历史消息里的思考正文：优先原生推理，没有就回退 think.lines 短句（老线程也能显示）。
+
+    只给 assistant 回复带；user 消息 / 没思考过的消息返回空串（接口据此不写字段）。"""
+    if not isinstance(msg, dict) or msg.get("role") != "assistant":
+        return ""
+    reasoning = msg.get("reasoning")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning
+    think = msg.get("think")
+    lines = think.get("lines") if isinstance(think, dict) else None
+    if isinstance(lines, list):
+        return "\n".join(str(line) for line in lines if str(line or "").strip())
+    return ""
+
+
 def _agent_thread_message_row(msg, text_field="text"):
     """线程消息对外形状：老字段不变，新增 steps/changes/run_id 等有才带（旧客户端兼容）。"""
     row = {"role": msg.get("role"), text_field: msg.get("text"), "at": msg.get("at")}
     for key in ("run_id", "actions", "steps", "changes", "truncated", "session_id", "rating",
                 "origin", "suggestions", "event", "canvas_id",
-                "think", "took", "self_check", "plan", "plan_status", "nodes", "reviews"):
+                "think", "took", "self_check", "plan", "plan_status", "nodes", "reviews",
+                "reasoning", "reasoning_truncated", "thinking_duration_ms", "skill"):
         if key in msg and msg.get(key) is not None:
             row[key] = msg[key]
+    thinking = _agent_thread_thinking_text(msg)
+    if thinking:
+        row["thinking"] = thinking
+    if "thinking_duration_ms" not in row:
+        # 老线程只有 think.secs：派生时长，前端标题才能显示「已思考 Ns」而不是「思考」
+        think = msg.get("think")
+        secs = think.get("secs") if isinstance(think, dict) else None
+        try:
+            seconds = float(secs)
+        except (TypeError, ValueError):
+            seconds = 0.0
+        if seconds > 0:
+            row["thinking_duration_ms"] = max(1, int(seconds * 1000))
     return row
+
+
+_HISTORY_SKILL_TOKEN_RE = re.compile(r"@skill\{([^}\n]+)\}")
+
+
+def _agent_history_plain_text(text, skill_name=""):
+    """喂模型的历史里去掉行内技能记号（只影响模型输入，线程里存的原文不动）。
+
+    剥完为空时：有 skill 字段 / 记号本身就带名字 → 用「使用技能「名」」兜底，别给模型空 user 消息；
+    没有技能可兜底就保持原样，不把消息清空。"""
+    raw = str(text or "")
+    names = _HISTORY_SKILL_TOKEN_RE.findall(raw)
+    cleaned = _HISTORY_SKILL_TOKEN_RE.sub("", raw)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned).replace(" \n", "\n").replace("\n ", "\n").strip()
+    if cleaned:
+        return cleaned
+    name = str(skill_name or "").strip() or (names[0].strip() if names else "")
+    if name:
+        return "使用技能「%s」" % name
+    return raw
 
 
 def _agent_thread_history_records(thread):
@@ -49980,7 +50981,7 @@ def _agent_thread_history_records(thread):
         role = msg.get("role")
         if role not in ("user", "assistant"):
             continue
-        text = str(msg.get("text") or "")
+        text = _agent_history_plain_text(msg.get("text"), msg.get("skill"))
         if role == "assistant" and msg.get("actions"):
             text += "\n" + "\n".join(f"[动作] {a}" for a in msg["actions"][:8])
         if role == "assistant" and isinstance(msg.get("steps"), list):
@@ -54357,10 +55358,14 @@ async def _agent_run_producer(req, queue, bus=None):
         mode = "run"
     pending_gen = []            # 本轮建好、等用户执行生成的节点
     # K2：思考 / 自检 / 待确认方案随线程持久化（刷新页面后这些卡片和思考时长都还在）
-    recorded = {"thoughts": [], "self_check": None, "plan": None}
+    recorded = {"thoughts": [], "self_check": None, "plan": None,
+                "reasoning_parts": [], "reasoning_chars": 0, "reasoning_truncated": False,
+                "think_first_at": None, "think_last_at": None}
 
     def emit(event, data):
         try:
+            if event in ("thought", "reasoning_delta", "thinking"):
+                _agent_think_track(recorded, event, data)
             if event == "thought" and isinstance(data, dict):
                 text = str(data.get("text") or "").strip()
                 if text and (not recorded["thoughts"] or recorded["thoughts"][-1]["text"] != text):
@@ -55630,7 +56635,7 @@ async def _agent_run_producer(req, queue, bus=None):
                 after_snapshot_final = ctx.reload()
                 action_lines, step_refs = ctx.action_lines(history, after_snapshot_final)
                 touched_refs = ctx.touched_refs(undo_log, after_snapshot_final) + step_refs
-                records = [] if approved_steps else [{"role": "user", "text": instruction}]
+                records = [] if approved_steps else [{"role": "user", "text": str(req.get("thread_text") or instruction), "skill": str(req.get("skill_name") or "").strip()}]
                 # 重新生成接口直接带 approved_steps 起 run，没有对应的用户消息：把触发它的那句补进线程，回放时看得出是谁要的
                 regen_user_text = str(req.get("regenerate_user_text") or "").strip()
                 if approved_steps and regen_user_text:
@@ -55661,6 +56666,8 @@ async def _agent_run_producer(req, queue, bus=None):
                                        "kinds": [row["kind"] for row in thoughts],
                                        "secs": "%.1f" % took}
                 record["took"] = round(took, 1)
+                # K2·思考正文：原生推理 + 思考时长单独落盘（think 短句面板照旧，形状不动）
+                record.update(_agent_think_record_fields(recorded, time.monotonic()))
                 check = recorded.get("self_check")
                 if isinstance(check, dict) and isinstance(check.get("items"), list) and check["items"]:
                     record["self_check"] = {
@@ -55763,6 +56770,7 @@ async def agent_run(payload: AgentRunRequest, request: Request):
                   "description": str(x.get("description") or "")[:400]}
                  for x in (payload.apps or [])[:8] if isinstance(x, dict) and x.get("name")],
         "instruction": instruction,
+        "thread_text": str(payload.thread_text or "").strip(),
         "focus": _agent_run_normalize_focus(payload.focus),
         "history": history,
         "thread_id": thread_id,
@@ -56361,12 +57369,9 @@ _deps.bind(
     _local_upload_abs=_local_upload_abs,
     _local_upload_caption_path=_local_upload_caption_path,
     _local_upload_classification_path=_local_upload_classification_path,
-    _write_local_upload_classification=_write_local_upload_classification,
     generation_meta_for_url=generation_meta_for_url,
     _write_local_upload_generation=_write_local_upload_generation,
     _sniff_image_ext_bytes=_sniff_image_ext_bytes,
-    classify_asset_image_best_effort=classify_asset_image_best_effort,
-    classify_image_with_provider=classify_image_with_provider,
     caption_image_with_provider=caption_image_with_provider,
     ensure_same_origin_request=ensure_same_origin_request,
     canvas_assets_index=canvas_assets_index,
@@ -56381,6 +57386,16 @@ _deps.bind(
     find_asset_category_with_library=find_asset_category_with_library,
     find_asset_category_in_library=find_asset_category_in_library,
     find_asset_item_in_library=find_asset_item_in_library,
+    current_asset_owner_id=current_asset_owner_id,
+    visible_asset_library=visible_asset_library,
+    owned_asset_library=owned_asset_library,
+    owned_asset_category=owned_asset_category,
+    owned_asset_item=owned_asset_item,
+    set_active_asset_library=set_active_asset_library,
+    asset_library_dir=asset_library_dir,
+    legacy_asset_owner_id=legacy_asset_owner_id,
+    can_read_other_user_asset=can_read_other_user_asset,
+    canvas_shared_roles_for_user=_canvas_perms.shared_roles_for_user,
     unique_asset_category_dir=unique_asset_category_dir,
     make_asset_library_item=make_asset_library_item,
     remove_asset_library_file=remove_asset_library_file,
@@ -56402,6 +57417,9 @@ _deps.bind(
     load_prompt_libraries=load_prompt_libraries,
     save_prompt_libraries=save_prompt_libraries,
     find_prompt_library=find_prompt_library,
+    visible_prompt_libraries=visible_prompt_libraries,
+    prompt_library_writable=prompt_library_writable,
+    set_active_prompt_library=set_active_prompt_library,
     normalize_prompt_library_item=normalize_prompt_library_item,
     shared_folders_load=shared_folders_load,
     shared_folder_abs=shared_folder_abs,
@@ -56504,6 +57522,22 @@ _deps.bind(
 )
 from server.routes.openai_compat import router as _openai_compat_router
 app.include_router(_openai_compat_router)
+
+# 登录 / 注册成功后把仍无归属的画布认领给该账号（画布存储在 main，auth 模块通过钩子回调）
+def _claim_on_login(user):
+    """登录/注册后：先认领无主画布，再认领无主素材库（同一时机，各自幂等）。"""
+    try:
+        claim_unowned_canvases(user)
+    except Exception as exc:
+        print("[auth] 认领无归属画布失败（不影响登录）：%s" % exc)
+    try:
+        claim_unowned_assets(user)
+    except Exception as exc:
+        print("[auth] 认领无归属素材失败（不影响登录）：%s" % exc)
+
+
+_auth_service.set_claim_hook(_claim_on_login)
+_auth_service.set_asset_hooks(purge=purge_user_asset_data, impact=asset_account_impact)
 
 from server.routes.split_layers import router as _split_layers_router
 app.include_router(_split_layers_router)
