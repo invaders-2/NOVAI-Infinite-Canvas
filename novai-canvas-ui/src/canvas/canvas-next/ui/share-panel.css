@@ -16,3 +16,22 @@
 .cn-root .nshare-err{padding:0 10px 8px;font-size:11.5px;line-height:1.6;color:var(--bad)}
 .cn-root .nshare-input{display:block;width:calc(100% - 20px);margin:2px 10px 8px;height:34px;padding:0 10px;border-radius:9px;background:var(--sunken);color:var(--fg);font-size:12px}
 .cn-root .nshare-foot{display:flex;gap:6px;justify-content:flex-end;padding:2px 10px 8px}
+
+/* ── 社区（M2）：分享菜单第三项 + 已发布管理子面板 ── */
+.cn-root .nshare-gap{height:6px}
+.cn-root .nshare-ver{display:inline-flex;align-items:center;height:16px;padding:0 5px;margin-left:4px;border-radius:4px;background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok);font-size:10px;vertical-align:1px}
+.cn-root .mi .nshare-go{margin-left:auto;color:var(--fg3)}
+.cn-root .mi .nshare-upd{margin-left:auto;height:22px;padding:0 9px;border-radius:5px;background:var(--solid);color:var(--on-solid);font-size:11.5px;line-height:22px;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap}
+.cn-root .mi .nshare-upd:hover{opacity:.86}
+.cn-root .nshare-pub{min-width:320px;max-width:360px}
+.cn-root .nshare-pubcard{display:flex;align-items:center;gap:10px;padding:4px 10px 8px}
+.cn-root .nshare-pubcard img,.cn-root .nshare-pubcard .ph{width:48px;height:48px;border-radius:10px;object-fit:cover;flex:none;background:var(--sunken);display:grid;place-items:center;color:var(--fg3)}
+.cn-root .nshare-pubcard b{display:block;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:240px}
+.cn-root .nshare-pubcard small{display:block;margin-top:2px;font-size:11px;color:var(--fg3)}
+.cn-root .nshare-pubstats{display:flex;align-items:center;gap:14px;padding:0 10px 8px;font-size:11.5px;color:var(--fg2)}
+.cn-root .nshare-pubstats span{display:inline-flex;align-items:center;gap:4px}
+.cn-root .nshare-pubstats svg{color:var(--fg3)}
+.cn-root .nshare-pubwarn{margin:0 10px 8px;padding:8px 10px;border-radius:9px;background:color-mix(in srgb,var(--warn) 12%,transparent);color:var(--warn-fg);font-size:11px;line-height:1.6}
+.cn-root .nshare-pub .mi{padding-top:6px;padding-bottom:6px;min-height:32px}
+.cn-root .nshare-pub .mi .ic{width:26px;height:26px;border-radius:7px}
+

@@ -1,10 +1,11 @@
 /**
- * 画布分享（T49）：右上角分享按钮的子菜单。
+ * 画布分享（T49 + 社区 M2）：右上角分享按钮的子菜单。
  * - 分享链接：局域网链接 + 三档权限（仅查看 / 可克隆 / 可存模板）+ 有效期 + 撤销；
- * - 打开分享链接：粘贴链接后在当前画布只读预览，可克隆节点到当前画布。
- * 面板走通用 openPop；只读预览由 ShareView（复用 TemplatePreview）承担。
+ * - 打开分享链接：粘贴链接后在当前画布只读预览，可克隆节点到当前画布；
+ * - 发布到社区：局域网里的人能在社区看到并克隆这张画布；已发布时变成「已发布到社区 · vN」+ 管理子面板。
+ * 面板走通用 openPop；发布弹窗由外壳（Vue）承担，这里只通过 postMessage 通知父窗口。
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CanvasDoc } from "../../react-canvas/reactCanvasStore";
 import { cloneWorkflowForImport } from "../personalTemplates";
@@ -24,27 +25,249 @@ const EXPIRES: Array<{ value: number; label: string }> = [
   { value: 0, label: "永久" },
 ];
 
+type CommunityItem = {
+  id: string;
+  version: number;
+  title: string;
+  status: string;
+  has_changes?: boolean;
+  changed_nodes?: number;
+  cover?: string;
+  package_updated_at?: number;
+  updated_at?: number;
+  stats?: { likes?: number; clones?: number; views?: number };
+};
+
+function ago(value?: number): string {
+  const stamp = Number(value) || 0;
+  if (!stamp) return "";
+  const diff = Math.max(0, Date.now() - stamp);
+  const mins = Math.round(diff / 60000);
+  if (mins < 1) return "刚刚";
+  if (mins < 60) return mins + " 分钟前";
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return hours + " 小时前";
+  const days = Math.round(hours / 24);
+  if (days < 30) return days + " 天前";
+  return Math.round(days / 30) + " 个月前";
+}
+
+/** 画布 → 外壳：发布要弹窗、在社区查看要切页，画布自己是 iframe，做不了。 */
+function tellHost(payload: Record<string, unknown>): boolean {
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage(payload, location.origin);
+      return true;
+    }
+  } catch {
+    /* 跨域父窗：当作没有外壳 */
+  }
+  return false;
+}
+
+function usePublished(canvasId: string) {
+  const [item, setItem] = useState<CommunityItem | null>(null);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(() => {
+    if (!canvasId) { setLoading(false); return; }
+    setLoading(true);
+    fetch("/api/community/mine?source_id=" + encodeURIComponent(canvasId), { headers: { Accept: "application/json" } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => setItem((data && data.item) || null))
+      .catch(() => setItem(null))
+      .finally(() => setLoading(false));
+  }, [canvasId]);
+  useEffect(() => { load(); }, [load]);
+  // 外壳发布成功后会广播一次，重新读一下发布状态
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin && event.origin !== location.origin) return;
+      const data = event.data;
+      if (data && data.type === "novai:community-updated") load();
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [load]);
+  return { item, loading, reload: load };
+}
+
 export function shareMenu(ctl: Ctl, anchor: Element) {
   openPop(anchor, (close) => <ShareMenuBody ctl={ctl} close={close} />, "down", "right");
 }
 
 function ShareMenuBody({ ctl, close }: { ctl: Ctl; close: () => void }) {
-  const [view, setView] = useState<"menu" | "share" | "open">("menu");
-  if (view === "menu") {
-    return <>
-      <div className="mh">分享这张画布</div>
-      <button className="mi" data-share-entry="link" onClick={() => setView("share")}>
-        <span className="ic"><Icon name="link" size="s" /></span>
-        <span>分享链接<span className="d">同一局域网的电脑 / 手机可直接打开</span></span>
-      </button>
-      <button className="mi" data-share-entry="open" onClick={() => setView("open")}>
-        <span className="ic"><Icon name="folder" size="s" /></span>
-        <span>打开分享链接<span className="d">粘贴别人给的链接，只读预览并可克隆到当前画布</span></span>
-      </button>
-    </>;
+  const [view, setView] = useState<"menu" | "share" | "open" | "published">("menu");
+  const canvasId = useS((s) => s.canvasId);
+  const canvasName = useS((s) => s.name);
+  const published = usePublished(canvasId);
+
+  const openPublish = (itemId?: string) => {
+    const sent = tellHost({
+      type: "novai:community-publish",
+      kind: "canvas",
+      sourceId: canvasId,
+      itemId: itemId || "",
+      title: canvasName || "",
+    });
+    if (!sent) {
+      ctl.store.toast("发布要在 NOVAI 主界面里操作");
+      return;
+    }
+    close();
+  };
+  const openCommunity = () => {
+    tellHost({ type: "novai:community-open", itemId: published.item ? published.item.id : "" });
+    close();
+  };
+
+  if (view === "published") {
+    return (
+      <PublishedPanel
+        ctl={ctl}
+        item={published.item}
+        loading={published.loading}
+        reload={published.reload}
+        back={() => setView("menu")}
+        onEdit={() => openPublish(published.item ? published.item.id : "")}
+        onOpenCommunity={openCommunity}
+      />
+    );
   }
   if (view === "open") return <OpenByLink ctl={ctl} close={close} back={() => setView("menu")} />;
-  return <ShareSettings ctl={ctl} close={close} back={() => setView("menu")} />;
+  if (view === "share") return <ShareSettings ctl={ctl} close={close} back={() => setView("menu")} />;
+
+  const item = published.item;
+  return <>
+    <div className="mh">分享这张画布</div>
+    <button className="mi" data-share-entry="link" onClick={() => setView("share")}>
+      <span className="ic"><Icon name="link" size="s" /></span>
+      <span>分享链接<span className="d">同一局域网的电脑 / 手机可直接打开</span></span>
+    </button>
+    <button className="mi" data-share-entry="open" onClick={() => setView("open")}>
+      <span className="ic"><Icon name="folder" size="s" /></span>
+      <span>打开分享链接<span className="d">粘贴别人给的链接，只读预览并可克隆到当前画布</span></span>
+    </button>
+    <div className="nshare-gap" />
+    <button className="mi" data-share-entry="community" data-community-state={item ? "published" : "draft"}
+      onClick={() => { if (item) setView("published"); else openPublish(); }}>
+      <span className="ic"><Icon name="users" size="s" /></span>
+      <span>
+        {item ? <>已发布到社区 <span className="nshare-ver mono">V{item.version}</span></> : "发布到社区"}
+        <span className="d">
+          {published.loading ? "读取发布状态…"
+            : item ? (item.has_changes ? "画布有新改动，可以更新到社区" : "「" + (item.title || canvasName) + "」正在社区里")
+              : "局域网里的人能在社区看到，并克隆这张画布"}
+        </span>
+      </span>
+      {item && item.has_changes
+        ? <span className="nshare-upd" role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); setView("published"); }}>更新</span>
+        : <Icon name="right" size="s" className="nshare-go" />}
+    </button>
+  </>;
+}
+
+function PublishedPanel({ ctl, item, loading, reload, back, onEdit, onOpenCommunity }: {
+  ctl: Ctl;
+  item: CommunityItem | null;
+  loading: boolean;
+  reload: () => void;
+  back: () => void;
+  onEdit: () => void;
+  onOpenCommunity: () => void;
+}) {
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  if (!item) {
+    return <div className="nshare" data-share-published>
+      <div className="mh" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <button className="ib" style={{ width: 22, height: 22 }} aria-label="返回" onClick={back}><Icon name="back" size="s" /></button>
+        社区
+      </div>
+      <div className="nshare-hint">{loading ? "读取中…" : "这张画布还没有发布到社区"}</div>
+    </div>;
+  }
+  const stats = item.stats || {};
+  const unlisted = item.status === "unlisted";
+  const call = async (path: string, body?: unknown) => {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: body ? { "Content-Type": "application/json", Accept: "application/json" } : { Accept: "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(String(data?.detail || "操作失败"));
+    return data;
+  };
+  const update = async () => {
+    if (busy) return;
+    setBusy("update"); setError("");
+    try {
+      const response = await fetch("/api/community/mine/" + encodeURIComponent(item.id), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ republish: true }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(String(data?.detail || "更新失败"));
+      ctl.store.toast("已更新到社区 v" + ((data.item && data.item.version) || item.version + 1));
+      reload();
+    } catch (err) {
+      setError((err as Error).message || "更新失败");
+    } finally { setBusy(""); }
+  };
+  const toggleUnlist = async () => {
+    if (busy) return;
+    setBusy("unlist"); setError("");
+    try {
+      await call("/api/community/mine/" + encodeURIComponent(item.id) + (unlisted ? "/relist" : "/unlist"));
+      ctl.store.toast(unlisted ? "已重新上架到社区" : "已从社区下架");
+      reload();
+    } catch (err) {
+      setError((err as Error).message || "操作失败");
+    } finally { setBusy(""); }
+  };
+  const cover = item.cover ? "/api/community/cover/" + encodeURIComponent(item.id) + "?v=" + (item.package_updated_at || 0) : "";
+  return <div className="nshare nshare-pub" data-share-published>
+    <div className="mh" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <button className="ib" style={{ width: 22, height: 22 }} aria-label="返回" onClick={back}><Icon name="back" size="s" /></button>
+      已发布到社区
+    </div>
+    <div className="nshare-pubcard">
+      {cover ? <img src={cover} alt="" /> : <span className="ph"><Icon name="canvas" size="s" /></span>}
+      <div>
+        <b>{item.title}</b>
+        <small>画布 · <span className="mono">v{item.version}</span> · {ago(item.package_updated_at || item.updated_at)}{unlisted ? " · 已下架" : ""}</small>
+      </div>
+    </div>
+    <div className="nshare-pubstats">
+      <span><Icon name="thumbup" size="xs" /><span className="mono">{stats.likes || 0}</span></span>
+      <span><Icon name="copy" size="xs" /><span className="mono">{stats.clones || 0}</span> 次克隆</span>
+      <span><Icon name="eye" size="xs" /><span className="mono">{stats.views || 0}</span></span>
+    </div>
+    {item.has_changes && !unlisted ? <div className="nshare-pubwarn">
+      发布后画布又改了 {Math.max(1, Number(item.changed_nodes) || 1)} 个节点。更新后社区里显示 <span className="mono">v{item.version + 1}</span>，已经克隆走的副本不受影响。
+    </div> : null}
+    <button className="mi" data-share-pub-edit onClick={onEdit}>
+      <span className="ic"><Icon name="edit" size="s" /></span>
+      <span>编辑标题、封面和简介</span>
+    </button>
+    <button className="mi" data-share-pub-open onClick={onOpenCommunity}>
+      <span className="ic"><Icon name="users" size="s" /></span>
+      <span>在社区查看</span>
+    </button>
+    <button className="mi" data-share-pub-unlist onClick={() => void toggleUnlist()} disabled={!!busy}>
+      <span className="ic"><Icon name={unlisted ? "up" : "eyeoff"} size="s" /></span>
+      <span>{unlisted ? "重新上架到社区" : "从社区下架"}</span>
+    </button>
+    {error ? <div className="nshare-err" role="alert">{error}</div> : null}
+    {!unlisted ? <div className="nshare-foot">
+      <button className="nshare-btn pri" data-share-pub-update disabled={!!busy || !item.has_changes} onClick={() => void update()}>
+        <Icon name="upload" size="xs" />{busy === "update" ? "更新中…" : "更新到社区"}
+      </button>
+    </div> : <div className="nshare-foot">
+      <button className="nshare-btn" disabled={!!busy} onClick={() => void toggleUnlist()}>{busy === "unlist" ? "处理中…" : "重新上架"}</button>
+    </div>}
+  </div>;
 }
 
 function ShareSettings({ ctl, close, back }: { ctl: Ctl; close: () => void; back: () => void }) {
@@ -142,7 +365,7 @@ function ShareSettings({ ctl, close, back }: { ctl: Ctl; close: () => void; back
     <div className="nshare-row">
       <span>有效期</span>
       <div className="seg">
-        {EXPIRES.map((item) => <button key={item.value} className={days === item.value ? "on" : ""} data-share-days={item.value} onClick={() => setDays(item.value)}>{item.label}</button>)}
+        {EXPIRES.map((entry) => <button key={entry.value} className={days === entry.value ? "on" : ""} data-share-days={entry.value} onClick={() => setDays(entry.value)}>{entry.label}</button>)}
       </div>
     </div>
     {error ? <div className="nshare-err" role="alert">{error}</div> : null}

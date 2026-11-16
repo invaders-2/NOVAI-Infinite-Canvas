@@ -154,6 +154,7 @@ const MAP = {
     up: 'arrow-up',
     upload: 'upload',
     user: 'user',
+    users: 'users',
     video: 'video',
     video2: 'video',
     volume: 'volume-2',

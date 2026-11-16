@@ -39,6 +39,10 @@ export const state = reactive({
     settingsOpen: false,
     settingsTab: 'general',
     desktop: '',            // '' 网页 | 'windows' 无边框 | 'mac' 原生透明标题栏
+    // 社区（局域网版）：发布弹窗请求 / 待打开的作品 / 发布克隆后的刷新标记
+    communityPublish: null,  // { kind: 'canvas'|'skill'|'prompt', sourceId, itemId, title }
+    communityItem: '',       // 从别的页面点「在社区查看」要打开的作品 id
+    communityRefresh: 0,     // 发布 / 克隆 / 下架后 +1，社区页与我的页据此重拉
     queue: { position: 0, total: 0 },
     online: 0,
     version: '',
@@ -59,6 +63,21 @@ export function toast(text, opts = {}) {
 }
 
 export function dismissToast(id) { state.toasts = state.toasts.filter(t => t.id !== id); }
+
+// ── 社区：发布弹窗与跳转 ──
+export function openCommunityPublish(request) {
+    const kind = request && (request.kind === 'skill' || request.kind === 'prompt') ? request.kind : 'canvas';
+    state.communityPublish = {
+        kind,
+        sourceId: String((request && request.sourceId) || ''),
+        itemId: String((request && request.itemId) || ''),
+        title: String((request && request.title) || ''),
+    };
+}
+export function closeCommunityPublish() { state.communityPublish = null; }
+export function openCommunityItem(itemId) { state.communityItem = String(itemId || ''); }
+export function consumeCommunityItem() { const id = state.communityItem; state.communityItem = ''; return id; }
+export function bumpCommunity() { state.communityRefresh += 1; }
 
 export function t(key, fallback) {
     void state.lang; // 让模板对语言切换有反应

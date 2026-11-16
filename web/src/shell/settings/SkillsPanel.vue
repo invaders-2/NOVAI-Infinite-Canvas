@@ -5,7 +5,7 @@ import { ref, computed, onMounted } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import NvSwitch from '../../components/NvSwitch.vue';
 import SetCard from './SetCard.vue';
-import { state, toast } from '../../lib/store.js';
+import { state, toast, openCommunityPublish } from '../../lib/store.js';
 import { navigate } from '../../lib/bridge.js';
 import { ICONS } from '../../lib/icons.js';
 
@@ -113,6 +113,11 @@ function confirmOverwrite() {
     if (o.kind === 'github') installGithub(true); else importFile(null, true);
 }
 function goMarket() { state.settingsOpen = false; navigate('store'); }
+// 技能也要能发布到社区：关掉设置弹窗，交给外壳的发布弹窗（与画布 / 提示词同一个）
+function publishToCommunity(s) {
+    state.settingsOpen = false;
+    openCommunityPublish({ kind: 'skill', sourceId: s.id, title: s.name });
+}
 
 /* GitHub 令牌：只为本机提高读取配额/访问私有仓库；值存后端数据目录，界面只显示掩码 */
 const ghToken = ref({ loading: true, configured: false, source: '', masked: '' });
@@ -303,6 +308,7 @@ onMounted(() => { load(); loadToken(); loadRelay(); });
                         <span class="tx"><b>{{ s.name }}</b><small>{{ s.description || s.id }}</small></span>
                         <span class="st">{{ s.enabled === false ? '已停用' : '可用' }}</span>
                         <span v-if="s.builtin_pack" class="chip" title="随安装包分发，不能删除，可以停用">内置</span>
+                        <button type="button" class="act" :title="'发布「' + s.name + '」到社区'" :aria-label="'发布 ' + s.name + ' 到社区'" @click="publishToCommunity(s)"><NvIcon name="users" /></button>
                         <NvSwitch :model-value="s.enabled !== false" :disabled="busyId === s.id" :label="'启用 ' + s.name" @update:model-value="v => toggleSkill(s, v)" />
                         <button v-if="!s.builtin_pack" type="button" class="act" :title="'删除 ' + s.name" :aria-label="'删除 ' + s.name" @click="askDelete(s)"><NvIcon name="trash" /></button>
                     </div>
@@ -322,6 +328,7 @@ onMounted(() => { load(); loadToken(); loadRelay(); });
                         <span v-if="s.usage_count" class="st">用过 {{ s.usage_count }} 次</span>
                         <span v-if="s.enabled === false" class="st">已停用</span>
                         <span v-if="s.builtin_pack" class="chip" title="随安装包分发，不能删除，可以停用">内置</span>
+                        <button type="button" class="act" :title="'发布「' + s.name + '」到社区'" :aria-label="'发布 ' + s.name + ' 到社区'" @click="publishToCommunity(s)"><NvIcon name="users" /></button>
                         <NvSwitch :model-value="s.enabled !== false" :disabled="busyId === s.id" :label="'启用 ' + s.name" @update:model-value="v => toggleSkill(s, v)" />
                         <button v-if="!s.builtin_pack" type="button" class="act" :title="'删除 ' + s.name" :aria-label="'删除 ' + s.name" @click="askDelete(s)"><NvIcon name="trash" /></button>
                     </div>

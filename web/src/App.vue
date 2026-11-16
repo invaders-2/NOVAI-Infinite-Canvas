@@ -10,6 +10,7 @@ import HomePage from './pages/home/HomePage.vue';
 import AssetsPage from './pages/assets/AssetsPage.vue';
 import MarketPage from './pages/market/MarketPage.vue';
 import MePage from './pages/me/MePage.vue';
+import PublishDialog from './components/community/PublishDialog.vue';
 import UpdateModal from './shell/UpdateModal.vue';
 import UpdateDone from './shell/UpdateDone.vue';
 import UpdateReminder from './shell/UpdateReminder.vue';
@@ -18,7 +19,8 @@ import Welcome from './shell/Welcome.vue';
 import AuthDialog from './shell/AuthDialog.vue';
 import { auth, loadAuth, standaloneView } from './lib/auth.js';
 import { initUpdates } from './lib/update.js';
-import { state } from './lib/store.js';
+import { state, closeCommunityPublish, bumpCommunity } from './lib/store.js';
+import { broadcast } from './lib/bridge.js';
 
 const isCanvas = computed(() => state.active === 'canvas' && state.canvasOpen);
 // 2026-11 重做：左侧导航下线，主导航进标题栏。画布编辑器打开时整条标题栏隐藏（mac / Windows / 网页一致），
@@ -35,6 +37,12 @@ watch(isCanvas, on => { if (!on) state.sourcePanelOpen = false; });
 
 // 不再自动弹欢迎页；intro 只承载「设置 → 关于 → 快速上手」打开的弹窗
 const intro = ref('');
+// 发布成功：关弹窗 + 通知社区页 / 我的页重拉 + 让画布 iframe 的分享菜单重读发布状态
+function onPublished() {
+    closeCommunityPublish();
+    bumpCommunity();
+    broadcast({ type: 'novai:community-updated' });
+}
 // /login、/reset：只显示登录 / 找回密码界面（必须登录模式下没登录会被送到这里），不加载外壳
 const standalone = standaloneView();
 onMounted(() => {
@@ -63,6 +71,8 @@ onMounted(() => {
             </main>
         </div>
         <div v-if="isFull" class="bt-fx" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+        <!-- 发布到社区：画布分享菜单 / 技能管理 / 提示词库 / 社区页 / 我的页都复用这一个弹窗 -->
+        <PublishDialog v-if="state.communityPublish" :request="state.communityPublish" @close="closeCommunityPublish" @done="onPublished" />
         <SettingsModal @quickstart="intro = 'quickstart'" />
         <UpdateModal />
         <UpdateDone />

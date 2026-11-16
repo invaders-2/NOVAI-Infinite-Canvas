@@ -115,6 +115,23 @@ function onMessage(event) {
         if (d.canvasId) openLegacyWithCanvasId(d.route, d.canvasId);
         return;
     }
+    // 画布分享菜单点「发布到社区 / 编辑信息」：由外壳弹出发布弹窗（画布是 iframe，弹窗只有外壳有）
+    if (d.type === 'novai:community-publish') {
+        const kind = d.kind === 'skill' || d.kind === 'prompt' ? d.kind : 'canvas';
+        state.communityPublish = {
+            kind,
+            sourceId: String(d.sourceId || ''),
+            itemId: String(d.itemId || ''),
+            title: String(d.title || ''),
+        };
+        return;
+    }
+    // 画布分享菜单点「在社区查看」：切到社区页并打开这个作品
+    if (d.type === 'novai:community-open') {
+        state.communityItem = String(d.itemId || '');
+        if (PAGE_IDS.includes('community')) navigate('community');
+        return;
+    }
     if (d.type === 'open-settings') {
         state.settingsTab = typeof d.tab === 'string' ? d.tab : 'general';
         state.settingsOpen = true;

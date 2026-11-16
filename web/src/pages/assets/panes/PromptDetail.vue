@@ -4,6 +4,7 @@ import { reactive, ref, watch, computed } from 'vue';
 import NvIcon from '../../../components/NvIcon.vue';
 import { run } from '../lib/state.js';
 import * as P from '../lib/prompts.js';
+import { openCommunityPublish } from '../../../lib/store.js';
 
 const props = defineProps({ item: { type: Object, default: null }, readonly: { type: Boolean, default: false } });
 const X = P.P;
@@ -18,6 +19,11 @@ const params = computed(() => (props.item && props.item.params && typeof props.i
 async function save() {
     saving.value = true;
     try { await run(mode.value === 'create' ? P.saveCreate({ ...form }) : P.saveEdit(props.item.id, { ...form })); } finally { saving.value = false; }
+}
+// 提示词也能发布到社区（与画布 / 技能共用外壳里那个发布弹窗）
+function publishToCommunity() {
+    if (!props.item || !props.item.id) return;
+    openCommunityPublish({ kind: 'prompt', sourceId: props.item.id, title: props.item.name || '提示词' });
 }
 </script>
 
@@ -48,6 +54,7 @@ async function save() {
             <div class="am-ph">
                 <div class="pt"><b>提示词预览</b><span>{{ P.categoryLabel(item.category || 'custom') }}</span></div>
                 <div class="pa">
+                    <button type="button" class="am-ib" title="发布到社区" aria-label="发布到社区" @click="publishToCommunity"><NvIcon name="users" /></button>
                     <button type="button" class="am-ib" :disabled="readonly" title="编辑" @click="P.startEdit(item.id)"><NvIcon name="pencil" /></button>
                     <button type="button" class="am-ib dng" :class="{ cf: X.pendingDelete === item.id }" :disabled="readonly" :title="X.pendingDelete === item.id ? '再次点击确认删除' : '删除'" @click="run(P.deleteOne(item.id))"><NvIcon name="trash" /></button>
                 </div>
