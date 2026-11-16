@@ -9,6 +9,8 @@ export const PAGES = [
     { id: 'asset-manager', label: '素材库', i18n: 'nav.assetManager', icon: 'library', native: true },
     // 应用市场：2026-11 按原型重做（pages/market/MarketPage.vue），数据走 /api/store/* + /api/skills + MCP
     { id: 'store', label: '应用市场', i18n: 'nav.store', icon: 'bag', native: true },
+    // 社区（局域网版，2026-11）：作品流 / 精选轮播 / 详情克隆，pages/community/CommunityPage.vue
+    { id: 'community', label: '社区', i18n: 'nav.community', icon: 'users', native: true },
     // 我的：个人中心（pages/me/MePage.vue），资料 / 好友 / 账户原来在右上角头像菜单里，2026-11 拆出来独立成页
     { id: 'me', label: '我的', i18n: 'nav.me', icon: 'user', native: true },
     // 在线生图 / GPT 对话 / Z-Image 已下线（2026-11）：旧页面 navigate 过来时 bridge 会回落到首页；后端接口保留，画布仍在用
@@ -41,7 +43,8 @@ export const state = reactive({
     desktop: '',            // '' 网页 | 'windows' 无边框 | 'mac' 原生透明标题栏
     // 社区（局域网版）：发布弹窗请求 / 待打开的作品 / 发布克隆后的刷新标记
     communityPublish: null,  // { kind: 'canvas'|'skill'|'prompt', sourceId, itemId, title }
-    communityItem: '',       // 从别的页面点「在社区查看」要打开的作品 id
+    communityItem: '',       // 正在看详情的作品 id（空 = 关着）
+    communityAuthor: '',      // 正在看「别人主页」的作品 id（空 = 看自己）
     communityRefresh: 0,     // 发布 / 克隆 / 下架后 +1，社区页与我的页据此重拉
     queue: { position: 0, total: 0 },
     online: 0,
@@ -76,7 +79,10 @@ export function openCommunityPublish(request) {
 }
 export function closeCommunityPublish() { state.communityPublish = null; }
 export function openCommunityItem(itemId) { state.communityItem = String(itemId || ''); }
-export function consumeCommunityItem() { const id = state.communityItem; state.communityItem = ''; return id; }
+export function openCommunityDetail(itemId) { state.communityItem = String(itemId || ''); }
+export function closeCommunityDetail() { state.communityItem = ''; }
+export function openCommunityAuthor(itemId) { state.communityAuthor = String(itemId || ''); }
+export function closeCommunityAuthor() { state.communityAuthor = ''; }
 export function bumpCommunity() { state.communityRefresh += 1; }
 
 export function t(key, fallback) {

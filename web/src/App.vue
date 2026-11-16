@@ -9,6 +9,8 @@ import CanvasListPage from './pages/canvas/CanvasListPage.vue';
 import HomePage from './pages/home/HomePage.vue';
 import AssetsPage from './pages/assets/AssetsPage.vue';
 import MarketPage from './pages/market/MarketPage.vue';
+import CommunityPage from './pages/community/CommunityPage.vue';
+import CommunityDetail from './pages/community/CommunityDetail.vue';
 import MePage from './pages/me/MePage.vue';
 import PublishDialog from './components/community/PublishDialog.vue';
 import UpdateModal from './shell/UpdateModal.vue';
@@ -19,7 +21,7 @@ import Welcome from './shell/Welcome.vue';
 import AuthDialog from './shell/AuthDialog.vue';
 import { auth, loadAuth, standaloneView } from './lib/auth.js';
 import { initUpdates } from './lib/update.js';
-import { state, closeCommunityPublish, bumpCommunity } from './lib/store.js';
+import { state, closeCommunityPublish, closeCommunityDetail, bumpCommunity } from './lib/store.js';
 import { broadcast } from './lib/bridge.js';
 
 const isCanvas = computed(() => state.active === 'canvas' && state.canvasOpen);
@@ -30,7 +32,7 @@ const showBar = computed(() => !isCanvas.value);
 const showChrome = computed(() => !showBar.value && (state.desktop === 'mac' || state.desktop === 'windows'));
 const isHome = computed(() => state.active === 'home');
 // 首页 / 画布列表 / 素材库 / 应用市场 / 我的：页面铺满整窗，内容从标题栏下面滚过，标题栏统一用渐变磨砂（画布编辑器整条不显示）
-const FULL = ['home', 'canvas', 'asset-manager', 'store', 'me'];
+const FULL = ['home', 'canvas', 'asset-manager', 'store', 'community', 'me'];
 const isFull = computed(() => !isCanvas.value && FULL.includes(state.active));
 // 离开画布时清掉素材面板标记，避免再次进入时残留状态
 watch(isCanvas, on => { if (!on) state.sourcePanelOpen = false; });
@@ -66,6 +68,7 @@ onMounted(() => {
                 <CanvasListPage v-show="state.active === 'canvas' && !state.canvasOpen" />
                 <AssetsPage v-if="state.visited['asset-manager']" v-show="state.active === 'asset-manager'" class="stage-page" />
                 <MarketPage v-if="state.visited.store" v-show="state.active === 'store'" class="stage-page" />
+                <CommunityPage v-if="state.visited.community" v-show="state.active === 'community'" class="stage-page" />
                 <MePage v-if="state.visited.me" v-show="state.active === 'me'" class="stage-page" />
                 <LegacyStage />
             </main>
@@ -73,6 +76,7 @@ onMounted(() => {
         <div v-if="isFull" class="bt-fx" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
         <!-- 发布到社区：画布分享菜单 / 技能管理 / 提示词库 / 社区页 / 我的页都复用这一个弹窗 -->
         <PublishDialog v-if="state.communityPublish" :request="state.communityPublish" @close="closeCommunityPublish" @done="onPublished" />
+        <CommunityDetail v-if="state.communityItem" :item-id="state.communityItem" @close="closeCommunityDetail" />
         <SettingsModal @quickstart="intro = 'quickstart'" />
         <UpdateModal />
         <UpdateDone />

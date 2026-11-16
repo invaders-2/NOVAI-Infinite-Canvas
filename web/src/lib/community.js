@@ -97,3 +97,18 @@ export function avatarText(author) {
     if (!avatar || avatar.startsWith('data:')) return '';
     return [...avatar].slice(0, 2).join('');
 }
+
+/** 克隆结果 → 一句提示（画布还可以直接打开新画布）。 */
+export function describeCloneResult(body) {
+    const result = body || {};
+    if (result.kind === 'canvas' || (!result.kind && result.target_id)) {
+        const failed = Number(result.failed) || 0;
+        return {
+            text: '已克隆到我的画布' + (failed ? '（' + failed + ' 个素材没取到，已标注）' : ''),
+            canvasUrl: '/static/canvas.html?id=' + encodeURIComponent(result.target_id || '') + '&project=default',
+        };
+    }
+    if (result.kind === 'skill') return { text: result.message || '技能已导入，默认停用，去设置里确认后启用' };
+    if (result.kind === 'prompt') return { text: '提示词已加进「社区」分组' };
+    return { text: '已完成' };
+}

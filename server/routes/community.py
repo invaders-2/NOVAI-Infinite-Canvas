@@ -371,12 +371,15 @@ async def item_detail(item_id: str, request: Request) -> Dict[str, Any]:
     resolved = await resolve_item(item_id)
     item = resolved["item"]
     payload = resolved["payload"]
+    me = store.load_me()
     return {
         "item": item,
         "mine": bool(resolved["mine"]),
         "online": bool(resolved["online"]),
         "payload": payload,
         "summary": _payload_summary(item, payload),
+        "liked": item_id in (me.get("likes") or []),
+        "favorited": item_id in (me.get("favorites") or []),
     }
 
 
@@ -499,6 +502,11 @@ class EventRequest(BaseModel):
 
 class SettingsRequest(BaseModel):
     visible: Optional[bool] = None
+
+
+class BlockRequest(BaseModel):
+    account_id: str = ""
+    blocked: bool = True
 
 
 class ProfileRequest(BaseModel):
@@ -1147,6 +1155,27 @@ async def report_item(item_id: str, payload: ReportRequest) -> Dict[str, Any]:
             pass
     done["reason"] = reason
     return done
+
+
+@router.post("/block")
+async def block_author(payload: BlockRequest) -> Dict[str, Any]:
+    """屏蔽作者：她 / 他的作品在本机作品流里直接不出现（可恢复）。"""
+    account_id = _clean_account_id(payload.account_id)
+    if not account_id:
+        raise HTTPException(status_code=400, detail="缺少作者 ID")
+    blocked = bool(payload.blocked)
+
+    def mutate(state: Dict[str, Any]) -> None:
+        current = [str(value) for value in (state.get("blocked_authors") or [])]
+        if blocked:
+            if account_id not in current:
+                current.insert(0, account_id)
+            state["blocked_authors"] = current[:store.MAX_BLOCKED]
+        else:
+            state["blocked_authors"] = [value for value in current if value != account_id]
+    store.me_update(mutate)
+    transport.clear_feed_cache()
+    return {"account_id": account_id, "blocked": blocked}
 
 
 # ---------------------------------------------------------------- 我的收藏 / 点赞 / 克隆

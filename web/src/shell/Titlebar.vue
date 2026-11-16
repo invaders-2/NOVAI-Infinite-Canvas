@@ -14,6 +14,7 @@ const NAV = [
     { id: 'canvas', i18n: 'nav.canvas', label: '画布', icon: 'canvas' },
     { id: 'asset-manager', i18n: 'nav.assetManager', label: '素材库', icon: 'library' },
     { id: 'store', i18n: 'nav.store', label: '应用市场', icon: 'bag' },
+    { id: 'community', i18n: 'nav.community', label: '社区', icon: 'users' },
     { id: 'me', i18n: 'nav.me', label: '我的', icon: 'user' },
 ];
 // 文案解析好交给 GooeyNav：它只认「导航项数组」，i18n 变了数组跟着重算，胶囊会重新量宽度

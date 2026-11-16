@@ -9,7 +9,8 @@ import NvIcon from '../../components/NvIcon.vue';
 import VendorLogo from '../../components/VendorLogo.vue';
 import NvVeilBg from '../../components/NvVeilBg.vue';
 import EffortSlider from '../../components/EffortSlider.vue';
-import { state, toast } from '../../lib/store.js';
+import { state, toast, openCommunityDetail } from '../../lib/store.js';
+import { authorInitial, avatarImage, avatarText, coverUrl, fmtCount, kindMeta } from '../../lib/community.js';
 import { openCanvasUrl, navigate } from '../../lib/bridge.js';
 import { CATS, TEMPLATES, TEMPLATE_MAP, SEED_PREFIX } from './templates.js';
 import TemplatePreview from './TemplatePreview.vue';
@@ -257,7 +258,7 @@ function coverOf(c) { const u = (c.thumbnails || []).filter(Boolean)[0]; return 
 function onCoverError(c) { c.thumbnails = (c.thumbnails || []).slice(1); }
 function openProject(c) { openCanvasUrl(canvasUrl(c)); }
 function allProjects() { navigate('canvas'); }
-function onPageFocus(e) { if (e.detail && e.detail.id === 'home') { loadRecent(); loadPlugins(); loadDefaultModel(); } }
+function onPageFocus(e) { if (e.detail && e.detail.id === 'home') { loadRecent(); loadPlugins(); loadDefaultModel(); loadCommunity(); } }
 // 在设置 / 应用市场里改了插件或技能，回到首页时同步
 watch(() => state.settingsOpen, open => { if (!open) { loadPlugins(); if (skillsState.value === 'ready') loadSkills(); } });
 
@@ -813,6 +814,46 @@ function bentoClass(index) {
 const preview = ref(null);      // 正在预览的模板
 function openPreview(t) { preview.value = t; }
 
+/* ───────── 社区精选（局域网版）：精选不足 4 张用最新补，没有在线节点也没有缓存时整块隐藏 ───────── */
+const community = ref({ items: [], creators: 0 });
+const communityBroken = ref(new Set());
+async function loadCommunity() {
+    try {
+        const [hotRes, feedRes] = await Promise.all([
+            fetch('/api/community/featured', { credentials: 'same-origin', headers: { Accept: 'application/json' } }),
+            fetch('/api/community/feed?sort=latest', { credentials: 'same-origin', headers: { Accept: 'application/json' } }),
+        ]);
+        const hot = hotRes.ok ? await hotRes.json() : { items: [] };
+        const feed = feedRes.ok ? await feedRes.json() : { items: [] };
+        const items = (Array.isArray(hot.items) ? hot.items : []).slice(0, 4);
+        if (items.length < 4) {
+            const seen = new Set(items.map(it => it.id));
+            (Array.isArray(feed.items) ? feed.items : []).forEach(it => {
+                if (items.length < 4 && it && it.id && !seen.has(it.id)) { items.push(it); seen.add(it.id); }
+            });
+        }
+        community.value = {
+            items,
+            creators: Number(feed.creators_online || hot.creators_online || 0),
+        };
+    } catch (e) {
+        community.value = { items: [], creators: 0 };
+    }
+}
+const communityCover = it => coverUrl(it);
+const communityAuthor = it => (it && it.author) || {};
+function communityAvatarImg(it) {
+    if (!it || communityBroken.value.has(it.id)) return '';
+    return avatarImage(communityAuthor(it));
+}
+function communityAvatarText(it) {
+    const author = communityAuthor(it);
+    return avatarText(author) || authorInitial(author);
+}
+function markCommunityAvatar(id) { communityBroken.value.add(id); }
+function openCommunityCard(it) { if (it && it.id) openCommunityDetail(it.id); }
+
+
 /* 带视频的模板卡：移上去才播，移出暂停回第一帧（只叠一层同尺寸 video，不动布局） */
 function cardVideoIn(e) { const v = e.currentTarget.querySelector('video'); if (v) { v.currentTime = 0; v.play().catch(() => {}); } }
 function cardVideoOut(e) { const v = e.currentTarget.querySelector('video'); if (v) { v.pause(); v.currentTime = 0; } }
@@ -834,6 +875,7 @@ onMounted(() => {
     loadPlugins();
     loadRecent();
     loadDefaultModel();
+    loadCommunity();
     window.addEventListener('novai-page-focus', onPageFocus);
     window.addEventListener('novai-canvas-focus', loadRecent);
     window.addEventListener('scroll', onModelViewportChange, true);
@@ -1041,6 +1083,30 @@ onBeforeUnmount(() => {
                             <span class="tag">{{ t.cat }}</span>
                             <span class="use" title="直接用这个模板新建画布" @click.stop="useTemplate(t.id)"><NvIcon name="plus" />用这个模板</span>
                             <span class="t"><b>{{ t.title }}</b><small>{{ t.desc }}</small></span>
+                        </button>
+                    </div>
+                </section>
+
+                <!-- 社区精选：局域网里别人的作品（没有在线节点也没有缓存时整块隐藏） -->
+                <section v-if="community.items.length" class="hp-com">
+                    <div class="hp-com-head">
+                        <h2>社区精选</h2>
+                        <span class="lan"><span class="dot" aria-hidden="true"></span>局域网内 {{ community.creators }} 位创作者在线</span>
+                        <span class="sp"></span>
+                        <button type="button" class="hp-com-more" @click="navigate('community')">查看更多<NvIcon name="chevr" /></button>
+                    </div>
+                    <div class="hp-com-grid">
+                        <button v-for="it in community.items" :key="it.id" type="button" class="cm-card" :class="{ off: !it.online }" @click="openCommunityCard(it)">
+                            <span class="cv">
+                                <img v-if="communityCover(it)" :src="communityCover(it)" alt="" loading="lazy" decoding="async" />
+                                <span v-else class="ph"><NvIcon :name="kindMeta(it.kind).icon" /></span>
+                                <span class="tag"><NvIcon :name="kindMeta(it.kind).icon" />{{ kindMeta(it.kind).label }}</span>
+                            </span>
+                            <b>{{ it.title }}</b>
+                            <span class="meta">
+                                <span class="au"><span class="av"><img v-if="communityAvatarImg(it)" :src="communityAvatarImg(it)" alt="" @error="markCommunityAvatar(it.id)" /><template v-else>{{ communityAvatarText(it) }}</template></span>{{ communityAuthor(it).nickname || '局域网用户' }}</span>
+                                <span class="st mono"><NvIcon name="heart" />{{ fmtCount((it.stats || {}).likes) }}<i></i><NvIcon name="copy" />{{ fmtCount((it.stats || {}).clones) }}</span>
+                            </span>
                         </button>
                     </div>
                 </section>
@@ -1538,6 +1604,38 @@ html.theme-dark .hp-mpanel { box-shadow: 0 18px 40px rgba(0, 0, 0, .36), 0 4px 1
 .hp-card .use .nv-i { width: 12px; height: 12px; }
 .hp-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
 .hp-card:hover .use, .hp-card:focus-visible .use { opacity: 1; transform: none; }
+
+/* ── 社区精选（局域网版）：模板库下方，同宽 4:3 四张卡 ── */
+.hp-com { width: 100%; margin-top: 48px; }
+.hp-com-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.hp-com-head h2 { margin: 0; font: 600 15px/1.3 var(--font-sans); }
+.hp-com-head .lan { display: inline-flex; align-items: center; gap: 5px; font: 400 11.5px/1 var(--font-sans); color: var(--ink-3); }
+.hp-com-head .lan .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--success); }
+.hp-com-head .sp { flex: 1; }
+.hp-com-more { height: 28px; padding: 0 10px 0 12px; border: 0; border-radius: 14px; background: var(--hp-glass); backdrop-filter: blur(24px) saturate(160%); -webkit-backdrop-filter: blur(24px) saturate(160%); color: var(--ink-2); font: 500 12px/1 var(--font-sans); display: inline-flex; align-items: center; gap: 2px; cursor: pointer; transition: background var(--duration-fast), color var(--duration-fast); }
+.hp-com-more:hover { background: var(--hp-glass-h); color: var(--ink); }
+.hp-com-more .nv-i { width: 13px; height: 13px; }
+.hp-com-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px 16px; }
+.cm-card { display: flex; flex-direction: column; border: 0; padding: 0; background: none; text-align: left; color: var(--ink); cursor: pointer; min-width: 0; }
+.cm-card .cv { position: relative; display: block; aspect-ratio: 4 / 3; border-radius: 14px; overflow: hidden; background: var(--hp-card); transition: transform var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out); }
+.cm-card .cv img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 600ms var(--ease-out); }
+.cm-card .cv .ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--ink-4); }
+.cm-card .cv .ph .nv-i { width: 26px; height: 26px; }
+.cm-card:hover .cv { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+.cm-card:hover .cv img { transform: scale(1.03); }
+.cm-card .cv .tag { position: absolute; left: 10px; top: 10px; z-index: 1; height: 22px; padding: 0 9px; border-radius: 11px; background: rgba(0,0,0,.34); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: #fff; font: 400 11px/22px var(--font-sans); display: inline-flex; align-items: center; gap: 4px; }
+.cm-card .cv .tag .nv-i { width: 11px; height: 11px; }
+.cm-card b { display: block; margin-top: 9px; font: 500 13px/18px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cm-card .meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 5px; }
+.cm-card .au { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font: 400 11.5px/1 var(--font-sans); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cm-card .av { width: 18px; height: 18px; flex: none; border-radius: 50%; background: var(--fill-2); color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; font: 500 9.5px/1 var(--font-sans); overflow: hidden; }
+.cm-card .av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cm-card .st { display: inline-flex; align-items: center; gap: 3px; flex: none; font: 400 11px/1 var(--font-mono); color: var(--ink-3); }
+.cm-card .st .nv-i { width: 12px; height: 12px; }
+.cm-card .st i { width: 7px; height: 1px; background: var(--ink-4); display: inline-block; }
+.cm-card.off .cv { filter: grayscale(1); opacity: .55; }
+@media (max-width: 1100px) { .hp-com-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .hp-com-grid { grid-template-columns: minmax(0, 1fr); } }
 
 /* 底部渐变磨砂（与标题栏同款，方向相反） */
 .hp-bfx { position: absolute; left: 0; right: 0; bottom: 0; height: 72px; z-index: 5; pointer-events: none; }
