@@ -21,7 +21,6 @@ const items = computed(() => A.currentItems());
 const detail = computed(() => A.selectedItem(items.value));
 const imageCount = computed(() => A.selectedImages().length);
 const targets = computed(() => A.moveTargets());
-const filtering = computed(() => !!A.activeClassEntry());
 // 「资产库」默认页可能是空的（生成物没手动保存过就在这里），而「画布里的」往往有货：空态给一条引导
 const canvasAssetCount = computed(() => uniqueItems().length);
 const ktabs = computed(() => A.kindTabs());
@@ -29,10 +28,9 @@ const emptyText = computed(() => {
     if (!S.kind) return '当前分组还没有素材，可以上传，或从智能画布输出保存到素材库。';
     const name = assetKindName(S.kind);
     if (L.query.trim()) return `没有找到匹配的${name}素材，可以换个关键词或切回「全部」。`;
-    if (filtering.value) return `当前分类下没有${name}素材，可以切回「全部」查看。`;
     return `当前分组还没有${name}素材。`;
 });
-const prog = useProgressive(() => items.value, () => [A.libId(), A.catId(), L.classFilter, L.query, S.kind].join('|'), () => L.sel);
+const prog = useProgressive(() => items.value, () => [A.libId(), A.catId(), L.query, S.kind].join('|'), () => L.sel);
 const scroller = ref(null);
 const marq = useMarquee(scroller, { enabled: () => L.manage, get: () => L.ids, set: s => { L.ids = s; }, end: () => { L.pendingBatch = false; } });
 watch(() => L.query, () => { L.sel = ''; });
@@ -65,12 +63,10 @@ function move(target) { if (target) run(A.moveSelected(target)); }
                     <button type="button" class="nv-btn sm" :disabled="!L.ids.size" @click="A.downloadSelected()"><NvIcon name="download" />下载所选</button>
                     <button type="button" class="nv-btn sm" :disabled="!L.ids.size" @click="A.copyToCanvas()"><NvIcon name="clip" />复制到画布</button>
                     <button type="button" class="nv-btn sm danger" :disabled="!L.ids.size" @click="run(A.deleteSelected())"><NvIcon name="trash" />{{ L.pendingBatch ? '确认删除' : '删除所选' }}</button>
+                    <button type="button" class="nv-btn sm danger" :disabled="!items.length" @click="run(A.deleteAll())"><NvIcon name="trash" />{{ L.pendingAll ? '确认删除全部 ' + items.length + ' 个' : '删除全部' }}</button>
                 </div>
                 <div class="am-mrow">
                     <span class="gt">AI 处理</span>
-                    <button type="button" class="nv-btn sm" :disabled="!imageCount || L.classifyBusy" @click="run(A.classifySelected())">
-                        <span v-if="L.classifyBusy" class="am-spin"></span><NvIcon v-else name="tag" />{{ L.classifyBusy ? '分类中' : '智能分类' }}
-                    </button>
                     <span class="sp"></span>
                     <span class="smy">已选 {{ L.ids.size }} 个，其中 {{ imageCount }} 张图片</span>
                 </div>
@@ -86,14 +82,14 @@ function move(target) { if (target) run(A.moveSelected(target)); }
 
             <div ref="scroller" class="am-scroll" @pointerdown="marq.down">
                 <div class="am-grid">
-                    <UploadCard v-if="!filtering" title="上传到当前分组" sub="图片 / 视频 / 音频" accept="image/*,video/*,audio/*" :disabled="!A.activeCat()" @files="upload" />
+                    <UploadCard title="上传到当前分组" sub="图片 / 视频 / 音频" accept="image/*,video/*,audio/*" :disabled="!A.activeCat()" @files="upload" />
                     <AssetCard v-for="it in prog.visible.value" :key="it.id" :card-id="it.id" :url="it.url" :kind="assetKind(it)" :name="it.name || 'asset'"
                                :meta="assetKindLabel(it) + ' · ' + shortDate(it.created_at)" :active="detail && detail.id === it.id" :checked="L.ids.has(it.id)" :manage="L.manage"
                                @select="A.clickCard" @toggle="A.toggleSelect" />
                     <ProgressiveMore v-if="prog.rest.value" :key="prog.shown.value" :rest="prog.rest.value" @more="prog.more" />
                     <div v-if="!items.length" class="am-emptybox">
                         {{ emptyText }}
-                        <button v-if="canvasAssetCount && !S.kind && !filtering" type="button" class="nv-btn sm" @click="setTab('canvas-assets')">
+                        <button v-if="canvasAssetCount && !S.kind" type="button" class="nv-btn sm" @click="setTab('canvas-assets')">
                             去「画布里的」看 {{ canvasAssetCount }} 个画布资产
                         </button>
                     </div>

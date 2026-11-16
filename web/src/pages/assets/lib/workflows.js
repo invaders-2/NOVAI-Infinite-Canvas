@@ -4,7 +4,7 @@ import { S, setStatus } from './state.js';
 import { apiJson, jsonBody, downloadUrl, downloadZip, workflowKindLabel } from './util.js';
 import { libraries } from './library.js';
 
-export const W = reactive({ libId: '', catId: '', sel: '', ids: new Set(), query: '', manage: false, pendingDelete: '', pendingBatch: false, treeEdit: null, pendingTreeDelete: '' });
+export const W = reactive({ libId: '', catId: '', sel: '', ids: new Set(), query: '', manage: false, pendingDelete: '', pendingBatch: false, pendingAll: false, treeEdit: null, pendingTreeDelete: '' });
 
 export function categories() {
     const cats = [];
@@ -45,10 +45,11 @@ export function resetToDefault() {
 }
 
 export function selectCat(libId, catId) { W.libId = libId || W.libId; W.catId = catId; W.sel = ''; W.ids.clear(); }
-export function toggleSelect(id) { W.pendingBatch = false; if (W.ids.has(id)) { W.ids.delete(id); if (W.sel === id) W.sel = ''; } else { W.ids.add(id); W.sel = id; } }
+export function toggleSelect(id) { W.pendingBatch = false; W.pendingAll = false; if (W.ids.has(id)) { W.ids.delete(id); if (W.sel === id) W.sel = ''; } else { W.ids.add(id); W.sel = id; } }
 export function clickCard(id) { if (W.manage) toggleSelect(id); else W.sel = id; W.pendingDelete = ''; }
-export function toggleManage() { W.manage = !W.manage; if (!W.manage) W.ids.clear(); W.pendingDelete = ''; }
-export function selectAll() { W.pendingBatch = false; currentItems().forEach(i => W.ids.add(i.id)); }
+export function toggleManage() { W.manage = !W.manage; if (!W.manage) W.ids.clear(); W.pendingDelete = ''; W.pendingAll = false; }
+export function selectAll() { W.pendingBatch = false; W.pendingAll = false; currentItems().forEach(i => W.ids.add(i.id)); }
+export function clearSelection() { W.ids.clear(); W.pendingBatch = false; W.pendingAll = false; }
 
 export function startTreeEdit(kind) {
     if (kind === 'category-new') W.treeEdit = { kind, placement: 'head', value: '新工作流分组', label: '工作流分组名称' };
@@ -129,11 +130,29 @@ export async function deleteOne(id) {
     W.ids.delete(id); W.sel = ''; W.pendingDelete = '';
     setStatus('已删除工作流');
 }
+// 删除全部：全选当前视图后复用 deleteSelected（二次确认；按钮文字会变成「确认删除全部」）
+export async function deleteAll() {
+    const list = currentItems();
+    if (!list.length) return;
+    if (!W.pendingAll) {
+        list.forEach(i => W.ids.add(i.id));
+        W.pendingDelete = '';
+        W.pendingBatch = false;
+        W.pendingAll = true;
+        setStatus('再次点击确认删除全部 ' + W.ids.size + ' 个工作流');
+        return;
+    }
+    W.pendingAll = false;
+    W.pendingBatch = true;
+    await deleteSelected();
+}
+
 export async function deleteSelected() {
     const ids = [...W.ids];
     if (!ids.length) return;
     if (!W.pendingBatch) { W.pendingBatch = true; setStatus('再次点击确认删除所选工作流'); return; }
     W.pendingBatch = false;
+    W.pendingAll = false;
     const data = await apiJson('/api/asset-library/items/delete', jsonBody('POST', { library_id: activeLibId(), ids }));
     setLib(data);
     W.ids.clear(); W.sel = '';

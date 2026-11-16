@@ -1,14 +1,13 @@
-// 「本地上传」区域（assets/uploads）：文件夹树、智能分类筛选、上传、剪切/移动、下载、复制到画布、删除、
-// 行内重命名、提示词反推（批量 / 单张）、智能分类、反推提示词编辑保存
+// 「本地上传」区域（assets/uploads）：文件夹树、上传、剪切/移动、下载、复制到画布、删除、
+// 行内重命名、提示词反推（批量 / 单张）、反推提示词编辑保存
 import { reactive } from 'vue';
 import { S, setStatus, fail, ensureCaptionModel, loadLocalAssets, openPreview } from './state.js';
 import { apiJson, jsonBody, assetKind, assetKindLabel, isLocalMediaFile, downloadAsAttachment, assetDownloadName, downloadZip, writeCanvasInbox, countKinds, buildKindTabs, matchesKind } from './util.js';
-import { classEntriesForItems, classSearchText, itemsMatchingClass } from './classify.js';
 
 export const U = reactive({
-    folder: '', classFilter: '', openGroup: '', sel: '', ids: new Set(), query: '', manage: false,
-    clipboard: null, captionBusy: false, classifyBusy: false, classifyPromptOpen: false,
-    pendingBatch: false, pendingDelete: '', renaming: '',
+    folder: '', sel: '', ids: new Set(), query: '', manage: false,
+    clipboard: null, captionBusy: false,
+    pendingBatch: false, pendingAll: false, pendingDelete: '', renaming: '',
 });
 
 // 画布生成物的只读目录名（后端 LOCAL_OUTPUT_FOLDER）。根视图不返回它们，进这个文件夹才加载
@@ -37,20 +36,17 @@ export function readonlyBlocked(ids) { return (ids || []).map(findUpload).filter
 function walk(node, fn) { if (!node) return null; if (fn(node)) return node; for (const c of node.children || []) { const r = walk(c, fn); if (r) return r; } return null; }
 export function folderByPath(path = '') { return walk(S.localTree, n => String(n.path || '') === String(path || '')); }
 export function folderContainsActive(folder) {
-    if (!folder || activeClassEntry()) return false;
+    if (!folder) return false;
     if (String(folder.path || '') === U.folder) return true;
     return (folder.children || []).some(folderContainsActive);
 }
-export function classEntries() { return classEntriesForItems((S.localAssets || []).filter(i => assetKind(i) === 'image')); }
-export function activeClassEntry() { return classEntries().find(e => e.key === U.classFilter) || null; }
-// 当前文件夹 / 智能分类 / 搜索过滤后的完整集合（不含类型筛选），类型计数和类型筛选都以它为基础
+// 当前文件夹 / 搜索过滤后的完整集合（不含类型筛选），类型计数和类型筛选都以它为基础
 export function baseItems() {
     const q = String(U.query || '').trim().toLowerCase();
     const source = scopedSource();
     let list = source.slice();
-    if (activeClassEntry()) list = itemsMatchingClass(source, U.classFilter);
-    else if (U.folder && !q) list = list.filter(it => String(it.folder || '') === U.folder);
-    if (q) list = list.filter(it => [it.name, it.file, assetKindLabel(it), classSearchText(it)].join(' ').toLowerCase().includes(q));
+    if (U.folder && !q) list = list.filter(it => String(it.folder || '') === U.folder);
+    if (q) list = list.filter(it => [it.name, it.file, assetKindLabel(it)].join(' ').toLowerCase().includes(q));
     return list;
 }
 export function items() { return baseItems().filter(it => matchesKind(it, S.kind)); }
@@ -58,14 +54,11 @@ export function items() { return baseItems().filter(it => matchesKind(it, S.kind
 export function kindTotals() { return countKinds(scopedSource()); }
 export function kindTabs() { return buildKindTabs(kindTotals(), S.kind); }
 export function folderTitle() {
-    const e = activeClassEntry();
-    if (e) return e.tag || '智能分类';
     if (!U.folder) return '本地上传';
     return folderByPath(U.folder)?.name || U.folder.split('/').pop() || '本地上传';
 }
 export function viewSubtitle(n) {
-    const e = activeClassEntry();
-    return e ? `智能分类：${e.label} / ${n} 个素材` : `${n} / ${scopedSource().length} 个素材`;
+    return `${n} / ${scopedSource().length} 个素材`;
 }
 export function selectedImages() { return [...U.ids].map(findUpload).filter(i => i && assetKind(i) === 'image'); }
 // 选中的素材「真的不存在了」才清空；只是被分类/筛选挡住时保留预览（旧版的有意设计，方便对照找相似图）
@@ -76,21 +69,17 @@ export function detailItem(list = items()) {
 // 数据重载后清理无效状态（旧 loadLocalAssets 尾部那段）
 export function afterLoad() {
     if (U.folder && !folderByPath(U.folder)) U.folder = '';
-    if (U.classFilter && !activeClassEntry()) U.classFilter = '';
     U.ids = new Set([...U.ids].filter(id => findUpload(id)));
     // 刷新时如果正停在「画布生成」，重拉一次（根视图不返回这些只读条目，不会自动带回来）
     if (isGeneratedFolder(U.folder)) void loadGeneratedAssets();
 }
-function clearPending() { U.pendingBatch = false; U.pendingDelete = ''; }
+function clearPending() { U.pendingBatch = false; U.pendingAll = false; U.pendingDelete = ''; }
 
 /* ───────── 导航 / 选择 ───────── */
 export async function selectFolder(path) {
-    U.folder = path || ''; U.classFilter = ''; U.sel = ''; U.ids.clear(); clearPending();
+    U.folder = path || ''; U.sel = ''; U.ids.clear(); clearPending();
     if (isGeneratedFolder(U.folder)) await loadGeneratedAssets();
 }
-export function toggleGroup(gid) { U.openGroup = U.openGroup === gid ? '' : gid; }
-export function toggleClassFilter(key) { U.classFilter = U.classFilter === key ? '' : key; U.ids.clear(); clearPending(); }
-export function classRoot() { if (!classEntries().length) setStatus('暂无智能分类，请先选择图片并点击“智能分类”'); }
 export function toggleSelect(id) {
     if (U.ids.has(id)) { U.ids.delete(id); if (U.sel === id) U.sel = ''; } else { U.ids.add(id); U.sel = id; }
     clearPending();
@@ -114,7 +103,6 @@ export async function upload(files) {
         const data = await apiJson('/api/local-assets/upload', { method: 'POST', body: form });
         const uploaded = Array.isArray(data.files) ? data.files : [];
         await loadLocalAssets();
-        U.classFilter = '';
         U.sel = uploaded[0]?.id || U.sel;
         setStatus(`已上传 ${uploaded.length} 个素材`);
     } catch (err) { fail(err, '上传失败'); }
@@ -128,7 +116,7 @@ export async function createFolder(name) {
     try {
         const data = await apiJson('/api/local-assets/folders', jsonBody('POST', { parent: U.folder || '', name }));
         applyTree(data);
-        U.folder = data.folder?.path || U.folder; U.classFilter = ''; U.sel = ''; U.ids.clear();
+        U.folder = data.folder?.path || U.folder; U.sel = ''; U.ids.clear();
         setStatus('已新建本地素材文件夹');
     } catch (err) { fail(err, '新建文件夹失败'); }
 }
@@ -138,7 +126,7 @@ export async function renameFolder(name) {
     try {
         const data = await apiJson('/api/local-assets/folders', jsonBody('PATCH', { path: U.folder, name }));
         applyTree(data);
-        U.folder = data.folder?.path || U.folder; U.classFilter = ''; U.sel = ''; U.ids.clear();
+        U.folder = data.folder?.path || U.folder; U.sel = ''; U.ids.clear();
         setStatus('已重命名本地素材文件夹');
     } catch (err) { fail(err, '重命名文件夹失败'); }
 }
@@ -204,6 +192,23 @@ export function copyToCanvas() {
         setStatus(`已复制 ${n} 个素材，去智能画布按 Ctrl+V 粘贴`);
     } catch (err) { setStatus('复制失败：' + (err?.message || err)); }
 }
+// 删除全部：把当前文件夹里可见的素材全选后走同一个删除（二次确认；按钮文字会变成「确认删除全部」）
+export async function deleteAll() {
+    const list = items();
+    if (!list.length) return;
+    if (!U.pendingAll) {
+        list.forEach(i => U.ids.add(i.id));
+        U.pendingDelete = '';
+        U.pendingBatch = false;
+        U.pendingAll = true;
+        setStatus('再次点击确认删除全部 ' + U.ids.size + ' 个素材（会删除磁盘文件）');
+        return;
+    }
+    U.pendingAll = false;
+    U.pendingBatch = true;
+    await remove([...U.ids], 'batch');
+}
+
 // 删除会删磁盘文件：加「再点一次确认」（旧版点一下就删）。key 区分批量 / 单个
 export async function remove(ids, key) {
     const blocked = readonlyBlocked(ids);
@@ -223,8 +228,7 @@ export async function remove(ids, key) {
     try {
         await apiJson('/api/local-assets/delete', jsonBody('POST', { names }));
         await loadLocalAssets();
-        if (U.classFilter && !activeClassEntry()) U.classFilter = '';
-        U.ids.clear();
+            U.ids.clear();
         if (U.sel && !findUpload(U.sel)) U.sel = '';
         setStatus(`已删除 ${names.length} 个素材`);
     } catch (err) { fail(err, '删除失败'); }
@@ -254,7 +258,7 @@ export async function captionSelected() {
 export async function captionOne(id) {
     const item = findUpload(id);
     if (isReadonlyAsset(item)) { setStatus('「画布生成」里的素材是只读生成物，不能反推提示词'); return; }
-    if (!item || assetKind(item) !== 'image' || U.captionBusy || U.classifyBusy) return;
+    if (!item || assetKind(item) !== 'image' || U.captionBusy) return;
     if (!ensureCaptionModel()) return;
     U.captionBusy = true; U.sel = item.id;
     setStatus(`正在反推「${item.name || '本地图片'}」的提示词...`);
@@ -266,22 +270,6 @@ export async function captionOne(id) {
         U.sel = item.id;
         setStatus('已反推并保存当前图片提示词');
     } catch (err) { fail(err, '提示词反推失败'); } finally { U.captionBusy = false; }
-}
-export async function classifySelected() {
-    const all = selectedImages();
-    const images = all.filter(i => !isReadonlyAsset(i));
-    if (all.some(isReadonlyAsset)) setStatus('「画布生成」里的素材是只读生成物，不能智能分类');
-    if (!images.length || U.classifyBusy) return;
-    if (!ensureCaptionModel()) return;
-    U.classifyBusy = true;
-    setStatus(`正在智能分类 ${images.length} 张本地图片...`);
-    try {
-        const data = await apiJson('/api/local-assets/classify', captionBody(images.map(i => i.file || i.id), (S.caption.classifyPrompt || '').trim()));
-        await loadLocalAssets();
-        if (images[0]?.id) U.sel = images[0].id;
-        const failed = (data.items || []).filter(i => !i.ok);
-        setStatus(failed.length ? `处理完成 ${data.count || 0} 张，${failed.length} 张失败：${failed[0].error || '分类失败'}` : `处理完成 ${data.count || images.length} 张图片`);
-    } catch (err) { fail(err, '智能分类失败'); } finally { U.classifyBusy = false; }
 }
 export async function saveCaption(id, caption) {
     const item = findUpload(id);

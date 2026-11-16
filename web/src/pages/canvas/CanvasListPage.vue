@@ -7,6 +7,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import { state, toast } from '../../lib/store.js';
+import { auth } from '../../lib/auth.js';
 import { openCanvasUrl } from '../../lib/bridge.js';
 import { assetPreviewUrl } from '../assets/lib/util.js';
 
@@ -103,6 +104,43 @@ function canvasUrl(c) {
     return (c.kind === 'smart' ? '/static/smart-canvas.html' : '/static/canvas.html') + '?id=' + enc + '&project=' + project;
 }
 function open(c) { closeMenus(); openCanvasUrl(canvasUrl(c)); }
+
+/* ───────── 批量管理 ───────── */
+const manage = ref(false);
+const picked = ref(new Set());
+const pickedCount = computed(() => picked.value.size);
+const allPicked = computed(() => shown.value.length > 0 && shown.value.every(c => picked.value.has(c.id)));
+function toggleManage() {
+    manage.value = !manage.value;
+    picked.value = new Set();
+    closeMenus();
+}
+function togglePick(id) {
+    const next = new Set(picked.value);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    picked.value = next;
+}
+function pickAll() { picked.value = allPicked.value ? new Set() : new Set(shown.value.map(c => c.id)); }
+function clearPicked() { picked.value = new Set(); }
+function tapCard(c) { if (manage.value) togglePick(c.id); else open(c); }
+function askBatchRemove() {
+    const ids = [...picked.value];
+    if (!ids.length) return;
+    confirm.value = {
+        title: '删除所选的 ' + ids.length + ' 个画布？',
+        desc: '删除后进回收站，30 天内可以恢复。',
+        ok: '删除',
+        fail: '批量删除失败',
+        run: async () => {
+            const results = await Promise.all(ids.map(id => fetch('/api/canvases/' + encodeURIComponent(id), { method: 'DELETE' })));
+            if (results.some(r => !r.ok)) throw new Error('batch delete failed');
+            picked.value = new Set();
+            await loadAll();
+            await loadTrash();
+            toast('已删除 ' + ids.length + ' 个画布', { icon: 'trash' });
+        },
+    };
+}
 function continueLast() {
     const latest = canvases.value.slice().sort((a, b) => (b.updated_at || b.created_at || 0) - (a.updated_at || a.created_at || 0))[0];
     if (latest) open(latest); else create();
@@ -131,16 +169,11 @@ async function create() {
 function toggleMenu(id) { menuFor.value = menuFor.value === id ? '' : id; sortOpen.value = false; }
 function closeMenus() { menuFor.value = ''; sortOpen.value = false; }
 
-/* ───────── 权限（沿用旧列表的 canvas-perms 弹窗，auth 开启才出现入口） ───────── */
+/* ───────── 权限（沿用旧列表的 canvas-perms 弹窗；登录后就有入口，未登录=本机模式不显示） ───────── */
 const permsOn = ref(false);
 let permsAssets = null;
-async function probeAuth() {
-    try {
-        const d = await getJSON('/api/auth/me', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
-        permsOn.value = !!d && d.auth_enabled === true;
-    } catch (e) {
-        permsOn.value = false;
-    }
+function probeAuth() {
+    permsOn.value = !!auth.loggedIn;
 }
 function loadPermsAssets() {
     if (window.NOVAI_CANVAS_PERMS) return Promise.resolve();
@@ -284,7 +317,7 @@ async function runConfirm() {
     const c = confirm.value; if (!c || confirmBusy.value) return;
     confirmBusy.value = true;
     try { await c.run(); confirm.value = null; }
-    catch (e) { confirm.value = null; toast('彻底删除失败', { danger: true, icon: 'alert' }); }
+    catch (e) { confirm.value = null; toast(c.fail || '彻底删除失败', { danger: true, icon: 'alert' }); }
     finally { confirmBusy.value = false; }
 }
 
@@ -310,6 +343,8 @@ function restartSlides() { clearInterval(slideTimer); slideTimer = setInterval((
 /* ───────── 生命周期 ───────── */
 const visible = computed(() => state.active === 'canvas' && !state.canvasOpen);
 watch(visible, v => { if (v) { loadAll(); restartSlides(); } else clearInterval(slideTimer); });
+// 登录 / 退出：列表范围跟着变（登录=自己的+共享的；未登录=本机全量），共享入口同步显示/隐藏
+watch(() => auth.loggedIn, () => { probeAuth(); loadAll(); });
 
 // 滚到底部附近自动加载下一批（沿用素材库 ProgressiveMore 的哨兵思路）
 const moreEl = ref(null);
@@ -325,6 +360,7 @@ function onKey(e) {
     if (confirm.value) { if (!confirmBusy.value) confirm.value = null; return; }
     if (rename.value) { rename.value = null; return; }
     if (trashOpen.value) { trashOpen.value = false; return; }
+    if (manage.value) { toggleManage(); return; }
     closeMenus();
 }
 function onDocClick(e) {
@@ -401,7 +437,18 @@ onBeforeUnmount(() => {
                         </div>
                     </Transition>
                 </div>
+                <button type="button" class="nv-btn" :class="{ primary: manage }" :aria-pressed="manage" @click="toggleManage"><NvIcon name="list" />{{ manage ? '完成' : '批量管理' }}</button>
                 <button type="button" class="nv-btn primary" :disabled="!!creating" @click="create()"><NvIcon name="plus" />新建画布</button>
+            </div>
+
+            <!-- 批量管理条 -->
+            <div v-if="manage" class="cl-mbar">
+                <span class="gt">已选 {{ pickedCount }} 个</span>
+                <button type="button" class="nv-btn sm" :disabled="!shown.length" @click="pickAll"><NvIcon name="check" />{{ allPicked ? '取消全选' : '全选' }}</button>
+                <button type="button" class="nv-btn sm" :disabled="!pickedCount" @click="clearPicked"><NvIcon name="square" />清空</button>
+                <span class="grow"></span>
+                <span class="hint">点卡片选择；删掉后会进回收站，30 天内可恢复</span>
+                <button type="button" class="nv-btn sm danger" :disabled="!pickedCount" @click="askBatchRemove"><NvIcon name="trash" />删除所选</button>
             </div>
 
             <!-- 卡片 -->
@@ -420,13 +467,14 @@ onBeforeUnmount(() => {
                 <p class="p">换个关键词试试</p>
             </div>
             <TransitionGroup v-else tag="div" name="card" class="cl-grid">
-                <article v-for="(c, i) in renderList" :key="c.id" class="cl-card" :class="{ 'menu-open': menuFor === c.id }" :style="{ '--d': Math.min(i, 12) * 24 + 'ms' }">
-                    <button type="button" class="cl-prev" :data-n="thumbsOf(c).length" :aria-label="'打开 ' + (c.title || '未命名画布')" @click="open(c)">
+                <article v-for="(c, i) in renderList" :key="c.id" class="cl-card" :class="{ 'menu-open': menuFor === c.id, managing: manage, picked: manage && picked.has(c.id) }" :style="{ '--d': Math.min(i, 12) * 24 + 'ms' }">
+                    <button type="button" class="cl-prev" :data-n="thumbsOf(c).length" :aria-label="manage ? (picked.has(c.id) ? '取消选择 ' : '选择 ') + (c.title || '未命名画布') : '打开 ' + (c.title || '未命名画布')" @click="tapCard(c)">
+                        <span v-if="manage" class="cl-ck" :class="{ on: picked.has(c.id) }" aria-hidden="true"><NvIcon v-if="picked.has(c.id)" name="check" /></span>
                         <img v-for="(u, k) in thumbsOf(c)" :key="k" :src="thumbSrc(u)" alt="" loading="lazy" decoding="async" fetchpriority="low" width="480" height="300" @error="onThumbError(c, u)">
                         <span v-if="!thumbsOf(c).length" class="cl-blank"><NvIcon name="grid9" :size="22" /></span>
-                        <span class="nv-badge" :class="c.kind === 'smart' ? 'strong' : 'on-image'">{{ c.kind === 'smart' ? '旧版' : '智能画布' }}</span>
+                        <span v-if="!manage" class="nv-badge" :class="c.kind === 'smart' ? 'strong' : 'on-image'">{{ c.kind === 'smart' ? '旧版' : '智能画布' }}</span>
                     </button>
-                    <div class="cl-more-wrap">
+                    <div v-if="!manage" class="cl-more-wrap">
                         <button type="button" class="cl-more" aria-label="更多操作" :aria-expanded="menuFor === c.id" @click.stop="toggleMenu(c.id)"><NvIcon name="more" /></button>
                         <Transition name="pop">
                             <div v-if="menuFor === c.id" class="nv-menu cl-pop right" role="menu">
@@ -438,7 +486,7 @@ onBeforeUnmount(() => {
                             </div>
                         </Transition>
                     </div>
-                    <div class="cl-body" @click="rename && rename.id === c.id ? null : open(c)">
+                    <div class="cl-body" @click="rename && rename.id === c.id ? null : tapCard(c)">
                         <input v-if="rename && rename.id === c.id" ref="renameEl" v-model="rename.value" class="cl-rename" aria-label="画布名称" maxlength="80"
                                @click.stop @keydown.enter.prevent="commitRename" @keydown.esc.stop.prevent="rename = null" @blur="commitRename">
                         <div v-else class="cl-title"><span>{{ c.title || '未命名画布' }}</span><NvIcon name="arrow" class="arr" /></div>
@@ -510,7 +558,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .cl { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; }
-.cl-in { width: min(1180px, calc(100% - 96px)); margin: 0 auto; padding: calc(var(--tbh, 0px) + 40px) 0 96px; display: flex; flex-direction: column; gap: 32px; }
+.cl-in { width: min(1240px, calc(100% - 96px)); margin: 0 auto; padding: calc(var(--tbh, 0px) + 40px) 0 96px; display: flex; flex-direction: column; gap: 32px; }
 .grow { flex: 1; }
 
 /* 顶部 */
@@ -549,6 +597,16 @@ onBeforeUnmount(() => {
 .cl-grid { position: relative; display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 28px 20px; }
 .cl-card { position: relative; display: flex; flex-direction: column; gap: 10px; min-width: 0; animation: card-in 480ms var(--ease-out) var(--d) both; }
 .cl-card.menu-open { z-index: 5; }
+/* 批量管理：勾选圈 + 选中态（软阴影，不画描边） */
+.cl-ck { position: absolute; left: 10px; top: 10px; z-index: 3; width: 20px; height: 20px; border-radius: 6px; background: rgba(10,10,10,.22); box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.95); display: inline-flex; align-items: center; justify-content: center; color: #fff; pointer-events: none; }
+.cl-ck.on { background: var(--accent); color: var(--on-accent); box-shadow: 0 0 0 1.5px var(--solid); }
+.cl-ck .nv-i { width: 12px; height: 12px; }
+.cl-card.picked .cl-prev { box-shadow: var(--shadow-lift); }
+.cl-card.picked .cl-title span { font-weight: 600; }
+.cl-card.managing .cl-prev { cursor: pointer; }
+.cl-mbar { position: relative; z-index: 9; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 14px; background: var(--fill-1); }
+.cl-mbar .gt { font: 500 12px/1 var(--font-sans); color: var(--ink-2); }
+.cl-mbar .hint { font: 400 11.5px/1 var(--font-sans); color: var(--ink-4); }
 @keyframes card-in { from { opacity: 0; transform: translateY(8px); filter: blur(3px); } }
 .cl-prev { position: relative; aspect-ratio: 16 / 10; border: 0; padding: 0; cursor: pointer; border-radius: var(--radius-lg); overflow: hidden; background: var(--fill-1); display: grid; gap: 2px;
     transition: box-shadow var(--duration-base) var(--ease-out), transform var(--duration-base) var(--ease-out); }

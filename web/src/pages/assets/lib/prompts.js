@@ -5,7 +5,7 @@ import { apiJson, jsonBody } from './util.js';
 
 export const P = reactive({
     libId: '', cat: 'all', focus: 'category', sel: '', ids: new Set(), query: '', manage: false,
-    edit: false, create: false, pendingDelete: '', pendingBatch: false, treeEdit: null, pendingTreeDelete: '',
+    edit: false, create: false, pendingDelete: '', pendingBatch: false, pendingAll: false, treeEdit: null, pendingTreeDelete: '',
 });
 const BUILTIN = [
     { id: 'view', name: '视角' }, { id: 'storyboard', name: '分镜' }, { id: 'character', name: '角色' },
@@ -54,7 +54,7 @@ function setLib(data) {
     if (data && data.library) S.promptLibrary = data.library;
     P.ids = new Set([...P.ids].filter(id => findPrompt(id)));
 }
-function clearPending() { P.pendingDelete = ''; P.pendingBatch = false; }
+function clearPending() { P.pendingDelete = ''; P.pendingBatch = false; P.pendingAll = false; }
 
 /* ───────── 导航 / 选择 ───────── */
 export function selectLib(id) { P.libId = id; P.cat = 'all'; P.focus = 'library'; P.sel = ''; P.create = false; P.edit = false; P.ids.clear(); }
@@ -154,6 +154,23 @@ export async function deleteOne(id) {
     P.pendingDelete = '';
     setStatus('提示词已删除');
 }
+// 删除全部：全选当前视图后复用 deleteSelected（二次确认；按钮文字会变成「确认删除全部」）
+export async function deleteAll() {
+    const list = currentItems();
+    if (!list.length) return;
+    if (!P.pendingAll) {
+        list.forEach(i => P.ids.add(i.id));
+        P.pendingDelete = '';
+        P.pendingBatch = false;
+        P.pendingAll = true;
+        setStatus('再次点击确认删除全部 ' + P.ids.size + ' 条提示词');
+        return;
+    }
+    P.pendingAll = false;
+    P.pendingBatch = true;
+    await deleteSelected();
+}
+
 export async function deleteSelected() {
     if (!P.ids.size) return;
     if (!P.pendingBatch) { P.pendingBatch = true; setStatus('再次点击确认删除所选提示词'); return; }

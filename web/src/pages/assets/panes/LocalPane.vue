@@ -1,6 +1,6 @@
 <script setup>
-// 「素材 / 本地上传」：文件夹树 + 智能分类；上传（按钮 / 拖入）、管理条（下载 / 复制到画布 / 剪切移动 / 删除）、
-// AI 处理（平台、模型、反推要求、智能分类、提示词反推、分类追加要求）、卡片名点击即改名、框选
+// 「素材 / 本地上传」：文件夹树；上传（按钮 / 拖入）、管理条（下载 / 复制到画布 / 剪切移动 / 删除）、
+// AI 处理（平台、模型、反推要求、提示词反推）、卡片名点击即改名、框选
 import { ref, computed, watch, nextTick } from 'vue';
 import NvIcon from '../../../components/NvIcon.vue';
 import AmTools from '../parts/AmTools.vue';
@@ -8,7 +8,6 @@ import AssetCard from '../parts/AssetCard.vue';
 import UploadCard from '../parts/UploadCard.vue';
 import MenuSelect from '../parts/MenuSelect.vue';
 import ProgressiveMore from '../parts/ProgressiveMore.vue';
-import SmartClassTree from '../parts/SmartClassTree.vue';
 import KindBar from '../parts/KindBar.vue';
 import LocalDetail from './LocalDetail.vue';
 import { S, ask, run, captionProviders, captionModels, setCaptionProvider, setCaptionModel, writeCaptionSettings } from '../lib/state.js';
@@ -23,7 +22,7 @@ const total = computed(() => (S.localAssets || []).length);
 const imageCount = computed(() => U.selectedImages().length);
 const providerOpts = computed(() => captionProviders().map(p => ({ value: p.id, label: p.name || p.id })));
 const modelOpts = computed(() => captionModels().map(m => ({ value: m, label: m })));
-const aiBusy = computed(() => X.captionBusy || X.classifyBusy);
+const aiBusy = computed(() => X.captionBusy);
 const aiOff = computed(() => !imageCount.value || !providerOpts.value.length || !S.caption.model || aiBusy.value);
 const folders = computed(() => {
     const out = [];
@@ -37,7 +36,7 @@ const emptyText = computed(() => {
     if (X.query.trim()) return `没有找到匹配的${name}素材，可以换个关键词或切回「全部」。`;
     return `当前文件夹下没有${name}素材，可以切回「全部」查看。`;
 });
-const prog = useProgressive(() => list.value, () => [X.folder, X.classFilter, X.query, S.kind].join('|'), () => X.sel);
+const prog = useProgressive(() => list.value, () => [X.folder, X.query, S.kind].join('|'), () => X.sel);
 const scroller = ref(null);
 const uploader = ref(null);
 const marq = useMarquee(scroller, { enabled: () => X.manage, get: () => X.ids, set: s => { X.ids = s; }, end: () => { X.pendingBatch = false; } });
@@ -79,11 +78,10 @@ async function renameFolder() {
                     <button type="button" class="am-ib" title="重命名文件夹" :disabled="!X.folder" @click="renameFolder"><NvIcon name="pencil" /></button>
                 </div>
             </div>
-            <button v-for="f in folders" :key="f.node.path || '__root__'" type="button" class="am-tr" :class="[f.depth ? 'sub' : 'par', { 'is-on': !U.activeClassEntry() && (f.node.path || '') === X.folder }]"
+            <button v-for="f in folders" :key="f.node.path || '__root__'" type="button" class="am-tr" :class="[f.depth ? 'sub' : 'par', { 'is-on': (f.node.path || '') === X.folder }]"
                     :style="f.depth > 1 ? { paddingLeft: 30 + (f.depth - 1) * 20 + 'px' } : null" @click="U.selectFolder(f.node.path || '')">
                 <NvIcon :name="f.depth ? 'folder' : 'cloud'" /><b>{{ f.node.name || '文件夹' }}</b><span class="n">{{ Number(f.node.count || 0) }}</span>
             </button>
-            <SmartClassTree :entries="U.classEntries()" :active-key="X.classFilter" :open-group="X.openGroup" @root="U.classRoot()" @group="U.toggleGroup" @filter="U.toggleClassFilter" />
             <div class="am-hint">选择图片/视频/音频文件即可上传，文件保存在项目 assets/uploads 目录。</div>
         </aside>
 
@@ -108,17 +106,15 @@ async function renameFolder() {
                     <button type="button" class="nv-btn sm" :disabled="!X.ids.size" @click="U.copyToCanvas()"><NvIcon name="clip" />复制到画布</button>
                     <button type="button" class="nv-btn sm" :disabled="!X.ids.size" @click="U.cutSelected()"><NvIcon name="scissors" />剪切/移动</button>
                     <button type="button" class="nv-btn sm danger" :disabled="!X.ids.size" @click="U.remove([...X.ids], 'batch')"><NvIcon name="trash" />{{ X.pendingBatch ? '确认删除' : '删除' }}</button>
+                    <button type="button" class="nv-btn sm danger" :disabled="!list.length" @click="run(U.deleteAll())"><NvIcon name="trash" />{{ X.pendingAll ? '确认删除全部 ' + list.length + ' 个' : '删除全部' }}</button>
                 </div>
                 <div class="am-mrow">
                     <span class="gt">AI 处理</span>
                     <MenuSelect :model-value="S.caption.provider" :options="providerOpts" placeholder="暂无聊天平台" :disabled="!providerOpts.length" variant="solid" title="平台" @update:model-value="setCaptionProvider" />
                     <MenuSelect :model-value="S.caption.model" :options="modelOpts" placeholder="暂无模型" :disabled="!modelOpts.length" variant="solid" title="模型" @update:model-value="setCaptionModel" />
                     <input v-model="S.caption.prompt" class="am-inp prompt" type="text" placeholder="描述图片" title="反推要求" @input="writeCaptionSettings">
-                    <button type="button" class="nv-btn sm" :disabled="aiOff" @click="U.classifySelected()"><span v-if="X.classifyBusy" class="am-spin"></span><NvIcon v-else name="tag" />{{ X.classifyBusy ? '分类中' : '智能分类' }}</button>
                     <button type="button" class="nv-btn sm primary" :disabled="aiOff" @click="U.captionSelected()"><span v-if="X.captionBusy" class="am-spin"></span><NvIcon v-else name="wand2" />{{ X.captionBusy ? '反推中' : '提示词反推' }}</button>
-                    <button type="button" class="am-ib" :class="{ pri: X.classifyPromptOpen }" title="智能分类要求" @click="X.classifyPromptOpen = !X.classifyPromptOpen"><NvIcon :name="X.classifyPromptOpen ? 'chevu' : 'settings'" /></button>
                 </div>
-                <textarea v-if="X.classifyPromptOpen" v-model="S.caption.classifyPrompt" class="am-txa" placeholder="默认已内置室内/室外、空间、主体、光影、模特、风格、色彩等分类。这里可以追加你的分类要求，例如：增加家装风格、镜头焦段、商业用途、人物年龄段、产品材质。" @input="writeCaptionSettings"></textarea>
             </div>
 
             <div v-if="X.clipboard && X.clipboard.ids.length" class="am-clip">
@@ -153,6 +149,5 @@ async function renameFolder() {
 
 <style scoped>
 .prompt { width: 140px; }
-.am-mbar .am-txa { min-height: 56px; }
 .am-ct :deep(.am-sel) { height: 30px; }
 </style>

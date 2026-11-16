@@ -68,9 +68,10 @@ async function rename(id) {
                     <span class="smy">已选择 {{ W.ids.size }} 个工作流。</span>
                     <span class="sp"></span>
                     <button type="button" class="nv-btn sm" :disabled="!items.length" @click="F.selectAll()"><NvIcon name="check" />全选</button>
-                    <button type="button" class="nv-btn sm" :disabled="!W.ids.size" @click="W.ids.clear(); W.pendingBatch = false"><NvIcon name="square" />清空</button>
+                    <button type="button" class="nv-btn sm" :disabled="!W.ids.size" @click="W.ids.clear(); W.pendingBatch = false; W.pendingAll = false"><NvIcon name="square" />清空</button>
                     <button type="button" class="nv-btn sm" :disabled="!W.ids.size" @click="run(F.exportItems([...W.ids]), '导出工作流失败')"><NvIcon name="download" />导出所选</button>
                     <button type="button" class="nv-btn sm danger" :disabled="!W.ids.size" @click="run(F.deleteSelected())"><NvIcon name="trash" />{{ W.pendingBatch ? '确认删除' : '删除所选' }}</button>
+                    <button type="button" class="nv-btn sm danger" :disabled="!items.length" @click="run(F.deleteAll())"><NvIcon name="trash" />{{ W.pendingAll ? '确认删除全部 ' + items.length + ' 个' : '删除全部' }}</button>
                 </div>
             </div>
             <div class="am-scroll">

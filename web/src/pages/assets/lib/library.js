@@ -1,14 +1,13 @@
-// 「资产库」区域：库 / 分组 / 智能分类、管理模式、剪贴板、移动到、上传、下载、智能分类、编辑、平台注册
+// 「资产库」区域：库 / 分组、管理模式、剪贴板、移动到、上传、下载、编辑、平台注册
 import { reactive } from 'vue';
-import { S, setStatus, fail, ensureCaptionModel, openPreview } from './state.js';
+import { S, setStatus, fail, openPreview } from './state.js';
 import { apiJson, jsonBody, assetKind, assetKindLabel, downloadAsAttachment, assetDownloadName, downloadZip, writeCanvasInbox, countKinds, buildKindTabs, matchesKind } from './util.js';
-import { classEntriesForItems, classSearchText, itemsMatchingClass, classGroupIdForKey } from './classify.js';
 
 export const L = reactive({
-    libId: '', catId: '', classFilter: '', openGroup: 'environment', focus: 'category',
+    libId: '', catId: '', focus: 'category',
     sel: '', ids: new Set(), query: '', manage: false, moveTarget: '', clipboard: null,
-    edit: false, pendingDelete: '', pendingBatch: false, treeEdit: null, pendingTreeDelete: '',
-    classifyBusy: false, avatarProvider: '', avatarBusy: '',
+    edit: false, pendingDelete: '', pendingBatch: false, pendingAll: false, treeEdit: null, pendingTreeDelete: '',
+    avatarProvider: '', avatarBusy: '',
 });
 
 /* ───────── 读取 ───────── */
@@ -26,33 +25,24 @@ export function activeCat() { const cats = categories(); return cats.find(c => c
 export const libId = () => activeLib()?.id || '';
 export const catId = () => activeCat()?.id || '';
 export function countForLib(lib) { return imageCats(lib).reduce((n, c) => n + (c.items || []).length, 0); }
-export function classEntries(lib = activeLib()) { return classEntriesForItems(imageCats(lib).flatMap(c => c.items || [])); }
-export function activeClassEntry() { return classEntries().find(e => e.key === L.classFilter) || null; }
 export function findAsset(id) {
     for (const lib of libraries()) for (const cat of lib.categories || []) for (const item of cat.items || []) if (item.id === id) return item;
     return null;
 }
-// 当前分组 / 智能分类 / 搜索过滤后的完整集合（不含类型筛选），类型计数和类型筛选都以它为基础
+// 当前分组 / 搜索过滤后的完整集合（不含类型筛选），类型计数和类型筛选都以它为基础
 export function baseItems() {
     const q = L.query.trim().toLowerCase();
-    const filter = activeClassEntry() ? L.classFilter : '';
-    const source = filter
-        ? itemsMatchingClass(categories().flatMap(c => c.items || []), filter)
-        : q ? categories().flatMap(c => c.items || []) : (activeCat()?.items || []);
+    const source = q ? categories().flatMap(c => c.items || []) : (activeCat()?.items || []);
     if (!q) return source;
-    return source.filter(item => [item.name, item.url, assetKindLabel(item), classSearchText(item)].join(' ').toLowerCase().includes(q));
+    return source.filter(item => [item.name, item.url, assetKindLabel(item)].join(' ').toLowerCase().includes(q));
 }
 export function currentItems() { return baseItems().filter(item => matchesKind(item, S.kind)); }
 // 类型页签的数量 = 当前资产库的完整素材集（与来源页签的计法一致，不随搜索/分类变化）
 export function kindTotals() { return countKinds(categories().flatMap(c => c.items || [])); }
 export function kindTabs() { return buildKindTabs(kindTotals(), S.kind); }
 export function selectedItem(items = currentItems()) { return items.find(i => i.id === L.sel) || items[0] || null; }
-export function viewTitle() { const e = activeClassEntry(); return e ? (e.tag || '智能分类') : (activeCat()?.name || '图片资产'); }
-export function viewSubtitle(n) {
-    const libName = activeLib()?.name || '资产库';
-    const e = activeClassEntry();
-    return e ? `${libName} / 智能分类：${e.label} / ${n} 个素材` : `${libName} / ${n} 个素材`;
-}
+export function viewTitle() { return activeCat()?.name || '图片资产'; }
+export function viewSubtitle(n) { return `${activeLib()?.name || '资产库'} / ${n} 个素材`; }
 export function selectedImages() { return [...L.ids].map(findAsset).filter(i => i && assetKind(i) === 'image'); }
 export function moveTargets() {
     const cur = `${libId()}::${catId()}`;
@@ -72,29 +62,18 @@ function setLibrary(data) {
 export function resetToDefault() {
     const libs = libraries();
     L.libId = (libs.find(l => l.id === 'default') || libs[0])?.id || '';
-    L.catId = ''; L.sel = ''; L.classFilter = '';
+    L.catId = ''; L.sel = '';
     L.ids.clear();
 }
 
 /* ───────── 树导航 ───────── */
-function clearPending() { L.pendingDelete = ''; L.pendingBatch = false; }
+function clearPending() { L.pendingDelete = ''; L.pendingBatch = false; L.pendingAll = false; }
 export function selectLib(id) {
-    L.libId = id; L.focus = 'library'; L.classFilter = '';
+    L.libId = id; L.focus = 'library';
     L.catId = categories()[0]?.id || ''; L.sel = ''; L.ids.clear(); L.edit = false;
 }
 export function selectCat(lid, cid) {
-    L.libId = lid || L.libId; L.catId = cid; L.classFilter = ''; L.focus = 'category'; L.sel = ''; L.ids.clear(); L.edit = false;
-}
-export function classRoot(lid) {
-    L.libId = lid || L.libId; L.focus = 'class';
-    if (!classEntries().length) setStatus('暂无智能分类，请先选择图片并点击“智能分类”');
-}
-export function toggleGroup(gid) { L.openGroup = L.openGroup === gid ? '' : gid; }
-export function toggleClassFilter(key, lid) {
-    if (lid) L.libId = lid;
-    L.classFilter = L.classFilter === key ? '' : key;
-    if (L.classFilter) L.openGroup = classGroupIdForKey(L.classFilter, classEntries()) || L.openGroup;
-    L.focus = 'class'; L.sel = ''; L.ids.clear(); clearPending();
+    L.libId = lid || L.libId; L.catId = cid; L.focus = 'category'; L.sel = ''; L.ids.clear(); L.edit = false;
 }
 
 /* ───────── 选择 ───────── */
@@ -133,7 +112,7 @@ export async function saveTreeEdit(name) {
     if (ed.kind === 'library-new') {
         data = await apiJson('/api/asset-library/libraries', jsonBody('POST', { name }));
         setLibrary(data);
-        L.libId = data.asset_library?.id || L.libId; L.catId = ''; L.classFilter = ''; L.focus = 'library';
+        L.libId = data.asset_library?.id || L.libId; L.catId = ''; L.focus = 'library';
     } else if (ed.kind === 'library-rename') {
         const lib = activeLib(); if (!lib) return;
         setLibrary(await apiJson(`/api/asset-library/libraries/${encodeURIComponent(lib.id)}`, jsonBody('PATCH', { name })));
@@ -141,7 +120,7 @@ export async function saveTreeEdit(name) {
     } else if (ed.kind === 'category-new') {
         data = await apiJson('/api/asset-library/categories', jsonBody('POST', { library_id: libId(), name, type: 'image' }));
         setLibrary(data);
-        L.catId = data.category?.id || L.catId; L.classFilter = ''; L.focus = 'category';
+        L.catId = data.category?.id || L.catId; L.focus = 'category';
     } else if (ed.kind === 'category-rename') {
         const cat = activeCat(); if (!cat) return;
         setLibrary(await apiJson(`/api/asset-library/categories/${encodeURIComponent(cat.id)}`, jsonBody('PATCH', { name })));
@@ -157,14 +136,14 @@ export async function deleteLib(lid) {
     if (L.pendingTreeDelete !== key) { L.pendingTreeDelete = key; L.treeEdit = null; setStatus('再次点击确认删除资产库'); return; }
     setLibrary(await apiJson(`/api/asset-library/libraries/${encodeURIComponent(lib.id)}`, { method: 'DELETE' }));
     L.libId = S.assetLibrary.active_library_id || libraries()[0]?.id || '';
-    L.catId = ''; L.classFilter = ''; L.sel = ''; L.ids.clear(); L.pendingTreeDelete = '';
+    L.catId = ''; L.sel = ''; L.ids.clear(); L.pendingTreeDelete = '';
 }
 export async function deleteCat() {
     const cat = activeCat(); if (!cat) return;
     const key = `asset-cat:${cat.id}`;
     if (L.pendingTreeDelete !== key) { L.pendingTreeDelete = key; L.treeEdit = null; setStatus('再次点击确认删除分组'); return; }
     setLibrary(await apiJson(`/api/asset-library/categories/${encodeURIComponent(cat.id)}`, { method: 'DELETE' }));
-    L.catId = ''; L.classFilter = ''; L.sel = ''; L.ids.clear(); L.pendingTreeDelete = '';
+    L.catId = ''; L.sel = ''; L.ids.clear(); L.pendingTreeDelete = '';
 }
 
 /* ───────── 上传 ───────── */
@@ -255,6 +234,23 @@ export async function deleteOne(id) {
     L.pendingDelete = '';
     setStatus('素材已删除');
 }
+// 删除全部：把当前视图里的素材全选后走同一套删除（二次确认；按钮文字会变成「确认删除全部」）
+export async function deleteAll() {
+    const list = currentItems();
+    if (!list.length) return;
+    if (!L.pendingAll) {
+        list.forEach(i => L.ids.add(i.id));
+        L.pendingDelete = '';
+        L.pendingBatch = false;
+        L.pendingAll = true;
+        setStatus('再次点击确认删除全部 ' + L.ids.size + ' 个素材');
+        return;
+    }
+    L.pendingAll = false;
+    L.pendingBatch = true;
+    await deleteSelected();
+}
+
 export async function deleteSelected() {
     if (!L.ids.size) return;
     if (!L.pendingBatch) { L.pendingBatch = true; setStatus('再次点击确认删除所选素材'); return; }
@@ -283,21 +279,4 @@ export async function saveInlineName(id, name) {
 }
 export function preview(id) { const it = findAsset(id); if (it) openPreview(it.url, assetKind(it), it.name); }
 
-/* ───────── AI 智能分类 ───────── */
-export async function classifySelected() {
-    const images = selectedImages();
-    if (!images.length || L.classifyBusy) return;
-    if (!ensureCaptionModel()) return;
-    L.classifyBusy = true;
-    setStatus(`正在智能分类 ${images.length} 张资产图片...`);
-    try {
-        const data = await apiJson('/api/asset-library/items/classify', jsonBody('POST', {
-            library_id: libId(), ids: images.map(i => i.id), provider: S.caption.provider, model: S.caption.model, prompt: (S.caption.classifyPrompt || '').trim(),
-        }));
-        setLibrary(data);
-        if (images[0]?.id) L.sel = images[0].id;
-        const failed = (data.items || []).filter(i => !i.ok);
-        setStatus(failed.length ? `处理完成 ${data.count || 0} 张，${failed.length} 张失败：${failed[0].error || '分类失败'}` : `处理完成 ${data.count || images.length} 张资产图片`);
-    } catch (err) { fail(err, '智能分类失败'); } finally { L.classifyBusy = false; }
-}
 export { setLibrary };

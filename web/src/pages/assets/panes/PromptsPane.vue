@@ -94,6 +94,7 @@ function rowClick(id) { if (!X.manage) P.clickRow(id); }
                     <button type="button" class="nv-btn sm" :disabled="!items.length || readonly" @click="P.selectAll()"><NvIcon name="check" />全选</button>
                     <button type="button" class="nv-btn sm" :disabled="!X.ids.size" @click="P.clearSelection()"><NvIcon name="square" />清空</button>
                     <button type="button" class="nv-btn sm danger" :disabled="readonly || !X.ids.size" @click="run(P.deleteSelected())"><NvIcon name="trash" />{{ X.pendingBatch ? '确认删除' : '删除所选' }}</button>
+                    <button type="button" class="nv-btn sm danger" :disabled="readonly || !items.length" @click="run(P.deleteAll())"><NvIcon name="trash" />{{ X.pendingAll ? '确认删除全部 ' + items.length + ' 条' : '删除全部' }}</button>
                 </div>
             </div>
             <div ref="scroller" class="am-scroll" @pointerdown="marq.down">
