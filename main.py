@@ -1189,6 +1189,7 @@ LAN_PUBLIC_GET_PREFIXES = ("/static/",)
 # T51 局域网好友：好友机投递消息 / ping 必须能在没有本机口令的情况下进来，
 # 这两条由路由内的 X-NOVAI-Friend-Token 校验把门；其余 /api/lan/* 仍要口令。
 from server.routes.lan_account import lan_api_public_without_token as _lan_api_public_without_token  # noqa: E402
+from server.routes.community import lan_api_public_without_token as _community_public_without_token  # noqa: E402
 from server.routes.canvas_share import (  # noqa: E402
     localize_private_media_url as _localize_private_media_url,
     localize_private_reference_urls as _localize_private_reference_urls,
@@ -1250,6 +1251,9 @@ async def lan_access_guard(request: Request, call_next):
         if lan_path_public_for_unauthenticated(request.url.path, request.method):
             return await call_next(request)
         if _lan_api_public_without_token(request.url.path, request.method):
+            return await call_next(request)
+        # 局域网社区公开接口：visible=false 时路由自己返回 404，事件要好友凭据
+        if _community_public_without_token(request.url.path, request.method):
             return await call_next(request)
         return JSONResponse(status_code=401, content={"detail": "需要局域网访问口令"})
     response = await call_next(request)
@@ -56436,6 +56440,14 @@ app.include_router(_canvas_share_router)
 # --- 局域网账号 / 好友 / 聊天（T51）：数据落 DATA_DIR/lan_account.json、lan_friends.json、lan_chat/ ---
 from server.routes.lan_account import router as _lan_account_router  # noqa: E402
 app.include_router(_lan_account_router)
+
+# --- 局域网社区（M1）：发布包 / 作品流 / 克隆，数据落 DATA_DIR/community/ ---
+# 与 canvas_share 共用 LOAD_CANVAS / SAVE_CANVAS；克隆画布复用 new_canvas 建一张空白画布再写入节点
+_deps.bind(
+    NEW_CANVAS=lambda title, owner_id=None: new_canvas(title, owner_id=owner_id),
+)
+from server.routes.community import router as _community_router  # noqa: E402
+app.include_router(_community_router)
 
 # --- 页面链接导入：解析 og:image / 最大 <img> 后复用 import-urls 的落盘链路 ---
 from server.routes.page_import import router as _page_import_router
