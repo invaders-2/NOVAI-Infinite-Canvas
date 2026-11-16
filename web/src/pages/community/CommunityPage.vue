@@ -124,9 +124,21 @@ async function cloneItem(item, event) {
         const body = await communityApi('/items/' + encodeURIComponent(item.id) + '/clone', { method: 'POST' });
         const described = describeCloneResult(body);
         bumpCommunity();
-        toast(described.text, described.canvasUrl ? {
-            onClick: () => openCanvasUrl(described.canvasUrl),
-        } : {});
+        if (body.kind === 'skill') {
+            const skillId = String(body.target_id || '');
+            toast(described.text, {
+                action: '去启用',
+                onClick: () => {
+                    state.skillFocus = skillId;
+                    state.settingsTab = 'skills';
+                    state.settingsOpen = true;
+                },
+            });
+        } else {
+            toast(described.text, described.canvasUrl ? {
+                onClick: () => openCanvasUrl(described.canvasUrl),
+            } : {});
+        }
     } catch (e) {
         toast(e.message || '克隆失败', { danger: true });
     } finally {
@@ -177,7 +189,7 @@ onBeforeUnmount(() => {
                             <span class="k">{{ meta(it).label }}</span>
                             <b>{{ it.title }}</b>
                             <small>{{ it.desc || '来自 ' + ((it.author || {}).nickname || '局域网用户') }}</small>
-                            <span class="au"><span class="av">{{ aText(it) }}</span>{{ (it.author || {}).nickname || '局域网用户' }}<span class="st mono"><NvIcon name="heart" />{{ fmtCount((it.stats || {}).likes) }}<i></i><NvIcon name="copy" />{{ fmtCount((it.stats || {}).clones) }}</span></span>
+                            <span class="au"><span class="av">{{ aText(it) }}</span>{{ (it.author || {}).nickname || '局域网用户' }}<span class="st mono"><span class="n"><NvIcon name="heart" />{{ fmtCount((it.stats || {}).likes) }}</span><span class="n"><NvIcon name="copy" />{{ fmtCount((it.stats || {}).clones) }}</span></span></span>
                         </span>
                         <button type="button" class="cfb" @click="cloneItem(it, $event)"><NvIcon name="copy" />克隆</button>
                     </div>
@@ -228,7 +240,7 @@ onBeforeUnmount(() => {
                             <b>{{ it.title }}</b>
                             <span class="meta">
                                 <span class="au"><span class="av"><img v-if="aImg(it)" :src="aImg(it)" alt="" @error="avatarError(it)" /><template v-else>{{ aText(it) }}</template></span>{{ (it.author || {}).nickname || '局域网用户' }}</span>
-                                <span class="st mono"><NvIcon name="heart" />{{ fmtCount((it.stats || {}).likes) }}<i></i><NvIcon name="copy" />{{ fmtCount((it.stats || {}).clones) }}</span>
+                                <span class="st mono"><span class="n"><NvIcon name="heart" />{{ fmtCount((it.stats || {}).likes) }}</span><span class="n"><NvIcon name="copy" />{{ fmtCount((it.stats || {}).clones) }}</span></span>
                             </span>
                         </button>
                     </div>
@@ -320,9 +332,10 @@ onBeforeUnmount(() => {
 .cf-card .t small { display: block; margin-top: 4px; font: 400 11.5px/16px var(--font-sans); opacity: .82; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cf-card .t .au { display: flex; align-items: center; gap: 6px; margin-top: 9px; font: 400 11.5px/1 var(--font-sans); opacity: .94; }
 .cf-card .t .au .av { width: 20px; height: 20px; border-radius: 50%; background: rgba(255,255,255,.22); display: inline-flex; align-items: center; justify-content: center; font: 500 10px/1 var(--font-sans); overflow: hidden; }
-.cf-card .t .au .st { display: inline-flex; align-items: center; gap: 3px; margin-left: 8px; font: 400 11px/1 var(--font-mono); opacity: .85; }
-.cf-card .t .au .st .nv-i { width: 11px; height: 11px; }
-.cf-card .t .au .st i { width: 6px; height: 1px; background: currentColor; opacity: .5; display: inline-block; }
+/* 点赞 / 克隆之间只用间距，不画分隔线 */
+.cf-card .t .au .st { display: inline-flex; align-items: center; gap: 10px; margin-left: 8px; font: 400 11px/1 var(--font-mono); opacity: .85; }
+.cf-card .t .au .st .n { display: inline-flex; align-items: center; gap: 3px; }
+.cf-card .t .au .st .n .nv-i { width: 11px; height: 11px; }
 .cf-card .cfb { position: absolute; right: 14px; bottom: 16px; z-index: 2; height: 30px; padding: 0 12px; border: 0; border-radius: 15px; background: #fff; color: #0a0a0a; font: 500 12px/1 var(--font-sans); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .cf-card .cfb .nv-i { width: 12px; height: 12px; }
 .cf-card .cfb:hover { box-shadow: var(--shadow-pop); }
@@ -374,9 +387,9 @@ onBeforeUnmount(() => {
 .tile .au { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font: 400 11.5px/1 var(--font-sans); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile .av { width: 18px; height: 18px; flex: none; border-radius: 50%; background: var(--fill-2); color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; font: 500 9.5px/1 var(--font-sans); overflow: hidden; }
 .tile .av img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.tile .st { display: inline-flex; align-items: center; gap: 3px; flex: none; font: 400 11px/1 var(--font-mono); color: var(--ink-3); }
-.tile .st .nv-i { width: 12px; height: 12px; }
-.tile .st i { width: 7px; height: 1px; background: var(--ink-4); display: inline-block; }
+.tile .st { display: inline-flex; align-items: center; gap: 10px; flex: none; font: 400 11px/1 var(--font-mono); color: var(--ink-3); }
+.tile .st .n { display: inline-flex; align-items: center; gap: 3px; }
+.tile .st .n .nv-i { width: 12px; height: 12px; }
 .tile.off .cv { filter: grayscale(1); opacity: .55; }
 
 /* 离线作者整体降饱和（在线卡不受影响） */

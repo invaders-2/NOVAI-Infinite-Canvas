@@ -5,7 +5,8 @@ import { computed, onMounted, ref, watch } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import NvSwitch from '../../components/NvSwitch.vue';
 import ProfileDialog from '../../shell/ProfileDialog.vue';
-import { toast } from '../../lib/store.js';
+import { bumpCommunity, toast } from '../../lib/store.js';
+import { communityApi } from '../../lib/community.js';
 import { auth, getAuthSettings, setInviteRequired, createInvite, logout as authLogout, openAuth } from '../../lib/auth.js';
 
 const props = defineProps({ me: { type: Object, default: () => ({}) } });
@@ -124,10 +125,35 @@ async function loadCredits() {
     } catch (e) { /* 积分关闭或不可用：不展示 */ }
 }
 
+/* ── 已屏蔽的作者：这里可以解除（接口 POST /api/community/block blocked:false） ── */
+const blocked = ref([]);
+const unblocking = ref('');
+async function loadBlocked() {
+    try {
+        const data = await communityApi('/profile');
+        blocked.value = Array.isArray(data.blocked_authors) ? data.blocked_authors : [];
+    } catch (e) { blocked.value = []; }
+}
+async function unblock(entry) {
+    if (unblocking.value) return;
+    unblocking.value = String(entry.account_id || '');
+    try {
+        await communityApi('/block', { method: 'POST', body: { account_id: entry.account_id, blocked: false } });
+        blocked.value = blocked.value.filter(row => row.account_id !== entry.account_id);
+        bumpCommunity();
+        toast('已解除屏蔽');
+    } catch (e) {
+        toast(e.message || '解除失败', { danger: true });
+    } finally {
+        unblocking.value = '';
+    }
+}
+
 function onKey(event) { if (event.key === 'Escape') emit('close'); }
 onMounted(() => {
     document.addEventListener('keydown', onKey);
     loadCredits();
+    loadBlocked();
 });
 </script>
 
@@ -173,6 +199,18 @@ onMounted(() => {
                     </template>
                     <div v-else class="pe-row-line"><span>本机模式 · 数据只存在这台电脑</span></div>
                 </div>
+
+                <template v-if="blocked.length">
+                    <div class="pe-sep"></div>
+                    <div class="pe-blocked">
+                        <div class="pe-blocked-hd">已屏蔽的作者 · {{ blocked.length }}</div>
+                        <div v-for="entry in blocked" :key="entry.account_id" class="pe-blocked-row">
+                            <span class="tx"><b>{{ entry.nickname || '未知作者' }}</b><small class="mono">{{ entry.account_id }}</small></span>
+                            <button type="button" class="nv-btn sm" :disabled="unblocking === entry.account_id" @click="unblock(entry)">{{ unblocking === entry.account_id ? '解除中…' : '解除' }}</button>
+                        </div>
+                        <p class="pe-blocked-note">解除后这位作者的作品会重新出现在社区里。</p>
+                    </div>
+                </template>
 
                 <template v-if="isAdmin">
                     <div class="pe-sep"></div>
@@ -225,6 +263,13 @@ html.theme-dark .pe { background: color-mix(in srgb, #1a1a1a 92%, transparent); 
 .pe-row-line .two { display: flex; flex-direction: column; gap: 2px; color: var(--ink); }
 .pe-row-line .two small { font: 400 11px/16px var(--font-sans); color: var(--ink-3); }
 .pe-row-line .acts { display: flex; gap: 6px; flex: none; }
+.pe-blocked { display: flex; flex-direction: column; gap: 6px; }
+.pe-blocked-hd { font: 500 12px/18px var(--font-sans); color: var(--ink-2); }
+.pe-blocked-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 10px; background: var(--fill-1); }
+.pe-blocked-row .tx { flex: 1; min-width: 0; }
+.pe-blocked-row b { display: block; font: 500 12.5px/17px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pe-blocked-row small { display: block; font: 400 10.5px/14px var(--font-mono); color: var(--ink-4); }
+.pe-blocked-note { margin: 2px 0 0; font: 400 11px/16px var(--font-sans); color: var(--ink-4); }
 .pe-f { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; }
 .pe-f .nv-btn { height: 34px; border-radius: 17px; padding: 0 18px; }
 </style>

@@ -31,7 +31,8 @@
 .cn-root .nshare-pubstats{display:flex;align-items:center;gap:14px;padding:0 10px 8px;font-size:11.5px;color:var(--fg2)}
 .cn-root .nshare-pubstats span{display:inline-flex;align-items:center;gap:4px}
 .cn-root .nshare-pubstats svg{color:var(--fg3)}
-.cn-root .nshare-pubwarn{margin:0 10px 8px;padding:8px 10px;border-radius:9px;background:color-mix(in srgb,var(--warn) 12%,transparent);color:var(--warn-fg);font-size:11px;line-height:1.6}
+/* 改动提示用中性灰（设计规范只允许黑白灰，唯一色相是 danger） */
+.cn-root .nshare-pubwarn{margin:0 10px 8px;padding:8px 10px;border-radius:9px;background:var(--sunken);color:var(--fg2);font-size:11px;line-height:1.6}
 .cn-root .nshare-pub .mi{padding-top:6px;padding-bottom:6px;min-height:32px}
 .cn-root .nshare-pub .mi .ic{width:26px;height:26px;border-radius:7px}
 

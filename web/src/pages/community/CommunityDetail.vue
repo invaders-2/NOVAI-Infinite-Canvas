@@ -6,7 +6,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import CommunityCanvasPreview from './CommunityCanvasPreview.vue';
 import { ago, avatarImage, avatarText, authorInitial, communityApi, coverUrl, fmtCount, fmtSize, kindMeta } from '../../lib/community.js';
-import { bumpCommunity, openCommunityAuthor, toast } from '../../lib/store.js';
+import { bumpCommunity, openCommunityAuthor, state, toast } from '../../lib/store.js';
 import { navigate, openCanvasUrl } from '../../lib/bridge.js';
 
 const props = defineProps({ itemId: { type: String, required: true } });
@@ -132,7 +132,15 @@ async function doClone() {
                 },
             });
         } else if (body.kind === 'skill') {
-            toast(body.message || '技能已导入，默认停用，去设置里确认后启用');
+            const skillId = String(body.target_id || '');
+            toast(body.message || '技能已导入，默认停用，去设置里确认后启用', {
+                action: '去启用',
+                onClick: () => {
+                    state.skillFocus = skillId;
+                    state.settingsTab = 'skills';
+                    state.settingsOpen = true;
+                },
+            });
         } else {
             toast('提示词已加进「社区」分组');
         }

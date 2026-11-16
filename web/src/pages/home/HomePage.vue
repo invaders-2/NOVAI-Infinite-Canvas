@@ -1105,7 +1105,7 @@ onBeforeUnmount(() => {
                             <b>{{ it.title }}</b>
                             <span class="meta">
                                 <span class="au"><span class="av"><img v-if="communityAvatarImg(it)" :src="communityAvatarImg(it)" alt="" @error="markCommunityAvatar(it.id)" /><template v-else>{{ communityAvatarText(it) }}</template></span>{{ communityAuthor(it).nickname || '局域网用户' }}</span>
-                                <span class="st mono"><NvIcon name="heart" />{{ fmtCount((it.stats || {}).likes) }}<i></i><NvIcon name="copy" />{{ fmtCount((it.stats || {}).clones) }}</span>
+                                <span class="st mono"><span class="n"><NvIcon name="heart" />{{ fmtCount((it.stats || {}).likes) }}</span><span class="n"><NvIcon name="copy" />{{ fmtCount((it.stats || {}).clones) }}</span></span>
                             </span>
                         </button>
                     </div>
@@ -1630,9 +1630,9 @@ html.theme-dark .hp-mpanel { box-shadow: 0 18px 40px rgba(0, 0, 0, .36), 0 4px 1
 .cm-card .au { display: inline-flex; align-items: center; gap: 5px; min-width: 0; font: 400 11.5px/1 var(--font-sans); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cm-card .av { width: 18px; height: 18px; flex: none; border-radius: 50%; background: var(--fill-2); color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; font: 500 9.5px/1 var(--font-sans); overflow: hidden; }
 .cm-card .av img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.cm-card .st { display: inline-flex; align-items: center; gap: 3px; flex: none; font: 400 11px/1 var(--font-mono); color: var(--ink-3); }
-.cm-card .st .nv-i { width: 12px; height: 12px; }
-.cm-card .st i { width: 7px; height: 1px; background: var(--ink-4); display: inline-block; }
+.cm-card .st { display: inline-flex; align-items: center; gap: 10px; flex: none; font: 400 11px/1 var(--font-mono); color: var(--ink-3); }
+.cm-card .st .n { display: inline-flex; align-items: center; gap: 3px; }
+.cm-card .st .n .nv-i { width: 12px; height: 12px; }
 .cm-card.off .cv { filter: grayscale(1); opacity: .55; }
 @media (max-width: 1100px) { .hp-com-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) { .hp-com-grid { grid-template-columns: minmax(0, 1fr); } }

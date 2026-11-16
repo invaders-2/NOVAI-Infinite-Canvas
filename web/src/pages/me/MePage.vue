@@ -424,11 +424,21 @@ function onFocusPage(event) {
     if (readonly.value) loadAuthor(); else { loadMe(); loadProfile(); loadWorks(); loadFriends(); }
 }
 function onDocDown(event) {
+    const insideFriends = !!(event.target.closest && event.target.closest('.mp-frwrap'));
+    if (!insideFriends && friendsOpen.value) friendsOpen.value = false;
     if (!event.target.closest || !event.target.closest('.mp-menu, .mp-more, .mp-share')) {
         coverMenu.value = false;
         openMenu.value = '';
         shareOpen.value = false;
     }
+}
+// Esc 关掉本页所有浮层（背景菜单 / 好友浮层 / 更多 / 分享），不给键盘用户留死路
+function onKey(event) {
+    if (event.key !== 'Escape') return;
+    coverMenu.value = false;
+    friendsOpen.value = false;
+    openMenu.value = '';
+    shareOpen.value = false;
 }
 // 在别处点赞 / 收藏 / 克隆后，列表和数量都要重拉（列表懒加载，清空后按当前 Tab 重取）
 watch(() => state.communityRefresh, () => {
@@ -448,10 +458,12 @@ onMounted(() => {
     loadAll();
     window.addEventListener('novai-page-focus', onFocusPage);
     document.addEventListener('mousedown', onDocDown, true);
+    document.addEventListener('keydown', onKey);
 });
 onBeforeUnmount(() => {
     window.removeEventListener('novai-page-focus', onFocusPage);
     document.removeEventListener('mousedown', onDocDown, true);
+    document.removeEventListener('keydown', onKey);
 });
 </script>
 
@@ -606,7 +618,7 @@ onBeforeUnmount(() => {
                     <button type="button" class="mp-title" @click="openDetail(item)">{{ item.title }}</button>
                     <span class="mp-meta">
                         <span class="mono">{{ 'v' + (item.version || 1) + ' · ' + (ago(item.updated_at || item.created_at) || '刚刚') }}</span>
-                        <span class="st mono"><NvIcon name="heart" />{{ fmtCount((item.stats || {}).likes) }}<i></i><NvIcon name="copy" />{{ fmtCount((item.stats || {}).clones) }}</span>
+                        <span class="st mono"><span class="n"><NvIcon name="heart" />{{ fmtCount((item.stats || {}).likes) }}</span><span class="n"><NvIcon name="copy" />{{ fmtCount((item.stats || {}).clones) }}</span></span>
                     </span>
                 </div>
             </div>
@@ -759,9 +771,9 @@ onBeforeUnmount(() => {
 .mp-title { display: block; width: 100%; margin-top: 9px; padding: 0; border: 0; background: none; text-align: left; color: var(--ink); font: 500 13px/18px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .mp-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 4px; font: 400 11px/15px var(--font-sans); color: var(--ink-3); }
 .mp-meta .mono { font: 400 10.5px/15px var(--font-mono); color: var(--ink-4); }
-.mp-meta .st { display: inline-flex; align-items: center; gap: 3px; flex: none; }
-.mp-meta .st .nv-i { width: 12px; height: 12px; }
-.mp-meta .st i { width: 7px; height: 1px; background: var(--ink-4); display: inline-block; }
+.mp-meta .st { display: inline-flex; align-items: center; gap: 10px; flex: none; }
+.mp-meta .st .n { display: inline-flex; align-items: center; gap: 3px; }
+.mp-meta .st .n .nv-i { width: 12px; height: 12px; }
 
 .mp-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 64px 0 40px; text-align: center; color: var(--ink-3); font: 400 12.5px/19px var(--font-sans); }
 .mp-empty b { font: 500 15px/21px var(--font-sans); color: var(--ink); }

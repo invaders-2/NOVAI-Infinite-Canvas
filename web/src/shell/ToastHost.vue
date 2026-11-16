@@ -10,6 +10,7 @@ function click(t) { if (t.onClick) { t.onClick(); dismissToast(t.id); } }
             <div v-for="t in state.toasts" :key="t.id" class="toast" :class="{ danger: t.danger, clickable: !!t.onClick }" @click="click(t)">
                 <NvIcon v-if="t.icon" :name="t.icon" />
                 <span>{{ t.text }}</span>
+                <button v-if="t.action" type="button" class="act" @click.stop="click(t)">{{ t.action }}</button>
             </div>
         </TransitionGroup>
     </div>
@@ -22,6 +23,10 @@ function click(t) { if (t.onClick) { t.onClick(); dismissToast(t.id); } }
 .toast.danger { background: var(--solid); color: var(--ink); }
 .toast.danger .nv-i { color: var(--danger); }
 .toast .nv-i { width: 14px; height: 14px; }
+.toast .act { height: 24px; padding: 0 10px; border: 0; border-radius: 999px; background: rgba(255, 255, 255, .16); color: inherit; font: 500 12px/1 var(--font-sans); cursor: pointer; }
+.toast .act:hover { background: rgba(255, 255, 255, .28); }
+.toast.danger .act { background: var(--fill-2); }
+.toast.danger .act:hover { background: var(--fill-3); }
 .toast-enter-active { transition: opacity 240ms var(--ease-out), transform 320ms var(--ease-out), filter 240ms var(--ease-out); }
 .toast-leave-active { transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out); }
 .toast-enter-from { opacity: 0; transform: translateY(10px) scale(.96); filter: blur(4px); }

@@ -28,7 +28,7 @@ from server.skills import skill_md
 SKILL_FIELDS = ("id", "name", "category", "icon", "description", "tags", "input_schema",
                 "deliverables", "skill_prompt", "enabled", "available", "usage_instruction",
                 "platforms", "scenarios", "source_skill_code", "skill_type",
-                "builtin_pack", "pack_version")
+                "builtin_pack", "pack_version", "source")
 
 SKILL_TYPES = ("system", "mine", "subscribe")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -99,6 +99,7 @@ def _normalize_skill(raw):
     platforms = [str(p) for p in platforms] if isinstance(platforms, list) else []
     scenarios = raw.get("scenarios")
     scenarios = [str(s) for s in scenarios] if isinstance(scenarios, list) else []
+    source = raw.get("source")
     return {
         "id": sid,
         "name": str(raw.get("name") or sid).strip(),
@@ -118,6 +119,8 @@ def _normalize_skill(raw):
         "skill_type": str(raw.get("skill_type") or "").strip().lower(),
         "builtin_pack": str(raw.get("builtin_pack") or "").strip(),
         "pack_version": str(raw.get("pack_version") or "").strip(),
+        # 社区克隆来的溯源信息（type / item_id / version / author）；内置与手工导入的技能没有
+        "source": source if isinstance(source, dict) else {},
     }
 
 
@@ -397,6 +400,7 @@ def public_skill(skill, kind: str = "skill", usage_count=None):
         "source_skill_code": str(skill.get("source_skill_code") or ""),
         "skill_type": skill_type,
         "builtin_pack": str(skill.get("builtin_pack") or ""),
+        "source": skill.get("source") if isinstance(skill.get("source"), dict) else {},
         "usage_count": int(usage_count or 0),
     }
 

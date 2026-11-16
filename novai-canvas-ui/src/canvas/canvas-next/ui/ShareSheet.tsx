@@ -240,7 +240,7 @@ function PublishedPanel({ ctl, item, loading, reload, back, onEdit, onOpenCommun
       </div>
     </div>
     <div className="nshare-pubstats">
-      <span><Icon name="thumbup" size="xs" /><span className="mono">{stats.likes || 0}</span></span>
+      <span><Icon name="heart" size="xs" /><span className="mono">{stats.likes || 0}</span></span>
       <span><Icon name="copy" size="xs" /><span className="mono">{stats.clones || 0}</span> 次克隆</span>
       <span><Icon name="eye" size="xs" /><span className="mono">{stats.views || 0}</span></span>
     </div>

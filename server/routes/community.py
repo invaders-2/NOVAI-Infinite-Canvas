@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import hmac
 import json
 import os
@@ -949,16 +950,33 @@ async def _clone_canvas(item: Dict[str, Any], package: Dict[str, Any], payload: 
 
 
 def _clone_skill(item: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+    """克隆技能：对端发来的包不可信——先按白名单取字段，再强制成本机「我导入的」技能。"""
     from server.skills import registry
-    definition = dict(payload or {})
+    source_payload = payload if isinstance(payload, dict) else {}
+    # 白名单：system / env / 未知字段进来一律丢掉（防止对端塞 skill_type=system 顶掉系统技能）
+    definition: Dict[str, Any] = {}
+    for field in packager.SKILL_FIELDS:
+        if field in source_payload:
+            definition[field] = copy.deepcopy(source_payload.get(field))
     original_id = str(definition.get("id") or "skill")
     base = re.sub(r"[^A-Za-z0-9._-]", "-", original_id)[:56] or "skill"
     new_id = "%s-c%s" % (base, secrets.token_hex(2))
+    author = item.get("author") if isinstance(item.get("author"), dict) else {}
     definition["id"] = new_id
     definition["name"] = str(definition.get("name") or original_id)
     definition["enabled"] = False          # 克隆来的技能默认停用，确认后才启用
     definition["available"] = True
-    definition.pop("author", None)
+    definition["skill_type"] = "mine"      # 克隆来的是我自己的技能，绝不继承 system / subscribe
+    # 作者署名挪到 source 里（不丢），技能管理据此显示「来自 XXX」
+    definition["source"] = {
+        "type": "community",
+        "item_id": str(item.get("id") or ""),
+        "version": int(item.get("version") or 1),
+        "author": {
+            "account_id": str(author.get("account_id") or ""),
+            "nickname": str(author.get("nickname") or ""),
+        },
+    }
     try:
         skill, _created = registry.import_skill(definition)
     except ValueError as exc:
@@ -966,7 +984,8 @@ def _clone_skill(item: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any
     return {"kind": "skill", "target_id": str(skill.get("id") or new_id),
             "title": skill.get("name") or definition["name"], "copied": 0, "failed": 0,
             "needs_enable": True,
-            "message": "来自 %s 的技能，确认后启用" % str((item.get("author") or {}).get("nickname") or "对方")}
+            "message": "来自 %s 的技能，确认后启用" % str(author.get("nickname") or "对方"),
+            "source": definition["source"]}
 
 
 def _clone_prompt(item: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1264,6 +1283,24 @@ def _profile_stats() -> Dict[str, Any]:
     return {"items": len(items), "likes": likes, "clones": clones, "views": views, "friends": friends}
 
 
+def _blocked_authors_payload(me: Dict[str, Any]) -> List[Dict[str, str]]:
+    """已屏蔽的作者：只有账号 id 落盘，昵称从本机作品 / 缓存里补（补不到就空着）。"""
+    ids = [str(value) for value in (me.get("blocked_authors") or []) if str(value)]
+    if not ids:
+        return []
+    names: Dict[str, str] = {}
+    try:
+        pool = list(_my_items()) + list(transport.load_cached_items())
+    except Exception:
+        pool = []
+    for item in pool:
+        author = item.get("author") if isinstance(item.get("author"), dict) else {}
+        account_id = str(author.get("account_id") or "")
+        if account_id and account_id not in names and str(author.get("nickname") or ""):
+            names[account_id] = str(author.get("nickname"))
+    return [{"account_id": aid, "nickname": names.get(aid, "")} for aid in ids]
+
+
 @router.get("/profile")
 async def get_profile(request: Request) -> Dict[str, Any]:
     _rate_read(request)
@@ -1282,6 +1319,7 @@ async def get_profile(request: Request) -> Dict[str, Any]:
         "favorites": len(me.get("favorites") or []),
         "likes": len(me.get("likes") or []),
         "clones": len(me.get("clones") or []),
+        "blocked_authors": _blocked_authors_payload(me),
         "author": _author(),
     }
 

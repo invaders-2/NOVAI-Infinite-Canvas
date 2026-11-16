@@ -102,9 +102,12 @@ def main() -> int:
     }
     payloads = {
         CANVAS_ID: canvas_payload(CANVAS_ID),
+        # 故意塞 skill_type=system / env / 未知字段：接收端必须按白名单剔除
         SKILL_ID: {"id": "peer-skill", "name": "鞋履白底精修", "category": "电商", "icon": "wand2",
                    "description": "去背、补光、统一投影", "tags": ["电商"], "skill_prompt": "把背景去掉",
-                   "enabled": True, "author": {"account_id": "peer-account-a", "nickname": "同事 A"}},
+                   "enabled": True, "skill_type": "system", "unknown_field": "leak",
+                   "env": {"API_KEY": "sk-should-not-survive"},
+                   "author": {"account_id": "peer-account-a", "nickname": "同事 A"}},
         PROMPT_ID: {"name": "暖调棚拍", "category": "lighting",
                     "positive": "米色无缝背景，柔和侧逆光", "negative": ""},
         CLOSED_ID: canvas_payload(CLOSED_ID, allow_media=False),
@@ -251,8 +254,28 @@ def main() -> int:
     check("克隆来的技能默认停用", new_skill is not None and new_skill.get("enabled") is False)
     check("返回 needs_enable 让前端弹确认", skill_body.get("needs_enable") is True)
     check("返回里带作者昵称", "同事 A" in str(skill_body.get("message") or ""), str(skill_body.get("message")))
-    check("技能落盘在 data/skills 下",
-          os.path.isfile(os.path.join(data_dir, "skills", str(skill_body.get("target_id") or "") + ".json")))
+    skill_file = os.path.join(data_dir, "skills", str(skill_body.get("target_id") or "") + ".json")
+    check("技能落盘在 data/skills 下", os.path.isfile(skill_file))
+    raw_skill = {}
+    if os.path.isfile(skill_file):
+        with open(skill_file, encoding="utf-8") as handle:
+            raw_skill = json.load(handle)
+    check("对端的 skill_type=system 被强制改成 mine",
+          str(raw_skill.get("skill_type") or "") == "mine", raw_skill.get("skill_type"))
+    check("未知字段被白名单剔除", "unknown_field" not in raw_skill, json.dumps(list(raw_skill.keys())[:14]))
+    check("对端的 env / API Key 没有落盘", "env" not in raw_skill and "sk-should-not-survive" not in json.dumps(raw_skill, ensure_ascii=False))
+    source = raw_skill.get("source") or {}
+    check("source 写了社区来源", source.get("type") == "community" and source.get("item_id") == SKILL_ID,
+          json.dumps(source, ensure_ascii=False)[:160])
+    check("source 保留作者署名",
+          str((source.get("author") or {}).get("nickname") or "") == "同事 A",
+          json.dumps(source.get("author") or {}, ensure_ascii=False))
+    check("source 记了发布版本", int(source.get("version") or 0) == int(items[SKILL_ID]["version"]), str(source.get("version")))
+    # /api/skills 走的就是 registry.public_skill，这里直接验这个投影，避免为一条断言再起一套路由
+    listed = registry.public_skill(registry.get_skill(str(skill_body.get("target_id") or "")) or {})
+    check("技能列表字段带 source，前端能显示「来自 XXX」",
+          str((listed.get("source") or {}).get("type")) == "community" and listed.get("skill_type") == "mine",
+          json.dumps(listed.get("source") or {}, ensure_ascii=False)[:120])
 
     # 6. 内置技能 id 不能被覆盖
     original_builtin = registry.load_builtin

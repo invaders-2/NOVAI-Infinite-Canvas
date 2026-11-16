@@ -46,6 +46,7 @@ export const state = reactive({
     communityItem: '',       // 正在看详情的作品 id（空 = 关着）
     communityAuthor: '',      // 正在看「别人主页」的作品 id（空 = 看自己）
     communityRefresh: 0,     // 发布 / 克隆 / 下架后 +1，社区页与我的页据此重拉
+    skillFocus: '',          // 克隆技能后要定位的技能 id（设置 → 技能 里滚到那一行并高亮）
     queue: { position: 0, total: 0 },
     online: 0,
     version: '',
@@ -60,7 +61,7 @@ export function rememberActive(id) { write(ACTIVE_KEY, id); }
 let toastSeq = 0;
 export function toast(text, opts = {}) {
     const id = ++toastSeq;
-    state.toasts.push({ id, text, icon: opts.icon || '', danger: !!opts.danger, onClick: opts.onClick || null });
+    state.toasts.push({ id, text, icon: opts.icon || '', danger: !!opts.danger, action: opts.action || '', onClick: opts.onClick || null });
     setTimeout(() => dismissToast(id), opts.duration || (opts.onClick ? 4000 : 2600));
     return id;
 }

@@ -103,6 +103,7 @@ async function loadSource() {
         form.title = String(props.request.title || s.title || '').slice(0, 60);
         form.desc = String(s.desc || '').slice(0, 400);
         form.cover = (s.covers && s.covers[0]) || '';
+        form.include_media = Number(s.media || 0) > 0;
         if (itemId.value) await loadExisting();
     } catch (e) {
         error.value = e.message || '读不到来源信息';
@@ -219,6 +220,14 @@ function onDocDown(event) {
 }
 
 const kindLabel = computed(() => kindMeta(kind.value).label);
+// 空画布不能发布；没有生成结果时「包含生成结果」没有意义
+const canvasNodes = computed(() => (kind.value === 'canvas' ? Number((source.value && source.value.nodes) || 0) : 0));
+const hasMedia = computed(() => Number((source.value && source.value.media) || 0) > 0);
+const isEmptyCanvas = computed(() => kind.value === 'canvas' && !loading.value && !!source.value && canvasNodes.value === 0);
+const mediaSummary = computed(() => {
+    if (!hasMedia.value) return '这张画布没有生成结果';
+    return '把图片和视频一起放进发布包（约 ' + fmtSize((source.value && source.value.size_bytes) || 0) + '）';
+});
 const mediaText = computed(() => {
     const s = source.value || {};
     if (kind.value !== 'canvas') return '';
@@ -289,6 +298,8 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
 
+                    <div v-if="isEmptyCanvas" class="pd-hint"><NvIcon name="info" />这张画布还是空的，先做点东西再发布</div>
+
                     <div v-if="kind === 'canvas'" class="pd-row">
                         <span class="pd-label">封面</span>
                         <div class="pd-covers">
@@ -344,9 +355,9 @@ onBeforeUnmount(() => {
                             <div><b>允许克隆</b><small>关闭后别人只能查看，不能复制到自己的画布</small></div>
                             <button type="button" class="nv-switch" :class="{ 'is-on': form.allow_clone }" :aria-pressed="form.allow_clone" aria-label="允许克隆" @click="form.allow_clone = !form.allow_clone"></button>
                         </div>
-                        <div v-if="kind === 'canvas'" class="pd-opt">
-                            <div><b>包含生成结果</b><small>把图片和视频一起放进发布包，（约 {{ fmtSize((source && source.size_bytes) || 0) }}）</small></div>
-                            <button type="button" class="nv-switch" :class="{ 'is-on': form.include_media }" :aria-pressed="form.include_media" aria-label="包含生成结果" @click="form.include_media = !form.include_media"></button>
+                        <div v-if="kind === 'canvas'" class="pd-opt" :class="{ off: !hasMedia }">
+                            <div><b>包含生成结果</b><small>{{ mediaSummary }}</small></div>
+                            <button type="button" class="nv-switch" :class="{ 'is-on': form.include_media && hasMedia }" :disabled="!hasMedia" :aria-pressed="form.include_media && hasMedia" :aria-label="hasMedia ? '包含生成结果' : '这张画布没有生成结果'" @click="hasMedia && (form.include_media = !form.include_media)"></button>
                         </div>
                     </div>
 
@@ -365,7 +376,7 @@ onBeforeUnmount(() => {
                 <button v-if="step === 'form' && !props.request.sourceId" type="button" class="nv-btn" @click="step = 'pick'">返回</button>
                 <span class="sp"></span>
                 <button type="button" class="nv-btn" @click="emit('close')">取消</button>
-                <button v-if="step === 'form'" type="button" class="nv-btn primary" :disabled="saving || loading" @click="submit">{{ saving ? '发布中…' : (editMode ? '保存' : '发布') }}</button>
+                <button v-if="step === 'form'" type="button" class="nv-btn primary" :disabled="saving || loading || isEmptyCanvas" :title="isEmptyCanvas ? '这张画布还是空的，先做点东西再发布' : ''" @click="submit">{{ saving ? '发布中…' : (editMode ? '保存' : '发布') }}</button>
             </footer>
         </div>
     </Teleport>
@@ -465,6 +476,9 @@ html.theme-dark .pd { background: color-mix(in srgb, #1a1a1a 90%, transparent); 
 .pd-vis.off { align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--fill-1); color: var(--ink-2); }
 .pd-vis.off .dot { background: var(--ink-4); }
 .pd-vis.off .tx { flex: 1; }
+.pd-opt.off { opacity: .62; }
+.pd-hint { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 10px; background: var(--fill-1); color: var(--ink-2); font: 400 12px/18px var(--font-sans); }
+.pd-hint .nv-i { width: 13px; height: 13px; flex: none; color: var(--ink-3); }
 .pd-err { padding: 8px 12px; border-radius: 10px; background: var(--danger-fill); color: var(--danger); font: 400 12px/18px var(--font-sans); }
 .pd-empty { padding: 28px 0; text-align: center; color: var(--ink-4); font: 400 12px/18px var(--font-sans); }
 .pd-pop-enter-active, .pd-pop-leave-active { transition: opacity .14s ease, transform .14s ease; }

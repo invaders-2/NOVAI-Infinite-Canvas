@@ -1,7 +1,7 @@
 <script setup>
 // 设置 → 技能：列出画布助手能用的技能（/api/skills），支持从 GitHub 安装（/api/skills/import-github，只下载 SKILL.md、不执行仓库内容）
 // 和导入本地 SKILL.md（/api/skills/import）。已存在同名技能时先问要不要覆盖。
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, nextTick, onMounted, watch } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import NvSwitch from '../../components/NvSwitch.vue';
 import SetCard from './SetCard.vue';
@@ -113,6 +113,25 @@ function confirmOverwrite() {
     if (o.kind === 'github') installGithub(true); else importFile(null, true);
 }
 function goMarket() { state.settingsOpen = false; navigate('store'); }
+// 克隆技能后从 toast「去启用」跳进来：滚到这一行并短暂高亮（软底，不画描边）
+const focusId = ref('');
+function flashSkillRow(id) {
+    focusId.value = String(id || '');
+    nextTick(() => {
+        const row = document.querySelector('[data-skill-id="' + String(focusId.value).replace(/"/g, '\"') + '"]');
+        if (!row) return;
+        row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        row.classList.add('is-focus');
+        setTimeout(() => row.classList.remove('is-focus'), 2400);
+    });
+}
+watch(() => [state.settingsOpen, state.settingsTab, state.skillFocus], () => {
+    if (!state.settingsOpen || state.settingsTab !== 'skills' || !state.skillFocus) return;
+    const id = String(state.skillFocus);
+    state.skillFocus = '';
+    flashSkillRow(id);
+}, { immediate: true });
+
 // 技能也要能发布到社区：关掉设置弹窗，交给外壳的发布弹窗（与画布 / 提示词同一个）
 function publishToCommunity(s) {
     state.settingsOpen = false;
@@ -303,10 +322,11 @@ onMounted(() => { load(); loadToken(); loadRelay(); });
         <template v-else>
             <SetCard v-if="mine.length" :title="'我导入的 · ' + mine.length + ' 个'">
                 <template v-for="s in mine" :key="s.id">
-                    <div class="row">
+                    <div class="row" :data-skill-id="s.id">
                         <span class="lead"><NvIcon :name="icon(s)" /></span>
                         <span class="tx"><b>{{ s.name }}</b><small>{{ s.description || s.id }}</small></span>
                         <span class="st">{{ s.enabled === false ? '已停用' : '可用' }}</span>
+                        <span v-if="s.source && s.source.type === 'community'" class="chip src" :title="'社区克隆 · v' + ((s.source.version) || 1) + ' · ' + ((s.source.author || {}).account_id || '')">来自 {{ (s.source.author || {}).nickname || '局域网用户' }}</span>
                         <span v-if="s.builtin_pack" class="chip" title="随安装包分发，不能删除，可以停用">内置</span>
                         <button type="button" class="act" :title="'发布「' + s.name + '」到社区'" :aria-label="'发布 ' + s.name + ' 到社区'" @click="publishToCommunity(s)"><NvIcon name="users" /></button>
                         <NvSwitch :model-value="s.enabled !== false" :disabled="busyId === s.id" :label="'启用 ' + s.name" @update:model-value="v => toggleSkill(s, v)" />
@@ -322,11 +342,12 @@ onMounted(() => { load(); loadToken(); loadRelay(); });
             <div v-if="!mine.length && !system.length" class="empty-all">{{ q.trim() ? '没有匹配的技能' : '还没有技能。可以从 GitHub 安装、导入 SKILL.md，或去应用市场把技能添加到画布助手。' }}</div>
             <SetCard v-if="system.length" :title="'内置技能 · ' + system.length + ' 个'" desc="画布助手会按任务自动启用；也可以在首页输入框的「技能」里手动挂上。">
                 <template v-for="s in system" :key="s.id">
-                    <div class="row">
+                    <div class="row" :data-skill-id="s.id">
                         <span class="lead"><NvIcon :name="icon(s)" /></span>
                         <span class="tx"><b>{{ s.name }}</b><small>{{ s.description || s.id }}</small></span>
                         <span v-if="s.usage_count" class="st">用过 {{ s.usage_count }} 次</span>
                         <span v-if="s.enabled === false" class="st">已停用</span>
+                        <span v-if="s.source && s.source.type === 'community'" class="chip src" :title="'社区克隆 · v' + ((s.source.version) || 1)">来自 {{ (s.source.author || {}).nickname || '局域网用户' }}</span>
                         <span v-if="s.builtin_pack" class="chip" title="随安装包分发，不能删除，可以停用">内置</span>
                         <button type="button" class="act" :title="'发布「' + s.name + '」到社区'" :aria-label="'发布 ' + s.name + ' 到社区'" @click="publishToCommunity(s)"><NvIcon name="users" /></button>
                         <NvSwitch :model-value="s.enabled !== false" :disabled="busyId === s.id" :label="'启用 ' + s.name" @update:model-value="v => toggleSkill(s, v)" />
@@ -375,7 +396,10 @@ onMounted(() => { load(); loadToken(); loadRelay(); });
 /* 行内确认条落在卡片底色（fill-1）上，换成实底才分得出来 */
 .ow.in-card { margin: 0 0 10px; background: var(--solid); }
 .skp :deep(.sc-b) { padding: 4px 14px; }
-.row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 9px 0; }
+.row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 9px 0; border-radius: 10px; transition: background 200ms var(--ease-out); }
+/* 从 toast「去启用」跳进来时：软底高亮 2.4s，不加描边 */
+.row.is-focus { background: var(--fill-2); }
+.chip.src { background: var(--fill-1); color: var(--ink-3); }
 .skp :deep(.nv-switch:disabled) { opacity: .4; cursor: default; }
 /* GitHub 中转 / 令牌：工具行下面两条不抢眼的小卡 */
 .ghcfg-stack { display: flex; flex-direction: column; gap: 8px; margin: 0 0 18px; }
