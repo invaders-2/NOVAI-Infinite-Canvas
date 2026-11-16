@@ -185,6 +185,9 @@ class CommunityTransport:
     async def author_profile(self, item_id: str) -> Optional[Dict[str, Any]]:
         raise NotImplementedError
 
+    async def profile_from_node(self, node: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        raise NotImplementedError
+
 
 class LanTransport(CommunityTransport):
     name = "lan"
@@ -305,6 +308,18 @@ class LanTransport(CommunityTransport):
             "POST", str(node["base"]) + "/api/community/public/items/" + item_id + "/event",
             str(node.get("token") or ""), body=payload, timeout=NODE_TIMEOUT)
         return status == 200
+
+    async def profile_from_node(self, node: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """直接按节点取对方的主页（好友列表里给「主页」用，不必先有作品 id）。"""
+        base = str((node or {}).get("base") or "").rstrip("/")
+        if not base:
+            return None
+        status, content = await _fetch_bytes("GET", base + "/api/community/public/profile",
+                                             str(node.get("token") or ""), timeout=PROFILE_TIMEOUT)
+        if status != 200:
+            return None
+        body = _json_of(content)
+        return body if isinstance(body, dict) else None
 
     async def author_profile(self, item_id: str) -> Optional[Dict[str, Any]]:
         node = self._node_for_item(item_id)

@@ -75,6 +75,8 @@ const MAP = {
     grid: 'layout-grid',
     grid9: 'grid-3x3',
     grip: 'grip-vertical',
+    heart: 'heart',
+    info: 'info',
     group: 'group',
     hand: 'hand',
     hash: 'hash',

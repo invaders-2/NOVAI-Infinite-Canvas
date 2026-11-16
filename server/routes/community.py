@@ -216,9 +216,9 @@ async def aggregate_items(force: bool = False) -> Dict[str, Any]:
 
 @router.get("/feed")
 async def feed(request: Request, kind: str = "", q: str = "", sort: str = "latest",
-               category: str = "") -> Dict[str, Any]:
+               category: str = "", refresh: bool = False) -> Dict[str, Any]:
     _rate_read(request)
-    data = await aggregate_items()
+    data = await aggregate_items(force=bool(refresh))
     items = [item for item in data["items"] if _matches(item, kind, category, q)]
     items = _sort_items(items, sort)
     counts = {"all": len(data["items"]), "canvas": 0, "skill": 0, "prompt": 0}
@@ -241,9 +241,9 @@ async def feed(request: Request, kind: str = "", q: str = "", sort: str = "lates
 
 
 @router.get("/featured")
-async def featured(request: Request) -> Dict[str, Any]:
+async def featured(request: Request, refresh: bool = False) -> Dict[str, Any]:
     _rate_read(request)
-    data = await aggregate_items()
+    data = await aggregate_items(force=bool(refresh))
     week_ago = store.now_ms() - 7 * 86400 * 1000
     scored: List[Tuple[int, Dict[str, Any]]] = []
     for item in data["items"]:
@@ -1425,6 +1425,87 @@ async def author_page(item_id: str, request: Request) -> Dict[str, Any]:
         "online": False,
         "mine": False,
     }
+
+
+def _public_author_block(author: Dict[str, Any], profile: Dict[str, Any],
+                        stats: Dict[str, Any], items: List[Dict[str, Any]], online: bool,
+                        cover_url: str) -> Dict[str, Any]:
+    return {
+        "author": {
+            "account_id": str(author.get("account_id") or ""),
+            "nickname": str(author.get("nickname") or "局域网用户"),
+            "avatar": str(author.get("avatar") or ""),
+        },
+        "profile": {
+            "cover_url": cover_url,
+            "focus_x": int(profile.get("focus_x") or 50),
+            "focus_y": int(profile.get("focus_y") or 50),
+            "default": not bool(cover_url),
+        },
+        "stats": stats,
+        "items": items,
+        "online": online,
+        "mine": False,
+    }
+
+
+@router.get("/authors/{account_id}")
+async def author_by_account(account_id: str, request: Request) -> Dict[str, Any]:
+    """按作者账号看主页：好友列表里的「主页」用这条（先按账号找到节点，再取对方的公开主页）。"""
+    _rate_read(request)
+    account = _clean_account_id(account_id)
+    if not account:
+        raise HTTPException(status_code=400, detail="作者 ID 不合法")
+    if account == _account_id():
+        items = [store.item_public(item, online=True) for item in _published_items()]
+        profile = store.load_profile()
+        return _public_author_block(_author(), profile, _profile_stats(), items, True,
+                                    _profile_cover_url(profile, public=True))
+    transport_ref = transport.get_transport()
+    node = next((entry for entry in transport.discover_nodes()
+                 if str(entry.get("id") or "") == account), None)
+    if node:
+        body = await transport_ref.profile_from_node(node)
+        if isinstance(body, dict):
+            items = [entry for entry in (body.get("items") or []) if isinstance(entry, dict)]
+            for entry in items:
+                transport.remember_cached_item(entry)
+                transport.remember_item_node(str(entry.get("id") or ""), node)
+            author = body.get("author") if isinstance(body.get("author"), dict) else {}
+            profile = body.get("profile") if isinstance(body.get("profile"), dict) else {}
+            return _public_author_block(author, profile, body.get("stats") or {}, items, True,
+                                        "/api/community/author-cover-by-account?account="
+                                        + urllib.parse.quote(account) if profile.get("has_cover") else "")
+    cached = [item for item in transport.load_cached_items()
+              if str(((item.get("author") or {}).get("account_id")) or "") == account]
+    if not cached:
+        raise HTTPException(status_code=404, detail="作者离线，也没有缓存")
+    author = (cached[0].get("author") or {})
+    stats = {
+        "items": len(cached),
+        "likes": sum(int((it.get("stats") or {}).get("likes") or 0) for it in cached),
+        "clones": sum(int((it.get("stats") or {}).get("clones") or 0) for it in cached),
+        "views": sum(int((it.get("stats") or {}).get("views") or 0) for it in cached),
+        "friends": 0,
+    }
+    return _public_author_block(author, {}, stats, cached, False, "")
+
+
+@router.get("/author-cover-by-account")
+async def author_cover_by_account(account: str, request: Request) -> Any:
+    _rate_read(request)
+    clean = _clean_account_id(account)
+    node = next((entry for entry in transport.discover_nodes()
+                 if str(entry.get("id") or "") == clean), None)
+    if not node:
+        raise HTTPException(status_code=404, detail="作者离线")
+    status, content = await transport._fetch_bytes(
+        "GET", str(node.get("base") or "") + "/api/community/public/profile/cover",
+        str(node.get("token") or ""), timeout=transport.PROFILE_TIMEOUT)
+    if status != 200 or not content:
+        raise HTTPException(status_code=404, detail="对方没有设置背景图")
+    from fastapi.responses import Response
+    return Response(content=content, media_type="image/webp")
 
 
 @router.get("/author-cover")
