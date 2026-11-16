@@ -71,5 +71,28 @@ assert.ok(panel.includes('videoRatioChoices') && panel.includes('ratio: videoRat
 const pickers = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/agent/PlanParamPickers.tsx'), 'utf8');
 assert.ok(pickers.includes('ratioDisplayLabel(value)') && card.includes('PlanRatioField'), '方案卡比例弹层把自适应显示为原图比例');
 assert.ok(backend.includes('params.sourceSize') && backend.includes('/auto|自适应|source/i.test(params.ratio)'), '生成请求使用原图显式 WxH，不再落 1:1');
+// 量不到源图尺寸时发 auto 交给后端按参考图算，别再硬塞 1:1 的像素尺寸（方案卡 / 助手自动运行走的正是这条路）
+assert.ok(backend.includes('return "auto";'), '没有源图尺寸时 size 发 auto，不落 1:1');
+assert.ok(backend.includes('{ ratio: "auto" }'), '请求带上 ratio=auto，后端才能按参考图算尺寸');
 
-console.log('[PASS] 原图比例：尺寸换算 / 源图选择 / 图片视频标签 / 方案卡与请求（4 组）');
+// ---- 5. 单节点请求：方案卡 / 助手自动运行不经过面板，也要按源图比例发尺寸 ----
+const engine = load('novai-canvas-ui/src/canvas/canvas-next/engine.ts');
+const imageSpec2 = model.specFor({ configId: 'i::m', label: 'img', kind: 'image', ui: { ratios: ['自适应', '1:1'], sizes: ['1K', '2K'], batch: [1] }, specSource: 'spec' });
+function singleRequest(params) {
+  const source = model.newNode('image', 0, 0, { hist: [{ url: '/assets/input/a.png', w: 800, h: 600 }], params: { ...params, ratio: '1:1', size: '1K' } });
+  const node = model.newNode('image', 400, 0, { params });
+  const store = { state: { doc: { nodes: [source, node], edges: [{ id: 'e1', from: source.id, to: node.id }], comments: [], canvasId: 'c1' }, runtime: {} },
+    modelOf: () => imageSpec2, node: (id) => [source, node].find((n) => n.id === id), backend: { available: () => true } };
+  const req = engine.buildRequest(store, node);
+  return req && req.params;
+}
+const adaptiveReq = singleRequest({ model: imageSpec2.id, ratio: '自适应', size: '1K', count: 1 });
+assert.strictEqual(adaptiveReq.sourceSize, '1024x768', '单节点原图比例：按上游 800×600 写显式 WxH');
+assert.strictEqual(adaptiveReq.size, '1024x768', '单节点原图比例：size 就是显式 WxH，不再是尺寸档');
+const adaptiveReq2k = singleRequest({ model: imageSpec2.id, ratio: '自适应', resolution: '2K', size: '2K', count: 1 });
+assert.strictEqual(adaptiveReq2k.size, '2048x1536', '单节点原图比例：2K 档按长边 2048 等比');
+const fixedReq = singleRequest({ model: imageSpec2.id, ratio: '1:1', size: '1K', count: 1 });
+assert.strictEqual(fixedReq.sourceSize, undefined, '显式比例不写 sourceSize');
+assert.strictEqual(fixedReq.size, '1K', '显式比例保持尺寸档，交给后端换算');
+
+console.log('[PASS] 原图比例：尺寸换算 / 源图选择 / 图片视频标签 / 方案卡与请求 / 单节点请求（5 组）');

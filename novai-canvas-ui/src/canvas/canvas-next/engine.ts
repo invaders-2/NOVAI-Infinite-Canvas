@@ -69,6 +69,18 @@ export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRo
   // 图片批量时生成节点自身连的图也会发送，必须先把名额留出来，否则「自身图 + 行素材」会超过模型 maxRefs。
   const plan = row ? planRow(node.kind, g.params, m, row, ownRefCount(doc, node.id, node.kind)) : null;
   let eff = plan ? plan.params : g.params;
+  // 原图比例（自适应）单节点：量得到源图尺寸就写进这次请求的显式 WxH。
+  // 不能只靠面板里的 useEffect 补 params.sourceSize —— 方案卡 / 助手自动运行、以及节点已经有结果不走面板时，
+  // sourceSize 一直是空的，尺寸会掉回 1:1（node 上写着原图比例，出图却是方图）。
+  if (!row && node.kind === "image" && isAdaptiveRatio((eff as { ratio?: string }).ratio)) {
+    const adaptive = eff as { ratio?: string; size?: string; resolution?: string; sourceSize?: string };
+    if (!/^\d+x\d+$/i.test(String(adaptive.sourceSize || "").trim())) {
+      const tier = String(adaptive.resolution || adaptive.size || "1K");
+      const box = sourceBoxInDoc(doc, node, node.kind);
+      const explicit = box ? sourceSizeForTier(box, tier) : "";
+      if (explicit) eff = { ...(eff as Record<string, unknown>), sourceSize: explicit, size: explicit } as typeof eff;
+    }
+  }
   // 原图比例（自适应）在批量行里拿不到源图：row.media 的图不是节点 doc 输入，wantedRatio 只能看出 1:1。
   // 这里按「这一行第一张图的真实像素」算显式 WxH（再回落生成节点自己的上游图），写进该行 params.sourceSize/size。
   // 只修图片批量：视频 batch 的行为保持不变（显式比例、视频原图比例路径都不动）
@@ -449,7 +461,8 @@ function syncVideoMode(store: CanvasStore, id: string) {
 }
 
 /** 已有结果的节点再生成：右侧新建「原名 · N」，复制提示词、参数和全部输入连线 */
-export function regenAsNew(store: CanvasStore, n: CanvasNode, size?: { w: number; h: number }): CanvasNode {
+export function regenAsNew(store: CanvasStore, n: CanvasNode, size?: { w: number; h: number }, opts: { linkSelf?: boolean } = {}): CanvasNode {
+  const linkSelf = opts.linkSelf !== false;
   const doc = store.state.doc; const g = genOf(n);
   const { x, y } = freeSpotRight(doc, n);
   const base = g.title.replace(/ · \d+$/, "");
@@ -462,13 +475,15 @@ export function regenAsNew(store: CanvasStore, n: CanvasNode, size?: { w: number
   // 被点的这个图片 / 视频 / 音频节点自己也是新节点的输入（媒体当参考 / 来源）。三种情况不连：
   // 文本节点（文本本身是提示词，连过去只会变成上下文）、没有结果的节点（留下一条取不到东西的空边）、
   // 表格批量行节点（请求由冻结的行输入决定，这条媒体边不会进请求，连上只会显示成一条不生效的输入）。
-  const selfEdge = n.kind !== "text" && isGenKind(n.kind) && !frozen && outOf(n) ? { id: uid("e"), from: n.id, to: c.id } : null;
+  const selfEdge = linkSelf && n.kind !== "text" && isGenKind(n.kind) && !frozen && outOf(n) ? { id: uid("e"), from: n.id, to: c.id } : null;
   store.addNodes([c], selfEdge ? [...edges, selfEdge] : edges, { select: true });
-  syncVideoMode(store, c.id);
+  // addNodes 会把不可用的 model 悄悄换成同类型默认模型；再来一次必须沿用原模型，linkSelf=false 时还原成原 params
+  if (!linkSelf) store.patchGen(c.id, { params: JSON.parse(JSON.stringify(g.params)) }, { history: false });
+  if (linkSelf) syncVideoMode(store, c.id);
   // 视频从视频结果再生成：autoVideoMode 优先「视频延长」，大多数模型没有这一档、会退回「文生视频」，
   // 等于把来源视频整个丢掉。这里显式选「参考视频生视频」（提示词照旧驱动，来源视频当参考），
   // 模型没有就依次退到「视频编辑」「视频延长」。
-  if (selfEdge && c.kind === "video") {
+  if (linkSelf && selfEdge && c.kind === "video") {
     const m = store.modelOf(c); const modes = m?.modes || [];
     const mode = (["参考视频生视频", "视频编辑", "视频延长"] as VideoMode[]).find((x) => modes.includes(x));
     if (mode && (genOf(store.node(c.id)!).params as VideoParams).mode !== mode) store.patchGen(c.id, (gg) => ({ params: { ...(gg.params as VideoParams), mode } }));

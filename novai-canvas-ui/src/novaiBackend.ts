@@ -243,9 +243,12 @@ function metaOf(canvas: Row): CanvasMeta {
 }
 
 function imageSize(params: ImageParams): string {
-  // 原图比例：面板已按源图比例 + 尺寸档算好显式 WxH，直接用，不能再回落到 1:1
+  // 原图比例：面板 / 引擎已按源图比例 + 尺寸档算好显式 WxH，直接用，不能再回落到 1:1
   const sourceSize = String(params.sourceSize || "").trim();
   if (/auto|自适应|source/i.test(params.ratio) && /^\d+x\d+$/.test(sourceSize)) return sourceSize;
+  // 量不到源图尺寸（远程素材 / 方案卡直接运行还没量过）：发 auto，让后端按参考图真实比例算，
+  // 别在这里硬塞一个 1:1 的像素尺寸 —— 那等于把「原图比例」改成了方图
+  if (/auto|自适应|source/i.test(params.ratio)) return "auto";
   const long = /4k/i.test(params.size) ? 4096 : /2k/i.test(params.size) ? 2048 : 1024;
   const ratio = /auto|自适应|source/i.test(params.ratio) ? "1:1" : params.ratio;
   const [w, h] = ratioWH(ratio, long);
@@ -301,6 +304,8 @@ async function createImageTask(req: GenRequest | EditRequest, prompt: string, pa
     provider_id: selected.provider,
     model: selected.model,
     size: sizeOverride || imageSize(params),
+    // 原图比例：把 auto 一起告诉后端 —— size 发成 auto 时它按参考图算；发成显式像素时它也不用再猜
+    ...(/auto|自适应|source/i.test(params.ratio) ? { ratio: "auto" } : {}),
     n: Math.max(1, Math.min(4, Number(params.count) || 1)),
     reference_images: references,
     ...(quality ? { quality } : {}),
@@ -820,6 +825,16 @@ export function createNovaiBackend(): CanvasBackend {
       const models = await this.listModels();
       const model = req.model || models.find((item) => item.kind === "image");
       if (!model) throw new GenError("MODEL_REQUIRED", "没有可用的图片模型");
+      // 白膜三档（提示词和桌面 bridge 的 buildEdit 逐字一致）：
+      //   人台 —— 人物转成白色石膏人台（服装展示）；
+      //   白模 —— 商品保留外形与机位，抹掉细节和颜色，做成未上色的石膏粗模（商品白膜）；
+      //   清场 —— 商品连同接触投影移除，只留干净场景。
+      const white = {
+        mannequin: "把照片里的人物变成纯白色的服装店人台模特：像人体模特一样身上没有衣服，保持原来的姿势、动作、镜头角度和构图，全身哑光纯白、不偏黄（不要米白或奶白）；背景换成无缝纯白，没有纹理、渐变和杂物，不要浅灰底；商品和人物脚下留淡淡的地面投影；不要删除人物，不要文字、水印、边框",
+        blockout: "把画面里的商品做成纯白色的石膏粗模，背景也换成纯白：商品和背景都是纯白（#FFFFFF），不偏黄、不偏米、不偏灰、不带任何色温；保留原商品的整体轮廓、比例、摆放角度、机位、构图和它与台面的接触投影；去掉所有细节 —— 缝线、鞋带结构、鞋底花纹、logo、印花、图案、装饰、材质纹理和反光全部抹掉；表面平滑哑光、纯白、只有大的体块起伏；背景是无缝纯白、没有任何纹理、渐变、暗角和杂物；商品和背景之间只靠柔和的浅灰投影与极淡的轮廓暗部区分，除此之外整张画面只有白色和中性灰；不要出现第二个影子，不要新增物体，不要文字、水印、边框",
+        clear: "把画面里的商品完整移除，并且连它压在台面或地面上的接触投影一起去掉：只移除商品和它的接触投影，不要留下任何商品残影、半透明轮廓、抠图毛边或边缘描边；商品原来挡住的背景要按周围的纹理、颜色和透视自然补全，补出来的台面、墙面和光影要跟原画面完全接得上；保留原来的机位、构图、布光和整体氛围，背景颜色保持原样（不要换成纯白或其它颜色），画面里其余物体的位置、比例和光影都不要动；输出一张没有商品的干净场景图：不要出现第二个影子，不要凭空生成新物体，不要新增道具或装饰，不要文字、水印、边框",
+      };
+      const whiteTier = (req.params as { tier?: string } | undefined)?.tier;
       const prompts: Record<string, string> = {
         redraw: "只重绘遮罩标记的区域，其余画面保持不变",
         erase: "移除遮罩标记区域里的内容并自然补全背景",
@@ -829,15 +844,21 @@ export function createNovaiBackend(): CanvasBackend {
         outpaint: "扩展画面并自然补全透明区域，保持原图内容不变",
         enhance: "将图片高清增强，提升细节和清晰度，内容保持不变",
         cutout: "完整保留主体并移除背景，输出透明背景图片",
-        whitemodel: "把照片里的人物变成纯白色的服装店人台模特：像人体模特一样身上没有衣服，保持原来的姿势、动作、镜头角度和构图，全身哑光纯白、不偏黄（不要米白或奶白），浅灰白摄影棚背景，柔和的棚拍光和淡淡阴影，不要删除人物，不要文字、水印、边框",
+        whitemodel: white[whiteTier === "clear" ? "clear" : whiteTier === "blockout" ? "blockout" : "mannequin"],
       };
       const params = { ...defaultParams("image", model), count: 1 } as ImageParams;
       // 编辑请求按源图真实比例要尺寸（不再固定方图）；扩图的源图是「原图 + 透明扩展」的合成图，天然是目标比例
       const sizing = await editSizing(req, model).catch(() => null);
       const references = [{ url: await uploadAsset(req.sourceUrl, "编辑原图"), name: "编辑原图", kind: "image" }];
       if (req.maskDataUrl) references.push({ url: await uploadAsset(req.maskDataUrl, "编辑遮罩"), name: "编辑遮罩", kind: "image" });
+      // 遮罩内换品：新品参考排在原图 / 遮罩之后（第三张），提示词里按这个顺序说
+      if (req.op === "redraw" && req.refUrl) references.push({ url: await uploadAsset(req.refUrl, "新品参考"), name: "新品参考", kind: "image" });
       const size = await requestImageSize(model, sizing?.size || imageSize(params));
-      const outputs = await createImageTask({ ...req, model }, promptForModel(model, `${prompts[req.op] || "编辑图片"}。${req.prompt || ""}`), params, references, signal, onEvent, size);
+      const swapPrompt = "参考图说明：第一张是原图；第二张是涂抹遮罩（透明底上的笔迹标出要处理的部分）。把遮罩区域里的商品替换成第三张参考图里的新品：新品的形状、比例、配色、材质、细节和 logo 100% 以参考图为准；新品在原画面里的位置、朝向、倾斜角度和前后遮挡关系必须与原来那只商品完全一致，不要重新构图、不要移动画面里的其它东西；遮罩区域里如果有多件商品，每一件都必须替换，不能只换其中一件；每件仍然保持各自的位置、朝向、倾斜角度和前后遮挡关系。遮罩以外的区域一模一样，不要改动。";
+      const editPrompt = req.op === "redraw" && req.refUrl
+        ? swapPrompt + (req.prompt ? "。" + req.prompt : "")
+        : `${prompts[req.op] || "编辑图片"}。${req.prompt || ""}`;
+      const outputs = await createImageTask({ ...req, model }, promptForModel(model, editPrompt), params, references, signal, onEvent, size);
       const out = outputs[0];
       if (!out || !sizing?.note) return out;
       return { ...out, meta: { ...(out.meta || {}), sizeNote: sizing.note } as GenOutput["meta"] & { sizeNote?: string } };
