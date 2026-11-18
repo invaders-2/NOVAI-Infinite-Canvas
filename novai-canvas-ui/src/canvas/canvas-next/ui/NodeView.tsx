@@ -261,12 +261,27 @@ function VideoBody({ node, out, res, hover }: { node: CanvasNode; out: GenOutput
   const cover = frame || (preview.startsWith("/api/media-preview?") ? preview : "");
   const [pinned, setPinned] = useState(false); const [paused, setPaused] = useState(false); const [muted, setMuted] = useState(false);
   const [now, setNow] = useState<number | null>(null); const [total, setTotal] = useState(0); const [trimOpen, setTrimOpen] = useState(false);
+  // 音量偏好全局共享（所有视频节点读同一个 localStorage），拖到 0 等于静音
+  const [vol, setVol] = useState(() => { try { const s = localStorage.getItem("cn:vvol"); const n = Number(s); return s != null && Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 1; } catch { return 1; } });
+  const volRef = useRef(vol); volRef.current = vol;
+  const trimOpenRef = useRef(trimOpen); trimOpenRef.current = trimOpen;
+  // 控制条自动隐藏：固定播放且正在播时，指针静止 1.7s 淡出；动一下 / 暂停 / 打开区间都会让它回来
+  const [barOn, setBarOn] = useState(true);
+  const barTimer = useRef(0);
   // 「收起」之后指针还在节点里：closed 只压住 hover 预览（不能让 hover 立刻又挂回来），
   // 但不能压住 pinned——否则收起后不移开鼠标再点播放就成了死键
   const [closed, setClosed] = useState(false);
   const mounted = pinned || (hover && !closed);
   const media = useMediaUrl(out.url || "", mounted); const url = media.url;
   const vref = useRef<HTMLVideoElement>(null);
+  const wakeBar = () => {
+    setBarOn(true);
+    window.clearTimeout(barTimer.current);
+    barTimer.current = window.setTimeout(() => {
+      const v = vref.current;
+      if (v && !v.paused && !trimOpenRef.current) setBarOn(false);
+    }, 1700);
+  };
   // 视频节点的框也要跟真实画面对上：助手生成 / 上传的视频常见竖版本被塞进 16:9 横框（或反过来），
   // 封面图和 <video> 元数据都能拿到真实宽高，差超过 6% 就按画面比例改一次框高（宽度不动）
   const fittedKey = useRef("");
@@ -299,7 +314,9 @@ function VideoBody({ node, out, res, hover }: { node: CanvasNode; out: GenOutput
     setPaused(false);
     if (pinned) {
       v.muted = false; setMuted(false);
+      v.volume = volRef.current;
       v.play().catch(() => { v.muted = true; setMuted(true); return v.play().catch(() => setPaused(true)); });
+      wakeBar();
     } else {
       v.muted = true; setMuted(true);
       v.play().catch(() => setPaused(true));
@@ -310,8 +327,8 @@ function VideoBody({ node, out, res, hover }: { node: CanvasNode; out: GenOutput
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, pinned, url]);
-  // 收起后指针离开正文：清掉 closed，下次进来照常挂载
-  useEffect(() => { if (!hover) setClosed(false); }, [hover]);
+  // 收起后指针离开正文：清掉 closed，下次进来照常挂载；指针整个移出节点时控制条也收掉（播放不中断）
+  useEffect(() => { if (!hover) { setClosed(false); if (pinned) { window.clearTimeout(barTimer.current); setBarOn(false); } } }, [hover, pinned]);
   // 服务商不一定按所选时长出片：拿到真实时长后写回当前版本（没手动设过区间时），时长角标和使用区间都按真的来
   const learnDur = (el: HTMLVideoElement) => {
     const d = el.duration; if (!Number.isFinite(d) || d <= 0) return;
@@ -320,10 +337,17 @@ function VideoBody({ node, out, res, hover }: { node: CanvasNode; out: GenOutput
     const real = Math.round(d * 100) / 100;
     store.patchGen(node.id, (g) => ({ hist: g.hist.map((h, i) => (i === g.hi && h.url === out.url ? { ...h, dur: real } : h)) }));
   };
-  const toggle = () => { const v = vref.current; if (!v) return; if (v.paused) { void v.play().catch(() => undefined); } else v.pause(); };
+  const toggle = () => { const v = vref.current; if (!v) return; if (v.paused) { void v.play().catch(() => undefined); } else v.pause(); wakeBar(); };
   // 画面点击：预览态是「点进来固定播放」，固定态才是原来的播放/暂停
-  const onSurface = () => { if (!pinned) { setPinned(true); return; } toggle(); };
-  const close = () => { const v = vref.current; if (v) { v.pause(); seekTo(v, 0); } setPinned(false); setClosed(true); setPaused(true); setNow(0); };
+  const onSurface = () => { if (!pinned) { setPinned(true); wakeBar(); return; } toggle(); };
+  const close = () => { const v = vref.current; if (v) { v.pause(); seekTo(v, 0); } setPinned(false); setClosed(true); setPaused(true); setNow(0); window.clearTimeout(barTimer.current); setBarOn(true); };
+  const applyVol = (nv: number) => {
+    nv = Math.min(1, Math.max(0, nv));
+    setVol(nv);
+    try { localStorage.setItem("cn:vvol", String(nv)); } catch { /* 隐私模式等场景写不进去就算了 */ }
+    const v = vref.current;
+    if (v) { v.volume = nv; if (nv > 0 && v.muted) { v.muted = false; setMuted(false); } }
+  };
   const saveTrim = (next: { in: number; out: number }) => {
     const t = clampTrim(out.dur, next);
     store.patchGen(node.id, (g) => ({ hist: g.hist.map((h, i) => (i === g.hi ? { ...h, trim: t } : h)) }));
@@ -338,22 +362,25 @@ function VideoBody({ node, out, res, hover }: { node: CanvasNode; out: GenOutput
       onPlay={() => setPaused(false)} onPause={() => setPaused(true)}
       onEnded={() => { setPaused(true); setNow(length); }}
       onError={() => media.onError()}
+      onPointerMove={wakeBar}
       onClick={(e) => { e.stopPropagation(); onSurface(); }}
       style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       : cover ? <img src={cover} alt="" draggable={false} decoding="async" onLoad={(e) => fitToMedia(e.currentTarget.naturalWidth, e.currentTarget.naturalHeight)} onClick={(e) => { e.stopPropagation(); if (out.url) setPinned(true); }} /> : null}
     {!pinned ? <button className="play" data-act="play" onPointerDown={(e) => { e.stopPropagation(); if (out.url) setPinned(true); }}><Icon name="play" /></button> : null}
     {chips}
-    {pinned ? <VideoControls now={now || 0} length={length} paused={paused} muted={muted} trimOpen={trimOpen}
-      onToggle={toggle} onMute={() => { const v = vref.current; const m = !muted; if (v) v.muted = m; setMuted(m); }}
+    {pinned ? <VideoControls shown={barOn} now={now || 0} length={length} paused={paused} muted={muted || vol === 0} vol={vol} trimOpen={trimOpen}
+      onToggle={toggle} onMute={() => { const v = vref.current; const m = !(muted || vol === 0); if (!m && volRef.current === 0) { applyVol(0.5); return; } if (v) v.muted = m; setMuted(m); wakeBar(); }}
+      onVol={applyVol} onWake={wakeBar}
       onSeek={(t) => { seekTo(vref.current, t); setNow(t); }} onClose={close}
-      onTrim={() => setTrimOpen((open) => !open)}
+      onTrim={() => { setTrimOpen((open) => !open); wakeBar(); }}
       onFrame={() => { vref.current?.pause(); window.dispatchEvent(new CustomEvent("cn:editor", { detail: { kind: "frame", id: node.id } })); }} /> : null}
     {pinned && trimOpen ? <TrimBar trim={trim} dur={out.dur} playing={!paused} onSeek={(t) => { seekTo(vref.current, t); setNow(t); }} onTrim={saveTrim} /> : null}
   </>;
 }
 
-/** 播放控制条：播放/暂停 · 当前/总时长 · 可点可拖的进度条 · 静音 · 收起 */
-function VideoControls({ now, length, paused, muted, trimOpen, onToggle, onMute, onSeek, onClose, onFrame, onTrim }: { now: number; length: number; paused: boolean; muted: boolean; trimOpen: boolean; onToggle: () => void; onMute: () => void; onSeek: (t: number) => void; onClose: () => void; onFrame: () => void; onTrim: () => void }) {
+/** 播放控制条：播放/暂停 · 当前/总时长 · 可点可拖的进度条 · 静音+音量 · 收起。
+ *  shown=false 时整条淡出且不吃指针（自动隐藏）；音量是悬停音量钮上方的竖向滑杆 */
+function VideoControls({ shown, now, length, paused, muted, vol, trimOpen, onToggle, onMute, onVol, onWake, onSeek, onClose, onFrame, onTrim }: { shown: boolean; now: number; length: number; paused: boolean; muted: boolean; vol: number; trimOpen: boolean; onToggle: () => void; onMute: () => void; onVol: (v: number) => void; onWake: () => void; onSeek: (t: number) => void; onClose: () => void; onFrame: () => void; onTrim: () => void }) {
   const track = useRef<HTMLDivElement>(null);
   const frac = length > 0 ? Math.max(0, Math.min(1, now / length)) : 0;
   const scrub = (e: React.PointerEvent) => {
@@ -364,8 +391,19 @@ function VideoControls({ now, length, paused, muted, trimOpen, onToggle, onMute,
     const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
     addEventListener("pointermove", move); addEventListener("pointerup", up);
   };
+  // 竖向音量滑杆：拖动中指针会离开悬停区，vdrag 让弹层在拖动期间保持可见
+  const [vdrag, setVdrag] = useState(false);
+  const vtrack = useRef<HTMLSpanElement>(null);
+  const volScrub = (e: React.PointerEvent) => {
+    e.stopPropagation(); e.preventDefault();
+    const at = (y: number) => { const box = vtrack.current; if (!box) return vol; const r = box.getBoundingClientRect(); return Math.max(0, Math.min(1, 1 - (y - r.top) / Math.max(1, r.height))); };
+    setVdrag(true); onVol(at(e.clientY));
+    const move = (ev: PointerEvent) => onVol(at(ev.clientY));
+    const up = () => { setVdrag(false); removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+  };
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-  return <div className="vctl" data-vctl onPointerDown={stop} onDoubleClick={stop} onClick={stop}>
+  return <div className={"vctl" + (shown ? "" : " hide")} data-vctl onPointerDown={stop} onPointerMove={onWake} onDoubleClick={stop} onClick={stop}>
     <button className="vctl-b" data-act={paused ? "resume" : "pause"} title={paused ? "播放" : "暂停"} onClick={onToggle}><Icon name={paused ? "play" : "pause"} size="s" /></button>
     <span className="vctl-t tnum" data-vtime>{formatClock(now)} / {formatClock(length)}</span>
     <div className="vctl-track" data-vtrack data-frac={frac.toFixed(3)} ref={track} onPointerDown={scrub}>
@@ -373,7 +411,14 @@ function VideoControls({ now, length, paused, muted, trimOpen, onToggle, onMute,
     </div>
     <button className="vctl-b" data-act="trim" title="使用区间（入点 / 出点）" aria-pressed={trimOpen} onClick={onTrim}><Icon name="scissors" size="s" /></button>
     <button className="vctl-b" data-act="vframe" title="导出当前帧（生成图片节点）" onClick={onFrame}><Icon name="camera" size="s" /></button>
-    <button className="vctl-b" data-act="mute" title={muted ? "取消静音" : "静音"} onClick={onMute}><Icon name={muted ? "mute" : "volume"} size="s" /></button>
+    <span className="vvol" data-vvol-wrap>
+      <button className="vctl-b" data-act="mute" title={muted ? "取消静音" : "静音"} onClick={onMute}><Icon name={muted ? "mute" : "volume"} size="s" /></button>
+      <span className={"vvol-pop" + (vdrag ? " drag" : "")} data-vvol title="音量" onPointerDown={volScrub} onClick={stop}>
+        <span className="vvol-track" ref={vtrack}>
+          <span className="vvol-rail" /><span className="vvol-fill" style={{ height: vol * 100 + "%" }} /><span className="vvol-knob" style={{ bottom: vol * 100 + "%" }} />
+        </span>
+      </span>
+    </span>
     <button className="vctl-b" data-act="stop" title="停止播放" onClick={onClose}><Icon name="x" size="s" /></button>
   </div>;
 }

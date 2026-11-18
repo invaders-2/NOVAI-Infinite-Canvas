@@ -93,12 +93,14 @@
 .cn-root .play svg{fill:#fff;stroke:none;width:16px;height:16px;margin-left:2px}
 .cn-root .vinfo{position:absolute;left:10px;bottom:10px;font-size:11px;padding:2px 7px;border-radius:6px;background:#0009;color:#fff}
 .cn-root .vprog{position:absolute;left:0;bottom:0;height:2px;background:#fff;width:0}
-.cn-root .vctl{position:absolute;left:0;right:0;bottom:0;z-index:4;display:flex;align-items:center;gap:6px;padding:18px 8px 6px;background:linear-gradient(to top,#0000009e,#0000);color:#fff;font-size:11px;cursor:default}
+.cn-root .vctl{position:absolute;left:0;right:0;bottom:0;z-index:4;display:flex;align-items:center;gap:6px;padding:18px 8px 6px;background:linear-gradient(to top,#0000009e,#0000);color:#fff;font-size:11px;cursor:default;transition:opacity .2s}
+/* 固定播放时指针静止 1.7s 自动隐藏（NodeView 的 wakeBar 控制），淡出后不吃指针，动鼠标即回 */
+.cn-root .vctl.hide{opacity:0;pointer-events:none}
 .cn-root .vctl-b{flex:none;width:22px;height:22px;border-radius:6px;display:grid;place-items:center;color:#fff}
 .cn-root .vctl-b:hover{background:#ffffff2e}
 .cn-root .vctl-b svg{width:14px;height:14px;stroke:#fff}
 .cn-root .vctl-b[data-act=resume] svg{fill:#fff;stroke:none;width:12px;height:12px;margin-left:1px}
-.cn-root .vctl-b[data-act=pause] svg{stroke-width:3}
+.cn-root .vctl-b[data-act=pause] svg{fill:#fff;stroke:none;width:12px;height:12px}
 .cn-root .vctl-t{flex:none;min-width:64px;text-align:center;color:#ffffffeb}
 .cn-root .vctl-track{position:relative;flex:1;min-width:40px;height:16px;cursor:pointer;touch-action:none}
 .cn-root .vctl-rail,.cn-root .vctl-fill{position:absolute;left:0;top:6px;height:4px;border-radius:2px}
@@ -106,6 +108,16 @@
 .cn-root .vctl-fill{background:#fff}
 .cn-root .vctl-knob{position:absolute;top:3px;width:10px;height:10px;margin-left:-5px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #00000073;transform:scale(.8);transition:transform .12s}
 .cn-root .vctl-track:hover .vctl-knob{transform:scale(1.1)}
+/* 音量：悬停音量钮上方浮出竖向滑杆（小弹层用加厚底 + 保留模糊，同「弹层底色加厚」规则）；::before 把按钮和弹层之间 6px 的缝补成连续悬停区，拖动中用 .drag 锁定可见 */
+.cn-root .vvol{position:relative;flex:none;display:grid}
+.cn-root .vvol::before{content:"";position:absolute;left:0;right:0;top:-8px;height:8px}
+.cn-root .vvol-pop{position:absolute;left:50%;bottom:28px;z-index:5;width:26px;height:76px;border-radius:10px;background:rgba(24,24,24,.95);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);box-shadow:0 10px 30px rgba(0,0,0,.5),0 2px 8px rgba(0,0,0,.3);opacity:0;pointer-events:none;transform:translateX(-50%) translateY(3px);transition:opacity .15s,transform .15s var(--ease);cursor:pointer;touch-action:none}
+.cn-root .vvol:hover .vvol-pop,.cn-root .vvol-pop.drag{opacity:1;pointer-events:auto;transform:translateX(-50%)}
+.cn-root .vvol-track{position:absolute;left:11px;right:11px;top:9px;bottom:9px}
+.cn-root .vvol-rail,.cn-root .vvol-fill{position:absolute;left:0;right:0;border-radius:2px}
+.cn-root .vvol-rail{top:0;bottom:0;background:#ffffff4d}
+.cn-root .vvol-fill{bottom:0;background:#fff}
+.cn-root .vvol-knob{position:absolute;left:50%;width:10px;height:10px;margin:0 0 -5px -5px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.5)}
 .cn-root .nbody.playing img{animation:kb var(--dur,5s) linear forwards}
 @keyframes kb{0%{transform:scale(1)}to{transform:scale(1.14) translate(-2%,-1%)}}
 .cn-root .abody{position:absolute;inset:0;--a-head:#38bdf8;container-type:size}
