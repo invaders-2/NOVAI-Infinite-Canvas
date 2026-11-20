@@ -497,7 +497,8 @@ const runToTable = async (world, output, replies) => {
     console.log('[8] 构建产物与接线');
     {
         const version = fs.readFileSync(path.join(root, 'VERSION'), 'utf8').trim();
-        eq(version, '2.0.07', 'VERSION = 2.0.07');
+        const dotVersion = fs.readFileSync(path.join(root, 'desktop/.version'), 'utf8').trim();
+        eq(version, dotVersion, 'VERSION 与 desktop/.version 同步（' + version + '）');
         const built = fs.readFileSync(path.join(root, 'static/novai-canvas/canvas.js'), 'utf8');
         ['参考图顺序', 'inputModesAuto', '不在这次提示词组里的输入通道', '上一次的规划不是合法 JSON', '规划没解析出来，重试一次', '只发送', '整组（第', '自身参考图占', '名额已被生成节点自身的参考图占满'].forEach((needle) => {
             ok(built.includes(needle), 'canvas.js 含新逻辑串「' + needle + '」');
