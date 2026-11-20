@@ -14,6 +14,7 @@ import { regenAsNew, requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRol
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
 import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, withGen, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, newNode, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatOptions, outputFormatShortLabel, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchInputWarnings, batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, ownRefCount, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
+import type { DepthModelStatus } from "../backend/types";
 import { useCtl, useS, type Ctl } from "./ctx";
 import { isSplitNode } from "./SplitNode";
 import { keyHint } from "./shortcuts";
@@ -26,7 +27,7 @@ import { AnimatedSendIcon } from "./AnimatedSendIcon";
 import { download } from "./menus";
 import { saveNodeToLibrary } from "./Library";
 import { VendorLogo } from "./VendorLogo";
-import { openPop } from "./overlay";
+import { ModalHead, openModal, openPop } from "./overlay";
 import { openModelCatalog } from "./ModelCatalog";
 import { togglePromptPresets } from "./PromptPresets";
 import { AiContentGeneratorIcon } from "./HugeAnimatedIcons";
@@ -487,6 +488,16 @@ async function runDepthCapture(store: CanvasStore, n: CanvasNode) {
   if (!src) { store.toast("这段视频还没有画面，先上传或生成一段再提取"); return; }
   const be = store.backend;
   if (!be.depthCapture) { store.toast("当前后端没有深度动作捕捉，更新到最新安装包再试"); return; }
+  // 安装包按需下载模型（不打进包里）：先查本机状态 —— 没下就弹「本地深度模型」，下完自动接着提取
+  if (be.depthModelStatus && be.depthModelDownload) {
+    const st = await be.depthModelStatus().catch(() => undefined);
+    if (st && st.runtime_ready === false) { store.toast("缺少推理组件 onnxruntime，请更新到最新安装包"); return; }
+    if (st && !st.downloaded) {
+      openModal((close) => <DepthModelModal store={store} initial={st} close={close}
+        onReady={() => { void runDepthCapture(store, n); }} />, "mm");
+      return;
+    }
+  }
   const started = Date.now();
   const abort = new AbortController();
   store.setRun(n.id, { status: "running", progress: .02, abort, startedAt: started });
@@ -510,6 +521,90 @@ async function runDepthCapture(store: CanvasStore, n: CanvasNode) {
     store.setRun(n.id, null);
     store.toast(err instanceof Error ? err.message : "深度动作捕捉失败");
   }
+}
+
+/** 「剩余多久」：和抠图弹窗同一套说法 */
+const depthEtaText = (sec: number) => {
+  if (!(sec > 0)) return "";
+  return sec < 60 ? `剩余约 ${Math.round(sec)} 秒` : `剩余约 ${Math.ceil(sec / 60)} 分钟`;
+};
+
+/**
+ * 「本地深度模型」下载弹窗：照抠图那套（.mm-* 磨砂弹窗、零边框），进度 / 已下载 MB / 速度 / ETA /
+ * 断点续传提示 / 重试 / 取消都在；下载完自动接着跑深度提取，不让用户再点一次。
+ */
+function DepthModelModal({ store, initial, close, onReady }: { store: CanvasStore; initial: DepthModelStatus; close: () => void; onReady: () => void }) {
+  const [st, setSt] = useState<DepthModelStatus>(initial);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const alive = useRef(true); const polling = useRef(false);
+  useEffect(() => {
+    alive.current = true;
+    if (initial.downloading) void poll();
+    return () => { alive.current = false; };
+  }, []);
+  const sizeMb = Math.round(Number(st.model_size_mb || st.total_mb) || 26);
+  const gotMb = Math.round(Number(st.downloaded_mb) || 0);
+  const pct = Math.max(0, Math.min(100, Math.round(Number(st.progress) || 0)));
+  const resume = gotMb > 1 && gotMb < sizeMb;
+  const downloading = !!st.downloading || !!st.verifying;
+  const beginExtract = () => { close(); store.toast("本地深度模型已就绪，开始提取深度"); onReady(); };
+  /** 下载中每秒轮询一次：进度 / 速度 / 剩余时间；完成就自动接着提取，中断则留在弹窗里说原因 */
+  async function poll() {
+    if (polling.current) return;
+    polling.current = true;
+    while (alive.current) {
+      await new Promise<void>((r) => setTimeout(r, 1000));
+      if (!alive.current) break;
+      const next = await store.backend.depthModelStatus!().catch(() => null);
+      if (!alive.current) break;
+      if (!next) continue;
+      setSt(next);
+      if (next.downloaded) { polling.current = false; beginExtract(); return; }
+      if (!next.downloading && !next.verifying) {
+        setErr(next.cancelled ? "" : next.error || "下载中断，已下载的部分会保留，点重试接着下");
+        polling.current = false;
+        return;
+      }
+    }
+    polling.current = false;
+  }
+  const start = async () => {
+    setBusy(true); setErr("");
+    try {
+      const r = await store.backend.depthModelDownload!();
+      if (!r.ok) { setErr(r.error || "下载启动失败，稍后重试"); return; }
+      if (r.downloaded) { beginExtract(); return; }
+      setSt((s) => ({ ...s, downloading: true, progress: Number(s.progress) || 0 }));
+      void poll();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "下载启动失败，稍后重试");
+    } finally { setBusy(false); }
+  };
+  const stop = async () => {
+    if (!st.verifying) { await store.backend.depthModelCancel?.().catch(() => undefined); store.toast("已取消下载，下次会接着下"); }
+    close();
+  };
+  return <><ModalHead title="本地深度模型" /><div className="mbd">
+    {downloading ? <>
+      <div className="mm-bar"><i style={{ width: pct + "%" }} /></div>
+      <div className="mm-meta">
+        <span>{st.verifying ? "正在校验文件…" : `${pct}% · 已下载 ${gotMb} / ${sizeMb} MB`}</span>
+        <span>{st.verifying ? "" : [st.speed_mbps ? `${Number(st.speed_mbps).toFixed(1)} MB/s` : "", depthEtaText(Number(st.eta_seconds) || 0)].filter(Boolean).join(" · ")}</span>
+      </div>
+      {st.retrying && st.hint ? <p className="mm-hint">{st.hint}（第 {Number(st.attempt) || 1} 次尝试）</p> : null}
+      <div className="mm-acts"><button className="btn" onClick={() => void stop()}>{st.verifying ? "后台继续" : "取消下载"}</button></div>
+    </> : <>
+      <p className="mm-text">本地深度模型 约 {sizeMb} MB，只下这一次；下完离线可用，深度动作捕捉不再报「缺少文件」。</p>
+      {resume ? <p className="mm-text">上次已下载 {gotMb} MB，这次会接着下。</p> : null}
+      {st.load_error ? <p className="mm-err"><Icon name="alert" size="s" />{st.load_error}</p> : null}
+      {err ? <p className="mm-err"><Icon name="alert" size="s" />{err}</p> : null}
+      <div className="mm-acts">
+        <button className="btn" onClick={close}>取消</button>
+        <button className="btn solid" disabled={busy} data-k="depth-download" onClick={() => void start()}><Icon name="download" size="s" />{busy ? "正在开始…" : err ? "重试下载" : resume ? "继续下载并提取" : "下载并提取"}</button>
+      </div>
+    </>}
+  </div></>;
 }
 
 /**

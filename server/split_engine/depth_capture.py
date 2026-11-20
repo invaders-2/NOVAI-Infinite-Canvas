@@ -81,6 +81,15 @@ def _session() -> tuple[object | None, str]:
         return _SESSION, ""
 
 
+def reset_session() -> None:
+    """模型文件换过（按需下载完成 / 重下）后清掉懒加载缓存，下次调用读新文件。"""
+    global _SESSION, _SESSION_ATTEMPTED, _LOAD_REASON
+    with _SESSION_LOCK:
+        _SESSION = None
+        _SESSION_ATTEMPTED = False
+        _LOAD_REASON = ""
+
+
 def available(ffmpeg: str = "") -> tuple[bool, str]:
     """给前端/接口探测用：模型和推理组件是否就绪。ffmpeg 由调用方传（安装版走内置那份）。"""
     session, reason = _session()

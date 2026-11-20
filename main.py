@@ -20393,10 +20393,23 @@ async def video_mux_audio(payload: VideoMuxAudioRequest):
 
 @app.get("/api/video/depth-capture/status")
 async def video_depth_capture_status():
-    """本机深度能力自检：模型和推理组件就绪才允许点。"""
+    """本机深度能力自检：模型和推理组件就绪才允许点；缺什么就说清缺什么、去哪补。"""
+    downloaded = _depth_model_downloaded()
+    runtime_ready = _depth_runtime_ready()
+    if not downloaded:
+        return {"ready": False, "downloaded": False, "runtime_ready": runtime_ready,
+                "available": False, "message": _depth_model_missing_message()}
+    if not runtime_ready:
+        return {"ready": False, "downloaded": True, "runtime_ready": False,
+                "available": False, "message": _depth_runtime_missing_message()}
     from server.split_engine import depth_capture
     ready, reason = depth_capture.available(ffmpeg_binary())
-    return {"ready": ready, "message": reason}
+    if ready:
+        _DEPTH_LOAD_ERROR["msg"] = ""
+    elif reason:
+        _DEPTH_LOAD_ERROR["msg"] = reason
+    return {"ready": ready, "downloaded": True, "runtime_ready": True,
+            "available": ready, "message": reason}
 
 
 @app.post("/api/video/depth-capture")
@@ -20412,11 +20425,19 @@ async def video_depth_capture(payload: DepthCaptureRequest):
     src = output_file_from_url(raw_url)
     if not src or not os.path.isfile(src):
         raise HTTPException(status_code=404, detail="视频文件不存在（只支持画布里的本地视频）")
+    # 先分别查「模型在不在」「推理组件在不在」，再加载模型：缺东西时给出用户能照着做的下一步，
+    # 不要把「缺少文件」这种话直接丢给用户（2.0.08 的线上问题就是只说了缺文件）
+    if not _depth_model_downloaded():
+        raise HTTPException(status_code=400, detail=_depth_model_missing_message())
+    if not _depth_runtime_ready():
+        raise HTTPException(status_code=400, detail=_depth_runtime_missing_message())
     from server.split_engine import depth_capture
     ffmpeg = ffmpeg_binary()
     ready, reason = depth_capture.available(ffmpeg)
     if not ready:
-        raise HTTPException(status_code=400, detail=reason)
+        _DEPTH_LOAD_ERROR["msg"] = reason or "本地深度模型加载失败"
+        raise HTTPException(status_code=400, detail=reason or "本地深度模型加载失败")
+    _DEPTH_LOAD_ERROR["msg"] = ""
     filename = f"depth_capture_{uuid.uuid4().hex[:12]}.mp4"
     output_path = output_path_for(filename, "output")
     result, error = await asyncio.to_thread(
@@ -20801,7 +20822,7 @@ def _matting_model_downloaded() -> bool:
     return os.path.isfile(path) and os.path.getsize(path) >= _MATTING_MODEL_SIZE - 1024
 
 
-def _friendly_download_error(exc) -> str:
+def _friendly_download_error(exc, need_mb: int = 350) -> str:
     text = str(exc)
     if isinstance(exc, requests.exceptions.SSLError) or "CERTIFICATE" in text.upper():
         return "安全证书校验失败（可能是代理或系统时间不对），请检查网络设置后重试"
@@ -20811,7 +20832,7 @@ def _friendly_download_error(exc) -> str:
         code = getattr(getattr(exc, "response", None), "status_code", "")
         return f"下载源返回错误（HTTP {code}），请稍后重试"
     if isinstance(exc, OSError) and getattr(exc, "errno", None) in (28,):
-        return "磁盘空间不足，模型需要约 350MB 空间"
+        return f"磁盘空间不足，模型需要约 {need_mb}MB 空间"
     return text[:200] or "未知错误"
 
 
@@ -20979,6 +21000,282 @@ async def matting_model_download():
 async def matting_model_cancel():
     """取消下载（已下载部分保留，下次接着下）。"""
     task = _MODEL_DOWNLOAD_TASKS.get("matting_model_download")
+    if task and task.get("downloading"):
+        task["cancel"] = True
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# 本地深度模型（Depth Anything V2 small，约 26MB）：和 RMBG 抠图同一套「按需下载」策略。
+# installer.nsi 用 /x "models" 把整个 models 目录排除在安装包之外（模型按需下载，不打进包），
+# 所以任何安装版用户第一次用深度动作捕捉时本地都没有这个文件 —— 只能在这里按需下回来。
+# ---------------------------------------------------------------------------
+_DEPTH_MODEL_NAME = "depth_anything_v2_small_int8.onnx"
+_DEPTH_MODEL_PATH = _models_path(_DEPTH_MODEL_NAME)
+_DEPTH_MODEL_URL = ("https://modelscope.cn/models/onnx-community/depth-anything-v2-small/"
+                    "resolve/master/onnx/model_quantized.onnx")
+_DEPTH_MODEL_SIZE = 27258801
+# 魔搭 LFS 那份文件的 SHA-256（与开发机上的逐字节一致）：下载完先校验再改名
+_DEPTH_MODEL_SHA256 = "fcf51f1b230362b28690bb9d1809bf0431f29cad20534e3f589bd7285547f20d"
+_DEPTH_MODEL_SIZE_MB = round(_DEPTH_MODEL_SIZE / 1024 / 1024)
+_DEPTH_MODEL_TASK_ID = "depth_model_download"
+# 助手工具自动下载模型最多等这么久（首次约 26MB，正常十几秒就够）
+_DEPTH_AUTO_DOWNLOAD_TIMEOUT = 300
+_DEPTH_LOAD_ERROR = {"msg": ""}
+
+
+def _depth_model_downloaded() -> bool:
+    path = _models_path(_DEPTH_MODEL_NAME)
+    return os.path.isfile(path) and os.path.getsize(path) >= _DEPTH_MODEL_SIZE - 1024
+
+
+def _depth_runtime_ready() -> bool:
+    """深度推理组件是否装了（只查 import，不加载 27MB 模型：状态接口要快）。"""
+    try:
+        import importlib.util
+        return importlib.util.find_spec("onnxruntime") is not None
+    except Exception:
+        return False
+
+
+def _depth_runtime_missing_message() -> str:
+    """onnxruntime 缺失时的用户文案：开发态指路 venv/pip，安装包才提示更新包。"""
+    try:
+        frozen = bool(getattr(sys, "frozen", False))
+    except Exception:
+        frozen = False
+    if frozen:
+        return "缺少推理组件 onnxruntime，请更新到最新安装包"
+    return ("缺少推理组件 onnxruntime：开发版请用项目 venv/bin/python3 启动，"
+            "或执行 venv/bin/pip install onnxruntime")
+
+
+def _depth_model_missing_message() -> str:
+    """模型没下时的用户文案：带上体积和「去哪点下载」，不要只说缺文件。"""
+    return ("本地深度模型未下载（约 %d MB）：打开画布里视频节点的「更多 → 深度动作捕捉」，"
+            "在弹窗里点「下载并提取」；也可以直接调 POST /api/video/depth-model/download"
+            % _DEPTH_MODEL_SIZE_MB)
+
+
+def _depth_reset_session():
+    """模型重下 / 换文件后丢掉 depth_capture 里的懒加载缓存（含上次的加载失败原因）。"""
+    try:
+        from server.split_engine import depth_capture
+    except Exception:
+        return
+    reset = getattr(depth_capture, "reset_session", None)
+    if callable(reset):
+        try:
+            reset()
+        except Exception:
+            pass
+
+
+def _download_depth_model(task_id: str):
+    """后台下载深度模型：写 .part，支持断点续传（Range），失败自动重试（指数退避），
+    下完校验大小与 SHA256 再改名；失败保留 .part，进度/速度/剩余时间写入 _MODEL_DOWNLOAD_TASKS。
+    形状与 _download_matting_model 一致（同一套下载经验，别再写第二套）。"""
+    task = _MODEL_DOWNLOAD_TASKS[task_id]
+    part = _DEPTH_MODEL_PATH + ".part"
+    os.makedirs(os.path.dirname(_DEPTH_MODEL_PATH), exist_ok=True)
+    for legacy in (_DEPTH_MODEL_PATH + ".tmp",):
+        try:
+            if os.path.exists(legacy):
+                os.remove(legacy)
+        except OSError:
+            pass
+    total = _DEPTH_MODEL_SIZE
+    task["total"] = total
+    max_attempts = 8
+    last_exc = None
+    for attempt in range(1, max_attempts + 1):
+        if task.get("cancel"):
+            break
+        have = os.path.getsize(part) if os.path.exists(part) else 0
+        if have > total:
+            os.remove(part)
+            have = 0
+        if have == total:
+            break
+        task["attempt"] = attempt
+        headers = {"Range": f"bytes={have}-"} if have else {}
+        try:
+            with requests.get(_DEPTH_MODEL_URL, stream=True, timeout=(20, 60), headers=headers) as resp:
+                if resp.status_code == 416:
+                    break
+                resp.raise_for_status()
+                append = bool(have) and resp.status_code == 206
+                if not append:
+                    have = 0
+                length = int(resp.headers.get("Content-Length") or 0)
+                if length:
+                    total = have + length
+                    task["total"] = total
+                done = have
+                last_t, last_b = time.time(), done
+                with open(part, "ab" if append else "wb") as fh:
+                    for chunk in resp.iter_content(chunk_size=256 * 1024):
+                        if task.get("cancel"):
+                            break
+                        if not chunk:
+                            continue
+                        fh.write(chunk)
+                        done += len(chunk)
+                        now = time.time()
+                        if now - last_t >= 0.5:
+                            speed = (done - last_b) / (now - last_t)
+                            task["speed"] = speed if not task.get("speed") else task["speed"] * 0.6 + speed * 0.4
+                            last_t, last_b = now, done
+                        task["downloaded"] = done
+                        task["progress"] = min(99, int(done * 100 / max(1, total)))
+            task["error"] = ""
+            if task.get("cancel"):
+                break
+            if os.path.getsize(part) >= total:
+                break
+        except Exception as exc:
+            last_exc = exc
+            task["error_hint"] = _friendly_download_error(exc, _DEPTH_MODEL_SIZE_MB)
+            print(f"[Depth] 模型下载中断（第 {attempt}/{max_attempts} 次）: {exc}")
+            wait = min(20, 2 ** attempt)
+            for _ in range(wait * 2):
+                if task.get("cancel"):
+                    break
+                time.sleep(0.5)
+    if task.get("cancel"):
+        task.update({"downloading": False, "cancelled": True, "speed": 0, "error": ""})
+        print("[Depth] 用户取消了模型下载（已下载部分保留，下次接着下）")
+        return
+    try:
+        size = os.path.getsize(part) if os.path.exists(part) else 0
+        if size < total:
+            raise RuntimeError(task.get("error_hint") or _friendly_download_error(last_exc, _DEPTH_MODEL_SIZE_MB) if last_exc else "下载未完成")
+        task["verifying"] = True
+        if total == _DEPTH_MODEL_SIZE:
+            h = hashlib.sha256()
+            with open(part, "rb") as fh:
+                for blk in iter(lambda: fh.read(4 * 1024 * 1024), b""):
+                    h.update(blk)
+            if h.hexdigest() != _DEPTH_MODEL_SHA256:
+                os.remove(part)
+                raise RuntimeError("模型文件校验失败（下载内容损坏），已清除，请重试")
+        os.replace(part, _DEPTH_MODEL_PATH)
+        _DEPTH_LOAD_ERROR["msg"] = ""
+        _depth_reset_session()
+        task.update({"downloading": False, "verifying": False, "progress": 100, "done": True, "error": "", "speed": 0})
+        print(f"[Depth] 本地深度模型下载完成并通过校验：{_DEPTH_MODEL_PATH}")
+    except Exception as exc:
+        task.update({"downloading": False, "verifying": False, "speed": 0, "error": str(exc)[:200]})
+        print(f"[Depth] 模型下载失败: {exc}")
+
+
+def _begin_depth_model_download() -> dict:
+    """起下载线程（已经在下就复用，避免两路同时写同一个 .part）。"""
+    task = _MODEL_DOWNLOAD_TASKS.get(_DEPTH_MODEL_TASK_ID)
+    if task and task.get("downloading"):
+        return {"ok": True, "task_id": _DEPTH_MODEL_TASK_ID, "already": True,
+                "progress": int(task.get("progress") or 0)}
+    if _depth_model_downloaded():
+        return {"ok": True, "task_id": _DEPTH_MODEL_TASK_ID, "downloaded": True,
+                "model_size_mb": _DEPTH_MODEL_SIZE_MB}
+    part = _DEPTH_MODEL_PATH + ".part"
+    resumed_from = os.path.getsize(part) if os.path.exists(part) else 0
+    _MODEL_DOWNLOAD_TASKS[_DEPTH_MODEL_TASK_ID] = {
+        "downloading": True, "progress": 0, "error": "", "done": False,
+        "cancel": False, "downloaded": resumed_from, "total": int(_DEPTH_MODEL_SIZE)}
+    Thread(target=_download_depth_model, args=(_DEPTH_MODEL_TASK_ID,), daemon=True).start()
+    return {"ok": True, "task_id": _DEPTH_MODEL_TASK_ID,
+            "resumed_from_mb": round(resumed_from / 1024 / 1024, 1)}
+
+
+async def _depth_ensure_model(timeout: float = _DEPTH_AUTO_DOWNLOAD_TIMEOUT) -> dict:
+    """助手工具用：本机没有深度模型就自动下载并轮询等待，最多 timeout 秒。
+
+    返回 {ok, downloaded, auto_downloaded, seconds, resumed_from_mb, message}；
+    message 只在失败时是给用户看的可执行说明（指向视频节点菜单里的下载入口），不抛异常。
+    """
+    if _depth_model_downloaded():
+        return {"ok": True, "downloaded": True, "auto_downloaded": False, "message": ""}
+    if not _depth_runtime_ready():
+        return {"ok": False, "downloaded": False, "auto_downloaded": False,
+                "message": _depth_runtime_missing_message()}
+    started = time.time()
+    begin = _begin_depth_model_download()
+    deadline = started + max(1.0, float(timeout))
+    while time.time() < deadline:
+        if _depth_model_downloaded():
+            return {"ok": True, "downloaded": True, "auto_downloaded": True,
+                    "seconds": round(time.time() - started, 1),
+                    "resumed_from_mb": float(begin.get("resumed_from_mb") or 0.0), "message": ""}
+        task = _MODEL_DOWNLOAD_TASKS.get(_DEPTH_MODEL_TASK_ID) or {}
+        if not task.get("downloading") and not task.get("verifying"):
+            reason = task.get("error") or task.get("error_hint") or "下载中断"
+            return {"ok": False, "downloaded": False, "auto_downloaded": True,
+                    "seconds": round(time.time() - started, 1),
+                    "message": "%s；已下载的部分会保留，下次接着下。也可以打开画布视频节点的"
+                               "「更多 → 深度动作捕捉」，在弹窗里点「重试下载」" % reason}
+        await asyncio.sleep(0.5)
+    return {"ok": False, "downloaded": False, "auto_downloaded": True, "timeout": True,
+            "seconds": round(time.time() - started, 1),
+            "message": "首次需要下载约 %d MB 深度模型，等了 %d 秒还没下完（已在后台继续下载）；"
+                       "稍后重试，或打开画布视频节点的「更多 → 深度动作捕捉」弹窗看进度"
+                       % (_DEPTH_MODEL_SIZE_MB, int(timeout))}
+
+
+@app.get("/api/video/depth-model/status")
+async def video_depth_model_status():
+    """本地深度模型状态：是否已下载、下载进度 / 速度 / 剩余时间、可读错误。
+
+    和抠图模型一样，这里只查文件 + import，不加载模型（状态接口要快）。
+    """
+    task = _MODEL_DOWNLOAD_TASKS.get(_DEPTH_MODEL_TASK_ID) or {}
+    downloaded = _depth_model_downloaded()
+    part = _DEPTH_MODEL_PATH + ".part"
+    got = int(task.get("downloaded") or (os.path.getsize(part) if os.path.exists(part) else 0))
+    total = int(task.get("total") or _DEPTH_MODEL_SIZE)
+    speed = float(task.get("speed") or 0)
+    # 已下载完时进度按「满」算：否则 downloaded_mb 显示 0，看着像没下
+    shown = total if downloaded else got
+    eta = int((total - shown) / speed) if speed > 1024 and task.get("downloading") else 0
+    runtime_ready = _depth_runtime_ready()
+    load_error = _DEPTH_LOAD_ERROR.get("msg") or ("" if runtime_ready or not downloaded else
+                                                 _depth_runtime_missing_message())
+    available = bool(downloaded and runtime_ready and not _DEPTH_LOAD_ERROR.get("msg"))
+    return {
+        "downloaded": downloaded,
+        "model_size": f"{_DEPTH_MODEL_SIZE_MB} MB",
+        "model_size_mb": _DEPTH_MODEL_SIZE_MB,
+        "downloading": bool(task.get("downloading")),
+        "verifying": bool(task.get("verifying")),
+        "progress": 100 if downloaded else int(task.get("progress") or (shown * 100 // max(1, total))),
+        "downloaded_mb": round(shown / 1024 / 1024, 1),
+        "total_mb": round(total / 1024 / 1024, 1),
+        "speed_mbps": round(speed / 1024 / 1024, 2),
+        "eta": eta,
+        "eta_seconds": eta,
+        "attempt": int(task.get("attempt") or 0),
+        "retrying": bool(task.get("downloading") and task.get("error_hint")),
+        "hint": task.get("error_hint") or "",
+        "cancelled": bool(task.get("cancelled")),
+        "error": task.get("error") or "",
+        # 深度动作捕捉到底能不能用：只看「模型在 + 推理组件在 + 没记过加载错误」，
+        # 不在这里加载模型；真正的加载错误在第一次捕捉后也会落到 load_error
+        "runtime_ready": runtime_ready,
+        "available": available,
+        "load_error": load_error,
+    }
+
+
+@app.post("/api/video/depth-model/download")
+async def video_depth_model_download():
+    """下载本地深度模型（Depth Anything V2 small 量化版，约 26MB）。已在下载 / 已下载时直接返回；中断过的接着下。"""
+    return _begin_depth_model_download()
+
+
+@app.post("/api/video/depth-model/cancel")
+async def video_depth_model_cancel():
+    """取消下载（已下载部分保留，下次接着下）。"""
+    task = _MODEL_DOWNLOAD_TASKS.get(_DEPTH_MODEL_TASK_ID)
     if task and task.get("downloading"):
         task["cancel"] = True
     return {"ok": True}
@@ -46932,8 +47229,30 @@ async def _agent_tool_depth_capture_run(args):
     ready = False
     if module is not None:
         ready, reason = module.available(ffmpeg)
+    download = None
+    # 安装包不打模型（按需下载）：首次调用时本地没有 —— 自动下再等，别让助手静默失败。
+    # check_only 只查状态，不起下载（用户没让它动本机文件）。
+    if module is not None and not ready and not args.get("check_only") and not _depth_model_downloaded():
+        if not _depth_runtime_ready():
+            reason = _depth_runtime_missing_message()
+            return {"ready": False, "reason": reason, "runtime_ready": False,
+                    "message": "本机深度动作捕捉不可用：%s。装好后重试；画布上如果有现成的深度视频，"
+                               "也可以直接拿它当参考视频继续。" % reason}
+        download = await _depth_ensure_model()
+        if download.get("ok"):
+            _depth_reset_session()
+            ready, reason = module.available(ffmpeg)
+            _DEPTH_LOAD_ERROR["msg"] = "" if ready else (reason or "")
+        else:
+            return {"ready": False, "reason": download.get("message") or reason,
+                    "runtime_ready": True, "model_download": download,
+                    "message": "本机深度动作捕捉不可用：%s" % (download.get("message") or reason or "原因未知")}
     if args.get("check_only") or not ready:
+        if not ready and not _depth_model_downloaded():
+            reason = _depth_model_missing_message()
         return {"ready": bool(ready), "reason": reason or "",
+                "runtime_ready": _depth_runtime_ready(),
+                "model_download": download,
                 "message": "本机深度动作捕捉可用" if ready else
                            "本机深度动作捕捉不可用：%s。按技能里的备选来源继续（画布上已有的深度视频 / 请用户上传）" % (reason or "原因未知")}
     url = str(args.get("url") or "").strip()
@@ -46963,10 +47282,15 @@ async def _agent_tool_depth_capture_run(args):
         raise AgentToolError(error or "深度视频生成失败", code="depth_capture_failed")
     seconds = round(float(result.get("elapsed") or (time.time() - started)), 2)
     depth_url = output_url_for(filename, "output")
+    download_note = ""
+    if download and download.get("auto_downloaded"):
+        download_note = "（首次使用已自动下载约 %d MB 深度模型，用时 %s 秒）" % (
+            _DEPTH_MODEL_SIZE_MB, download.get("seconds", 0))
     return {
         "ready": True,
         "url": depth_url,
         "depth_url": depth_url,
+        "model_download": download,
         "name": filename,
         "kind": "video",
         "video": label,
@@ -46976,10 +47300,10 @@ async def _agent_tool_depth_capture_run(args):
         "frames": result.get("frames", 0),
         "duration": result.get("duration", 0),
         "seconds": seconds,
-        "message": "已生成深度动作通道 %s（%s 帧 / %s 秒，本机推理没有上传视频）。"
+        "message": "已生成深度动作通道 %s（%s 帧 / %s 秒，本机推理没有上传视频）%s。"
                    "它只保留动作、节奏、站位和空间关系，不带原片外观：把它当参考视频喂给视频生成节点，"
                    "再配人物 / 产品参考图重生成；不要把灰度深度图当画面外观描述给用户。"
-                   % (depth_url, result.get("frames", 0), result.get("duration", 0)),
+                   % (depth_url, result.get("frames", 0), result.get("duration", 0), download_note),
     }
 
 

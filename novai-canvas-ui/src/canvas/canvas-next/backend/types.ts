@@ -75,6 +75,29 @@ export type MattingModelStatus = {
   error?: string;
   load_error?: string;
 };
+/** 本地深度模型（Depth Anything V2 small，约 26MB）状态：形状与 MattingModelStatus 一致 */
+export type DepthModelStatus = {
+  downloaded: boolean;
+  downloading?: boolean;
+  verifying?: boolean;
+  /** 0-100 */
+  progress?: number;
+  downloaded_mb?: number;
+  total_mb?: number;
+  model_size_mb?: number;
+  speed_mbps?: number;
+  eta_seconds?: number;
+  attempt?: number;
+  retrying?: boolean;
+  hint?: string;
+  cancelled?: boolean;
+  error?: string;
+  load_error?: string;
+  /** 推理组件 onnxruntime 是否装了（false = 装包太旧，下模型也没用） */
+  runtime_ready?: boolean;
+  /** 模型在 + 组件在 + 没记过加载错误 */
+  available?: boolean;
+};
 /** 本地超分（Real-ESRGAN）运行时状态：NOVAI 后端有这套接口，NOVAI 桌面版没有 */
 export type UpscaleRuntimeStatus = { installed: boolean; downloading: boolean; progress: number; message: string; platform?: string };
 /** 本地超分结果：skipped 表示原图已经达到目标精度，url 指回原图，调用方不要再写一个新版本 */
@@ -236,6 +259,10 @@ export interface CanvasBackend {
   upscaleLocal?(sourceUrl: string, target: "2k" | "4k"): Promise<UpscaleResult>;
   /** 深度动作捕捉：本机把视频逐帧转成深度参考视频（灰度、越近越亮）。没实现的后端不显示入口 */
   depthCapture?(sourceUrl: string): Promise<{ url: string; w?: number; h?: number; dur?: number; seconds?: number }>;
+  /** 深度动作捕捉用的本地模型（约 26MB，安装包按需下载）：查状态 / 开始下载 / 取消下载 */
+  depthModelStatus?(): Promise<DepthModelStatus>;
+  depthModelDownload?(): Promise<{ ok: boolean; already?: boolean; downloaded?: boolean; error?: string }>;
+  depthModelCancel?(): Promise<{ ok: boolean }>;
   /** 本机套用原声：把 audioUrl 的音轨贴到 videoUrl 上，可只取 start 起 duration 秒；返回新视频地址 */
   muxAudio?(videoUrl: string, audioUrl: string, opts?: { start?: number; duration?: number }): Promise<{ url: string; dur?: number; seconds?: number }>;
 

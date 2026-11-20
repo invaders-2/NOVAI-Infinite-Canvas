@@ -1,5 +1,5 @@
 import { hostRoot } from "./novaiBridgeRoot";
-import type { CanvasBackend, CanvasTask, ChatMessage, EditRequest, GenEvent, GenRequest, GenResult, LoadedDoc, MattingModelStatus, SavedDoc, UpscaleResult, UpscaleRuntimeStatus } from "./canvas/canvas-next/backend/types";
+import type { CanvasBackend, CanvasTask, ChatMessage, DepthModelStatus, EditRequest, GenEvent, GenRequest, GenResult, LoadedDoc, MattingModelStatus, SavedDoc, UpscaleResult, UpscaleRuntimeStatus } from "./canvas/canvas-next/backend/types";
 import { GenError } from "./canvas/canvas-next/backend/types";
 import { defaultParams, gifFrameFieldsForRequest, outputFormatForRequest, qualityForRequest, ratioWH, specFor, thinkingForRequest, withGen, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./canvas/canvas-next/model";
 import { emptyDoc, hasContent, readDoc, sanitizeDoc, type CanvasDoc, type CanvasNode, type NodeKind } from "./canvas/react-canvas/reactCanvasStore";
@@ -526,6 +526,21 @@ export function createNovaiBackend(): CanvasBackend {
     return new GenError("MATTING_FAILED", detail || "本地抠图失败");
   };
 
+  /** 深度动作捕捉报错 → 用户能照着做的文案（模型没下 / 推理组件缺失 / 视频不支持） */
+  const depthError = (error: unknown): Error => {
+    const err = error instanceof GenError ? error : new GenError("DEPTH_CAPTURE_FAILED", error instanceof Error ? error.message : "深度动作捕捉失败");
+    const status = /^HTTP_(\d+)$/.exec(err.code)?.[1] || "";
+    const detail = err.message || "";
+    // 老后端 / BEAT 桌面版没有这条路由
+    if (status === "404") return new GenError("DEPTH_UNSUPPORTED", "当前后端没有深度动作捕捉，更新到最新安装包再试");
+    // 模型未下载：后端已经带了体积和下调入口，别再盖掉（用户要能照着点）
+    if (status === "400" && /深度模型未下载|未下载/.test(detail)) return new GenError("DEPTH_MODEL_MISSING", detail || "本地深度模型未下载（约 26 MB）：在视频节点的「更多 → 深度动作捕捉」里点下载");
+    if (status === "400" && /onnxruntime/.test(detail)) return new GenError("DEPTH_RUNTIME_MISSING", detail || "缺少推理组件 onnxruntime，请更新到最新安装包");
+    if (status === "400") return new GenError("DEPTH_SOURCE_UNSUPPORTED", detail || "这段视频不支持深度动作捕捉（先拖进画布）");
+    if (status === "500") return new GenError("DEPTH_CAPTURE_FAILED", detail || "深度动作捕捉失败");
+    return new GenError("DEPTH_CAPTURE_FAILED", detail || "深度动作捕捉失败");
+  };
+
   /** 超分接口报错 → 用户能看懂的文案（未安装 / 图片太大 / 格式不支持 / 超分失败） */
   const upscaleError = (error: unknown): Error => {
     const err = error instanceof GenError ? error : new GenError("UPSCALE_FAILED", error instanceof Error ? error.message : "本地超分失败");
@@ -1032,6 +1047,36 @@ export function createNovaiBackend(): CanvasBackend {
       const data = await request("/api/matting/model/cancel", jsonBody({})).catch(() => null);
       return { ok: data?.ok === true };
     },
+    async depthModelStatus(): Promise<DepthModelStatus> {
+      const data = await request("/api/video/depth-model/status");
+      return {
+        downloaded: data?.downloaded === true,
+        downloading: data?.downloading === true,
+        verifying: data?.verifying === true,
+        progress: Number(data?.progress) || 0,
+        downloaded_mb: Number(data?.downloaded_mb) || 0,
+        total_mb: Number(data?.total_mb) || 0,
+        model_size_mb: Number(data?.model_size_mb) || 0,
+        speed_mbps: Number(data?.speed_mbps) || 0,
+        eta_seconds: Number(data?.eta_seconds) || 0,
+        attempt: Number(data?.attempt) || 0,
+        retrying: data?.retrying === true,
+        hint: String(data?.hint || ""),
+        cancelled: data?.cancelled === true,
+        error: String(data?.error || ""),
+        load_error: String(data?.load_error || ""),
+        runtime_ready: data?.runtime_ready !== false,
+        available: data?.available === true,
+      };
+    },
+    async depthModelDownload() {
+      const data = await request("/api/video/depth-model/download", jsonBody({}));
+      return { ok: data?.ok !== false, already: data?.already === true, downloaded: data?.downloaded === true, error: typeof data?.error === "string" ? data.error : undefined };
+    },
+    async depthModelCancel() {
+      const data = await request("/api/video/depth-model/cancel", jsonBody({})).catch(() => null);
+      return { ok: data?.ok === true };
+    },
     async upscaleRuntimeStatus(): Promise<UpscaleRuntimeStatus> {
       const data = await request("/api/image/upscale/runtime");
       return {
@@ -1049,7 +1094,12 @@ export function createNovaiBackend(): CanvasBackend {
     /** 深度动作捕捉：本机逐帧推理，视频不上传、不花额度；结果是灰度参考视频 */
     async depthCapture(sourceUrl) {
       const path = await localMediaPath(sourceUrl, "深度动作捕捉");
-      const data = await request("/api/video/depth-capture", jsonBody({ url: path }));
+      let data: Row;
+      try {
+        data = await request("/api/video/depth-capture", jsonBody({ url: path }));
+      } catch (error) {
+        throw depthError(error);
+      }
       const url = urlOf(data);
       if (!url) throw new GenError("NO_OUTPUT", "深度视频没有返回地址");
       return {
