@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const assert = require('assert');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const esbuild = require('../novai-canvas-ui/node_modules/esbuild');
 const root = path.join(__dirname, '..');
 function load(entry) {
@@ -52,11 +52,25 @@ ok(p.notes.some((n) => n.includes('自动压低')), '说明里提到自动压低
 eq(p.subs, [{ start: 15, end: 60, text: '大家好' }], '字幕帧位');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'novai-ix-'));
-const lint = (name, text) => { const f = path.join(tmp, name); fs.writeFileSync(f, text); execFileSync('xmllint', ['--noout', f]); return true; };
+// xmllint 是 macOS 自带、Ubuntu CI runner 默认没有：缺了就明确跳过 XML 合法性检查并打印原因，
+// 不把「没检查」当通过；装了的机器仍由 xmllint --noout 跑真实校验。
+const hasXmllint = spawnSync('which', ['xmllint'], { stdio: 'ignore' }).status === 0;
+let skipped = 0;
+const checkXml = (name, text, msg) => {
+    if (!hasXmllint) {
+        skipped++;
+        console.log('[SKIP] ' + msg + '：当前环境没有 xmllint（Ubuntu CI runner 默认不装）');
+        return;
+    }
+    const f = path.join(tmp, name);
+    fs.writeFileSync(f, text);
+    execFileSync('xmllint', ['--noout', f]);
+    passed++;
+};
 
 // Premiere / 达芬奇
 const xml = X.toXmeml(p);
-ok(lint('a.xml', xml), 'xmeml 是合法 XML');
+checkXml('a.xml', xml, 'xmeml 是合法 XML');
 ok(xml.includes('<name>测试 &lt;工程&gt;</name>'), '工程名转义');
 ok(/<transitionitem>.*?<start>90<\/start><end>120<\/end><alignment>center<\/alignment>/.test(xml), '转场跨剪切点 90–120');
 ok(xml.includes('<start>300</start><end>360</end><in>60</in><out>180</out>'), '2× 变速：素材用 120 帧');
@@ -71,7 +85,7 @@ eq((xml.match(/<track>/g) || []).length, 4, 'V1 V2 A1 A2 四条轨');
 
 // Final Cut
 const fcp = X.toFcpxml(p);
-ok(lint('a.fcpxml', fcp), 'fcpxml 是合法 XML');
+checkXml('a.fcpxml', fcp, 'fcpxml 是合法 XML');
 ok(fcp.includes('<transition name="Cross Dissolve" offset="90/30s" duration="30/30s">'), 'FCP 转场');
 ok(/<asset-clip ref="a2"[^>]*offset="105\/30s" duration="105\/30s" start="45\/30s"/.test(fcp), 'FCP 第二段');
 ok(/<clip name="收尾图" offset="210\/30s" duration="90\/30s" start="0s" format="r1" tcFormat="NDF"><video ref="a3" offset="0s"/.test(fcp), "图片包在 clip 里");
@@ -96,4 +110,4 @@ const rd = X.readme(p);
 ok(rd.includes('Final Cut Pro') && rd.includes('重新链接'), '说明文字');
 
 fs.rmSync(tmp, { recursive: true, force: true });
-console.log(`timeline interchange: ${passed} passed`);
+console.log(`timeline interchange: ${passed} passed` + (skipped ? `, ${skipped} skipped（未安装 xmllint）` : ''));

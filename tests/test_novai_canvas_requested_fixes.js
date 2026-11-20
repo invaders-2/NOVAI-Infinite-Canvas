@@ -6,6 +6,14 @@ const assert = require('assert');
 const esbuild = require('../novai-canvas-ui/node_modules/esbuild');
 const root = path.join(__dirname, '..');
 
+// Node 20（CI 固定的运行时）没有 navigator 全局（Node 21 才加）。这个 bundle 里两处会在加载时读它：
+// AgentConnect.tsx 顶层用 navigator.platform 选 Claude 桌面配置路径，mediabunny 初始化读 navigator.userAgent。
+// 这里只补 navigator 对象和 userAgent（mediabunny 初始化要读它；platform 等字段读到 undefined 不影响断言），
+// 让模块能加载；测试本身不碰浏览器 API，Node 22 已有 navigator，不覆盖。
+if (typeof globalThis.navigator === 'undefined') {
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { userAgent: 'node' } });
+}
+
 function load(entry) {
     const result = esbuild.buildSync({
         entryPoints: [path.join(root, entry)], bundle: true, platform: 'node',
