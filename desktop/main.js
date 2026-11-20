@@ -933,6 +933,7 @@ const IFRAME_SHIM = `(function(){
       get_guest_drag_bytes: function(){ return call('source-view', {action:'guest-drag-bytes'}); },
       get_guest_drag_original: function(){ return call('source-view', {action:'guest-drag-original'}); },
       get_recent_source_media: function(){ return call('source-view', {action:'recent-media'}); },
+      get_source_fmp4_timeline: function(){ return call('source-view', {action:'fmp4-timeline'}); },
       get_recent_custom_source_urls: function(){ return call('source-view', {action:'custom-urls'}); },
       set_source_zoom: function(m, v){ return call('source-view', {action:'source-zoom', mode: m, value: v}); },
       source_zoom_in: function(){ return call('source-view', {action:'source-zoom', mode:'in'}); },
@@ -1210,6 +1211,26 @@ function isVideoContentType(value) {
     || text.indexOf('application/mpegurl') >= 0;
 }
 
+// fMP4 分片 / init 段的识别：站点只给分片时，画布要靠「哪一个 init + 哪些分片 + 顺序」去拼接。
+// 只按 URL 与响应头判断（主进程不下载字节，落盘与拼接都在后端）。
+const MEDIA_FRAGMENT_URL_RE = /\.(m4s|m4a|ts)(\?|#|$)/i;
+const MEDIA_INIT_URL_RE = /(?:^|\/)init(?:\.|_|-|$)/i;
+const MEDIA_SEGMENT_PATH_RE = /(?:^|\/)(?:seg|segment|chunk|frag)[-_]?\d+/i;
+
+function mediaSegmentInfo(url, contentType) {
+  const text = String(url || '');
+  const ctype = String(contentType || '').toLowerCase();
+  let pathname = text;
+  try { pathname = new URL(text).pathname || text; } catch (_) {}
+  const isInitSegment = MEDIA_INIT_URL_RE.test(pathname) || /\/init\.mp4/i.test(pathname);
+  const isFragment = !isInitSegment && (
+    ctype.indexOf('video/iso.segment') >= 0
+    || MEDIA_FRAGMENT_URL_RE.test(text)
+    || MEDIA_SEGMENT_PATH_RE.test(pathname)
+  );
+  return { isInitSegment: isInitSegment, isFragment: isFragment };
+}
+
 // 只影响「最近媒体」缓冲的 kind 标注（画布只从 kind==='video' 里挑真链），不改变请求捕获条件。
 // 影响面：MSE 真链常是 /stream/ 路径 + application/octet-stream（分片），按类型会被判成 other 漏掉；
 // resourceType=media 同理。image/* 仍优先判图片，不会把头像/封面算进视频。
@@ -1245,16 +1266,25 @@ function recordMediaRequest(url, resourceType, pageUrl, contentType, force) {
       existing.resourceType = String(resourceType || existing.resourceType || '');
       existing.pageUrl = String(pageUrl || existing.pageUrl || '');
       existing.time = Date.now();
+      existing.ts = existing.time;
       if (type) existing.contentType = type;
       existing.kind = classifyMediaKind(target, existing.contentType, String(resourceType || existing.resourceType || ''));
+      const info = mediaSegmentInfo(target, existing.contentType);
+      existing.isInitSegment = info.isInitSegment;
+      existing.isFragment = info.isFragment;
     } else {
+      const now = Date.now();
+      const info = mediaSegmentInfo(target, type);
       recentMediaRequests.push({
         url: target,
         resourceType: String(resourceType || ''),
         contentType: type,
         kind: kind,
-        time: Date.now(),
+        time: now,
+        ts: now,
         pageUrl: String(pageUrl || ''),
+        isInitSegment: info.isInitSegment,
+        isFragment: info.isFragment,
       });
       while (recentMediaRequests.length > MEDIA_BUFFER_LIMIT) recentMediaRequests.shift();
     }
@@ -2106,6 +2136,48 @@ async function handleSourceViewAction(payload) {
         const videos = fresh.filter((item) => item.kind === 'video');
         const others = fresh.filter((item) => item.kind !== 'video');
         return { ok: true, items: videos.concat(others) };
+      } catch (err) {
+        return { ok: false, error: String(err && err.message || err) };
+      }
+    }
+    if (action === 'fmp4-timeline') {
+      // 分片拼接用：同一页面最近 120 秒抓到的媒体请求，按时间排序后给出 init 段与有序分片。
+      // 主进程只负责「有哪些段、顺序、Referer」；下载与拼接都在后端的 import-fmp4。
+      try {
+        const now = Date.now();
+        const fresh = (recentMediaRequests || [])
+          .filter((item) => item && (now - item.time) <= MEDIA_BUFFER_WINDOW_MS)
+          .slice()
+          .sort((a, b) => (a.ts || a.time || 0) - (b.ts || b.time || 0));
+        const latest = fresh.length ? fresh[fresh.length - 1] : null;
+        const pageUrl = String((latest && latest.pageUrl) || '');
+        const samePage = pageUrl
+          ? fresh.filter((item) => !item.pageUrl || item.pageUrl === pageUrl)
+          : fresh;
+        const items = samePage.map((item) => {
+          const info = mediaSegmentInfo(item.url, item.contentType);
+          return {
+            url: item.url,
+            contentType: item.contentType || '',
+            resourceType: item.resourceType || '',
+            kind: classifyMediaKind(item.url, item.contentType, item.resourceType),
+            ts: item.ts || item.time || 0,
+            isInitSegment: info.isInitSegment,
+            isFragment: info.isFragment,
+          };
+        });
+        const seen = new Set();
+        const initSegments = [];
+        const segments = [];
+        for (const item of items) {
+          if (seen.has(item.url)) continue;
+          seen.add(item.url);
+          if (item.isInitSegment) initSegments.push(item.url);
+          else if (item.isFragment) segments.push(item.url);
+        }
+        const init = initSegments.length ? initSegments[initSegments.length - 1] : '';
+        clog('source-view', 'fmp4-timeline init=' + (init ? init.slice(0, 80) : '-') + ' segments=' + segments.length + ' page=' + pageUrl.slice(0, 120));
+        return { ok: true, pageUrl: pageUrl, referer: pageUrl, init: init, initSegments: initSegments, segments: segments, items: items };
       } catch (err) {
         return { ok: false, error: String(err && err.message || err) };
       }

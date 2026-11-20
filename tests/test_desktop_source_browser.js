@@ -1647,6 +1647,37 @@ ok(/detachMediaRequestProbe\(\);/.test(main) && /onHeadersReceived\(null\)/.test
 ok(/action === 'recent-media'/.test(handleFn) && /\(now - item\.time\) <= MEDIA_BUFFER_WINDOW_MS/.test(handleFn), 'recent-media 只返回 120 秒内');
 ok(/kind: classifyMediaKind\(item\.url, item\.contentType, item\.resourceType\)/.test(handleFn), 'recent-media 补 kind 字段（带 resourceType）');
 ok(/const videos = fresh\.filter\(\(item\) => item\.kind === 'video'\)/.test(handleFn) && /return \{ ok: true, items: videos\.concat\(others\) \}/.test(handleFn), '视频记录优先返回');
+ok(/action === 'fmp4-timeline'/.test(handleFn), 'fmp4-timeline 动作：返回 init 段 + 有序分片 + pageUrl/referer');
+ok(/isInitSegment: info\.isInitSegment/.test(main) && /isFragment: info\.isFragment/.test(main) && /ts: now/.test(main), '记录带 ts / isInitSegment / isFragment（recent-media 旧字段不动）');
+ok(/get_source_fmp4_timeline: \(\) => ipcRenderer\.invoke\('novai:source-view', \{ action: 'fmp4-timeline' \}\)/.test(preload), 'preload 暴露 get_source_fmp4_timeline');
+ok(/get_source_fmp4_timeline: function\(\)\{ return call\('source-view', \{action:'fmp4-timeline'\}\); \}/.test(shim), 'shim get_source_fmp4_timeline');
+{
+    // 分片识别抽成纯函数：直接取出源码执行，验真实判定（不靠正则自嗨）
+    const segFnSrc = topLevelFunction(main, 'mediaSegmentInfo');
+    const constLine = (name) => (main.match(new RegExp('^const ' + name + ' = .*;$', 'm')) || [''])[0];
+    let segInfo = null;
+    try {
+        segInfo = new Function(
+            constLine('MEDIA_FRAGMENT_URL_RE') + '\n' + constLine('MEDIA_INIT_URL_RE') + '\n' + constLine('MEDIA_SEGMENT_PATH_RE') + '\n' + segFnSrc + '\nreturn mediaSegmentInfo;'
+        )();
+    } catch (_) {}
+    if (typeof segInfo === 'function') {
+        const init = segInfo('https://sns-video-v6.xhscdn.com/stream/init.mp4', 'video/mp4');
+        ok(init.isInitSegment === true && init.isFragment === false, 'init.mp4 判成 init 段');
+        const initQuery = segInfo('https://cdn.x/ab/init.mp4?sign=abc', 'video/mp4');
+        ok(initQuery.isInitSegment === true, '带签名参数的 init.mp4 也认');
+        const frag = segInfo('https://sns-video-v6.xhscdn.com/stream/seg_000.m4s', 'application/octet-stream');
+        ok(frag.isFragment === true && frag.isInitSegment === false, '.m4s 判成分片');
+        const iso = segInfo('https://cdn.x/stream/abc', 'video/iso.segment');
+        ok(iso.isFragment === true, 'video/iso.segment 判成分片（URL 看不出后缀）');
+        const plain = segInfo('https://cdn.x/a/full.mp4', 'video/mp4');
+        ok(plain.isFragment === false && plain.isInitSegment === false, '整段 mp4 既不是 init 也不是分片');
+        const chunk = segInfo('https://cdn.x/media/chunk_12', 'application/octet-stream');
+        ok(chunk.isFragment === true, 'chunk_12 这类路径判成分片');
+    } else {
+        ok(false, 'mediaSegmentInfo 可独立执行');
+    }
+}
 ok(/action === 'fetch-url'/.test(handleFn), 'fetch-url 动作');
 ok(/session\.fromPartition\(SOURCE_BROWSER_PARTITION\)\.fetch\(targetUrl, \{ headers: headers \}\)/.test(handleFn), '主进程 session.fetch 拉取');
 ok(/'User-Agent': sourceBrowserUserAgent\(\)/.test(handleFn) && !/headers\.Referer/.test(handleFn), '带干净 UA、不设置 Referer（Chromium 会拦成 ERR_BLOCKED_BY_CLIENT）');

@@ -43,6 +43,7 @@ type DesktopApi = {
   get_last_guest_drag?: () => Promise<unknown>;
   get_guest_drag_bytes?: () => Promise<unknown>;
   get_recent_source_media?: () => Promise<unknown>;
+  get_source_fmp4_timeline?: () => Promise<unknown>;
   get_source_view_fetch_bytes?: (arg: unknown, maxBytes?: number) => Promise<unknown>;
   fetch_source_url?: (arg: unknown, referer?: string) => Promise<unknown>;
 };
@@ -53,6 +54,12 @@ type GuestBytes = { url: string; dataUrl: string; contentType: string; size: num
 type ImportItem = { url: string; data?: string; content_type?: string; name?: string };
 
 const NO_SOURCE_URL_TEXT = "没读到拖进来的素材地址，请从在线素材面板里重新拖一次";
+
+/**
+ * 只剩分片、拼接也不可用时的引导：站点只给 fMP4 分片时，单段 .m4s 打不开，
+ * 必须先在面板里把播放器跑一遍（主进程才抓得到 init + 完整分片）再拖。
+ */
+const FRAGMENT_GUIDE_TEXT = "这条视频拿到的是加密分片（.m4s），只抓到分片且没抓全，先在面板里播一遍再拖，播完再拖一次；或换一条直链 mp4";
 
 function desktopApi(): DesktopApi | null {
   const api = (window as unknown as { pywebview?: { api?: unknown } }).pywebview?.api;
@@ -209,6 +216,18 @@ async function guestDragInfo(): Promise<GuestDragInfo> {
 const RECENT_MEDIA_TIMEOUT_MS = 900;
 const RECENT_MEDIA_MAX = 4;
 
+/**
+ * 最近的媒体条目是不是视频。老条目的桥返回没有 kind 字段（旧画布就是按扩展名认视频的），
+ * 这类按扩展名 / resourceType 兜底；明确标了 image / other 的仍然跳过。
+ */
+function entryLooksLikeVideo(url: string, row: Record<string, unknown> | null): boolean {
+  const kind = String((row && row.kind) || "").toLowerCase();
+  if (kind === "video") return true;
+  if (kind) return false;
+  if (/\.(?:mp4|m4s|m4a|ts|m3u8|mov|webm|mkv|flv|avi)(?:[?#]|$)/i.test(url)) return true;
+  return String((row && row.resourceType) || "").toLowerCase() === "media";
+}
+
 /** 主进程抓到的最近视频请求（120s 内）：blob 播放时靠它还原出可下载的真链 */
 async function recentVideoUrls(pageUrl: string): Promise<string[]> {
   const api = desktopApi();
@@ -225,7 +244,7 @@ async function recentVideoUrls(pageUrl: string): Promise<string[]> {
     const obj = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
     const url = String(obj ? obj.url ?? obj.src ?? obj.mediaUrl ?? "" : entry ?? "").trim();
     if (!url || !/^https?:\/\//i.test(url)) continue;
-    if (String((obj && obj.kind) || "").toLowerCase() !== "video") continue;
+    if (!entryLooksLikeVideo(url, obj)) continue;
     picked.push({
       url,
       time: Number(obj && obj.time) || 0,
@@ -238,6 +257,73 @@ async function recentVideoUrls(pageUrl: string): Promise<string[]> {
   // 整段优先于分片 → 同页面优先 → mp4 优先于 m3u8（m3u8 后端下不了整段视频） → 越新越优先
   picked.sort((a, b) => Number(a.fragment) - Number(b.fragment) || Number(b.same) - Number(a.same) || Number(a.hls) - Number(b.hls) || b.time - a.time);
   return unique(picked.map((item) => item.url)).slice(0, RECENT_MEDIA_MAX);
+}
+
+const FMP4_TIMELINE_TIMEOUT_MS = 1500;
+/** 一次拼接最多带多少段：前端与后端上限（600）对齐，这里再收一道，防止桥返回一整页历史 */
+const FMP4_MAX_SEGMENTS = 600;
+
+/** 主进程给的「init + 有序分片」清单（浏览器模式下没有桥，返回 null） */
+type Fmp4Timeline = { init: string; segments: string[]; referer: string; pageUrl: string };
+
+function httpUrls(value: unknown): string[] {
+  const list = Array.isArray(value) ? value : [];
+  return unique(list.map((item) => String(item || "").trim()).filter((url) => /^https?:\/\//i.test(url)));
+}
+
+async function fmp4Timeline(pageUrlHint: string): Promise<Fmp4Timeline | null> {
+  const api = desktopApi();
+  const fn = api && api.get_source_fmp4_timeline;
+  if (typeof fn !== "function") {
+    console.info("[sourceDrop] 桌面桥没有 fMP4 分片清单（浏览器模式），无法拼接");
+    return null;
+  }
+  let payload: unknown;
+  try {
+    payload = await withTimeout(fn(), FMP4_TIMELINE_TIMEOUT_MS);
+  } catch (error) {
+    console.info("[sourceDrop] 取 fMP4 分片清单失败：" + messageOf(error));
+    return null;
+  }
+  const row = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  if (row.ok !== true) {
+    console.info("[sourceDrop] 取 fMP4 分片清单失败：" + String(row.error || "桥无响应"));
+    return null;
+  }
+  // 列表本身可能是有序的（items 按 ts 排序），没有 init 就拼不出来
+  const init = String(row.init || httpUrls(row.initSegments).pop() || "").trim();
+  const segments = httpUrls(row.segments).slice(0, FMP4_MAX_SEGMENTS);
+  if (!/^https?:\/\//i.test(init)) {
+    console.info("[sourceDrop] 分片清单里没有 init 段（没抓全）");
+    return null;
+  }
+  if (!segments.length) {
+    console.info("[sourceDrop] 分片清单里没有分片（没抓全）");
+    return null;
+  }
+  return {
+    init,
+    segments,
+    referer: String(row.referer || "").trim(),
+    pageUrl: String(row.pageUrl || pageUrlHint || "").trim(),
+  };
+}
+
+/** 分片拼接落节点：成功返回 true；没清单 / 没抓全 / 后端失败都返回 false，交给引导提示 */
+async function stitchFmp4(store: CanvasStore, at: { x: number; y: number }, pageUrlHint: string): Promise<boolean> {
+  const timeline = await fmp4Timeline(pageUrlHint);
+  if (!timeline) return false;
+  try {
+    const result = await importFmp4(timeline, "在线视频");
+    if (result.rows.length && await placeImported(store, at, result.rows)) {
+      console.info("[sourceDrop] fMP4 分片拼接成功：" + timeline.segments.length + " 段");
+      return true;
+    }
+    console.info("[sourceDrop] fMP4 拼接没落成节点：" + (result.failed.slice(0, 2).join("；") || "接口没有回素材"));
+  } catch (error) {
+    console.info("[sourceDrop] fMP4 拼接失败：" + messageOf(error));
+  }
+  return false;
 }
 
 /** 字节通道的等待上限：主进程自己 20s 超时，这里只防「父窗口不回包」把整次 drop 挂死 */
@@ -312,6 +398,11 @@ async function importItems(items: ImportItem[]): Promise<{ rows: ImportedRow[]; 
   }
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new Error(errorOf(data, response.status));
+  return importRowsFromResponse(data);
+}
+
+/** import-urls 与 import-fmp4 的返回同构：逐条读 ok / item，失败原因原样带出 */
+function importRowsFromResponse(data: unknown): { rows: ImportedRow[]; failed: string[] } {
   const returned = Array.isArray((data as Record<string, unknown>)?.items) ? (data as { items: unknown[] }).items : [];
   const rows: ImportedRow[] = [];
   const failed: string[] = [];
@@ -332,6 +423,31 @@ async function importItems(items: ImportItem[]): Promise<{ rows: ImportedRow[]; 
   }
   if (!returned.length) failed.push("导入接口没有返回任何结果");
   return { rows, failed };
+}
+
+/**
+ * fMP4 分片拼接：下载与拼接都在后端（签名地址通常不带 cookie 也能下，大文件更不能绕主进程传 base64），
+ * 主进程只提供「init 是哪一段、分片顺序、referer」。
+ */
+async function importFmp4(timeline: Fmp4Timeline, name: string): Promise<{ rows: ImportedRow[]; failed: string[] }> {
+  let response: Response;
+  try {
+    response = await fetch("/api/local-assets/import-fmp4", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        urls: [timeline.init, ...timeline.segments],
+        referer: timeline.referer,
+        pageUrl: timeline.pageUrl,
+        name,
+      }),
+    });
+  } catch (error) {
+    throw new Error("连不上本地服务：" + messageOf(error));
+  }
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(errorOf(data, response.status));
+  return importRowsFromResponse(data);
 }
 
 /** URL 版：只有地址可交（浏览器模式 / 字节通道不可用时） */
@@ -505,10 +621,12 @@ export async function dropSourceUrls(store: CanvasStore, at: { x: number; y: num
   let urls = urlsFromDataTransfer(dt);
   let blobs = blobUrlsFromDataTransfer(dt);
   let drag: GuestDragInfo = { http: [], blobs: [], pageUrl: "", video: false };
-  // 原生视图起拖的素材，iframe 有时只拿得到空载荷：再问一次主进程记下的那次拖拽
-  if (!urls.length) {
+  // 原生视图起拖的素材，iframe 有时只拿得到空载荷；载荷给的是「页面地址 / 缩略图地址」时同理。
+  // 两种情况都要和主进程记下的那次拖拽合并（旧画布的 mergeGuestDropPayload），否则页面地址被过滤后
+  // 明明主进程抓到了真视频，却直接报「拖的是页面不是素材」。
+  if (!urls.length || urls.every(isPageLikeUrl)) {
     drag = await guestDragInfo();
-    urls = drag.http;
+    urls = unique([...urls, ...drag.http]);
     blobs = unique([...blobs, ...drag.blobs]);
   }
   const videoIntent = drag.video || blobs.length > 0;
@@ -546,10 +664,12 @@ export async function dropSourceUrls(store: CanvasStore, at: { x: number; y: num
   // 同一批候选里有整段时先导整段，分片排后面
   urls = fragmentsLast(urls);
 
-  // 只剩 fMP4 / HLS 分片：每片只有 2~6 秒，后端既拼不成整段也认不出类型，别静默 import
+  // 只剩 fMP4 / HLS 分片：每片只有 2~6 秒，单段打不开。先拿主进程的 init + 有序分片去拼接，
+  // 拼不了（没抓全 init / 桥没开）才退回可操作引导，而不是直接把分片当整段导入。
   if (urls.length && urls.every((url) => isFragmentUrl(url))) {
-    console.info("[sourceDrop] 只拿到视频分片，已跳过导入：" + urls.join(" "));
-    store.toast("这条视频拿到的是加密分片（.m4s），下不了整段；先在面板里把视频播完、或换一条直链 mp4 再拖", 12000);
+    if (await stitchFmp4(store, at, drag.pageUrl)) return;
+    console.info("[sourceDrop] 只拿到视频分片、没有可拼接的清单，已跳过导入并退回引导：" + urls.join(" "));
+    store.toast(FRAGMENT_GUIDE_TEXT, 12000);
     return;
   }
 
@@ -584,10 +704,11 @@ export async function dropSourceUrls(store: CanvasStore, at: { x: number; y: num
 
   if (!placed) {
     const all = [...(bytesFailure ? [bytesFailure] : []), ...reasons, ...failed];
-    // URL 上没有后缀的分片真链，只能等后端认出来：同样给可操作引导，别只甩一句 400
+    // URL 上没有后缀的分片真链，只能等后端认出来：这时同样先试拼接，拼不了再给可操作引导
     if (all.some((text) => text.indexOf("视频分片") >= 0)) {
-      console.info("[sourceDrop] 后端认出视频分片，已跳过导入：" + urls.join(" "));
-      store.toast("这条视频拿到的是加密分片（.m4s），下不了整段；先在面板里把视频播完、或换一条直链 mp4 再拖", 12000);
+      if (await stitchFmp4(store, at, drag.pageUrl)) return;
+      console.info("[sourceDrop] 后端认出视频分片且没拼成，已退回引导：" + urls.join(" "));
+      store.toast(FRAGMENT_GUIDE_TEXT, 12000);
       return;
     }
     store.toast("在线素材导入失败：" + (all.slice(0, 2).join("；") || "未知原因"), 6000);

@@ -54,6 +54,7 @@ const api = {
   get_guest_drag_original: () => ipcRenderer.invoke('novai:source-view', { action: 'guest-drag-original' }),
   // 内嵌浏览器网络里抓到的媒体请求（最近 120 秒）
   get_recent_source_media: () => ipcRenderer.invoke('novai:source-view', { action: 'recent-media' }),
+  get_source_fmp4_timeline: () => ipcRenderer.invoke('novai:source-view', { action: 'fmp4-timeline' }),
   get_recent_custom_source_urls: () => ipcRenderer.invoke('novai:source-view', { action: 'custom-urls' }),
   // 内嵌网页缩放：mode = 'in' | 'out' | 'reset' | 'set'（set 时传 value）
   set_source_zoom: (mode, value) => ipcRenderer.invoke('novai:source-view', { action: 'source-zoom', mode, value }),

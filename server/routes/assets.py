@@ -140,6 +140,16 @@ class LocalAssetUrlImportRequest(BaseModel):
     folder: str = ""
 
 
+class LocalAssetFmp4ImportRequest(BaseModel):
+    # 桌面端采集到的顺序：urls[0] = init 段，其后 = 播放窗口里抓到的有序分片
+    urls: List[str] = []
+    referer: str = ""
+    page_url: str = ""
+    pageUrl: str = ""
+    name: str = ""
+    folder: str = ""
+
+
 class LocalAssetFolderRequest(BaseModel):
     parent: str = ""
     path: str = ""
@@ -340,6 +350,58 @@ def _is_fmp4_fragment(head):
     return len(head) >= 8 and head[4:8] in _FMP4_FRAGMENT_BOXES
 
 
+# --- fMP4 分片拼接：init.mp4（ftyp）+ 有序 .m4s 顺序拼接 = 整段可播视频 ---
+# 站点只给分片时，单段既不是整段视频也播不了；拼接产物是 ftyp 开头，不会被 _is_fmp4_fragment 拦。
+_FMP4_MAX_SEGMENTS = 600
+_FMP4_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
+_FMP4_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
+_FMP4_INIT_ERROR = "第一段不是 init 段（缺少 ftyp 盒）：拼接必须先抓到 init.mp4，再按顺序拼上分片"
+
+
+def _is_fmp4_init_segment(head):
+    """init 段 = 4 字节长度 + 'ftyp'（ffmpeg / 站点生成的 init.mp4 都是这个形态）。"""
+    head = head or b""
+    return len(head) >= 12 and head[4:8] == b"ftyp"
+
+
+async def _assert_public_fmp4_url(url, index):
+    """沿用 page_import 的 SSRF 校验（只放行公网 http(s)、80/443）；失败带段号。"""
+    from server.routes.page_import import PageImportError, assert_public_url
+
+    try:
+        await assert_public_url(url)
+    except PageImportError as exc:
+        raise HTTPException(status_code=400, detail=f"第 {index} 段地址不允许访问：{exc.message}")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"第 {index} 段地址校验失败：{type(exc).__name__} {exc}".strip())
+
+
+def _stitch_video_meta(path):
+    """拼接产物取宽高 / 时长：复用 main.py 的 ffprobe 探测（deps 里绑定）。"""
+    meta = {}
+    try:
+        dimensions = deps.get("probe_video_dimensions")
+        if callable(dimensions):
+            width, height = dimensions(path)
+            if width and height:
+                meta["width"] = int(width)
+                meta["height"] = int(height)
+    except Exception:
+        pass
+    try:
+        duration = deps.get("probe_video_file_duration_seconds")
+        if callable(duration):
+            value = duration(path)
+            if value:
+                meta["duration"] = round(float(value), 2)
+    except Exception:
+        pass
+    return meta
+
+
 def _resolve_media_kind_ext(name_path, content_type, content):
     """决定落盘的 (kind, ext)：先按 Content-Type/扩展名，认不出再按文件头魔数。"""
     kind, ext = deps._local_upload_kind_ext(name_path, content_type)
@@ -473,6 +535,92 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
                     result["error"] = f"下载失败：{kind}"
             results.append(result)
     return {"ok": True, "count": len(uploaded), "files": uploaded, "items": results}
+
+
+@router.post("/local-assets/import-fmp4")
+async def import_local_assets_from_fmp4(payload: LocalAssetFmp4ImportRequest):
+    """按给定顺序把 init.mp4 + 分片拼成整段视频，落成本机素材（结构与 import-urls 一致）。
+
+    站点只给 fMP4 分片时，单段 .m4s 打不开；桌面端负责「有哪些段、顺序、Referer」，
+    下载与拼接走这里（签名地址通常不带 cookie 也能下），主进程不传 base64。
+    """
+    if deps.local_output_readonly_name(payload.folder):
+        raise HTTPException(status_code=403, detail="「画布生成」是只读目录：生成物由画布产出，不能往里导入")
+    urls = [str(item or "").strip() for item in (payload.urls or []) if str(item or "").strip()]
+    if not urls:
+        raise HTTPException(status_code=400, detail="没有可拼接的分片地址：需要 init 段 + 至少一段分片")
+    if len(urls) > _FMP4_MAX_SEGMENTS:
+        raise HTTPException(status_code=400, detail=f"分片太多：{len(urls)} 段，上限 {_FMP4_MAX_SEGMENTS} 段")
+    for index, url in enumerate(urls, start=1):
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail=f"第 {index} 段不是 http(s) 地址：{url[:120]}")
+        await _assert_public_fmp4_url(url, index)
+
+    referer = str(payload.referer or "").strip() or str(payload.page_url or payload.pageUrl or "").strip()
+    headers = {"User-Agent": _FMP4_BROWSER_UA, "Accept": "video/*,*/*;q=0.8"}
+    if referer.startswith(("http://", "https://")):
+        headers["Referer"] = referer
+
+    timeout = httpx.Timeout(connect=20.0, read=120.0, write=30.0, pool=20.0)
+    chunks: List[bytes] = []
+    total = 0
+    async with httpx.AsyncClient(http2=False, verify=deps._SSL_CONTEXT, trust_env=deps._TRUST_ENV, timeout=timeout, follow_redirects=True, headers=headers) as client:
+        for index, url in enumerate(urls, start=1):
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                status = getattr(getattr(exc, "response", None), "status_code", 0) or 0
+                raise HTTPException(status_code=400, detail=f"第 {index} 段下载失败：HTTP {status}")
+            except Exception as exc:
+                detail = str(exc).strip()
+                raise HTTPException(status_code=400, detail=f"第 {index} 段下载失败：{type(exc).__name__}{' ' + detail if detail else ''}"[:300])
+            content = response.content or b""
+            if not content:
+                raise HTTPException(status_code=400, detail=f"第 {index} 段内容为空")
+            head = content[:_MEDIA_SNIFF_BYTES]
+            if index == 1:
+                if not _is_fmp4_init_segment(head):
+                    raise HTTPException(status_code=400, detail=_FMP4_INIT_ERROR)
+            elif _is_fmp4_init_segment(head):
+                # init 段重复出现（同一地址被采集两次）时跳过，两张 ftyp 连排会拼出放不出来的文件
+                continue
+            total += len(content)
+            if total > _FMP4_MAX_TOTAL_BYTES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"拼接总大小超过 2GB（已下载 {index} 段 / {round(total / 1024 / 1024)}MB）",
+                )
+            chunks.append(content)
+
+    if len(chunks) < 2:
+        raise HTTPException(status_code=400, detail="只拿到 init 段，没有分片：在面板里播一遍再拖")
+    content = b"".join(chunks)
+    # 拼接产物以 ftyp 开头：这里按魔数确认是视频，再落盘（分片守卫不参与，它挡的是单段 .m4s）
+    sniffed = _sniff_media_ext(content[:_MEDIA_SNIFF_BYTES])
+    if not sniffed or sniffed[0] != "video":
+        raise HTTPException(status_code=400, detail="拼接结果不是可识别的视频（init 段可能不是 fMP4）")
+    ext = sniffed[1]
+    folder_rel, folder_abs = deps._local_upload_safe_folder(payload.folder)
+    os.makedirs(folder_abs, exist_ok=True)
+    base = os.path.splitext(str(payload.name or "").strip())[0]
+    base = re.sub(r"[^0-9A-Za-z一-鿿._-]+", "_", base).strip("_")[:60] or "web-video-stitch"
+    filename = f"up_{uuid.uuid4().hex[:12]}_{base}{ext}"
+    rel_name = f"{folder_rel}/{filename}".lstrip("/")
+    path = os.path.join(folder_abs, filename)
+    with open(path, "wb") as handle:
+        handle.write(content)
+    item = deps._local_upload_item(rel_name)
+    item.update(_stitch_video_meta(path))
+    return {
+        "ok": True,
+        "count": 1,
+        "files": [item],
+        "items": [{"url": urls[0], "ok": True, "file": rel_name, "item": item}],
+        "segments": len(chunks),
+        "bytes": total,
+        "referer": headers.get("Referer", ""),
+    }
 
 
 @router.get("/local-assets")

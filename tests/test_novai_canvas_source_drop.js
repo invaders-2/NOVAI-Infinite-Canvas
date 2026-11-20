@@ -391,6 +391,87 @@ const importedItem = (url) => ({ items: [{ ok: true, item: { url, name: 'x.jpg',
     ok(store17.toasts.some((t) => t.indexOf('加密分片') >= 0 && t.indexOf('直链 mp4') >= 0), '失败提示换成可操作引导');
     ok(store17.toastMs.some((ms) => ms === 12000), '后端分片提示也是 12s');
 
+
+    console.log('[23] 只拿到分片 + 桥给出 init/有序分片：拼接后落可播视频节点');
+    const store18 = fakeStore();
+    const initUrl = 'https://sns-video-v6.xhscdn.com/stream/init.mp4';
+    const segUrls = [
+        'https://sns-video-v6.xhscdn.com/stream/seg_000.m4s',
+        'https://sns-video-v6.xhscdn.com/stream/seg_001.m4s',
+        'https://sns-video-v6.xhscdn.com/stream/seg_002.m4s',
+    ];
+    global.window = { pywebview: { api: {
+        get_source_fmp4_timeline: async () => ({ ok: true, init: initUrl, segments: segUrls, referer: videoPage, pageUrl: videoPage }),
+    } } };
+    requests = [];
+    global.fetch = async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, json: async () => videoItem('/assets/uploads/stitched.mp4') }; };
+    await srcDrop.dropSourceUrls(store18, { x: 0, y: 0 }, dt({ 'text/uri-list': segUrls.join('\r\n') }));
+    ok(requests.length === 1 && requests[0].url === '/api/local-assets/import-fmp4', '分片走 import-fmp4 拼接接口');
+    ok(requests[0] && JSON.stringify(requests[0].body.urls) === JSON.stringify([initUrl].concat(segUrls)), 'urls[0] 是 init，其后按抓取顺序');
+    ok(requests[0] && requests[0].body.referer === videoPage && requests[0].body.pageUrl === videoPage, 'body 带 referer / pageUrl');
+    ok(store18.nodes.length === 1 && store18.nodes[0].kind === 'video', '拼接成功落一个视频节点');
+    ok(store18.nodes[0] && store18.nodes[0].hist[0].dur === 12.5, '视频节点带真实时长');
+    ok(store18.toasts.some((t) => t.indexOf('已从在线素材添加') >= 0), '成功提示');
+    ok(!store18.toasts.some((t) => t.indexOf('加密分片') >= 0), '拼接成功时不再弹分片引导');
+
+    console.log('[24] 分片没抓全（桥没有 init）：退回可操作引导');
+    const store19 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_source_fmp4_timeline: async () => ({ ok: true, init: '', segments: [segUrls[0]] }),
+    } } };
+    global.fetch = async () => { throw new Error('没抓全时不该发 import-fmp4 请求'); };
+    await srcDrop.dropSourceUrls(store19, { x: 0, y: 0 }, dt({ 'text/uri-list': segUrls[0] }));
+    ok(store19.nodes.length === 0, '没抓全不落节点');
+    const guide = store19.toasts.find((t) => t.indexOf('只抓到分片且没抓全') >= 0) || '';
+    ok(!!guide, '引导提示点明「只抓到分片且没抓全」');
+    ok(guide.indexOf('先在面板里播一遍再拖') >= 0, '给出「先在面板里播一遍再拖」的具体操作');
+    ok(guide.indexOf('直链 mp4') >= 0, '保留「换直链 mp4」的替代方案');
+    ok(store19.toastMs.some((ms) => ms === 12000), '引导提示 12s（够读完）');
+
+    console.log('[25] 载荷是页面地址：先合并主进程最近拖拽，再决定是否提示');
+    const store20 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: {
+            tagName: 'VIDEO',
+            pageUrl: videoPage,
+            uriList: 'https://sns-video-v6.xhscdn.com/stream/real.mp4',
+            bestUrl: 'https://sns-video-v6.xhscdn.com/stream/real.mp4',
+        } }),
+    } } };
+    requests = [];
+    global.fetch = async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, json: async () => videoItem('/assets/uploads/merged.mp4') }; };
+    await srcDrop.dropSourceUrls(store20, { x: 0, y: 0 }, dt({ 'text/uri-list': videoPage }));
+    ok(requests.length === 1 && requests[0].url === '/api/local-assets/import-urls', '合并后正常走 import-urls');
+    ok(requests[0] && requests[0].body.items[0].url === 'https://sns-video-v6.xhscdn.com/stream/real.mp4', '用的是主进程记下的真视频地址');
+    ok(store20.nodes.length === 1, '合并后能落节点');
+    ok(!store20.toasts.some((t) => t.indexOf('页面地址') >= 0), '不再误报「拖的是页面不是素材」');
+
+    console.log('[26] recent-media 老条目没有 kind：按扩展名兜底认视频');
+    const store21 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: videoDrag }),
+        get_recent_source_media: async () => ({ ok: true, items: [
+            { url: 'https://sns-video-v6.xhscdn.com/stream/legacy.mp4', pageUrl: videoPage, time: 200 },
+            { url: 'https://i.pinimg.com/a.jpg', pageUrl: videoPage, time: 300 },
+        ] }),
+    } } };
+    requests = [];
+    global.fetch = async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, json: async () => videoItem('/assets/uploads/legacy.mp4') }; };
+    await srcDrop.dropSourceUrls(store21, { x: 0, y: 0 }, dt({}));
+    ok(requests.length === 1 && requests[0].body.items[0].url === 'https://sns-video-v6.xhscdn.com/stream/legacy.mp4', '无 kind 的 .mp4 老条目被认成视频（jpg 仍跳过）');
+    ok(store21.nodes.length === 1 && store21.nodes[0].kind === 'video', '老条目也能落视频节点');
+
+    console.log('[27] fMP4 拼接接线（sourceDrop.ts / server/routes/assets.py）');
+    const dropSrc2 = read(SRC + '/sourceDrop.ts');
+    ok(/get_source_fmp4_timeline/.test(dropSrc2), '接上主进程 fMP4 分片清单桥');
+    ok(/\/api\/local-assets\/import-fmp4/.test(dropSrc2), '调新的 import-fmp4 后端接口');
+    ok(/type Fmp4Timeline = \{ init: string; segments: string\[\]; referer: string; pageUrl: string \};/.test(dropSrc2), '清单结构（init / segments / referer / pageUrl）');
+    ok(!/下不了整段；先在面板里把视频播完/.test(dropSrc2), '旧那句「下不了整段」已被拼接流程取代');
+    const assetsPy = read('server/routes/assets.py');
+    ok(/@router\.post\("\/local-assets\/import-fmp4"\)/.test(assetsPy), '后端注册 import-fmp4');
+    ok(/_is_fmp4_init_segment/.test(assetsPy), '后端校验第一段是 init（ftyp）');
+    ok(/_FMP4_MAX_SEGMENTS = 600/.test(assetsPy) && /_FMP4_MAX_TOTAL_BYTES = 2 \* 1024 \* 1024 \* 1024/.test(assetsPy), '段数 / 总大小上限');
+
     console.log('');
     if (fails.length) {
         console.error('[FAIL] ' + fails.length + ' 项失败：');

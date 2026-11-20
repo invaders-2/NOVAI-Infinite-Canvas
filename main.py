@@ -59403,6 +59403,8 @@ _deps.bind(
     generation_meta_for_url=generation_meta_for_url,
     _write_local_upload_generation=_write_local_upload_generation,
     _sniff_image_ext_bytes=_sniff_image_ext_bytes,
+    probe_video_dimensions=probe_video_dimensions,
+    probe_video_file_duration_seconds=probe_video_file_duration_seconds,
     caption_image_with_provider=caption_image_with_provider,
     ensure_same_origin_request=ensure_same_origin_request,
     canvas_assets_index=canvas_assets_index,
