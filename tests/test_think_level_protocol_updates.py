@@ -487,6 +487,11 @@ class ThinkPassthroughTests(unittest.TestCase):
         self._orig_providers_file = main.API_PROVIDERS_FILE
         main.API_PROVIDERS_FILE = os.path.join(self.tmpdir, "api_providers.json")
         self.addCleanup(self._restore)
+        # 上游是本机 mock，不需要真 key；但 api_headers 缺 key 会直接 400。
+        # API/.env 是本机密钥文件（已 gitignore），CI / 全新克隆里没有，这里注入假值免依赖开发机环境。
+        env_patch = patch.dict(os.environ, {"API_PROVIDER_APIMART_KEY": "sk-unit-test"})
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
         self.server.reject_think = False
         self.server.sse = False
         with self.server.log_lock:

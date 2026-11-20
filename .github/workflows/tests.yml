@@ -14,6 +14,8 @@
 #     （fastapi / pydantic / requests / httpx / pillow / python-multipart）；
 #     cv2、onnxruntime 等都是函数内惰性导入，不需要装，也不跑打包。
 #   - tests/test_video_segments.py 需要 ffmpeg（ubuntu-latest 自带；缺失时真实切分用例自动 skip）。
+#   - 第 11 步跑在「全新克隆」上：本机密钥文件 API/.env、运行数据 data/ 都已 gitignore，CI 里不存在。
+#     单测不许依赖这两者（需要 key 的用例自己注入假值），否则本机绿、CI 红。
 name: tests
 
 on:
