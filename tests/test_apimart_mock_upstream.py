@@ -739,8 +739,15 @@ class ApimartMockUpstreamTests(unittest.TestCase):
                                           prompt="mock notice", size="4096x4096", n=1)
         result = asyncio.run(main.build_online_image_result(payload))
         self.assertIn("size_notice", result)
-        self.assertIn("2K", result["size_notice"])
-        self.assertIn("4K", result["size_notice"])
+        # 画布直发链路用 direct_image_size_caps 的口径：说明「原请求 → 实际尺寸」，不再复述档位名
+        notice = result["size_notice"]
+        self.assertIn("4096x4096", notice)
+        self.assertIn("2048x2048", notice)
+        self.assertIn("按模型规格", notice)
+        # 实际发给上游的档位也跟着收敛（分辨率档 2K，不是请求的 4K）
+        posts = [item for item in self.requests()
+                 if item["method"] == "POST" and item["path"] == "/v1/images/generations"]
+        self.assertEqual(posts[-1]["body"].get("resolution"), "2K", posts[-1]["body"])
         self.assert_local_output(result["images"][0])
 
         plain = main.OnlineImageRequest(provider_id=self.provider_id, model="gpt-image-2",

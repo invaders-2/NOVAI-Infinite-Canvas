@@ -30,12 +30,16 @@ assert.ok(agentPanel.includes('createPortal(') && agentPanel.includes('model-fly
 assert.ok(agentPanel.includes('searchPlaceholder="搜索模型"'), '搜索占位文案保留');
 
 // ---- 二级：去 header / 去副文案 / 搜索只在 >8 时出现 ----
-const comboBlock = (agentPanel.match(/<ComboMenu[\s\S]*?\/>/) || [''])[0];
-assert.ok(comboBlock, 'AgentModelMenu 仍用 ComboMenu');
+const comboStart = agentPanel.indexOf('<ComboMenu');
+const comboBlock = comboStart > 0 ? agentPanel.slice(comboStart, agentPanel.indexOf('document.querySelector(".cn-root") || document.body', comboStart)) : '';
+assert.ok(comboStart > 0 && comboBlock.includes('items={optionsOf(active.vendor)}'), 'AgentModelMenu 仍用 ComboMenu');
 assert.ok(!/header=\{/.test(comboBlock), '二级不再传 header（去掉「供应商 · 选择模型」标题）');
 assert.ok(!/header=\{<div className="mh">/.test(agentPanel), '没有「供应商 · 选择模型」标题块');
 assert.ok(!agentPanel.includes('能读图') && !agentPanel.includes('只读文字'), '去掉「能读图 / 只读文字」副文案');
-assert.ok(comboBlock.includes('renderItem={(m) => <span className="nm">{m.name}</span>}'), '二级行内只有模型名');
+const itemRenderStart = agentPanel.indexOf('renderItem={(m) =>');
+const itemRender = itemRenderStart > 0 ? agentPanel.slice(itemRenderStart, agentPanel.indexOf('\n', itemRenderStart)) : '';
+assert.ok(itemRender.includes('<VendorLogo name={m.vendor} model={m.name} size={14} />'), '二级行首是供应商 logo（2.0.08 起按供应商区分）');
+assert.ok(itemRender.includes('<span className="nm">{m.name}</span>') && !/className="d"/.test(itemRender), '二级行内只有模型名，没有「能读图 / 只读文字」副文案');
 assert.ok(comboBlock.includes('searchable={optionsOf(active.vendor).length > 8}'), '搜索框只在当前供应商 >8 个模型时显示');
 assert.ok(!/searchable\s*$/m.test(comboBlock), '不再无条件 searchable');
 

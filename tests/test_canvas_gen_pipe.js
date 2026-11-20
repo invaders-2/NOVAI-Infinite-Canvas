@@ -309,7 +309,7 @@ assert.ok(spot.y > pBase.y + pBase.h, 'freeSpotRight 单独调用同样掉到下
 assert.strictEqual(JSON.stringify(s9k.state.doc), beforeSpot, 'freeSpotRight 不改 doc（纯函数）');
 
 // ── 10. @ 本节点：把当前结果当参考发出去 ──────────────────────────────────
-// 10.1 图片：@ 自己 + 有结果 → self 作为 reference 进 inputs，resolvedPrompt 里是「图N」而不是标题
+// 10.1 图片：@ 自己 + 有结果 → self 作为 reference 排到 inputs 最前（模型按「图1」先拿到本节点源图），resolvedPrompt 里是「图N」而不是标题
 const selfImg = genNode('self_img', 'image', { title: '本节点图', prompt: '把 @{self_img} 再画一版', gen: { hist: [{ url: PIX, w: 1024, h: 1024 }], hi: 0, params: { ...model.defaultParams('image', IMAGE_SPEC), ratio: '1:1', size: '1K' } } });
 const d10 = doc([t1, selfImg], [edge('e1', 't1', 'self_img')]);
 const r10 = engine.requestForNode(makeStore(d10), d10.nodes[1]);
@@ -317,7 +317,8 @@ const selfIn = r10.inputs.filter((x) => x.nodeId === 'self_img');
 assert.strictEqual(selfIn.length, 1, '@ 本节点：inputs 里要有自己当前结果');
 assert.strictEqual(selfIn[0].role, 'reference', '图片自引用 → reference');
 assert.strictEqual(selfIn[0].url, PIX, '用的是本节点当前结果');
-assert.strictEqual(selfIn[0].order, r10.inputs.length, 'self 追加在 inputs 末尾（order = length）');
+assert.strictEqual(r10.inputs[0].nodeId, 'self_img', 'self 排到 inputs 最前（2.0.08 起「本节点」是第一参考）');
+assert.deepStrictEqual(r10.inputs.map((x) => x.order), r10.inputs.map((_, i) => i + 1), 'self 插队后其余 inputs 的 order 重排成 1..N（不留空洞）');
 assert(r10.resolvedPrompt.includes('「图1」') || r10.resolvedPrompt.includes('「图2」'), 'resolvedPrompt 里 self 显示成「图N」');
 assert(!r10.resolvedPrompt.includes('@'), '记号要全部换成「图N」');
 // 10.2 没有结果：不加 self（记号只显示标题）

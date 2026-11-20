@@ -86,7 +86,8 @@ async function waitFor(cond, label, timeout = 1000) {
 
     /* 3) 面板接线：结束后没拿到可见回复要主动读一次线程；模型清单没加载完不能吞掉第一条消息 */
     const panel = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/tapnow/AgentPanel.tsx'), 'utf8');
-    assert.ok(/settled && !nextText && threadId && threadId !== "__new__"/.test(panel),
+    assert.ok(/const firstTerminal = settled && !terminalHandled;/.test(panel), "只有第一次进终态才补读线程（宽限刷新不重复读）");
+    assert.ok(/firstTerminal && !nextText && threadId && threadId !== "__new__"/.test(panel),
         "结束后没有可见回复时要读一次线程（不刷新也能看到回复）");
     assert.ok(/loadThreadMessages\(threadId\)\.then/.test(panel), "读线程后要重绘面板");
     assert.ok(/for \(let i = 0; i < 24 && !store\.state\.models\.length; i \+= 1\)/.test(panel),

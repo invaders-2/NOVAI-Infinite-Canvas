@@ -58,8 +58,12 @@ assert.ok(/\.cn-root #agent \.ab\{[^}]*scrollbar-width:none/.test(css) && /\.cn-
 const overlay = read('novai-canvas-ui/src/canvas/canvas-next/ui/overlay.tsx');
 const menusCss = read('novai-canvas-ui/src/canvas/canvas-next/ui/canvas-next.css');
 assert.ok(overlay.includes('closest("#agent")') && overlay.includes('agent-pop'), '#pop 按来源标记 agent-pop');
-assert.ok(overlay.includes('agent-layer-open') && overlay.includes('syncOverlayBlur'), '弹层开合切换面板 blur 状态');
-assert.ok(menusCss.includes('html.agent-layer-open .cn-root #agent') && /html\.agent-layer-open \.cn-root #agent\{[^}]*backdrop-filter:none/.test(menusCss), '弹层打开时 #agent 去掉 backdrop-filter');
+const canvasApp = read('novai-canvas-ui/src/canvas/canvas-next/CanvasApp.tsx');
+const appOpen = canvasApp.indexOf('<div id="app">');
+const appClose = canvasApp.indexOf('</div>', canvasApp.indexOf('<AgentPanel'));
+assert.ok(appOpen > 0 && appClose > appOpen && canvasApp.indexOf('<OverlayHost />') > appClose, '弹层挂在 .cn-root 根级（不在 #agent 里）：面板的 backdrop root 不会截断弹层自己的模糊采样');
+assert.ok(/\.cn-root #agent\{[^}]*backdrop-filter:var\(--glass-blur\)/.test(menusCss), '助手面板保持自身磨砂玻璃（弹层在根级，不需要打开弹层就关掉面板 blur）');
+assert.ok(!/html\.agent-layer-open/.test(menusCss), '旧的「弹层打开就关 #agent blur」兜底规则已删除（弹层改挂根级后不再起作用）');
 assert.ok(/\.cn-root #pop\.agent-pop[^{]*\{[^}]*var\(--glass-bg\)/.test(menusCss), '助手内部 #pop 仍是 glass-bg');
 assert.ok(agentPanel.includes('createPortal') && agentPanel.includes('model-flyout-portal') && agentPanel.includes('document.querySelector(".cn-root")'), '二级模型 flyout portal 到 .cn-root 根级');
 assert.ok(overlay.includes('model-flyout'), 'portal flyout 不触发外部点击关闭');

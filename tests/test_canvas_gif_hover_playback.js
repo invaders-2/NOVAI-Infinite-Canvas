@@ -54,7 +54,7 @@ ok(/const \[hoverNode, setHoverNode\] = useState\(false\);/.test(nodeView), 'hov
 ok(/onPointerEnter=\{node\.kind === "image" \|\| node\.kind === "video" \? \(\) => setHoverNode\(true\) : undefined\}/.test(nodeView), '.nbody pointerenter 开播（图片/视频共用同一个 hover）');
 ok(/onPointerLeave=\{node\.kind === "image" \|\| node\.kind === "video" \? \(\) => setHoverNode\(false\) : undefined\}/.test(nodeView), '.nbody pointerleave 立刻回静态');
 ok(/<Body \{\.\.\.p\} out=\{out\} running=\{running\} hover=\{hoverNode\} \/>/.test(nodeView), 'hover 传给 Body');
-ok(/hover: boolean \}/.test(bodyFn) && /<MediaImg src=\{out\.url\} alpha=\{false\} px=\{node\.w\} play=\{p\.hover\} \/>/.test(bodyFn), 'Body 把 play 传给 MediaImg');
+ok(/hover: boolean \}/.test(bodyFn) && /<MediaImg src=\{out\.url\} alpha=\{false\} px=\{node\.w\} play=\{p\.hover\}[^>]*\/>/.test(bodyFn), 'Body 把 play 传给 MediaImg（后面的 nodeId / nodeW / nodeH 是原图比例用的附加属性）');
 ok(!/store\.(patchGen|snapshot|updateNode)/.test(nodeView.slice(nodeView.indexOf('const [playGif'), nodeView.indexOf('const gif = isGifUrl'))), 'hover 状态不写 store / 不进历史（NodeView 早退分支里没有 store 写入）');
 
 console.log('[6] 非 GIF / 灯箱 / 生成链路未被牵动');

@@ -57,7 +57,7 @@ assert.strictEqual(mentions.selfSourceOf(node({ hist: [{ url: 'v1.mp4', meta: { 
 
 // ---- 7. 引擎接线：按请求实际发出的源图记录，不再事后从 before 推算 ----
 const engine = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/engine.ts'), 'utf8');
-assert.ok(/const src = selfSourceOf\(node\);/.test(engine), 'buildRequest 的本节点参考必须走 selfSourceOf（新版本记录优先）');
+assert.ok(/const selfSeed = flags\?\.selfSrcSeed !== undefined \? flags\.selfSrcSeed : selfSourceOf\(node\);/.test(engine), 'buildRequest 的本节点参考默认走 selfSourceOf（新版本记录优先），父节点代跑时可用 selfSrcSeed 指定本次源图');
 assert.ok(/let selfSrc: string \| null = null;/.test(engine), 'buildRequest 要按「这次实际发出去的 self 源图」准备记录，没有就是 null');
 assert.ok(/selfSrc, \.\.\.\(vm \?/.test(engine), 'self 源图记录要随 GenRequest 带给写回');
 assert.ok(!/url: selfSourceOf\(node\) \}\)/.test(engine), '不能把可能为空的 selfSourceOf 直接拼进 inputs');

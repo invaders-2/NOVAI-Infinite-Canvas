@@ -55,7 +55,9 @@ class ApimartSizeNoticeSourceTests(unittest.TestCase):
         self.assertIn("apimart_requested_resolution = _base_resolution", source)
         self.assertIn("apimart_size_notice(", source)
         self.assertIn('size_notice_out["size_notice"] = apimart_notice', source)
-        self.assertIn("size_notice = next(", source)
+        # 2.0.08：原图比例自动选的尺寸说明（auto_size_note）优先，其次才是各批 caps 收敛的说明
+        self.assertIn("auto_size_note", source)
+        self.assertIn("size_notice = auto_size_note or next(", source)
         self.assertIn('result["size_notice"] = size_notice', source)
 
 

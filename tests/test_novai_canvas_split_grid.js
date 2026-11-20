@@ -72,10 +72,12 @@ assert(reg.includes('<button key={op} className="mi" data-k={k} onClick={() => {
 
 /* ---------- 共用 hook：定位 / 开合只写一份 ---------- */
 assert(reg.includes('function useMenuFlyout()'), '定位与开合抽成 useMenuFlyout 共用 hook');
-assert(reg.includes('type FlyKey = "rotate" | "split" | "enhance";'), 'hook 用单值 key 管理「同一时刻只开一个」（旋转 / 切分 / 增强）');
+const flyKeyLine = (reg.match(/type FlyKey = [^;]+;/) || [''])[0];
+assert(/type FlyKey = "[a-z]+"(\s*\|\s*"[a-z]+")*;/.test(flyKeyLine), 'hook 用单值 key 管理「同一时刻只开一个」（旋转 / 切分 / 增强 / 图层切分）');
+for (const k of ['"rotate"', '"split"', '"enhance"', '"layersplit"']) assert(flyKeyLine.includes(k), 'FlyKey 覆盖 ' + k);
 assert(reg.includes('const [key, setKey] = useState<FlyKey | null>(null);'), 'key 单值 → 悬停另一行自动切换');
 assert.strictEqual((reg.match(/const pr = pop\.getBoundingClientRect/g) || []).length, 1, 'measure 代码只写一份（没有复制两份定位）');
-assert.strictEqual((reg.match(/style={flyStyle}/g) || []).length, 3, '三个子浮层共用同一个 flyStyle');
+assert.strictEqual((reg.match(/style={flyStyle}/g) || []).length, 4, '四个子浮层（旋转 / 切分 / 增强 / 图层切分）共用同一个 flyStyle');
 
 /* ---------- 子浮层：挂在菜单里，贴行右侧 ---------- */
 assert(reg.includes('className="split-flyout"'), '浮层是 .split-flyout（不再是独立的 #pop.split-pop）');

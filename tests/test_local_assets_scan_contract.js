@@ -28,11 +28,13 @@ const outputBody = outStart >= 0 && outEnd > outStart ? mainSrc.slice(outStart, 
 
 console.log('[S1] 扫描范围');
 ok(/^def _local_upload_tree_and_items\(/m.test(mainSrc), '存在 _local_upload_tree_and_items');
-ok(/uploads_root = LOCAL_UPLOAD_DIR/.test(scanBody), '递归只从 LOCAL_UPLOAD_DIR 出发');
+ok(/for uploads_root, _url_prefix in local_upload_roots\(\):/.test(scanBody), '递归只从 local_upload_roots() 给出的受管上传目录出发（登录后 = users/{uid}/uploads）');
+ok(/return \[\(LOCAL_UPLOAD_DIR, "\/assets\/uploads"\)\]/.test(mainSrc) && /roots = \[\(local_upload_dir\(\), local_upload_url_prefix\(\)\)\]/.test(mainSrc), '候选根只有 NOVAI 自己的 uploads 目录（未登录 = assets/uploads）');
 ok(/os\.walk\(uploads_root, followlinks=False\)/.test(scanBody), 'os.walk 显式 followlinks=False');
 ok(!/os\.walk\(ASSETS_DIR/.test(mainSrc), '不再从 ASSETS_DIR 整盘遍历');
 ok(!/os\.walk\(\s*[\"']\/|os\.walk\(\s*os\.path\.expanduser/.test(scanBody), '没有从系统根 / home 出发的遍历');
-ok(/OUTPUT_OUTPUT_DIR/.test(outputBody), '生成物只扫 OUTPUT_OUTPUT_DIR');
+ok(/for root, url_prefix in local_output_roots\(\):/.test(outputBody), '生成物只扫 local_output_roots()（登录后 = users/{uid}/output）');
+ok(/roots\.append\(\(OUTPUT_OUTPUT_DIR, "\/assets\/output"\)\)/.test(mainSrc) && /os\.path\.join\(_user_assets_root\(uid\), "output"\)/.test(mainSrc), '候选输出根只有 NOVAI 自己的 output 目录');
 
 console.log('[S2] 不跟链接 / junction');
 ok(/def _local_scan_is_link\(/.test(mainSrc), '有链接判定函数');

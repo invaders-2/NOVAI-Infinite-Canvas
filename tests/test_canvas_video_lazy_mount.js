@@ -52,7 +52,7 @@ ok(/hover=\{p\.hover\} \/>;/.test(bodyFn), 'Body 传给 VideoBody');
 ok(!/store\.(patchGen|set|updateNode)\([^)]*hover/.test(nodeView), 'hover 不写画布文档');
 
 console.log('[3] pinned（固定播放）逻辑存在且控制条只在 pinned 时出现');
-ok(/const onSurface = \(\) => \{ if \(!pinned\) \{ setPinned\(true\); return; \} toggle\(\); \};/.test(videoBody), '点画面：预览态进固定态，固定态才是播放/暂停');
+ok(/const onSurface = \(\) => \{ if \(!pinned\) \{ setPinned\(true\); wakeBar\(\); return; \} toggle\(\); \};/.test(videoBody), '点画面：预览态进固定态（同时唤醒控制条），固定态才是播放/暂停');
 ok(/data-act="play" onPointerDown=\{\(e\) => \{ e\.stopPropagation\(\); if \(out\.url\) setPinned\(true\); \}\}/.test(videoBody), '播放按钮进固定态（onPointerDown，来得及在被卸载前响应）');
 ok(/\{pinned \? <VideoControls /.test(videoBody), '控制条只在 pinned 时渲染');
 ok(/onClose=\{close\}/.test(videoBody) && /const close = \(\) => \{ const v = vref\.current; if \(v\) \{ v\.pause\(\); seekTo\(v, 0\); \} setPinned\(false\); setClosed\(true\);/.test(videoBody), '收起：暂停 + 归零 + 卸载回封面');
@@ -78,7 +78,7 @@ ok(/if \(!enabled\) return \{ url: "", stream: false, onError \};/.test(useMedia
 ok(!/if \([^)]*\)\s*return[^;]*;\s*\n\s*const \w+ = use/.test(useMedia), 'hooks 没有条件调用（useAssetUrl 仍在顶层）');
 
 console.log('[7] 时长角标 / 使用区间 / 截帧链路没被砍掉');
-ok(/onLoadedMetadata=\{\(e\) => learnDur\(e\.currentTarget\)\}/.test(videoBody), 'learnDur 仍在 onLoadedMetadata 上（懒挂载后推迟到首次 hover/播放才学到真实时长）');
+ok(/onLoadedMetadata=\{\(e\) => \{[^}]*learnDur\(e\.currentTarget\)/.test(videoBody), 'learnDur 仍在 onLoadedMetadata 上（懒挂载后推迟到首次 hover/播放才学到真实时长；同一回调里还会 fitToMedia 修原图比例）');
 ok(/const learnDur = \(el: HTMLVideoElement\) => \{[\s\S]{0,400}?store\.patchGen\(node\.id/.test(videoBody), 'learnDur 仍回写 dur');
 ok(/<span className="vdur tnum" data-vdur>\{formatClock\(out\.dur\)\}<\/span>/.test(videoBody), 'dur 角标还在');
 ok(/onFrame=\{\(\) => \{ vref\.current\?\.pause\(\); window\.dispatchEvent\(new CustomEvent\("cn:editor", \{ detail: \{ kind: "frame", id: node\.id \} \}\)\); \}\}/.test(videoBody), '截帧仍发 cn:editor');

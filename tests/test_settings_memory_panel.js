@@ -29,7 +29,8 @@ ok(!/title="记忆"/.test(panel), '记忆卡片不再自带「记忆」标题（
 ok(!panel.includes('与 GPT 对话页记忆库共用同一份数据'), '卡片不再重复介绍文案');
 
 console.log('[2] 列表：文本 + 启用开关 + 删除');
-ok(/onMounted\(loadMemories\)/.test(panel), '挂载时加载 /api/memories');
+ok(/onMounted\(\(\) => \{ loadMemories\(\); refreshSmartMemory\(\); \}\)/.test(panel), '挂载时加载 /api/memories，并顺带刷新画布助手智能记忆开关');
+ok(/fetch\('\/api\/agent\/smart-memory'\)/.test(panel) && /method: 'PUT'/.test(panel), '智能记忆总开关走 GET / PUT /api/agent/smart-memory');
 ok(/<NvSwitch[\s\S]{0,220}toggleMemory\(m\)/.test(panel), '每条记忆挂启用开关，切换走 toggleMemory');
 ok(/<NvIcon name="trash" \/>/.test(panel), '每条记忆有删除按钮（trash）');
 ok(/deleteMemory\(item\)/.test(panel), '删除调用 deleteMemory');

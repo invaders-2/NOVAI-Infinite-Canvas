@@ -174,10 +174,11 @@ ok(/agentDraft=\{agentDraft\}/.test(mainTs), 'CanvasApp 收到 agentDraft prop')
 
 const panel = read('novai-canvas-ui/src/canvas/tapnow/AgentPanel.tsx');
 ok(/if \(!draft\.autoSend\) return;/.test(panel), 'AgentPanel 认 draft.autoSend（非 agent 模板不自动发送）');
-const draftSet = panel.indexOf('setDraft(text)');
-const autoSendAt = panel.indexOf('if (!draft.autoSend) return;');
-ok(draftSet > 0 && autoSendAt > draftSet, '先把文字填进输入框，再判 autoSend');
-ok(/void send\(\)\.catch/.test(panel.slice(autoSendAt, autoSendAt + 1200)), 'autoSend 时真的调面板自己的 send()');
+const draftEffect = panel.slice(panel.indexOf('handledDraft.current = draft.seq'));
+const draftSet = draftEffect.indexOf('setDraft(');
+const autoSendAt = draftEffect.indexOf('if (!draft.autoSend) return;');
+ok(draftSet > 0 && autoSendAt > draftSet, '先把文字填进输入框（含技能胶囊），再判 autoSend');
+ok(/void send\(\)\.catch/.test(draftEffect.slice(autoSendAt, autoSendAt + 1200)), 'autoSend 时真的调面板自己的 send()');
 ok(/handledDraft\.current === draft\.seq/.test(panel), '同一个 seq 只处理一次（避免重复自动发送）');
 
 /* ───────── [5] 构建产物 ───────── */

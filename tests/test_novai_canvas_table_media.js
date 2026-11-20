@@ -134,15 +134,16 @@ const fiveCols = plain('多维表格', ['镜头', '画面', '运镜', '时长', 
 eq(table.tableAutoSize(fiveCols, 3).w, 3 * 112 + 5 * 132 + 36, '3 条通道 + 5 列 = 1032，不再被 800 截断');
 const huge = plain('多维表格', Array.from({ length: 8 }, (_, i) => '列' + i), [Array.from({ length: 8 }, () => 'x')]);
 eq(table.tableAutoSize(huge, 12).w, 1600, '宽度封顶 1600');
-// 节点持久化：sanitizeDoc 只给 table 放宽到 1600，其它节点仍 800
+// 节点持久化（2.0.08）：保留用户拉过的尺寸，只有脏到离谱（>4000）才按同系数收回——重开画布不再把节点缩回 800
 const schema = load('novai-canvas-ui/src/canvas/react-canvas/reactCanvasStore.ts');
 const cleaned = schema.sanitizeDoc({
     nodes: [{ id: 'tb', kind: 'table', x: 0, y: 0, w: 1400, h: 300, text: '' }, { id: 'im', kind: 'image', x: 0, y: 0, w: 1400, h: 300, text: '' }],
     edges: [],
 });
-eq(cleaned.nodes.find((n) => n.id === 'tb').w, 1400, '表格节点宽度不再被 800 截断');
-eq(cleaned.nodes.find((n) => n.id === 'im').w, 800, '其它节点仍按 800 收口');
-eq(schema.sanitizeDoc({ nodes: [{ id: 'tb2', kind: 'table', x: 0, y: 0, w: 5000, h: 300, text: '' }], edges: [] }).nodes[0].w, 1600, '表格宽度封顶 1600');
+eq(cleaned.nodes.find((n) => n.id === 'tb').w, 1400, '表格节点宽度原样保留');
+eq(cleaned.nodes.find((n) => n.id === 'im').w, 1400, '普通节点宽度也原样保留（不再被 800 收回）');
+eq(schema.sanitizeDoc({ nodes: [{ id: 'tb2', kind: 'table', x: 0, y: 0, w: 5000, h: 300, text: '' }], edges: [] }).nodes[0].w, 4000, '超上限（5000）按同系数收到 4000');
+eq(schema.sanitizeDoc({ nodes: [{ id: 'im2', kind: 'image', x: 0, y: 0, w: 5000, h: 300, text: '' }], edges: [] }).nodes[0].w, 4000, '普通节点同样只收到 4000');
 eq(schema.sanitizeOp({ type: 'update-node', id: 'tb', patch: { w: 1400 } }).patch.w, 1400, 'update-node 操作里表格宽度不被 800 卡');
 
 /* ---------- [5][6] LLM 出表：素材来源直连成一列，inputModes 按任务写 ---------- */

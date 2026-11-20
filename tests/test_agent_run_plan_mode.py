@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import io
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -48,7 +49,11 @@ def drain(req):
     """同步跑完 producer，收集它塞进队列的所有 SSE 片段（静音它自己的进度打印）。"""
     async def run():
         queue = asyncio.Queue()
-        with contextlib.redirect_stdout(io.StringIO()):
+        # 这些用例验证的是「非流式决策」的提示词 / 计划契约（模型调用在 _agent_run_chat 上打桩）。
+        # 2026-11 起产品默认走流式（NOVAI_AGENT_V2_STREAM 默认开），流式链路由 tests/test_agent_fix3_stream.py 覆盖；
+        # 这里把开关钉回非流式，桩才仍然打在决策调用上。
+        with contextlib.redirect_stdout(io.StringIO()), \
+                patch.dict(os.environ, {"NOVAI_AGENT_V2_STREAM": "0"}):
             await main._agent_run_producer(req, queue)
         chunks = []
         while not queue.empty():
@@ -381,8 +386,10 @@ class AgentRunEndpointModeTests(unittest.TestCase):
         chat = AsyncMock(return_value=json.dumps(chat_reply, ensure_ascii=False))
 
         async def run():
-            response = await main.agent_run(payload, object())   # 路由新增 request 参数（auth-off 放行）
-            return [chunk async for chunk in response.body_iterator]
+            # 同 drain()：非流式契约用例，钉住 NOVAI_AGENT_V2_STREAM=0
+            with patch.dict(os.environ, {"NOVAI_AGENT_V2_STREAM": "0"}):
+                response = await main.agent_run(payload, object())   # 路由新增 request 参数（auth-off 放行）
+                return [chunk async for chunk in response.body_iterator]
 
         with patch.object(main, "load_canvas", return_value=canvas()), \
                 patch.object(main, "_agent_run_resolve_chat", return_value=chat_config()), \

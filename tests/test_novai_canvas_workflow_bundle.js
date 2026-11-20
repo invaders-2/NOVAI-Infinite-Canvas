@@ -272,8 +272,10 @@ function makeDeflatedZip(files) {
     assert(main.includes('createCanvas') && main.includes('fetch("/api/canvases"') && /method: "POST"/.test(main), 'main.tsx 实现 createCanvas 且走 POST /api/canvases');
     assert(main.includes('board_x: 40') && main.includes('board_y: 40') && main.includes('icon: "🧩"'), '新建画布参数（icon / 坐标）');
     assert(css.includes('.cn-root .wf-drop') && css.includes('.cn-root .wf-status') && css.includes('.cn-root .wf-acts'), '面板样式');
-    const wfCss = css.slice(css.indexOf('/* ---------- 工作流导入 / 导出面板 ---------- */'));
-    assert(wfCss.length > 0 && css.includes('.cn-root .wf-sec'), '面板样式段落在');
+    const wfStart = css.indexOf('/* ---------- 工作流导入 / 导出面板 ---------- */');
+    const wfNext = wfStart >= 0 ? css.indexOf('/* ----------', wfStart + 10) : -1;
+    const wfCss = wfStart >= 0 ? css.slice(wfStart, wfNext > wfStart ? wfNext : undefined) : '';
+    assert(wfCss.length > 0 && css.includes('.cn-root .wf-sec'), '面板样式段落在（只看它自己那一段，后面新增的段落不参与判定）');
     const borderViolations = findForbiddenBorders(wfCss);
     assert.deepStrictEqual(borderViolations, [], '面板样式不许用可见 border 表达层级（复位 border:0 / border:none 放行，实际：' + borderViolations.join('；') + '）');
     const insetShadowViolations = findForbiddenInsetShadows(wfCss);

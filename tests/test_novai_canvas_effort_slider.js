@@ -145,10 +145,11 @@ assert.ok(agentPanel.includes('import { EffortSlider } from "../canvas-next/ui/E
 assert.ok(agentPanel.includes('thinkLevels={thinkLevels} thinkLevel={thinkLevel} onThinkChange={setThinkLevel}'), '一级模型菜单传入当前模型的档位 / 当前值 / 改写回调');
 assert.ok(agentPanel.includes('<EffortSlider levels={thinkLevels} value={thinkLevel} onChange={onThinkChange} />'), '一级供应商列表下方、模型设置上方插入滑块');
 assert.ok(agentPanel.indexOf('className="model-effort"') > agentPanel.indexOf('className="model-providers"') && agentPanel.indexOf('className="model-effort"') < agentPanel.indexOf('onSettings ?'), '滑块位于供应商列表与模型设置之间');
-assert.ok(agentPanel.includes('<EffortSlider levels={thinkLevels} value={thinkLevel} onChange={setThinkLevel} />'), '#aThinkLevel 弹层复用同一滑块');
-assert.ok(agentPanel.includes('id="aThinkLevel"') && agentPanel.includes('data-think-level={thinkLevel || "default"}'), '触发 pill / data-think-level 保留');
+assert.ok(agentPanel.includes('<EffortSlider levels={thinkLevels} value={thinkLevel} onChange={onThinkChange} />'), '#aThinkLevel 弹层复用同一滑块（档位 / 当前值 / 回调都由 AgentModelMenu 的 props 传进来）');
+assert.ok(agentPanel.includes('onThinkChange={setThinkLevel}'), '弹层滑块的 onThinkChange 接回面板 setThinkLevel');
+assert.ok(!agentPanel.includes('id="aThinkLevel"'), '模型强度 pill 已下线（2026-11：强度滑块直接放进模型菜单，不再占输入区一个 pill）');
 assert.ok(agentPanel.includes('localStorage.setItem("canvas-next:agent:think"') && agentPanel.includes('localStorage.removeItem("canvas-next:agent:think")'), '画布 localStorage canvas-next:agent:think 不变');
-assert.ok(agentPanel.includes('thinkLevels.length > 1 ? <button'), '只有多于 1 档才给入口');
+assert.ok(agentPanel.includes('thinkLevels.length > 1 ? <div className="model-effort">'), '只有多于 1 档才渲染滑块');
 assert.ok(agentPanel.includes('closest?.(".ev-track")'), '滑块聚焦时方向键不被菜单抢走');
 
 // ---- 一级菜单宽度 / 供应商列表高度 ----
