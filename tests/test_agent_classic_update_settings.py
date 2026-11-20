@@ -159,5 +159,39 @@ class ClassicRunGenerationSettingsTests(unittest.TestCase):
         self.assertEqual(node["ratio"], "16:9")
 
 
+class SettingClearValueTests(unittest.TestCase):
+    """可清空参数（_AGENT_SETTING_CLEARABLE）：default / none / 空串 = 删掉节点 params 里的键。
+    真实故障：待生成卡片把「默认」写成 "default"，thinking 被当成假值落成 false、文本 think 直接报错。"""
+
+    @staticmethod
+    def node(kind, params):
+        return {"id": "n", "type": "smart-" + kind,
+                "data": {"gen": {"title": "t", "prompt": "", "params": dict(params)}}}
+
+    def test_image_thinking_default_clears_instead_of_false(self):
+        settings = main._agent_validate_settings({"thinking": "default", "quality": "default"}, "image")
+        node = self.node("image", {"thinking": True, "quality": "high"})
+        main._agent_classic_apply_settings(node, "image", settings)
+        self.assertNotIn("thinking", node["data"]["gen"]["params"])
+        self.assertNotIn("quality", node["data"]["gen"]["params"])
+
+    def test_text_think_default_is_accepted_and_clears(self):
+        settings = main._agent_validate_settings({"output": "table", "think": "default", "search": False}, "text")
+        self.assertEqual(settings.get("think"), "")
+        node = self.node("text", {"think": "high", "output": "text"})
+        main._agent_classic_apply_settings(node, "text", settings)
+        self.assertNotIn("think", node["data"]["gen"]["params"])
+        self.assertEqual(node["data"]["gen"]["params"]["output"], "table")
+
+    def test_video_switch_clear_values_remove_keys(self):
+        settings = main._agent_validate_settings(
+            {"turbo": "default", "draft": "", "multiShot": "none", "genMode": "default"}, "video")
+        node = self.node("video", {"turbo": True, "draft": True, "multiShot": True, "genMode": "4K"})
+        main._agent_classic_apply_settings(node, "video", settings)
+        params = node["data"]["gen"]["params"]
+        for key in ("turbo", "draft", "multiShot", "genMode"):
+            self.assertNotIn(key, params)
+
+
 if __name__ == "__main__":
     unittest.main()

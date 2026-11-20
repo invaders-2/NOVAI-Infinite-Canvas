@@ -30,18 +30,45 @@ export type LanFriend = {
   added_by: string;
 };
 
-export type LanMessageKind = "text" | "canvas";
-export type LanMessageStatus = "sent" | "failed" | "received";
+export type LanMessageKind = "text" | "canvas" | "image" | "video";
+/** pending = 没送出去，已落库，等对方上线由后端自动补发 */
+export type LanMessageStatus = "sent" | "failed" | "pending" | "received";
 export type LanMessage = {
   id: string;
   kind: LanMessageKind;
   text: string;
   share_url: string;
   canvas_title: string;
+  /** 图片 / 视频消息才有：本机 /api/lan/media/<id> 的绝对地址 */
+  media_url?: string;
+  media_name?: string;
+  media_size?: number;
   ts: number;
   dir: "in" | "out" | "sys";
   status: LanMessageStatus;
   read: boolean;
+};
+
+export type LanFriendRequestStatus = "pending" | "accepted" | "rejected" | "failed";
+
+/** 好友请求里对方那一半（incoming 是 from，outgoing 是 to） */
+export type LanFriendRequestPeer = {
+  id: string;
+  nickname: string;
+  avatar: string;
+  base_url: string;
+  code: string;
+  /** outgoing 不带；incoming 里是请求方的局域网口令，回调时用 */
+  token?: string;
+};
+
+export type LanFriendRequest = {
+  id: string;
+  ts: number;
+  status: LanFriendRequestStatus;
+  from?: LanFriendRequestPeer;
+  to?: LanFriendRequestPeer;
+  error?: string;
 };
 
 /** 旧好友码：NOVAI-<局域网IP>:<端口>-<32+ 位口令>（与后端 parse_friend_code 同一套规则） */
@@ -100,12 +127,39 @@ export function isDataAvatar(avatar: unknown): boolean {
   return typeof avatar === "string" && avatar.startsWith("data:image/");
 }
 
+/** 媒体消息的类型标签：图片 / 视频，其它 kind 返回空串 */
+export function mediaKindLabel(kind: unknown): string {
+  if (kind === "image") return "[图片]";
+  if (kind === "video") return "[视频]";
+  return "";
+}
+
 /** 会话列表里的一行摘要 */
 export function messagePreview(message: LanMessage | null | undefined): string {
   if (!message) return "还没有消息";
   if (message.kind === "canvas") return "画布 · " + (message.canvas_title || "未命名画布");
   const text = String(message.text || "").replace(/\s+/g, " ").trim();
+  const media = mediaKindLabel(message.kind);
+  if (media) return media + (text ? " " + text.slice(0, 36) : "");
   return text ? text.slice(0, 40) : "还没有消息";
+}
+
+/** 好友请求里「对方」是谁：incoming 看 from，outgoing 看 to */
+export function requestPeer(request: LanFriendRequest | null | undefined): LanFriendRequestPeer | null {
+  if (!request) return null;
+  const peer = request.from || request.to;
+  return peer && typeof peer === "object" ? peer : null;
+}
+
+/** 好友请求的一句话（列表顶部的请求行 / outgoing 提示都用它） */
+export function requestPreview(request: LanFriendRequest | null | undefined): string {
+  if (!request) return "";
+  const name = String(requestPeer(request)?.nickname || "").trim() || "对方";
+  if (request.status === "accepted") return "已和 " + name + " 成为好友";
+  if (request.status === "rejected") return name + " 拒绝了你的好友请求";
+  if (request.status === "failed") return "给 " + name + " 的好友请求没送到";
+  if (request.from) return name + " 请求添加好友";
+  return "已向 " + name + " 发送好友请求，等对方同意";
 }
 
 function pad2(value: number): string {
@@ -162,9 +216,15 @@ export function lanErrorMessage(status: number, detail?: string): string {
   if (status === 403) return "好友凭据无效：让对方删掉你之后重新用好友码加一次。";
   if (status === 404) return text || "好友不存在，可能已经被删除。";
   if (status === 410) return "这条分享已经失效，请对方重新发一张画布。";
-  if (status === 502) return text || "对方离线或端口不通，稍后重试。";
+  if (status === 502) return text || "对方暂时没响应，消息已保存，恢复后会自动补发。";
   if (status >= 500) return "对方那台 NOVAI 出了点问题，稍后再试。";
   return text || "操作失败，请稍后再试。";
+}
+
+/** 没送出去的消息在气泡下方补一句（空串 = 不用提示，正常消息不打扰） */
+export function messageDeliveryLabel(status: unknown): string {
+  if (status === "pending") return "未送达 · 对方上线后自动补发";
+  return "";
 }
 
 /** 从分享链接里取 token（画布卡片只存链接，打开时复用 T49 的只读预览） */

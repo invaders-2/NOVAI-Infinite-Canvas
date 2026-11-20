@@ -22,7 +22,7 @@
   background:color-mix(in srgb,var(--panel) 78%,transparent);
   backdrop-filter:blur(44px) saturate(190%);-webkit-backdrop-filter:blur(44px) saturate(190%);
   box-shadow:0 10px 30px rgba(0,0,0,.24),0 36px 84px rgba(0,0,0,.32);
-  transform-origin:0 100%;animation:lanIn .2s var(--ease) both}
+  transform-origin:0 17px;animation:lanIn .2s var(--ease) both}
 .cn-root[data-theme=light] .lan-panel{background:color-mix(in srgb,var(--panel) 82%,transparent);
   box-shadow:0 10px 30px rgba(15,23,42,.12),0 36px 84px rgba(15,23,42,.18)}
 @keyframes lanIn{from{opacity:0;transform:translateX(-10px) scale(.99)}}
@@ -47,10 +47,12 @@
 .cn-root .lan-friend:hover{background:var(--hover)}
 .cn-root .lan-avatar{position:relative;width:34px;height:34px;border-radius:50%;flex:none;display:grid;place-items:center;
   background:var(--sunken);font-size:16px;line-height:1;color:var(--fg);overflow:hidden}
-.cn-root .lan-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.cn-root .lan-avatar img{width:100%;height:100%;object-fit:cover;display:block;border-radius:50%}
 .cn-root .lan-avatar.big{width:52px;height:52px;font-size:24px}
-.cn-root .lan-avatar[data-online]::after{content:"";position:absolute;right:0;bottom:0;width:9px;height:9px;border-radius:50%;
-  background:var(--ok);box-shadow:0 0 0 2px var(--panel)}
+/* 好友行头像 + 在线绿点：绿点挂在不裁切的外层（.lan-avw），内容留在 .lan-avatar 里按圆裁 */
+.cn-root .lan-avw{position:relative;flex:none;width:34px;height:34px;display:grid;place-items:center}
+.cn-root .lan-online-dot{position:absolute;right:0;bottom:0;width:9px;height:9px;border-radius:50%;
+  background:var(--ok);box-shadow:0 0 0 2px var(--panel);pointer-events:none}
 .cn-root .lan-friend-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
 .cn-root .lan-friend-name{font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cn-root .lan-friend-status{display:flex;align-items:center;gap:6px;min-width:0;font-size:11px;color:var(--fg3)}
@@ -78,6 +80,7 @@
   box-shadow:0 2px 8px rgba(0,0,0,.14);font-size:13px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
 .cn-root .lan-msg.me .lan-bubble{background:var(--solid);color:var(--on-solid);border-bottom-right-radius:6px;box-shadow:0 2px 10px rgba(0,0,0,.18)}
 .cn-root .lan-meta{display:flex;align-items:center;gap:8px;padding:2px 4px 0;font-size:10.5px;color:var(--fg3)}
+.cn-root .lan-pending{font-size:10.5px;color:var(--bad);opacity:.85}
 .cn-root .lan-retry{font-size:10.5px;color:var(--bad);padding:0 4px;border-radius:6px}
 .cn-root .lan-retry:hover{background:color-mix(in srgb,var(--bad) 12%,transparent)}
 
@@ -160,6 +163,38 @@
 .cn-root .lan-crop-acts{display:flex;align-items:center;justify-content:flex-end;gap:8px;width:100%;padding-top:2px}
 .cn-root .lan-crop-acts .lan-btn:first-child{margin-right:auto}
 
+/* ── 好友请求行（好友列表顶部）：头像 + 「X 请求添加好友」+ 同意 / 拒绝；无描边，靠软底与间距分层 ── */
+.cn-root .lan-reqs{display:flex;flex-direction:column;gap:6px;padding:2px 2px 6px}
+.cn-root .lan-req-row{display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 8px;border-radius:12px;
+  background:color-mix(in srgb,var(--card) 88%,transparent);box-shadow:0 2px 8px rgba(0,0,0,.1)}
+.cn-root .lan-req-row.wait{background:var(--sunken);box-shadow:none}
+.cn-root .lan-req-row-av{width:30px;height:30px;font-size:14px}
+.cn-root .lan-req-row-text{flex:1;min-width:0;font-size:12px;line-height:1.45;color:var(--fg);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-root .lan-req-row.wait .lan-req-row-text{font-size:11.5px;color:var(--fg3);white-space:normal}
+.cn-root .lan-req-btn{flex:none;height:26px;padding:0 10px;border-radius:8px;font-size:11.5px;
+  background:var(--solid);color:var(--on-solid)}
+.cn-root .lan-req-btn.ghost{background:var(--sunken);color:var(--fg2)}
+.cn-root .lan-req-btn:hover:not(:disabled){opacity:.9}
+.cn-root .lan-req-btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ── 图片 / 视频消息：圆角 12、图片 220×300 封顶、视频 260 宽；不加边框，靠投影和底色立起来 ── */
+.cn-root .lan-media-wrap{display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:100%}
+.cn-root .lan-media-wrap.me{align-items:flex-end}
+.cn-root .lan-media{display:block;padding:0;border-radius:12px;overflow:hidden;line-height:0;max-width:220px;
+  background:var(--sunken);box-shadow:0 2px 10px rgba(0,0,0,.18)}
+.cn-root .lan-media img{display:block;width:auto;height:auto;max-width:220px;max-height:300px;object-fit:cover}
+.cn-root .lan-media:disabled{cursor:default;opacity:.72}
+.cn-root .lan-media-video{display:block;width:auto;max-width:260px;max-height:300px;border-radius:12px;background:var(--sunken);
+  box-shadow:0 2px 10px rgba(0,0,0,.2);line-height:0}
+.cn-root .lan-media-fail{display:grid;place-items:center;min-width:120px;min-height:84px;padding:14px;
+  border-radius:12px;background:var(--sunken);color:var(--fg3);font-size:11.5px;line-height:1.5;text-align:center}
+.cn-root .lan-caption{margin-top:2px;max-width:220px}
+.cn-root .lan-list[data-drop="1"]{background:color-mix(in srgb,var(--solid) 6%,transparent);border-radius:14px}
+
+/* 输入区：附件按钮与「发送中…」提示 */
+.cn-root .lan-sending{flex:none;align-self:center;padding:0 2px;font-size:11px;color:var(--fg3);white-space:nowrap}
+
 /* ── 画布卡片只读预览：复用 T49 的 ShareView（它自带 scrim + 窗口 z-index） ── */
 .cn-root .lan-preview{position:fixed;inset:0;z-index:70;pointer-events:none}
 .cn-root .lan-preview > *{pointer-events:auto}
@@ -181,7 +216,8 @@
 .cn-root #lb #avatar{font-size:20px;line-height:1;font-weight:500;background:rgba(var(--ink),.1)}
 
 /* ── 右下角新消息通知：让开 #orb（bottom 18、56/64px 高）和 #zb（bottom 16、40px 高）；
-     Agent 面板展开时 #agent 占掉右侧 380px，卡片整体左移，别压到面板上 ── */
+     Agent 面板展开时 #agent 占掉右侧 380px，卡片整体左移，别压到面板上。
+     column-reverse 决定堆叠方向：DOM 第 1 张贴右下角；数组按消息时间从下往上排，最新的就离角落最近 ── */
 .cn-root.lan-root .lan-notices{position:fixed;right:max(16px,env(safe-area-inset-right,0px));
   bottom:calc(96px + env(safe-area-inset-bottom,0px));z-index:2;display:flex;flex-direction:column-reverse;gap:8px;pointer-events:none}
 .cn-root.lan-root .lan-notices > *{pointer-events:auto}
@@ -206,4 +242,30 @@
 @media (prefers-reduced-motion:reduce){
   .cn-root .lan-notice{animation:none}
   .cn-root .lan-notice[data-leaving="1"]{transition:none}
+}
+
+/* ── 右下角好友请求卡片：位置与 .lan-notices 一致（right 16 / bottom 96；Agent 面板打开时由内联样式整体左移）。
+     配方照 web/src/shell/UpdateReminder.vue：宽 320、圆角 16、padding 14px 16px 16px、磨砂厚底 + 柔和投影，不画边框。
+     不自动消失；关闭只是忽略这一次，列表顶部仍能处理。 ── */
+.cn-root.lan-root .lan-requests{position:fixed;right:max(16px,env(safe-area-inset-right,0px));
+  bottom:calc(96px + env(safe-area-inset-bottom,0px));z-index:2;display:flex;flex-direction:column-reverse;gap:8px;pointer-events:none}
+.cn-root.lan-root .lan-requests > *{pointer-events:auto}
+.cn-root .lan-req{position:relative;width:320px;max-width:calc(100vw - 32px);padding:14px 16px 16px;border-radius:16px;color:var(--fg);
+  background:rgba(24,24,24,.95);
+  backdrop-filter:blur(32px) saturate(180%);-webkit-backdrop-filter:blur(32px) saturate(180%);
+  box-shadow:0 10px 28px rgba(0,0,0,.34),0 2px 8px rgba(0,0,0,.22);
+  transform-origin:100% 100%;animation:lanNoticeIn .22s var(--ease) both}
+.cn-root[data-theme=light] .lan-req{background:rgba(255,255,255,.96);
+  box-shadow:0 10px 28px rgba(15,23,42,.16),0 2px 8px rgba(15,23,42,.08)}
+.cn-root .lan-req-hd{display:flex;align-items:center;gap:8px}
+.cn-root .lan-req-av{width:32px;height:32px;font-size:15px}
+.cn-root .lan-req-title{flex:1;min-width:0;font-size:13.5px;font-weight:600;line-height:20px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cn-root .lan-req-x{flex:none;width:22px;height:22px;border-radius:7px;display:grid;place-items:center;color:var(--fg3);opacity:.7;
+  transition:opacity var(--d-quick) var(--e-std),background-color var(--d-quick) var(--e-std),color var(--d-quick) var(--e-std)}
+.cn-root .lan-req-x:hover{background:var(--hover);color:var(--fg);opacity:1}
+.cn-root .lan-req-note{margin:6px 0 12px;font-size:12px;line-height:18px;color:var(--fg3)}
+.cn-root .lan-req-acts{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+@media (prefers-reduced-motion:reduce){
+  .cn-root .lan-req{animation:none}
 }

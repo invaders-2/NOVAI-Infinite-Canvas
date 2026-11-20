@@ -38,12 +38,16 @@ export type ModelCapsItem = {
   native_background?: unknown;
   /** 只返回提示词、不产视频（如 MiniMax-H3-Context-IR）：true 时面板不给视频参数 */
   prompt_only?: unknown;
+  /** 视频模型能出声音、且请求里能明确开关（后端 apimart_video_audio_switchable 判定）；缺省 = 没有这个入口 */
+  audio?: unknown;
   /** Midjourney 专属参数：{ versions, speeds, hd }（后端只给这几个数组） */
   mj?: unknown;
   /** 精确像素生成的模型（GPT-Image 家族）声明的像素上限：长边 / 总像素 / 最低像素 */
   max_long_edge?: unknown;
   max_pixels?: unknown;
   min_pixels?: unknown;
+  /** include_builtin=1 才有：能力表里有定义、但 provider 没登记的内部模型（不是用户清单里的） */
+  builtin?: unknown;
 };
 
 /** 请求尺寸能取的范围（后端 caps 下发的像素上限；没声明的模型视为不限制） */
@@ -187,6 +191,8 @@ export function modelCapsUi(kind: "image" | "video" | "audio", item: ModelCapsIt
       ui.durs = [...new Set(strings(item.durations).map(Number).filter((n) => Number.isFinite(n) && (n > 0 || n === -1)))].sort((a, b) => a - b);
     }
     if (Array.isArray(item.modes)) ui.modes = normalizeCapsModes(item.modes);
+    // 原生音频开关：只有后端明确说「能出声音且能开关」才落进 ui（缺字段 = 面板不给这个入口）
+    if (item.audio === true) ui.audio = true;
   }
   return Object.keys(ui).length ? ui : null;
 }

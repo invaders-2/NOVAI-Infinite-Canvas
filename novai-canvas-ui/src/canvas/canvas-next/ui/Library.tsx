@@ -58,7 +58,8 @@ export async function placeItem(ctl: Ctl, it: GItem, at?: { x: number; y: number
   if (!sw || !sh) { const m = mk === "audio" ? null : await measure(it.url, mk); if (m) { sw = m.w; sh = m.h; } }
   const box = libraryNodeBox(sw, sh, mk);
   const asset = assetRefOf(it);
-  if (target && store.node(target)) { replaceNodeMedia(store, target, { url: it.url, w: box.w, h: box.h }); store.patchGen(target, { asset }); store.setUI({ replace: null }); store.toast("已替换素材"); return; }
+  // 素材库这一条也把媒体类型传进去：类型不符就停在这一步（守卫已提示原因，替换态保持，方便再选一条）
+  if (target && store.node(target)) { if (!replaceNodeMedia(store, target, { url: it.url, w: box.w, h: box.h }, mk)) return; store.patchGen(target, { asset }); store.setUI({ replace: null }); store.toast("已替换素材"); return; }
   const c = at || ctl.center(); const n = store.newNode(mk, c.x - box.w / 2, c.y - box.h / 2, { title: it.name, uploaded: true, hist: [{ url: it.url, w: sw || box.w, h: sh || box.h }], w: box.w, h: box.h, ...(asset ? { asset } : {}) });
   store.addNodes([n], [], { select: true }); store.toast("已放到画布");
 }
@@ -69,17 +70,6 @@ function scopeOf(it: GItem, scope: "personal" | "local") {
   return scope === "local" ? local : nonLocal;
 }
 
-/** 素材用途（和后端 server/asset_meta.py 的 ASSET_USES 同一套 id） */
-export const USES: Array<{ id: string; label: string; icon: IconName }> = [
-  { id: "product", label: "产品", icon: "cube" },
-  { id: "model", label: "模特", icon: "user" },
-  { id: "scene", label: "场景", icon: "image" },
-  { id: "source", label: "源视频", icon: "video" },
-  { id: "depth", label: "深度视频", icon: "layers" },
-  { id: "style", label: "风格参考", icon: "palette" },
-  { id: "sound", label: "音效", icon: "audio" },
-];
-const USE_LABEL: Record<string, string> = Object.fromEntries(USES.map((u) => [u.id, u.label]));
 const TYPES: Array<{ id: string; label: string; icon: IconName }> = [
   { id: "all", label: "全部类型", icon: "layoutgrid" },
   { id: "image", label: "图片", icon: "image" },
@@ -120,7 +110,7 @@ export function LibrarySection({ q }: { q: string }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [scope, setScope] = useState<"personal" | "local">("personal");
   const [query, setQuery] = useState(q || "");
-  const [use, setUse] = useState("all"); const [type, setType] = useState("all"); const [productId, setProductId] = useState<string | null>(null);
+  const [type, setType] = useState("all"); const [productId, setProductId] = useState<string | null>(null);
   // 手风琴：展开的文件夹（可同时开多个）；showAll = 已点过「显示全部」的文件夹
   const [open, setOpen] = useState<Set<string>>(() => new Set()); const [showAll, setShowAll] = useState<Set<string>>(() => new Set());
   const [edit, setEdit] = useState<FolderEditState | null>(null);
@@ -188,8 +178,8 @@ export function LibrarySection({ q }: { q: string }) {
     connect();
     return () => { stop = true; window.clearTimeout(timer); try { ws?.close(); } catch { /* ignore */ } };
   }, [scheduleRefresh]);
-  useEffect(() => { setVisible(PAGE); setUse("all"); setProductId(null); setEdit(null); }, [scope]);
-  useEffect(() => { setVisible(PAGE); }, [use, type, productId, query]);
+  useEffect(() => { setVisible(PAGE); setProductId(null); setEdit(null); }, [scope]);
+  useEffect(() => { setVisible(PAGE); }, [type, productId, query]);
   const loadMore = async () => {
     if (!cmd || loadingMore || !hasMore) return;
     setLoadingMore(true);
@@ -212,15 +202,13 @@ export function LibrarySection({ q }: { q: string }) {
   }, [cats, scoped, scope]);
   const folderByKey = useMemo(() => new Map(folders.map((f) => [f.key, f])), [folders]);
   const product = productId ? products.find((p) => p.id === productId) || null : null;
-  const useCounts = useMemo(() => { const m = new Map<string, number>(); for (const it of scoped) if (it.use) m.set(it.use, (m.get(it.use) || 0) + 1); return m; }, [scoped]);
   const searching = !!query.trim();
   const shown = useMemo(() => {
     let list = scoped;
     if (product) { const ids = new Set(product.angles.map((a) => a.item_id)); list = list.filter((it) => !!it.assetId && ids.has(it.assetId)); }
-    if (use !== "all") list = list.filter((it) => it.use === use);
     if (type !== "all") list = list.filter((it) => it.kind === type);
     return filterLibraryItems(list, "all", query);
-  }, [scoped, product, use, type, query]);
+  }, [scoped, product, type, query]);
   useEffect(() => {
     const el = sentinel.current; if (!el) return;
     const root = el.closest(".dbody"); const io = new IntersectionObserver((es) => {
@@ -309,15 +297,11 @@ export function LibrarySection({ q }: { q: string }) {
     </div>;
   };
   const topFolders = folders.filter((f) => !f.parentKey);
-  const gridTitle = searching ? "搜索结果" : product ? product.name + " · 产品角度" : use !== "all" ? USE_LABEL[use] || "素材" : "全部素材";
+  const gridTitle = searching ? "搜索结果" : product ? product.name + " · 产品角度" : "全部素材";
   return <div className="lib-shell">
     <div className="lib-head"><button className="ib" aria-label="收起素材库" onClick={close}><Icon name="left" size="s" /></button><b>素材库</b><span className="sp" /><button className="lib-ai" data-lib-ai onClick={() => openCharacterLibrary(ctl)}><Icon name="user" size="xs" />AI 角色</button><button className="ib" aria-label="上传素材" onClick={upload}><Icon name="plus" size="s" /></button></div>
     <div className="lib-scope"><button className={scope === "personal" ? "on" : ""} onClick={() => setScope("personal")}>个人</button><button className={scope === "local" ? "on" : ""} onClick={() => setScope("local")}>本地</button></div>
     <div className="lib-search"><Icon name="search" size="xs" /><input value={query} placeholder="搜名称或 AI 标签，如「白色运动鞋」" onChange={(e) => setQuery(e.target.value)} />{query ? <button className="ib" aria-label="清空搜索" onClick={() => setQuery("")}><Icon name="x" size="xs" /></button> : null}<AnimateIcon asChild><button className="ib" aria-label="刷新" onClick={() => setTick((t) => t + 1)}><Icon name="history" size="xs" /></button></AnimateIcon></div>
-    {useCounts.size ? <div className="lib-chips" role="group" aria-label="按用途筛选">
-      <button className={"lib-chip" + (use === "all" ? " on" : "")} aria-pressed={use === "all"} onClick={() => setUse("all")}>全部</button>
-      {USES.filter((u) => useCounts.has(u.id)).map((u) => <button key={u.id} className={"lib-chip" + (use === u.id ? " on" : "")} aria-pressed={use === u.id} onClick={() => setUse(use === u.id ? "all" : u.id)}><Icon name={u.icon} size="xs" />{u.label}<em>{useCounts.get(u.id)}</em></button>)}
-    </div> : null}
     {err ? <div className="lib-empty">{err}<button className="linkbtn" onClick={() => setTick((t) => t + 1)}>重试</button></div> : null}
     {busy && !items.length ? <div className="lib-empty">正在读取全局素材…</div> : null}
     {!searching && scope === "personal" && products.length ? <div className="lib-sec">
@@ -373,12 +357,10 @@ function AssetPreview({ it, onClose }: { it: GItem; onClose: () => void }) {
 function LibTile({ it, selected, onSelect, onPreview, onMenu }: { it: GItem; selected: boolean; onSelect: () => void; onPreview: () => void; onMenu: (e: MouseEvent) => void }) {
   const [broken, setBroken] = useState(false);
   const thumb = broken ? "" : thumbOf(it);
-  const useLabel = it.use ? USE_LABEL[it.use] : "";
-  const tip = [it.name, useLabel, it.summary, (it.tags || []).slice(0, 6).join(" · "), it.canvas_title].filter(Boolean).join("\n");
+  const tip = [it.name, it.summary, (it.tags || []).slice(0, 6).join(" · "), it.canvas_title].filter(Boolean).join("\n");
   return <div className={"a" + (selected ? " sel" : "") + (it.kind === "prompt" ? " txt" : "") + (it.kind === "video" ? " vid" : "")} title={tip} onClick={(e) => { e.stopPropagation(); onSelect(); }} onDoubleClick={(e) => { e.stopPropagation(); onPreview(); }} onContextMenu={onMenu} draggable onDragStart={(e) => { (window as unknown as { __novaiLibDrag?: GItem }).__novaiLibDrag = it; try { e.dataTransfer?.setData("text/plain", it.url); } catch { /* ignore */ } }} onDragEnd={() => { (window as unknown as { __novaiLibDrag?: GItem }).__novaiLibDrag = undefined; }}>
     {thumb ? <img src={thumb} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} /> : it.kind === "video" ? <Icon name="video" /> : it.kind === "audio" ? <span className="atext"><Icon name="audio" size="xs" />{it.name}</span> : <span className="atext"><Icon name={it.kind === "prompt" ? "pencil" : "image"} size="xs" />{it.name}</span>}
     {it.kind === "video" ? <span className="abadge"><Icon name={it.use === "depth" ? "layers" : "play"} size="xs" />{it.use === "depth" ? "深度" : "视频"}</span> : null}
-    {useLabel && it.kind !== "video" && it.kind !== "audio" ? <span className="ause">{useLabel}</span> : null}
   </div>;
 }
 

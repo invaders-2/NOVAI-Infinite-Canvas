@@ -5,7 +5,7 @@
  * 在线状态与未读每 5s 轮询，会话内容 4s 轮询；不用 WebSocket。
  * 画布卡片的只读预览直接复用 T49 的 ShareView（内部是 TemplatePreview + 克隆 / 存模板）。
  */
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { CanvasDoc } from "../../react-canvas/reactCanvasStore";
 import { serverDocToDoc } from "../../../novaiBackend";
@@ -13,22 +13,30 @@ import { cloneWorkflowForImport, savePersonalTemplate } from "../personalTemplat
 import { uid } from "../model";
 import { useCtl, useS } from "./ctx";
 import { Icon } from "./Icon";
+import { AnimatedSendIcon } from "./AnimatedSendIcon";
 import { TemplatePreview } from "./TemplatePreview";
 import { previewDocOf, shareErrorMessage } from "./shareDoc";
 import { localizeDocMedia, mediaStatsText, type MediaStats } from "./shareMedia";
 import { AvatarCrop } from "./AvatarCrop";
 import {
   absolutizeSnapshot, avatarText, daySeparator, friendStatusLabel, isDataAvatar, lanErrorMessage, mergeLanMessages,
-  messageTimeLabel, newMessageId, onlineCount, parseFriendCode, shareTokenOf,
-  unreadTotal, type LanFriend, type LanMe, type LanMessage, type LanView,
+  messageDeliveryLabel, messageTimeLabel, newMessageId, onlineCount, parseFriendCode, requestPeer, requestPreview, shareTokenOf,
+  unreadTotal, type LanFriend, type LanFriendRequest, type LanMe, type LanMessage, type LanMessageKind, type LanView,
 } from "./lanDoc";
+import {
+  appendNotices, clearFriendNotices, noticeMessages, noticePreviewOf, planNoticeFetches, NOTICE_LEAVE, NOTICE_TTL,
+  type LanNoticeItem, type LanNoticeMessage, type NoticePollState,
+} from "./lanNotice";
 import "./lan-chat.css";
+
+type LanRequests = { incoming: LanFriendRequest[]; outgoing: LanFriendRequest[] };
 
 type Snapshot = {
   ready: boolean;
   me: LanMe | null;
   friends: LanFriend[];
   messages: LanMessage[];
+  requests: LanRequests;
   open: boolean;
   view: LanView;
   activeId: string;
@@ -39,7 +47,7 @@ type Snapshot = {
 };
 
 const EMPTY: Snapshot = {
-  ready: false, me: null, friends: [], messages: [], open: false, view: "list",
+  ready: false, me: null, friends: [], messages: [], requests: { incoming: [], outgoing: [] }, open: false, view: "list",
   activeId: "", previewUrl: "", sending: false, notice: "", error: "",
 };
 
@@ -95,14 +103,84 @@ async function loadFriends(quiet = true): Promise<void> {
   else if (!quiet) setLan({ error: result.error });
 }
 
+/** 关掉好友请求卡片 = 忽略这一次；30 分钟内同一请求不再弹（列表顶部照样能处理） */
+const REQUEST_IGNORE_MS = 30 * 60 * 1000;
+const ignoredRequests = new Map<string, number>();
+
+function ignoreRequest(requestId: string): void {
+  ignoredRequests.set(requestId, Date.now());
+}
+
+function isIgnoredRequest(requestId: string, now = Date.now()): boolean {
+  const stamp = ignoredRequests.get(requestId) || 0;
+  if (!stamp) return false;
+  if (now - stamp < REQUEST_IGNORE_MS) return true;
+  ignoredRequests.delete(requestId);
+  return false;
+}
+
+/** 上一轮看到的状态：只有「pending → accepted/rejected」才提示，刷新页面不会把旧结果再弹一遍 */
+const lastRequestStatus = new Map<string, string>();
+
+/** 好友请求轮询：失败静默，绝不往 error 里塞（每 5s 弹一次红字比不提示更糟） */
+async function loadRequests(): Promise<void> {
+  const result = await api("/api/lan/friend-requests");
+  if (!result.ok) return;
+  const data = result.data || {};
+  const incoming: LanFriendRequest[] = Array.isArray(data.incoming) ? data.incoming : [];
+  const outgoing: LanFriendRequest[] = Array.isArray(data.outgoing) ? data.outgoing : [];
+  setLan({ requests: { incoming, outgoing } });
+  let settled = false;
+  for (const request of outgoing) {
+    const before = lastRequestStatus.get(request.id);
+    lastRequestStatus.set(request.id, request.status);
+    if (before !== "pending") continue;
+    if (request.status !== "accepted" && request.status !== "rejected") continue;
+    const name = String(requestPeer(request)?.nickname || "").trim() || "对方";
+    settled = true;
+    notify(request.status === "accepted" ? name + " 已同意你的好友请求" : name + " 拒绝了你的好友请求");
+  }
+  if (settled) void loadFriends(false);
+}
+
+/** 同意 / 拒绝本机收到的好友请求；卡片和列表顶部那一行共用 */
+async function respondToRequest(request: LanFriendRequest, accept: boolean): Promise<boolean> {
+  const result = await api(
+    "/api/lan/friend-requests/" + encodeURIComponent(request.id) + (accept ? "/accept" : "/reject"),
+    { method: "POST" },
+  );
+  if (!result.ok) {
+    notify(result.error || "操作失败，稍后再试");
+    return false;
+  }
+  ignoreRequest(request.id);
+  const name = String(requestPeer(request)?.nickname || "").trim() || "对方";
+  notify(accept ? "已添加 " + name + " 为好友" : "已拒绝");
+  void loadFriends(false);
+  void loadRequests();
+  return true;
+}
+
 async function loadMessages(friendId: string, after = 0): Promise<void> {
   if (!friendId) return;
   const result = await api("/api/lan/messages?with=" + encodeURIComponent(friendId) + "&after=" + (after || 0));
   if (!result.ok) { setLan({ error: result.error }); return; }
   const incoming: LanMessage[] = Array.isArray(result.data?.messages) ? result.data.messages : [];
   if (!incoming.length) return;
-  // 只并消息，不清 error：发送失败后这里紧接着刷新一次，清了用户就看不到报错了
-  setLan({ messages: mergeLanMessages(snapshot.messages, incoming) });
+  // 后端把「待补发」的消息送出去后状态会变 sent：给一句提示，别让用户以为还卡着
+  const before = new Map(snapshot.messages.map((item) => [item.id, item.status]));
+  const recovered = incoming.filter((item) => item.status === "sent" && before.get(item.id) === "pending");
+  // 只并消息，不清 error：发送失败后这里紧接着刷新一次，清了用户就看不到报错了。
+  // 例外：这条失败的消息已经补发出去，那条红字就过期了，得一起收掉。
+  setLan(recovered.length
+    ? { messages: mergeLanMessages(snapshot.messages, incoming), error: "" }
+    : { messages: mergeLanMessages(snapshot.messages, incoming) });
+  if (recovered.length === 1) {
+    const text = String(recovered[0].text || "").trim().slice(0, 16);
+    notify(recovered[0].kind === "text" && text ? "已补发：" + text : "消息已补发");
+  } else if (recovered.length > 1) {
+    notify(recovered.length + " 条消息已补发");
+  }
 }
 
 async function markRead(friendId: string): Promise<void> {
@@ -146,10 +224,26 @@ export async function openChatEntry(): Promise<void> {
   openChat(target.id);
 }
 
-type SendInput = { text?: string; kind?: "text" | "canvas"; share_url?: string; canvas_title?: string; message_id?: string };
+/** 左侧栏头像左键：先到好友列表，点某个好友才进会话（openChatEntry 保留「直接进最近会话」的老语义） */
+export async function openFriendList(): Promise<void> {
+  setLan({ open: true, view: "list", activeId: "", messages: [], error: "", notice: "" });
+  void loadRequests();
+  await Promise.all([loadMe(), loadFriends(false)]);
+}
 
-async function sendToFriend(friendId: string, input: SendInput): Promise<boolean> {
-  if (!friendId) return false;
+type SendInput = {
+  text?: string;
+  kind?: LanMessageKind;
+  share_url?: string;
+  canvas_title?: string;
+  message_id?: string;
+  media_url?: string;
+  media_name?: string;
+  media_size?: number;
+};
+
+async function sendToFriend(friendId: string, input: SendInput): Promise<ApiResult> {
+  if (!friendId) return { ok: false, status: 0, data: null, error: "好友不存在，可能已经被删除" };
   setLan({ sending: true, error: "" });
   const result = await api("/api/lan/friends/" + encodeURIComponent(friendId) + "/send", {
     method: "POST",
@@ -158,6 +252,9 @@ async function sendToFriend(friendId: string, input: SendInput): Promise<boolean
       kind: input.kind || "text",
       share_url: input.share_url || "",
       canvas_title: input.canvas_title || "",
+      media_url: input.media_url || "",
+      media_name: input.media_name || "",
+      media_size: input.media_size || 0,
       message_id: input.message_id || newMessageId(),
     }),
   });
@@ -171,7 +268,53 @@ async function sendToFriend(friendId: string, input: SendInput): Promise<boolean
     await loadMessages(friendId);
   }
   void loadFriends();
-  return result.ok;
+  return result;
+}
+
+/* ---------------------------------------------------------------- 图片 / 视频 */
+
+/** 后端单文件上限 200MB，超出直接拦在本地，省一次白跑 */
+const MEDIA_MAX_BYTES = 200 * 1024 * 1024;
+
+type LanMedia = { id: string; url: string; name: string; size: number; mime: string; kind: "image" | "video" };
+
+function mediaKindOf(file: File): "image" | "video" | "" {
+  const type = String(file.type || "");
+  if (type.startsWith("image/")) return "image";
+  if (type.startsWith("video/")) return "video";
+  return "";
+}
+
+/** 粘贴 / 拖拽过来的文件：优先 items（拖拽时 files 常是空的） */
+function mediaFilesOf(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const files: File[] = [];
+  for (const item of Array.from(data.items || [])) {
+    if (item.kind !== "file") continue;
+    const file = item.getAsFile();
+    if (file && mediaKindOf(file)) files.push(file);
+  }
+  if (files.length) return files;
+  return Array.from(data.files || []).filter((file) => !!mediaKindOf(file));
+}
+
+/** 上传到本机后端，拿到局域网可访问的绝对地址；失败给一句中文原因 */
+async function uploadMedia(file: File): Promise<{ media?: LanMedia; error: string }> {
+  const form = new FormData();
+  form.append("file", file, file.name || "media");
+  try {
+    const response = await fetch("/api/lan/media", { method: "POST", body: form });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      if (response.status === 413) return { error: "文件太大（上限 200MB）" };
+      return { error: lanErrorMessage(response.status, String(data?.detail || "")) };
+    }
+    const media = data?.media as LanMedia | undefined;
+    if (!media?.url) return { error: "上传失败，请重试" };
+    return { media, error: "" };
+  } catch {
+    return { error: lanErrorMessage(0) };
+  }
 }
 
 /* ---------------------------------------------------------------- 画布卡片只读预览 */
@@ -379,10 +522,19 @@ export function LanChatHost() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const avatarFileRef = useRef<HTMLInputElement | null>(null);
+  const mediaFileRef = useRef<HTMLInputElement | null>(null);
+  /** 加载失败的图片 / 视频按消息 id 记住，占位文案顶上去（不画边框） */
+  const [brokenMedia, setBrokenMedia] = useState<Record<string, boolean>>({});
+  /** 正拖着文件进会话区：只改底色提示，不加描边 */
+  const [dropActive, setDropActive] = useState(false);
+  /** 列表顶部请求行正在同意 / 拒绝的 request.id */
+  const [requestBusy, setRequestBusy] = useState("");
   /** 本次会话内上传过的原图；确认裁切后才留，用于「重新裁切」 */
   const [avatarSource, setAvatarSource] = useState<{ image: HTMLImageElement; url: string } | null>(null);
   /** 裁切中：fresh 表示这次新选的文件，取消时要把它的 objectURL 一起丢掉 */
   const [crop, setCrop] = useState<{ image: HTMLImageElement; url: string; fresh: boolean } | null>(null);
+  /** 贴着 #avatar 的内联定位；量不到头像或窄屏时为 null，交回 CSS 默认值 */
+  const [panelBox, setPanelBox] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
 
   const dropObjectUrl = (source: { url: string } | null) => {
     if (!source) return;
@@ -426,12 +578,44 @@ export function LanChatHost() {
 
   useEffect(() => { notify = (text: string) => ctl.store.toast(text); }, [ctl]);
 
+  // 面板贴着头像打开：量 #avatar 的 getBoundingClientRect 算 left / top / max-height。
+  // 头像在 #lb 里是垂直居中的，窗口高度一变它就动，所以 resize 要重新量。
+  // ≤720px 时清掉内联值，让媒体查询的全宽贴顶规则生效。
+  useLayoutEffect(() => {
+    if (!snap.open) { setPanelBox(null); return; }
+    const place = () => {
+      const avatar = document.getElementById("avatar");
+      if (!avatar || window.innerWidth <= 720) { setPanelBox(null); return; }
+      const rect = avatar.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const margin = 12;
+      const cap = Math.min(660, vh - margin * 2);
+      const minHeight = Math.min(160, cap);
+      let left = rect.right + 12;
+      if (left + 364 > vw - margin) left = vw - margin - 364;
+      let top = rect.top;
+      if (top + minHeight > vh - margin) top = vh - margin - minHeight;
+      left = Math.max(margin, Math.round(left));
+      top = Math.max(margin, Math.round(top));
+      setPanelBox({ left, top, maxHeight: Math.floor(Math.min(cap, vh - margin - top)) });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [snap.open]);
+
   // 我的资料：每次打开浮层同步一次（昵称/头像可能被另一台机器或另一个页面改过）
+  // 好友与好友请求同频 5s 轮询；请求失败静默（loadRequests 内部吞掉）
   useEffect(() => {
     void loadMe();
     void loadFriends(false);
-    const timer = setInterval(() => { void loadFriends(); }, 5000);
-    return () => clearInterval(timer);
+    void loadRequests();
+    // 窗口 / 画布 iframe 不可见时跳过（原来最小化了也每 5s 打两个接口），重新可见时立刻补一次
+    const poll = () => { if (document.hidden) return; void loadFriends(); void loadRequests(); };
+    const timer = setInterval(poll, 5000);
+    document.addEventListener("visibilitychange", poll);
+    return () => { clearInterval(timer); document.removeEventListener("visibilitychange", poll); };
   }, []);
 
   // 首页（外壳 iframe）点头像菜单里的好友时发 novai:lan-open 过来：合法 friendId 直接进那个会话，否则走默认入口
@@ -466,7 +650,7 @@ export function LanChatHost() {
       if (snapshot.messages.some((item) => item.dir === "in" && !item.read)) await markRead(friendId);
     };
     void tick();
-    const timer = setInterval(() => { void tick(); }, 4000);
+    const timer = setInterval(() => { if (!document.hidden) void tick(); }, 4000);
     return () => clearInterval(timer);
   }, [snap.open, snap.view, snap.activeId]);
 
@@ -489,14 +673,59 @@ export function LanChatHost() {
   }, [snap.open, snap.previewUrl, crop]);
 
   const active = snap.friends.find((f) => f.id === snap.activeId) || null;
+  const pendingIncoming = snap.requests.incoming.filter((request) => request.status === "pending");
+  const pendingOutgoing = snap.requests.outgoing.filter((request) => request.status === "pending");
 
   const submitText = async () => {
     const text = draft.trim();
     if (!text || !snap.activeId || snap.sending) return;
     setDraft("");
-    const ok = await sendToFriend(snap.activeId, { text, message_id: newMessageId() });
-    if (!ok) setDraft(text);
+    const result = await sendToFriend(snap.activeId, { text, message_id: newMessageId() });
+    // 502 说明后端已经把消息存成「待补发」，塞回输入框会让用户再发一条重复的
+    if (!result.ok && result.status !== 502) setDraft(text);
     composerRef.current?.focus();
+  };
+
+  const markBroken = (messageId: string) => {
+    setBrokenMedia((prev) => (prev[messageId] ? prev : { ...prev, [messageId]: true }));
+  };
+
+  /** 选文件 / 粘贴 / 拖拽都走这里：先传本机后端拿局域网地址，再按 image|video 发出去 */
+  const sendMediaFiles = async (files: File[]) => {
+    const friendId = snap.activeId;
+    if (!friendId || snap.sending) return;
+    const usable = files.filter((file) => !!mediaKindOf(file));
+    if (!usable.length) { notify("只能发图片或视频"); return; }
+    setLan({ sending: true, error: "" });
+    for (const file of usable) {
+      const kind = mediaKindOf(file);
+      if (!kind) continue;
+      if (file.size > MEDIA_MAX_BYTES) {
+        setLan({ sending: false, error: "文件太大（上限 200MB）" });
+        notify("文件太大（上限 200MB）");
+        return;
+      }
+      const uploaded = await uploadMedia(file);
+      if (!uploaded.media) {
+        setLan({ sending: false, error: uploaded.error });
+        notify(uploaded.error);
+        return;
+      }
+      await sendToFriend(friendId, {
+        kind,
+        media_url: uploaded.media.url,
+        media_name: uploaded.media.name,
+        media_size: uploaded.media.size,
+        message_id: newMessageId(),
+      });
+    }
+    setLan({ sending: false });
+  };
+
+  const respondFromList = async (request: LanFriendRequest, accept: boolean) => {
+    setRequestBusy(request.id);
+    await respondToRequest(request, accept);
+    setRequestBusy("");
   };
 
   const sendCanvas = async () => {
@@ -528,13 +757,21 @@ export function LanChatHost() {
     setLan({ sending: true, error: "", notice: "" });
     const result = await api("/api/lan/friends", { method: "POST", body: JSON.stringify({ code: codeDraft.trim() }) });
     if (!result.ok) { setLan({ sending: false, error: result.error }); return; }
+    // 新版本对方在线时只是「投递了请求」（pending），旧版本才直接成为好友
     const friend = result.data?.friend as LanFriend | undefined;
+    const pending = !!result.data?.pending;
+    const peerName = String(requestPeer(result.data?.request as LanFriendRequest)?.nickname || "").trim();
     await loadFriends(false);
+    void loadRequests();
     setLan({ sending: false, error: "", notice: "" });
     setCodeDraft("");
-    notify("已加为好友：" + (friend?.nickname || "对方"));
-    if (friend?.id) openChat(friend.id);
-    else setLan({ view: "list" });
+    if (friend?.id) {
+      notify("已加为好友：" + (friend.nickname || "对方"));
+      openChat(friend.id);
+      return;
+    }
+    setLan({ view: "list" });
+    if (pending) notify("已向 " + (peerName || "对方") + " 发送好友请求，等对方同意");
   };
 
   const saveMe = async () => {
@@ -596,6 +833,9 @@ export function LanChatHost() {
       kind: message.kind,
       share_url: message.share_url,
       canvas_title: message.canvas_title,
+      media_url: message.media_url,
+      media_name: message.media_name,
+      media_size: message.media_size,
       message_id: message.id,
     });
   };
@@ -618,8 +858,11 @@ export function LanChatHost() {
 
   const friendRow = (friend: LanFriend) => (
     <button key={friend.id} className={"lan-friend" + (friend.online ? " on" : "")} data-lan-friend={friend.id} onClick={() => openChat(friend.id)}>
-      <span className="lan-avatar" data-online={friend.online ? "1" : undefined}>
-        {isDataAvatar(friend.avatar) ? <img src={friend.avatar} alt="" /> : avatarText(friend)}
+      <span className="lan-avw" data-online={friend.online ? "1" : undefined}>
+        <span className="lan-avatar">
+          {isDataAvatar(friend.avatar) ? <img src={friend.avatar} alt="" /> : avatarText(friend)}
+        </span>
+        {friend.online ? <span className="lan-online-dot" /> : null}
       </span>
       <span className="lan-friend-main">
         <span className="lan-friend-name">{friend.nickname}</span>
@@ -635,7 +878,8 @@ export function LanChatHost() {
   return createPortal(
     <div className="cn-root lan-root" data-theme={theme}>
       {snap.open ? (
-        <div id="lanPanel" className="lan-panel" data-lan-panel onKeyDown={(e) => e.stopPropagation()}>
+        <div id="lanPanel" className="lan-panel" data-lan-panel onKeyDown={(e) => e.stopPropagation()}
+          style={panelBox ? { left: panelBox.left, top: panelBox.top, bottom: "auto", maxHeight: panelBox.maxHeight } : undefined}>
           <div className="lan-head">
             {snap.view === "chat" ? (
               <button className="lan-ib" aria-label="返回好友列表" data-lan-back onClick={() => setLan({ view: "list", activeId: "", messages: [], error: "" })}><Icon name="back" size="s" /></button>
@@ -665,6 +909,26 @@ export function LanChatHost() {
 
           {snap.view === "list" ? (
             <div className="lan-body" data-lan-view="list">
+              {pendingIncoming.length || pendingOutgoing.length ? (
+                <div className="lan-reqs" data-lan-request-rows>
+                  {pendingIncoming.map((request) => {
+                    const peer = requestPeer(request);
+                    return (
+                      <div className="lan-req-row" key={request.id} data-lan-request-row={request.id}>
+                        <span className="lan-avatar lan-req-row-av">{isDataAvatar(peer?.avatar) ? <img src={String(peer?.avatar || "")} alt="" /> : avatarText(peer)}</span>
+                        <span className="lan-req-row-text">{requestPreview(request)}</span>
+                        <button className="lan-req-btn ghost" data-lan-request-reject-row={request.id} disabled={requestBusy === request.id} onClick={() => void respondFromList(request, false)}>拒绝</button>
+                        <button className="lan-req-btn" data-lan-request-accept-row={request.id} disabled={requestBusy === request.id} onClick={() => void respondFromList(request, true)}>同意</button>
+                      </div>
+                    );
+                  })}
+                  {pendingOutgoing.map((request) => (
+                    <div className="lan-req-row wait" key={request.id} data-lan-request-wait={request.id}>
+                      <span className="lan-req-row-text">{requestPreview(request)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               {snap.friends.length ? snap.friends.map(friendRow) : (
                 <div className="lan-empty">
                   <span className="lan-empty-ic"><Icon name="user" /></span>
@@ -678,7 +942,21 @@ export function LanChatHost() {
 
           {snap.view === "chat" ? (
             <>
-              <div className="lan-list" ref={listRef} data-lan-messages>
+              <div className="lan-list" ref={listRef} data-lan-view="chat" data-lan-messages data-drop={dropActive ? "1" : undefined}
+                onDragOver={(e) => {
+                  if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "copy";
+                  if (!dropActive) setDropActive(true);
+                }}
+                onDragLeave={() => setDropActive(false)}
+                onDrop={(e) => {
+                  const files = mediaFilesOf(e.dataTransfer);
+                  if (!files.length) return;
+                  e.preventDefault();
+                  setDropActive(false);
+                  void sendMediaFiles(files);
+                }}>
                 {snap.messages.length ? snap.messages.map((message, index) => {
                   const previous = index > 0 ? snap.messages[index - 1] : null;
                   const day = daySeparator(message.ts, previous?.ts || 0);
@@ -701,12 +979,34 @@ export function LanChatHost() {
                               <small>{shareTokenOf(message.share_url) ? "点开只读预览 · 可克隆到画布" : "链接已失效"}</small>
                             </span>
                           </button>
+                        ) : message.kind === "image" || message.kind === "video" ? (
+                          <div className={"lan-media-wrap" + (message.dir === "out" ? " me" : "")} data-lan-media={message.id}>
+                            {message.kind === "video"
+                              ? (message.media_url && !brokenMedia[message.id]
+                                ? <video className="lan-media-video" src={message.media_url} controls preload="metadata" playsInline onError={() => markBroken(message.id)} />
+                                : <span className="lan-media-fail">视频加载失败</span>)
+                              : (
+                                <button type="button" className="lan-media" disabled={!message.media_url}
+                                  aria-label={message.media_name ? "查看图片 " + message.media_name : "查看图片"}
+                                  onClick={() => { if (message.media_url) window.open(message.media_url, "_blank"); }}>
+                                  {message.media_url && !brokenMedia[message.id]
+                                    ? <img src={message.media_url} alt={message.media_name || "图片"} loading="lazy" onError={() => markBroken(message.id)} />
+                                    : <span className="lan-media-fail">图片加载失败</span>}
+                                </button>
+                              )}
+                            {String(message.text || "").trim() ? <div className="lan-bubble lan-caption">{message.text}</div> : null}
+                          </div>
                         ) : (
                           <div className="lan-bubble">{message.text}</div>
                         )}
                         <div className="lan-meta">
                           <span>{messageTimeLabel(message.ts)}</span>
-                          {message.status === "failed" ? <button className="lan-retry" data-lan-retry onClick={() => void retry(message)}>重发</button> : null}
+                          {messageDeliveryLabel(message.status)
+                            ? <span className="lan-pending" data-lan-pending={message.status}>{messageDeliveryLabel(message.status)}</span>
+                            : null}
+                          {message.status === "failed" || message.status === "pending"
+                            ? <button className="lan-retry" data-lan-retry onClick={() => void retry(message)}>重发</button>
+                            : null}
                         </div>
                       </div>
                       )}
@@ -722,13 +1022,24 @@ export function LanChatHost() {
                   value={draft}
                   placeholder={active?.online ? "发消息给 " + (active?.nickname || "好友") + "，Enter 发送" : "对方离线也能发，连上后会收到"}
                   onChange={(e) => { setDraft(e.target.value); if (snap.error) setLan({ error: "" }); }}
+                  onPaste={(e) => {
+                    const files = mediaFilesOf(e.clipboardData);
+                    if (!files.length) return;
+                    e.preventDefault();
+                    void sendMediaFiles(files);
+                  }}
                   onKeyDown={(e) => {
                     e.stopPropagation();
                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submitText(); }
                   }}
                 />
+                <input ref={mediaFileRef} type="file" accept="image/*,video/*" multiple hidden data-lan-media-input
+                  onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ""; void sendMediaFiles(files); }} />
+                <button className="lan-ib" data-lan-attach data-tip="发图片或视频" aria-label="发送图片或视频" title="发送图片或视频"
+                  disabled={snap.sending} onClick={() => mediaFileRef.current?.click()}><Icon name="image" size="s" /></button>
                 <button className="lan-ib" data-lan-send-canvas data-tip="把当前画布发给对方" aria-label="发送当前画布" title="把当前画布发给对方" disabled={snap.sending} onClick={() => void sendCanvas()}><Icon name="layout" size="s" /></button>
-                <button className="lan-send" data-lan-send disabled={snap.sending || !draft.trim()} aria-label="发送" onClick={() => void submitText()}><Icon name="send" size="s" /></button>
+                {snap.sending ? <span className="lan-sending" data-lan-sending>发送中…</span> : null}
+                <button className="lan-send" data-lan-send disabled={snap.sending || !draft.trim()} aria-label="发送" onClick={() => void submitText()}><AnimatedSendIcon size={16} /></button>
               </div>
             </>
           ) : null}
@@ -812,95 +1123,86 @@ export function LanChatHost() {
 
 /* ---------------------------------------------------------------- 右下角新消息通知 */
 
-type LanLastMessage = { kind?: string; text?: string; ts?: number; dir?: string };
-
-type LanNotice = { friendId: string; nickname: string; avatar: string; preview: string; leaving?: boolean };
-
-/** 停 5s 自动消失、退场 180ms、同时最多两张：够看清又不挡画布 */
-const NOTICE_TTL = 5000;
-const NOTICE_LEAVE = 180;
-const NOTICE_MAX = 2;
-
-const lastMessageOf = (friend: LanFriend): LanLastMessage | null => {
-  const last = (friend as LanFriend & { last_message?: LanLastMessage | null }).last_message;
-  return last && typeof last === "object" ? last : null;
-};
-
-/** 一句话预览：后端 last_message 拿不到也要给出看得懂的兜底 */
-const noticePreview = (friend: LanFriend): string => {
-  const last = lastMessageOf(friend);
-  if (!last) return "给你发来一条消息";
-  const text = String(last.text || "").replace(/\s+/g, " ").trim();
-  if (last.kind === "canvas") return "[画布]" + (text ? " " + text.slice(0, 40) : "");
-  return text ? text.slice(0, 60) : "给你发来一条消息";
-};
-
 /**
- * 新消息卡片：跟着 5s 轮询回来的未读数走，某好友 unread 比上一轮涨了就弹一张。
- * 正看着这个人的会话不弹；同一好友再来消息只换预览、重置计时。
+ * 新消息卡片：一条消息一张，自下而上涨上去（数组按消息时间排，第 0 项贴右下角，见 lanNotice.ts）。
+ * 触发仍然挂在 5s 轮询回来的未读数上：某好友 unread 涨了才按 ts 游标补拉一次消息，
+ * 按 message id 去重；页面刚打开时只记游标不弹（历史未读不打扰），正开着这个人的会话也不弹。
  */
 export function LanNoticeHost() {
   const theme = useS((s) => s.ui.theme);
   const agentOpen = useS((s) => s.ui.agentOpen);
   const snap = useLan();
-  const [items, setItems] = useState<LanNotice[]>([]);
-  const previousUnread = useRef(new Map<string, number>());
+  const [items, setItems] = useState<LanNoticeItem[]>([]);
+  const pollState = useRef<NoticePollState>({ unread: new Map(), cursor: new Map() });
+  const shown = useRef(new Set<string>());
+  const fetching = useRef(new Set<string>());
   const timers = useRef(new Map<string, number>());
+  const mounted = useRef(true);
 
-  const clearTimer = (friendId: string) => {
-    const timer = timers.current.get(friendId);
+  const clearTimer = (messageId: string) => {
+    const timer = timers.current.get(messageId);
     if (timer) window.clearTimeout(timer);
-    timers.current.delete(friendId);
+    timers.current.delete(messageId);
   };
 
-  const dismiss = (friendId: string) => {
-    clearTimer(friendId);
-    setItems((list) => list.map((item) => (item.friendId === friendId ? { ...item, leaving: true } : item)));
-    timers.current.set(friendId, window.setTimeout(() => {
-      timers.current.delete(friendId);
-      setItems((list) => list.filter((item) => item.friendId !== friendId));
+  const dismiss = (messageId: string) => {
+    clearTimer(messageId);
+    setItems((list) => list.map((item) => (item.messageId === messageId ? { ...item, leaving: true } : item)));
+    timers.current.set(messageId, window.setTimeout(() => {
+      timers.current.delete(messageId);
+      setItems((list) => list.filter((item) => item.messageId !== messageId));
     }, NOTICE_LEAVE));
   };
 
-  const arm = (friendId: string) => {
-    clearTimer(friendId);
-    timers.current.set(friendId, window.setTimeout(() => dismiss(friendId), NOTICE_TTL));
+  const arm = (messageId: string) => {
+    clearTimer(messageId);
+    timers.current.set(messageId, window.setTimeout(() => dismiss(messageId), NOTICE_TTL));
   };
 
   useEffect(() => {
-    const previous = previousUnread.current;
-    const next = new Map<string, number>();
-    const fresh: LanFriend[] = [];
-    for (const friend of snap.friends) {
-      const unread = Math.max(0, Number(friend.unread) || 0);
-      next.set(friend.id, unread);
-      const before = previous.get(friend.id);
-      if (before !== undefined && unread > before) fresh.push(friend);
-    }
-    previousUnread.current = next;
-    if (!fresh.length) return;
-    const chattingWith = snap.open && snap.view === "chat" ? snap.activeId : "";
-    const show = fresh.filter((friend) => friend.id !== chattingWith);
-    if (!show.length) return;
-    setItems((list) => {
-      let merged = list;
-      for (const friend of show) {
-        const notice: LanNotice = { friendId: friend.id, nickname: friend.nickname, avatar: friend.avatar, preview: noticePreview(friend) };
-        merged = [notice, ...merged.filter((item) => item.friendId !== friend.id)];
-      }
-      return merged.slice(0, NOTICE_MAX);
-    });
-    for (const friend of show) arm(friend.id);
-  }, [snap.friends, snap.open, snap.view, snap.activeId]);
-
-  useEffect(() => () => {
-    for (const timer of timers.current.values()) window.clearTimeout(timer);
-    timers.current.clear();
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      for (const timer of timers.current.values()) window.clearTimeout(timer);
+      timers.current.clear();
+    };
   }, []);
 
+  useEffect(() => {
+    const chattingWith = snap.open && snap.view === "chat" ? snap.activeId : "";
+    const plan = planNoticeFetches(pollState.current, snap.friends, chattingWith);
+    pollState.current = plan.state;
+    for (const job of plan.fetches) {
+      if (fetching.current.has(job.friendId)) continue;
+      const friend = snap.friends.find((item) => item.id === job.friendId);
+      if (!friend) continue;
+      fetching.current.add(job.friendId);
+      void api("/api/lan/messages?with=" + encodeURIComponent(friend.id) + "&after=" + (job.after || 0))
+        .then((result) => {
+          if (!mounted.current || !result.ok) return;
+          const all: LanNoticeMessage[] = Array.isArray(result.data?.messages) ? result.data.messages : [];
+          // 游标按返回里的最新 ts 走：中间夹着自己发的消息也算处理过，下次不重拉
+          const latest = all.reduce((n, message) => Math.max(n, Number(message?.ts) || 0), 0);
+          if (latest) pollState.current.cursor.set(friend.id, Math.max(pollState.current.cursor.get(friend.id) || 0, latest));
+          const fresh = noticeMessages(all, job.after, shown.current).map((message) => {
+            shown.current.add(message.id);
+            return {
+              friendId: friend.id, messageId: message.id, nickname: friend.nickname,
+              avatar: friend.avatar, preview: noticePreviewOf(message), ts: Number(message.ts) || 0,
+            };
+          });
+          if (!fresh.length) return;
+          setItems((list) => appendNotices(list, fresh));
+          for (const item of fresh) arm(item.messageId);
+        })
+        .catch(() => {})
+        .finally(() => { fetching.current.delete(job.friendId); });
+    }
+  }, [snap.friends, snap.open, snap.view, snap.activeId]);
+
   const openFromNotice = (friendId: string) => {
-    clearTimer(friendId);
-    setItems((list) => list.filter((item) => item.friendId !== friendId));
+    for (const item of items) if (item.friendId === friendId) clearTimer(item.messageId);
+    setItems((list) => clearFriendNotices(list, friendId));
     openChat(friendId);
   };
 
@@ -910,8 +1212,9 @@ export function LanNoticeHost() {
     <div className="cn-root lan-root" data-theme={theme}>
       <div className="lan-notices" data-lan-notices style={agentOpen ? { right: "calc(380px + 16px)" } : undefined}>
         {items.map((item) => (
-          <div key={item.friendId} className="lan-notice" data-lan-notice={item.friendId} data-leaving={item.leaving ? "1" : undefined}
-            role="button" tabIndex={0} aria-label={"查看 " + item.nickname + " 的新消息"}
+          <div key={item.messageId} className="lan-notice" data-lan-notice={item.messageId} data-lan-notice-friend={item.friendId}
+            data-leaving={item.leaving ? "1" : undefined} role="button" tabIndex={0}
+            aria-label={"查看 " + item.nickname + " 的新消息：" + item.preview}
             onClick={() => openFromNotice(item.friendId)}
             onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openFromNotice(item.friendId); } }}>
             <span className="lan-avatar lan-notice-av">{isDataAvatar(item.avatar) ? <img src={item.avatar} alt="" /> : avatarText(item)}</span>
@@ -920,9 +1223,70 @@ export function LanNoticeHost() {
               <span className="lan-notice-text">{item.preview}</span>
             </span>
             <span className="lan-notice-go">查看</span>
-            <button type="button" className="lan-notice-x" aria-label="关闭提醒" onClick={(event) => { event.stopPropagation(); dismiss(item.friendId); }}><Icon name="x" size="xs" /></button>
+            <button type="button" className="lan-notice-x" aria-label="关闭提醒" onClick={(event) => { event.stopPropagation(); dismiss(item.messageId); }}><Icon name="x" size="xs" /></button>
           </div>
         ))}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/* ---------------------------------------------------------------- 右下角好友请求卡片 */
+
+const REQUEST_CARD_MAX = 2;
+
+/**
+ * 好友请求卡片：规格照 web/src/shell/UpdateReminder.vue（320 宽、圆角 16、磨砂厚底、标题行 + 说明 + 右下按钮）。
+ * 不自动消失；点关闭只是忽略这一次（内存记 30 分钟），好友列表顶部照样能同意 / 拒绝。
+ */
+export function LanRequestHost() {
+  const theme = useS((s) => s.ui.theme);
+  const agentOpen = useS((s) => s.ui.agentOpen);
+  const snap = useLan();
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const [busy, setBusy] = useState("");
+
+  const dismiss = (requestId: string) => {
+    ignoreRequest(requestId);
+    setDismissed((list) => (list.includes(requestId) ? list : [...list, requestId]));
+  };
+
+  const respond = async (request: LanFriendRequest, accept: boolean) => {
+    setBusy(request.id);
+    const ok = await respondToRequest(request, accept);
+    setBusy("");
+    if (ok) dismiss(request.id);
+  };
+
+  const items = snap.requests.incoming
+    .filter((request) => request.status === "pending" && !dismissed.includes(request.id) && !isIgnoredRequest(request.id))
+    .sort((a, b) => (Number(b.ts) || 0) - (Number(a.ts) || 0))
+    .slice(0, REQUEST_CARD_MAX);
+
+  if (!items.length) return null;
+
+  return createPortal(
+    <div className="cn-root lan-root" data-theme={theme}>
+      <div className="lan-requests" data-lan-requests style={agentOpen ? { right: "calc(380px + 16px)" } : undefined}>
+        {items.map((request) => {
+          const peer = requestPeer(request);
+          const pending = busy === request.id;
+          return (
+            <div key={request.id} className="lan-req" data-lan-request={request.id} role="dialog" aria-label={requestPreview(request)}>
+              <div className="lan-req-hd">
+                <span className="lan-avatar lan-req-av">{isDataAvatar(peer?.avatar) ? <img src={String(peer?.avatar || "")} alt="" /> : avatarText(peer)}</span>
+                <b className="lan-req-title">{requestPreview(request)}</b>
+                <button type="button" className="lan-req-x" aria-label="关闭提醒" onClick={() => dismiss(request.id)}><Icon name="x" size="xs" /></button>
+              </div>
+              <p className="lan-req-note">同意后你们可以互相发消息、图片和视频。</p>
+              <div className="lan-req-acts">
+                <button type="button" className="lan-btn" data-lan-request-reject={request.id} disabled={pending} onClick={() => void respond(request, false)}>拒绝</button>
+                <button type="button" className="lan-btn pri" data-lan-request-accept={request.id} disabled={pending} onClick={() => void respond(request, true)}>同意</button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>,
     document.body,

@@ -11,6 +11,7 @@
                                              -> {ok, skill}；不存在 404
     DELETE /api/skills/{id}               -> 删除 data/skills/<id>.json -> {ok, deleted}；不存在 404、纯内置 400
     POST /api/skills/import               -> body {markdown, overwrite?} 导入 SKILL.md（也兼容旧的 JSON 定义）
+    POST /api/skills/import-zip           -> multipart file=.zip, overwrite? 安装技能包（每份 SKILL.md 一个技能）
                                              -> {ok, skill, created}；name 非法 400、已存在未 overwrite 409
     GET  /api/agents                      -> {agents:[...]}（等价 kind='agent'，原字段不变）
     GET  /api/agents/{agent_id}           -> {agent:{...完整定义含 input_schema}}
@@ -49,6 +50,7 @@ from server.skills import registry as skills_registry
 from server.skills import skill_md
 from server.skills import github_install
 from server.skills import token_store
+from server.skills import script_runner
 from server.routes.deps import deps
 
 router = APIRouter(prefix="/api")
@@ -667,8 +669,13 @@ def _skill_md_json_meta(metadata: Dict[str, Any], key: str, fallback: Any) -> An
     return fallback
 
 
-def _skill_md_to_definition(parsed: Dict[str, Any]) -> Dict[str, Any]:
-    """把 parse_skill_md 的结果落成 data/skills 里的技能定义（id = name）。"""
+def _skill_md_to_definition(parsed: Dict[str, Any], default_enabled: bool = False) -> Dict[str, Any]:
+    """把 parse_skill_md 的结果落成 data/skills 里的技能定义（id = name）。
+
+    默认**不启用**（2026-11-19 安全加固）：导入后要用户在「设置 → 技能」手动打开开关，
+    否则外部仓库进来的提示词会立刻进画布助手。SKILL.md 的 metadata.enabled 可显式覆盖；
+    覆盖已有技能时由调用方把原有状态传进 default_enabled，避免一次重导入把启用状态改掉。
+    """
     metadata = parsed.get("metadata") if isinstance(parsed.get("metadata"), dict) else {}
     name = str(parsed.get("name") or "").strip()
 
@@ -687,8 +694,11 @@ def _skill_md_to_definition(parsed: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(schema, dict):
         schema = {"files": [], "params": []}
     deliverables = [item for item in deliverables if isinstance(item, dict)] if isinstance(deliverables, list) else []
-    enabled_raw = metadata.get("enabled", True)
-    enabled = str(enabled_raw).strip().lower() not in ("false", "0", "no", "off", "")
+    if "enabled" in metadata:
+        enabled_raw = metadata.get("enabled")
+        enabled = str(enabled_raw).strip().lower() not in ("false", "0", "no", "off", "")
+    else:
+        enabled = bool(default_enabled)
     return {
         "id": name,
         "name": meta_text("display_name", name),
@@ -763,6 +773,91 @@ async def skills_import_github(data: Dict[str, Any] = Body(...)):
     }
 
 
+MAX_SKILL_ZIP_BYTES = 10 * 1024 * 1024
+MAX_SKILLS_PER_ZIP = 20
+
+
+@router.post("/skills/import-zip")
+async def skills_import_zip(file: UploadFile = File(...), overwrite: str = Form("")):
+    """上传 .zip 技能包安装（画布助手里「安装技能包」用）。
+
+    包里每一份 SKILL.md（最多 3 层目录、最多 20 个）各装成一个技能；它旁边 references/ 下的 .md 内联成附录
+    （NOVAI 技能只有一段正文，和 RedSkill 安装同一套处理）。完整包文件另存到 skills_dir/<技能id>/，
+    安装时不执行任何脚本；之后助手要跑包内脚本走 run_skill_script，每次都先出确认卡等用户点执行。
+    解压安全校验（绝对路径 / .. / 符号链接 / 解压后超过 20MB）复用 redskill_install。
+    已有同名技能且没带 overwrite 时不覆盖，放进 conflicts 让前端问用户。"""
+    from server.skills import redskill_install as rs
+
+    raw = await file.read(MAX_SKILL_ZIP_BYTES + 1)
+    if len(raw) > MAX_SKILL_ZIP_BYTES:
+        raise HTTPException(status_code=413, detail="技能包超过 10MB 上限")
+    if not raw:
+        raise HTTPException(status_code=400, detail="上传的技能包是空文件")
+    try:
+        files = await asyncio.to_thread(rs._read_bundle, raw)
+    except rs.RedSkillError as exc:
+        message = str(exc).replace("下载到的不是有效的 zip 包", "上传的文件不是有效的 zip 压缩包")
+        raise HTTPException(status_code=400 if exc.status_code >= 500 else exc.status_code, detail=message)
+    candidates = sorted(
+        name for name in files
+        if name.rsplit("/", 1)[-1].lower() == "skill.md" and len(name.split("/")) - 1 <= rs.MAX_SKILL_DEPTH)
+    if not candidates:
+        listing = "、".join(sorted(files)[:6]) or "（空包）"
+        raise HTTPException(status_code=422, detail="压缩包里没有找到 SKILL.md（技能包至少要有一份 SKILL.md）；包内文件：%s" % listing)
+    ow = str(overwrite or "").strip().lower() in ("1", "true", "yes", "on")
+    installed: List[Dict[str, Any]] = []
+    conflicts: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+    for path in candidates[:MAX_SKILLS_PER_ZIP]:
+        try:
+            markdown = rs._build_markdown(files, path)
+        except rs.RedSkillError as exc:
+            errors.append({"path": path, "error": str(exc)})
+            continue
+        # 包里带脚本：正文末尾附上脚本清单，助手才知道能用 run_skill_script 跑（每次运行前用户确认）
+        prefix = path.rsplit("/", 1)[0] + "/" if "/" in path else ""
+        pkg_scripts = sorted(
+            name[len(prefix):] for name in files
+            if name.startswith(prefix) and not name[len(prefix):].startswith("__MACOSX/")
+            and os.path.splitext(name)[1].lower() in script_runner.SCRIPT_EXTS)
+        appendix = script_runner.scripts_appendix({
+            "scripts": pkg_scripts,
+            "requirements": "requirements.txt" if (prefix + "requirements.txt") in files else ""})
+        if appendix:
+            markdown = markdown.rstrip() + appendix + "\n"
+        try:
+            result = _import_skill_md(markdown, ow)
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                name = ""
+                try:
+                    name = str(skill_md.parse_skill_md(markdown).get("name") or "")
+                except Exception:
+                    pass
+                conflicts.append({"path": path, "name": name, "error": str(exc.detail)})
+            else:
+                errors.append({"path": path, "error": str(exc.detail)})
+            continue
+        package = {}
+        try:
+            package = await asyncio.to_thread(script_runner.save_package, result["skill"]["id"], files, path,
+                                              str(file.filename or ""))
+        except Exception as exc:                 # 技能本身已装好；包文件落盘失败只影响脚本
+            errors.append({"path": path, "error": "技能已安装，但包内文件保存失败：%s" % exc})
+        installed.append({"path": path, "skill": result["skill"], "created": result["created"],
+                          "scripts": list(package.get("scripts") or [])})
+    if not installed and not conflicts:
+        raise HTTPException(status_code=422, detail="；".join("%s：%s" % (e["path"], e["error"]) for e in errors) or "技能包安装失败")
+    return {
+        "ok": bool(installed),
+        "installed": installed,
+        "conflicts": conflicts,
+        "errors": errors,
+        "skipped": max(0, len(candidates) - MAX_SKILLS_PER_ZIP),
+        "file_name": str(file.filename or ""),
+    }
+
+
 def _import_skill_md(markdown: Any, overwrite: bool) -> Dict[str, Any]:
     if not isinstance(markdown, str) or not markdown.strip():
         raise HTTPException(status_code=400, detail="markdown 不能为空（要导入的 SKILL.md 文本）")
@@ -777,7 +872,10 @@ def _import_skill_md(markdown: Any, overwrite: bool) -> Dict[str, Any]:
     if existing and not overwrite:
         raise HTTPException(status_code=409,
                             detail="技能已存在：%s（需要 overwrite: true 才能覆盖）" % name)
-    skill = _skill_md_to_definition(parsed)
+    skill = _skill_md_to_definition(
+        parsed,
+        default_enabled=bool(existing.get("enabled", False)) if existing else False,
+    )
     _write_skill_definition(skill)
     saved = skills_registry.get_skill(name) or skill
     return {"ok": True, "skill": skills_registry.public_skill(saved, kind="skill"),

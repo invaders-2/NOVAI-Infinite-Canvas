@@ -146,7 +146,26 @@ function sanitizeClips(raw: unknown): TimelineClip[] {
     const srcDur = num(row.srcDur, 0, 86400); if (srcDur) extra.srcDur = srcDur;
     const volume = num(row.volume, 0, 2); if (volume !== undefined) extra.volume = volume;
     const speed = num(row.speed, 0.25, 4); if (speed !== undefined && speed !== 1) extra.speed = speed;
-    if (row.trans === "fade" || row.trans === "dissolve") { extra.trans = row.trans; extra.transMs = num(row.transMs, 0, 2000) ?? 500; }
+    if (typeof row.trans === "string" && ["fade", "dissolve", "wipe", "slide", "zoom"].includes(row.trans)) { extra.trans = row.trans; extra.transMs = num(row.transMs, 0, 2000) ?? 500; }
+    // 画中画（自由摆放，靠 start 定位）、画面变换 / 关键帧、调色、背景音乐自动压低：以前这里不认，刷新后画中画跑回主轨、变换调色全丢
+    if (row.layer === "overlay") { extra.layer = "overlay"; extra.start = Math.max(0, Number(row.start) || 0); }
+    const tfOf = (v: unknown) => {
+      if (!v || typeof v !== "object") return undefined;
+      const o: Record<string, number> = {};
+      for (const k of ["x", "y", "s", "o", "r"]) { const n = Number((v as Record<string, unknown>)[k]); if (Number.isFinite(n)) o[k] = Math.max(-10000, Math.min(10000, n)); }
+      return o;
+    };
+    const tf = tfOf(row.tf); if (tf && Object.keys(tf).length) extra.tf = tf;
+    if (Array.isArray(row.kf)) {
+      const kf = row.kf.slice(0, 200).map((k) => { const t = Number((k as Record<string, unknown>)?.t); return Number.isFinite(t) ? { t: Math.max(0, t), ...tfOf(k) } : null; }).filter(Boolean);
+      if (kf.length) extra.kf = kf;
+    }
+    if (row.color && typeof row.color === "object") {
+      const c: Record<string, number> = {};
+      for (const k of ["b", "c", "s"]) { const n = num((row.color as Record<string, unknown>)[k], 0, 300); if (n !== undefined) c[k] = n; }
+      if (Object.keys(c).length) extra.color = c;
+    }
+    const duck = num(row.duck, 0, 1); if (duck !== undefined && duck > 0 && duck < 1) extra.duck = duck;
     if (typeof row.title === "string" && row.title) extra.title = row.title.slice(0, 120);
     if (typeof row.thumb === "string" && row.thumb && row.thumb.length < 300000) extra.thumb = row.thumb;
     if (row.pad === true) extra.pad = true;

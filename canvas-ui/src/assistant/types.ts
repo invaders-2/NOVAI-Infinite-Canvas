@@ -1,9 +1,29 @@
 // 画布助手微应用的数据契约：宿主（NOVAI 桥接层）→ 微应用（事件/环境），微应用 → 宿主（动作）。
 // 只描述渲染需要的最小集合，不改动 /api/agent/* 的协议。
 
+export interface ThinkingSegment {
+	kind: "base" | "reasoning" | "thought"
+	round: number
+	text: string
+}
+
 export type Part =
-	| { type: "text"; id: string; text: string }
-	| { type: "thinking"; id: string; text: string; totalDurationMs: number }
+	| { type: "text"; id: string; text: string; streamed?: boolean }
+	| {
+			type: "thinking"
+			id: string
+			text: string
+			totalDurationMs: number
+			/** 原生推理增量还在流：true 时标题显示「思考中…」、正文保留光标 */
+			streaming?: boolean
+			/** 首个思考事件的到达时间（wall clock ms），用于「已思考 Ns」 */
+			startedAt?: number
+			endedAt?: number
+			/** 时长已被 done/error 定格，后续 run_start 不再把它抬高 */
+			durationLocked?: boolean
+			/** 增量分段：同一轮出现过 reasoning_delta 时，该轮的 thought 短句不并入正文 */
+			segments?: ThinkingSegment[]
+	  }
 	| {
 			type: "tool_event"
 			id: string
@@ -258,7 +278,7 @@ export interface CanvasAssistantHostApi {
 
 export interface CanvasAssistantHandle {
 	pushEvent(event: StreamEvent): void
-	setHistory(messages: { role?: string; text?: string }[]): void
+	setHistory(messages: { role?: string; text?: string; thinking?: string; reasoning?: string; thinking_duration_ms?: number }[]): void
 	setRefs(refs: RefChip[]): void
 	setSkills(skills: SkillChip[]): void
 	setSelectedSkill(id: string | null): void

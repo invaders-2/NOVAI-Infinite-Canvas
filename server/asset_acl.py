@@ -82,8 +82,7 @@ def _canvas_references(doc: Dict[str, Any], target_path: str) -> bool:
 
 
 def _role_for_canvas(owner_uid: int, user: Dict[str, Any], canvas_id: str, shares: Dict[str, str]) -> Optional[str]:
-    if str(user.get("role")) == "admin":
-        return "admin"
+    # 2026-11：管理员没有素材特权，和普通账号一样只能读自己的 + 共享画布引用的素材。
     if int(user.get("id")) == int(owner_uid):
         return "owner"
     return shares.get(canvas_id)

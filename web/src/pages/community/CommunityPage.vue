@@ -25,6 +25,7 @@ const q = ref('');
 const loading = ref(true);
 const failed = ref('');
 const items = ref([]);
+const nodes = ref([]);          // /feed 的 nodes：发现到的机器（可能有人 online:false）
 const counts = ref({ all: 0, canvas: 0, skill: 0, prompt: 0 });
 const creators = ref(0);
 const featured = ref([]);
@@ -35,16 +36,34 @@ const canvasItems = computed(() => items.value.filter(it => it.kind === 'canvas'
 const skillItems = computed(() => items.value.filter(it => it.kind === 'skill'));
 const promptItems = computed(() => items.value.filter(it => it.kind === 'prompt'));
 const isEmpty = computed(() => !loading.value && !items.value.length);
+// 发现了机器但一条作品都没有：这不是「社区没人」，而是连不上 / 版本旧，得说清楚
+const offlineNodes = computed(() => nodes.value.filter(node => node && node.online === false));
+const nodesOnlyEmpty = computed(() => isEmpty.value && !filtering.value && nodes.value.length > 0);
 const emptyTitle = computed(() => {
     if (filtering.value) return '没有找到「' + q.value.trim() + '」';
+    if (nodesOnlyEmpty.value) return '同一网络发现 ' + nodes.value.length + ' 台机器，但都连不上或版本过旧';
     if (sort.value === 'hot' || sort.value === 'clones') return '还没有人点赞或克隆';
     return '社区里还没有作品';
 });
 const emptyHint = computed(() => {
     if (filtering.value) return '换个关键词试试，或者自己发布一个作品';
+    if (nodesOnlyEmpty.value) {
+        return offlineNodes.value.length
+            ? '让对方在「系统设置 → 隐私与安全性 → 本地网络」里允许 NOVAI，确认两边都是最新版本，再点「重新发现」'
+            : '对方的 NOVAI 版本可能太旧，升级到同一版本后重新打开社区就能看到作品';
+    }
     if (creators.value > 1) return '同一网络里有人在线，作品发布后这里就能看到';
     return '把画布、技能或提示词发布出来，同一网络里的同事就能看到并克隆';
 });
+
+// 作品自己带 online，节点表里也可能标 offline：两边任一为离线就灰显
+const offlineNodeIds = computed(() => new Set(offlineNodes.value.map(node => String(node.id || '')).filter(Boolean)));
+function nodeOffline(item) {
+    if (!item) return false;
+    if (item.online === false) return true;
+    const nodeId = String((item.node || {}).id || '');
+    return !!nodeId && offlineNodeIds.value.has(nodeId);
+}
 
 function countOf(kind) { return (counts.value && counts.value[kind]) || 0; }
 
@@ -62,6 +81,7 @@ async function load() {
             communityApi('/featured').catch(() => ({ items: [] })),
         ]);
         items.value = Array.isArray(feed.items) ? feed.items : [];
+        nodes.value = Array.isArray(feed.nodes) ? feed.nodes.filter(Boolean) : [];
         counts.value = feed.counts || counts.value;
         creators.value = Number(feed.creators_online) || 0;
         featured.value = Array.isArray(hot.items) ? hot.items : [];
@@ -69,6 +89,7 @@ async function load() {
     } catch (e) {
         failed.value = e.message || '社区加载失败';
         items.value = [];
+        nodes.value = [];
     } finally {
         loading.value = false;
     }
@@ -134,10 +155,12 @@ async function cloneItem(item, event) {
                     state.settingsOpen = true;
                 },
             });
+        } else if (described.canvasUrl) {
+            // 克隆完直接进画布，别让用户再自己找一遍
+            openCanvasUrl(described.canvasUrl);
+            toast(described.text);
         } else {
-            toast(described.text, described.canvasUrl ? {
-                onClick: () => openCanvasUrl(described.canvasUrl),
-            } : {});
+            toast(described.text);
         }
     } catch (e) {
         toast(e.message || '克隆失败', { danger: true });
@@ -147,7 +170,19 @@ async function cloneItem(item, event) {
 }
 
 /* ── 卡片小工具 ── */
-const coverOf = item => coverUrl(item);
+// 远程封面取不到时退回占位图标，别把浏览器的碎图露出来；先自动重试一次再放弃
+const coverRetried = ref(new Set());
+const coverOf = item => {
+    if (!item || item.coverBroken) return '';
+    const base = coverUrl(item);
+    if (!base) return '';
+    return coverRetried.value.has(item.id) ? base + '&r=1' : base;
+};
+function coverError(item) {
+    if (!item || !item.id) return;
+    if (coverRetried.value.has(item.id)) { item.coverBroken = true; return; }
+    setTimeout(() => coverRetried.value.add(item.id), 2000);
+}
 const aImg = item => (item.avatarBroken ? '' : avatarImage(item.author || {}));
 const aText = item => avatarText(item.author || {}) || authorInitial(item.author || {});
 async function avatarError(item) { item.avatarBroken = true; }
@@ -183,7 +218,7 @@ onBeforeUnmount(() => {
             <section v-if="cfCards.length && tab === 'discover' && !filtering" class="cm-hero">
                 <div class="cf" @mouseenter="hovering = true" @mouseleave="hovering = false">
                     <div v-for="(it, i) in cfCards" :key="it.id" class="cf-card" :class="{ on: i === cf }" :style="cfStyle(i)" role="button" :tabindex="i === cf ? 0 : -1" :aria-label="it.title" @click="onCardClick(it)" @keydown.enter="onCardClick(it)">
-                        <img v-if="coverOf(it)" :src="coverOf(it)" alt="" loading="lazy" decoding="async" />
+                        <img v-if="coverOf(it)" :src="coverOf(it)" alt="" loading="lazy" decoding="async" @error="coverError(it)" />
                         <span v-else class="cf-ph"><NvIcon :name="meta(it).icon" /></span>
                         <span class="t">
                             <span class="k">{{ meta(it).label }}</span>
@@ -222,19 +257,22 @@ onBeforeUnmount(() => {
             <div v-else-if="isEmpty" class="cm-empty">
                 <b>{{ emptyTitle }}</b>
                 <span>{{ emptyHint }}</span>
-                <button type="button" class="nv-btn primary sm" @click="publish">发布作品</button>
+                <div class="cm-emptyacts">
+                    <button v-if="nodesOnlyEmpty" type="button" class="nv-btn sm" @click="load">重新发现</button>
+                    <button type="button" class="nv-btn primary sm" @click="publish">发布作品</button>
+                </div>
             </div>
             <template v-else>
                 <!-- 画布 / 工作流 -->
                 <section v-if="(tab === 'discover' || tab === 'canvas') && canvasItems.length" class="cm-sec">
                     <div class="cm-sh"><h2>画布 / 工作流</h2><button v-if="tab === 'discover'" type="button" class="more" @click="tab = 'canvas'">查看全部<NvIcon name="chevr" /></button></div>
                     <div class="cm-grid">
-                        <button v-for="it in (tab === 'discover' ? canvasItems.slice(0, 8) : canvasItems)" :key="it.id" type="button" class="tile" :class="{ off: !it.online }" @click="onCardClick(it)">
+                        <button v-for="it in (tab === 'discover' ? canvasItems.slice(0, 8) : canvasItems)" :key="it.id" type="button" class="tile" :class="{ off: nodeOffline(it) }" @click="onCardClick(it)">
                             <span class="cv">
-                                <img v-if="coverOf(it)" :src="coverOf(it)" alt="" loading="lazy" decoding="async" />
+                                <img v-if="coverOf(it)" :src="coverOf(it)" alt="" loading="lazy" decoding="async" @error="coverError(it)" />
                                 <span v-else class="ph"><NvIcon :name="meta(it).icon" /></span>
                                 <span class="kind"><NvIcon :name="meta(it).icon" />{{ meta(it).label }}</span>
-                                <span v-if="!it.online" class="offb">作者离线</span>
+                                <span v-if="nodeOffline(it)" class="offb">作者离线</span>
                                 <span v-if="it.allow_clone !== false" class="hov"><NvIcon name="copy" />克隆</span>
                             </span>
                             <b>{{ it.title }}</b>
@@ -250,9 +288,9 @@ onBeforeUnmount(() => {
                 <section v-if="(tab === 'discover' || tab === 'skill') && skillItems.length" class="cm-sec">
                     <div class="cm-sh"><h2>技能</h2><button v-if="tab === 'discover'" type="button" class="more" @click="tab = 'skill'">查看全部<NvIcon name="chevr" /></button></div>
                     <div class="cm-skills">
-                        <button v-for="it in (tab === 'discover' ? skillItems.slice(0, 6) : skillItems)" :key="it.id" type="button" class="sk" :class="{ off: !it.online }" @click="onCardClick(it)">
+                        <button v-for="it in (tab === 'discover' ? skillItems.slice(0, 6) : skillItems)" :key="it.id" type="button" class="sk" :class="{ off: nodeOffline(it) }" @click="onCardClick(it)">
                             <span class="skc">
-                                <img v-if="coverOf(it)" :src="coverOf(it)" alt="" loading="lazy" />
+                                <img v-if="coverOf(it)" :src="coverOf(it)" alt="" loading="lazy" @error="coverError(it)" />
                                 <span v-else class="ph"></span>
                                 <span class="ico"><NvIcon name="wand2" /></span>
                             </span>
@@ -272,9 +310,9 @@ onBeforeUnmount(() => {
                 <section v-if="(tab === 'discover' || tab === 'prompt') && promptItems.length" class="cm-sec">
                     <div class="cm-sh"><h2>提示词</h2><button v-if="tab === 'discover'" type="button" class="more" @click="tab = 'prompt'">查看全部<NvIcon name="chevr" /></button></div>
                     <div class="cm-prompts">
-                        <button v-for="it in (tab === 'discover' ? promptItems.slice(0, 6) : promptItems)" :key="it.id" type="button" class="pr" :class="{ off: !it.online }" @click="onCardClick(it)">
+                        <button v-for="it in (tab === 'discover' ? promptItems.slice(0, 6) : promptItems)" :key="it.id" type="button" class="pr" :class="{ off: nodeOffline(it) }" @click="onCardClick(it)">
                             <span class="pri">
-                                <img v-if="coverOf(it)" :src="coverOf(it)" alt="" loading="lazy" />
+                                <img v-if="coverOf(it)" :src="coverOf(it)" alt="" loading="lazy" @error="coverError(it)" />
                                 <span v-else class="ph"><NvIcon name="type" /></span>
                             </span>
                             <span class="prb">
@@ -438,6 +476,8 @@ onBeforeUnmount(() => {
 .cm-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 72px 0 40px; text-align: center; color: var(--ink-3); font: 400 12.5px/19px var(--font-sans); }
 .cm-empty b { font: 500 15px/21px var(--font-sans); color: var(--ink); }
 .cm-empty .nv-btn { margin-top: 10px; }
+.cm-empty .cm-emptyacts { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.cm-empty .cm-emptyacts .nv-btn { margin-top: 0; }
 .cm-skel { margin-top: 30px; display: flex; flex-direction: column; gap: 22px; }
 .cm-skel .big { height: 300px; border-radius: 18px; }
 .cm-skel .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }

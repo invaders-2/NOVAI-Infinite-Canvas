@@ -33,27 +33,29 @@ def run(coro):
 
 
 class InferUseTest(unittest.TestCase):
-    def test_kind_name_folder_and_classification(self):
+    def test_kind_name_folder_inference(self):
         self.assertEqual(asset_meta.infer_use({"kind": "audio"}), "sound")
         self.assertEqual(asset_meta.infer_use({"kind": "video", "name": "走秀"}), "source")
         self.assertEqual(asset_meta.infer_use({"kind": "video", "name": "走秀 · 深度"}), "depth")
         self.assertEqual(asset_meta.infer_use({"kind": "image", "name": "a"}, "产品"), "product")
         self.assertEqual(asset_meta.infer_use({"kind": "image", "name": "a"}, "角色"), "model")
-        cls_model = {"categories": {"model": ["单人模特", "全身模特"]}}
-        self.assertEqual(asset_meta.infer_use({"kind": "image", "classification": cls_model}), "model")
-        cls_prod = {"categories": {"model": ["无人"], "subject": ["产品", "鞋"]}}
-        self.assertEqual(asset_meta.infer_use({"kind": "image", "classification": cls_prod}), "product")
-        cls_scene = {"categories": {"model": ["无人"], "scene": ["室外"]}}
-        self.assertEqual(asset_meta.infer_use({"kind": "image", "classification": cls_scene}), "scene")
         self.assertEqual(asset_meta.infer_use({"kind": "image", "name": "IMG_1"}), "")
+        # 历史 classification 数据还在条目里，但已不再参与用途推断
+        cls_model = {"categories": {"model": ["单人模特", "全身模特"]}}
+        self.assertEqual(asset_meta.infer_use({"kind": "image", "classification": cls_model}), "")
+        cls_prod = {"categories": {"model": ["无人"], "subject": ["产品", "鞋"]}}
+        self.assertEqual(asset_meta.infer_use({"kind": "image", "classification": cls_prod}), "")
+        cls_scene = {"categories": {"model": ["无人"], "scene": ["室外"]}}
+        self.assertEqual(asset_meta.infer_use({"kind": "image", "classification": cls_scene}), "")
 
     def test_manual_use_survives_auto_refresh(self):
-        item = {"kind": "image", "name": "x", "classification": {"categories": {"model": ["单人模特"]}}}
+        item = {"kind": "image", "name": "双人模特棚拍"}
         self.assertEqual(asset_meta.set_manual_use(item, "产品"), "product")
         self.assertFalse(asset_meta.apply_auto_use(item))
         self.assertEqual(item["use"], "product")
         asset_meta.set_manual_use(item, "")
         asset_meta.apply_auto_use(item)
+        # 清掉手动标记后按名称（含「模特」）重新推断，不再依赖已下线的 AI 分类
         self.assertEqual((item["use"], item["use_source"]), ("model", "auto"))
         self.assertEqual(asset_meta.normalize_use("深度视频"), "depth")
         self.assertEqual(asset_meta.normalize_use("胡说"), "")
@@ -81,7 +83,6 @@ class LibraryFlowTest(unittest.TestCase):
             mock.patch.object(main, "OUTPUT_DIR", self.out),
             mock.patch.object(main, "ASSET_LIBRARY_DIR", os.path.join(self.dir, "library")),
             mock.patch.object(main, "ASSET_LIBRARY_PATH", os.path.join(self.dir, "asset_library.json")),
-            mock.patch.object(routes, "_spawn_asset_library_classification", return_value=False),
             mock.patch.object(main, "generation_meta_for_url", return_value=None),
             mock.patch.object(main, "_local_upload_tree_and_items", return_value=({}, [])),
             mock.patch.object(main, "OUTPUT_INPUT_DIR", os.path.join(self.dir, "none")),

@@ -98,7 +98,7 @@ class RecallGateTests(unittest.TestCase):
     def test_route_400_when_off(self):
         resp = CLIENT.get("/api/agent/recall", params={"q": "海报", "canvas_id": "c1"})
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("NOVAI_AGENT_V2_MEMORY", resp.json()["detail"])
+        self.assertIn("智能记忆未开启", resp.json()["detail"])
 
     def test_registration_happens_in_a_fresh_process_with_flag_on(self):
         """注册发生在 import 时，进程内翻不了；用干净子进程验证开关打开后确实注册。"""

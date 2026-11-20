@@ -71,7 +71,7 @@ class DepthMotionPackTests(unittest.TestCase):
     def test_prompt_warns_about_depth_limits(self):
         """这几天实测踩出来的坑必须写进正文，否则助手会承诺做不到的事。"""
         prompt = self.skill()["skill_prompt"]
-        for phrase in ("30 秒", "锁死产品的形状", "keep_audio", "首帧图"):
+        for phrase in ("30 秒", "锁死产品的形状", "keep_audio", "首帧图", "不限时长"):
             self.assertIn(phrase, prompt)
 
     def test_prompt_asks_user_for_missing_assets(self):

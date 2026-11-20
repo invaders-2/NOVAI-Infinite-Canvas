@@ -6,6 +6,7 @@ import { emptyDoc, hasContent, readDoc, sanitizeDoc, type CanvasDoc, type Canvas
 import { queueLocalMirror } from "./canvas/canvas-next/localMirror";
 import { clampImageSize, indexModelCaps, mergeCapsReferenceCapability, modelCapsKey, modelCapsUi, type ModelCapsItem } from "./canvas/canvas-next/modelCaps";
 import { midjourneyPrompt } from "./canvas/canvas-next/midjourney";
+import { readExtraModels } from "./canvas/canvas-next/modelExtras";
 
 type Row = Record<string, any>;
 type CanvasMeta = { title: string; icon: string; viewport: Row; logs: Row[]; updatedAt: number };
@@ -335,11 +336,17 @@ function textContent(content: ChatMessage["content"]): string {
 export function createNovaiBackend(): CanvasBackend {
   const metadata = new Map<string, CanvasMeta>();
   let modelCache: Promise<ModelSpec[]> | null = null;
+  /** 模型清单缓存对应的「本机清单外模型」快照：画布里加了 / 移了模型就靠它让缓存失效 */
+  let modelCacheExtras = "";
+  /** 内置模型（include_builtin=1）的 caps：只用来给「清单外模型」找权威参数，不参与下拉候选 */
+  let builtinCapsCache: Promise<Map<string, ModelCapsItem>> | null = null;
   let configCache: Promise<Row> | null = null;
   let capsCache: Promise<Map<string, ModelCapsItem>> | null = null;
 
   const config = () => {
-    if (!configCache) configCache = request("/api/config").catch((error) => { configCache = null; capsCache = null; throw error; });
+    // config 失败 = 这次拿到的平台 / 模型清单不可信：两份 caps 缓存（默认 + include_builtin）一起丢掉，
+    // 否则下一次打开读到的还是按上一个平台算出来的参数
+    if (!configCache) configCache = request("/api/config").catch((error) => { configCache = null; capsCache = null; builtinCapsCache = null; throw error; });
     return configCache;
   };
 
@@ -357,6 +364,27 @@ export function createNovaiBackend(): CanvasBackend {
       .catch(() => new Map<string, ModelCapsItem>())
       .finally(() => clearTimeout(timer));
     return capsCache;
+  };
+
+  /**
+   * 内置候选（能力表有定义、provider 没登记）的 caps。只在「本机清单外模型」非空时才拉：
+   * 这些模型不在 /api/model-caps 的默认结果里，没有它们的参数就只能按名字猜（面板标「未验证」）。
+   * 接口没上线时等于空表，不影响主流程。
+   */
+  const loadBuiltinCaps = (): Promise<Map<string, ModelCapsItem>> => {
+    if (builtinCapsCache) return builtinCapsCache;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), MODEL_CAPS_TIMEOUT_MS);
+    builtinCapsCache = fetch("/api/model-caps?include_builtin=1", { signal: controller.signal, headers: { Accept: "application/json" } })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const data = await response.json().catch(() => ({}));
+        return indexModelCaps(data?.items);
+      })
+      // 失败 / 超时不要把空表钉在缓存里：下次重开还能拿到权威参数，不然这一轮全是「未验证」
+      .catch(() => { builtinCapsCache = null; return new Map<string, ModelCapsItem>(); })
+      .finally(() => clearTimeout(timer));
+    return builtinCapsCache;
   };
 
   const load = async (canvasId: string): Promise<LoadedDoc> => {
@@ -624,7 +652,9 @@ export function createNovaiBackend(): CanvasBackend {
     kind: "bridge",
     available: () => true,
     listModels() {
-      if (modelCache) return modelCache;
+      const extrasKey = JSON.stringify(readExtraModels());
+      if (modelCache && extrasKey === modelCacheExtras) return modelCache;
+      modelCacheExtras = extrasKey;
       modelCache = (async () => {
         const capsPromise = loadCaps();
         const cfg = await config();
@@ -666,13 +696,55 @@ export function createNovaiBackend(): CanvasBackend {
             }
           }
         }
+        // 候选模型：只补下拉里的入口，一个字都不写回「设置 → API」的模型清单。
+        // ① 后端 caps 有规格、但没登记进 provider 清单的模型：协议更新只补了 model_caps_overrides
+        //    （或用户从清单里删过）时，这些模型只有参数没有入口，这里补上让节点编辑器选得到。
+        // ② 用户在下拉「全部可用模型」里挑的上游模型（modelExtras，本机记录，删掉即还原）。
+        const providerById = new Map(providers.map((provider: Row) => [String(provider.id || "comfly"), provider]));
+        const knownLower = new Set(out.map((model) => model.id.toLowerCase()));
+        const appendCandidate = (provider: Row, providerId: string, kind: "image" | "video", name: string, capsItem?: ModelCapsItem) => {
+          const id = modelId(providerId, name);
+          if (knownLower.has(id.toLowerCase())) return undefined;
+          const vendor = String(provider.name || providerId);
+          let ui = modelCapsUi(kind, capsItem);
+          if (ui) {
+            // caps 只声明参数、不声明参考图能力：沿用官方 / 按名字的预设，别把参考图入口误关
+            const official = kind === "image" ? officialImageUi(name) : null;
+            const guessed = specFor({ configId: id, label: name, vendor, kind, ui: null });
+            ui = mergeCapsReferenceCapability(kind, ui, { ...guessed, ...(official || {}) });
+          }
+          const spec = specFor({ configId: id, label: name, vendor, kind, ui, specSource: ui ? "spec" : "guess" });
+          knownLower.add(id.toLowerCase());
+          out.push(spec);
+          return spec;
+        };
+        for (const capsItem of caps.values()) {
+          const kind = String(capsItem.kind || "");
+          if (kind !== "image" && kind !== "video") continue;
+          // 内置模型（include_builtin 才有）不进主下拉：用户没登记的一律留在「全部可用模型」里挑
+          if (capsItem.builtin === true) continue;
+          const providerId = String(capsItem.provider || "");
+          const provider = providerById.get(providerId);
+          const name = String(capsItem.model || "").trim();
+          if (!provider || !name) continue;
+          const spec = appendCandidate(provider, providerId, kind, name, capsItem);
+          if (spec) spec.unlisted = true;
+        }
+        const extras = readExtraModels().filter((candidate) => providerById.has(candidate.provider));
+        const builtinCaps = extras.length ? await loadBuiltinCaps() : null;
+        for (const candidate of extras) {
+          const provider = providerById.get(candidate.provider)!;
+          const key = modelCapsKey(candidate.provider, candidate.model);
+          const spec = appendCandidate(provider, candidate.provider, candidate.kind, candidate.model, caps.get(key) || builtinCaps?.get(key));
+          if (spec) spec.extra = true;
+        }
         return out;
       })();
       modelCache.catch(() => { modelCache = null; });
       return modelCache;
     },
     onModelsChanged(cb) {
-      const invalidate = () => { modelCache = null; configCache = null; capsCache = null; cb(); };
+      const invalidate = () => { modelCache = null; configCache = null; capsCache = null; builtinCapsCache = null; cb(); };
       const channel = typeof BroadcastChannel === "function" ? new BroadcastChannel("studio-api") : null;
       channel?.addEventListener("message", invalidate);
       window.addEventListener("message", invalidate);
@@ -830,8 +902,8 @@ export function createNovaiBackend(): CanvasBackend {
       //   白模 —— 商品保留外形与机位，抹掉细节和颜色，做成未上色的石膏粗模（商品白膜）；
       //   清场 —— 商品连同接触投影移除，只留干净场景。
       const white = {
-        mannequin: "把照片里的人物变成纯白色的服装店人台模特：像人体模特一样身上没有衣服，保持原来的姿势、动作、镜头角度和构图，全身哑光纯白、不偏黄（不要米白或奶白）；背景换成无缝纯白，没有纹理、渐变和杂物，不要浅灰底；商品和人物脚下留淡淡的地面投影；不要删除人物，不要文字、水印、边框",
-        blockout: "把画面里的商品做成纯白色的石膏粗模，背景也换成纯白：商品和背景都是纯白（#FFFFFF），不偏黄、不偏米、不偏灰、不带任何色温；保留原商品的整体轮廓、比例、摆放角度、机位、构图和它与台面的接触投影；去掉所有细节 —— 缝线、鞋带结构、鞋底花纹、logo、印花、图案、装饰、材质纹理和反光全部抹掉；表面平滑哑光、纯白、只有大的体块起伏；背景是无缝纯白、没有任何纹理、渐变、暗角和杂物；商品和背景之间只靠柔和的浅灰投影与极淡的轮廓暗部区分，除此之外整张画面只有白色和中性灰；不要出现第二个影子，不要新增物体，不要文字、水印、边框",
+        mannequin: "把照片里的人物变成纯白色的服装店人台模特：像人体模特一样身上没有衣服，保持原来的姿势、动作、镜头角度和构图，全身哑光纯白、不偏黄（不要米白或奶白）；背景换成无缝纯白，没有纹理、渐变和杂物，不要浅灰底；商品和人物脚下留淡淡的地面投影；画面里除了人物和脚下的淡投影之外不要出现任何东西 —— 原图里的椅子、沙发、床、包、台面、家具、道具、布景、墙饰全部去掉，不要把它们也变成白色留在画面里；不要删除人物，不要文字、水印、边框",
+        blockout: "把画面里的商品做成纯白色的石膏粗模，背景也换成纯白：商品和背景都是纯白（#FFFFFF），不偏黄、不偏米、不偏灰、不带任何色温；保留原商品的整体轮廓、比例、摆放角度、机位、构图和它与台面的接触投影；去掉所有细节 —— 缝线、鞋带结构、鞋底花纹、logo、印花、图案、装饰、材质纹理和反光全部抹掉；表面平滑哑光、纯白、只有大的体块起伏；背景是无缝纯白、没有任何纹理、渐变、暗角和杂物；商品和背景之间只靠柔和的浅灰投影与极淡的轮廓暗部区分，除此之外整张画面只有白色和中性灰；外形必须和原商品完全一致 —— 轮廓、比例、摆放角度、机位一个都不改，不要捏软、不要变形、不要重新设计，只做「抹掉细节」这一件事；画面里除了这件商品和它的接触投影之外不要出现任何东西（不要台面、道具、布景、包装、标签）；不要出现第二个影子，不要新增物体，不要文字、水印、边框",
         clear: "把画面里的商品完整移除，并且连它压在台面或地面上的接触投影一起去掉：只移除商品和它的接触投影，不要留下任何商品残影、半透明轮廓、抠图毛边或边缘描边；商品原来挡住的背景要按周围的纹理、颜色和透视自然补全，补出来的台面、墙面和光影要跟原画面完全接得上；保留原来的机位、构图、布光和整体氛围，背景颜色保持原样（不要换成纯白或其它颜色），画面里其余物体的位置、比例和光影都不要动；输出一张没有商品的干净场景图：不要出现第二个影子，不要凭空生成新物体，不要新增道具或装饰，不要文字、水印、边框",
       };
       const whiteTier = (req.params as { tier?: string } | undefined)?.tier;

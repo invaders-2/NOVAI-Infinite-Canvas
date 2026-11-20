@@ -13,7 +13,8 @@ import type { CanvasDoc, CanvasNode } from "../../react-canvas/reactCanvasStore"
 import { connect, title } from "../actions";
 import { hostRoot } from "../../../novaiBridgeRoot";
 import { listElements, type CanvasElement } from "../elements";
-import { relinkMentions, kindIndex, KIND_SHORT, mentionable, mentionToken, selfRefOf, MENTION_RE } from "../mentions";
+import { mentionedIds, relinkMentions, kindIndex, KIND_SHORT, mentionable, mentionToken, selfRefOf, MENTION_RE } from "../mentions";
+import { selfInputRole } from "../engine";
 import { expandGroupInputs, genOf, inputsOf, isGenKind, sectionsOf, srcOf, textOf, TYPE_LABEL, uid, type GenKind, type InputRef } from "../model";
 import { isStack, stackItems } from "../stack";
 import { useCtl, useS } from "./ctx";
@@ -78,9 +79,18 @@ export function PromptEditor(props: PromptEditorProps) {
   const ctl = useCtl(); const store = ctl.store;
   const doc = useS((s) => s.doc);
   const ins = useMemo(() => inputsOf(doc, node.id), [doc, node.id]);
-  // 本节点当前结果也能 @（图片 / 视频）：放在已连接输入之后，编号才和请求里的发送顺序一致
+  // 本节点当前结果也能 @（图片 / 视频）：真正会发送时它排在请求 inputs 第 1 位，chip 也按「本节点 图1」编号；
+  // 不能发送时维持旧顺序（追加在末尾），和面板「未发送」状态一致。
   const selfIns = useMemo(() => selfRefOf(node), [node]);
-  const mentionIns = useMemo(() => [...ins.flatMap((x) => x.node.kind === "group" ? [x, ...expandGroupInputs(doc, [x])] : [x]), ...(selfIns ? [selfIns] : [])], [doc, ins, selfIns]);
+  const selfRole = useMemo(() => {
+    const m = store.modelOf(node);
+    if (!selfIns || !m || !isGenKind(node.kind) || !mentionedIds(genOf(node).prompt).has(node.id)) return null;
+    return selfInputRole(node.kind, genOf(node).params, m, ins.filter((x) => x.node.kind === "image").length);
+  }, [node, ins, selfIns, store]);
+  const mentionIns = useMemo(() => {
+    const base = ins.flatMap((x) => x.node.kind === "group" ? [x, ...expandGroupInputs(doc, [x])] : [x]);
+    return selfRole && selfIns ? [selfIns, ...base] : [...base, ...(selfIns ? [selfIns] : [])];
+  }, [doc, ins, selfIns, selfRole]);
   const ref = useRef<HTMLDivElement>(null);
   const last = useRef<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; mark: AtMark } | null>(null);

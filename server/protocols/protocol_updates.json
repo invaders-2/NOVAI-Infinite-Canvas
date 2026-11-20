@@ -781,6 +781,162 @@
           "note": "最多 2 张图（首尾帧），第 3 张起项目侧会截断"
         }
       ]
+    },
+    {
+      "provider_id": "apimart",
+      "name": "APIMart",
+      "version": 5,
+      "released_at": "2026-11-18",
+      "summary": "文档 2026-11-18 版增量：新增 13 个模型 ID（视频 1：seedance-2-5-flash；文本 12：gpt-6 系列 / gpt-5.4-5.6 / claude-opus-5）；协议侧新增 webhook HMAC 签名、上传保留期与超量计费、账户余额/用量/消费记录与定价接口、三种上下文缓存、Seedance 2.5 草稿模式、Midjourney 图生视频、Seedance 虚拟人资产；能力表补 seedance-2.5 的 4k、wan3.0 的 -1/21:9、gpt-image-2.6 的 svg.reasoning.effort 档位。",
+      "docs_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-5-flash/generation",
+      "new_models": {
+        "chat": [
+          "gpt-5.2",
+          "gpt-5.3-codex",
+          "gpt-5.4",
+          "gpt-5.4-mini",
+          "gpt-5.5",
+          "gpt-5.6-sol",
+          "gpt-5.6-luna",
+          "gpt-6-astra",
+          "gpt-6-luna",
+          "gpt-6.1-sol",
+          "claude-opus-5",
+          "claude-opus-5-thinking"
+        ],
+        "image": [],
+        "video": [
+          "seedance-2-5-flash"
+        ],
+        "audio": []
+      },
+      "protocol_changes": [
+        {
+          "field": "webhook_signature",
+          "from": "",
+          "to": "提交体顶层可选 webhook_secret（≥16 字符，仅小写键名）→ 回调带 X-Webhook-Signature: hex(HMAC-SHA256(secret, raw body))；请求级密钥覆盖控制台 Callback signing；两处都没有则回调无签名头",
+          "note": "文档确证（L80243 / L80272 / L80289 / L80388）；项目当前不带该字段，回调无法验签，等于任何来源都能伪造回调。"
+        },
+        {
+          "field": "upload_retention_billing",
+          "from": "上传免费（72 小时 2000 文件配额，响应带 X-Upload-Quota-*）",
+          "to": "新增 retention_days=3|7|15|30：3 天档在免费额度内免费，超出后或选 7/15/30 天档按实际字节计费；响应新增 bytes / retention_days / expires_at，付费上传另带 overage{charged,bytes,cost_usd,price_per_gb_usd}",
+          "note": "文档确证（L80678–L80702）；402 overage.reason=overage_not_enabled|needs_reconfirm|insufficient_balance|insufficient_key_quota，429 overage.enabled=false / needs_reconfirm=true。项目上传后立刻使用 URL，未用 expires_at，长档计费也不在报价里。"
+        },
+        {
+          "field": "account_endpoints",
+          "from": "只有生成 / 任务查询",
+          "to": "GET /v1/balance（当前 Key 余额）、GET /v1/user/balance（账户余额）、GET /v1/usage（按时间/模型聚合，≤31 天）、GET /v1/logs/requests 与 /v1/logs/requests/{id}（消费/错误明细，游标分页）",
+          "note": "文档确证（L54447 / L54844 / L55176 / L54187）；零余额也可查。项目没有余额/用量面板，超时与计费争议只能看上游控制台。"
+        },
+        {
+          "field": "pricing_endpoints",
+          "from": "",
+          "to": "GET /api/pricing/model?model=（公开免鉴权，只读 data.pricing：rates / effective_rates / price_factor / tier_count / limits / extras.tools）；GET /v1/pricing/model（鉴权，按 resolution/size/quality/duration/n 报本账户实付价）",
+          "note": "文档确证（L35150–L35326、L54396–L54420）；本项目积分价目是 2026-10-24 构建期快照，没有接这两个实时接口。"
+        },
+        {
+          "field": "context_cache",
+          "from": "",
+          "to": "cache_control（type=ephemeral，ttl 5m|1h）走 OpenAI 兼容与 Claude 原生两条路；1h 需 anthropic-beta: extended-cache-ttl-2025-04-11；/v1/responses 另收 prompt_cache_options.ttl=30m|12h（12h 仅 responses）+ mode=explicit + prompt_cache_breakpoint，缓存前缀至少 1024 tokens",
+          "note": "文档确证（L28371–L28440 Gemini、L31342–L31420 Claude、L33278–L33360 OpenAI）；项目不传缓存字段，长 system prompt 每次都按全价计费。"
+        },
+        {
+          "field": "video_draft_mode",
+          "from": "",
+          "to": "seedance-2.5 草稿模式：draft:true（强制 480p）→ 轮询拿 task_id → 用 draft_task_id + resolution(1080p|4k) 出成片；草稿 3 天过期；成片不得重发 prompt/image_urls/video_urls/audio_urls/duration/size/seed… 等继承字段（同值也 400）",
+          "note": "文档确证（L46920–L47060）；seedance-2-5-flash 不支持草稿（L46195 的 WARNING）。项目没有草稿入口。"
+        },
+        {
+          "field": "midjourney_video",
+          "from": "Midjourney 只有图片动作（imagine/blend/upscale/inpaint…）",
+          "to": "POST /v1/midjourney/generations/video：图生视频，固定 FAST、约 5 秒、不支持文生视频；image_urls 或 task_id+index 二选一；motion low|high（默认 high）、batch_size 1|2|4（默认 1，按 N 倍计费）、video_type 480p/720p × 基础/首尾帧、end_url 自动升级 start_end",
+          "note": "文档确证（L19372–L19972）；计费 id midjourney@video / midjourney@video-720p。项目 MJ 分支没有视频入口。"
+        },
+        {
+          "field": "virtual_avatar_assets",
+          "from": "",
+          "to": "虚拟人资产：POST /v1/seedance2/private-avatar（批量 ≤20）、/private-avatar/assets(+/{id})、/private-avatar/groups(+/{id})；审核通过返回 asset://，可直接填 image_urls / video_urls / audio_urls；资产接口免费、审核走 GET /v1/tasks/{id}",
+          "note": "文档确证（L45377–L45900、L46820–L46900）；真实人脸必须先进资产库，否则上游拒。项目没有资产库入口，带人脸参考图会失败。"
+        },
+        {
+          "field": "svg_reasoning_effort",
+          "from": "",
+          "to": "图片接口新增嵌套字段 svg.model + svg.reasoning.effort(none|minimal|low|medium|high|xhigh|max)，SVG 作者模型按 token 另计费（data.usage.svg_usage）；顶层 reasoning_effort 仍 0 命中",
+          "note": "文档确证（L6537–L6569、L6676–L6681）；这是 images/generations 内的嵌套推理参数，不是 chat 的 reasoning_effort。项目只下发 svg.model。"
+        },
+        {
+          "field": "responses_api_scope",
+          "from": "/v1/responses 只记录为 OpenAI 兼容入口",
+          "to": "/v1/responses 支持多模态输入（input_text+input_image）与 web_search/file_search/function_call/remote MCP 工具，按 output 数组逐项解析；thinking 不能关闭（qwen3.8-max 固定思考）",
+          "note": "文档确证（L33450–L33480、L34334–L34350、L34863、L35008）；项目走 chat/completions 与 messages，不解析 output 数组。"
+        },
+        {
+          "field": "thinking_alias",
+          "from": "",
+          "to": "同名模型加 -thinking 后缀是平台扩展别名（如 claude-opus-5-thinking），官方建议改用标准名 + 请求体 thinking 参数",
+          "note": "文档确证（L33012、L89183）；项目 thinking 走 server/protocols/thinking.py 的 budget_tokens 映射，不依赖别名。"
+        }
+      ],
+      "model_caps": [],
+      "parameter_changes": [
+        {
+          "model": "seedance-2.5",
+          "field": "resolutions",
+          "from": "480p/720p/1080p（无 2k/4k）",
+          "to": "480p/720p/1080p/4k（2k/2160p 仍不支持）",
+          "note": "文档确证（L46265–L46266 与 L47190 的错误表）；能力表和价目表都补 4K 档，否则编辑器发不出 4k、积分也按 1080P 估"
+        },
+        {
+          "model": "seedance-2.5",
+          "field": "draft",
+          "from": "未下发",
+          "to": "draft:true / draft_task_id（480p 草稿 → 1080p|4k 成片，草稿 3 天过期，继承字段不得重发）",
+          "note": "文档确证（L46920–L47060）；项目无草稿入口，只在能力表注释与本次报告留档"
+        },
+        {
+          "model": "seedance-2-5-flash",
+          "field": "caps",
+          "from": "无独立条目",
+          "to": "480p/720p、4–30 秒或 -1、6 比例 + adaptive、图 10 / 视频 5 / 音频 5、mp4|mov、无草稿",
+          "note": "文档确证（L45920–L46070）；别名 doubao-seedance-2-5-flash，点号写法不支持"
+        },
+        {
+          "model": "wan3.0-video",
+          "field": "durations",
+          "from": "2–30（无 -1）",
+          "to": "-1 + 2–30",
+          "note": "文档确证（L53735–L53744）"
+        },
+        {
+          "model": "wan3.0-video",
+          "field": "ratios",
+          "from": "16:9/1:1/4:3/3:4/9:16",
+          "to": "21:9 + 原 5 个 + adaptive",
+          "note": "文档确证（L53720–L53730）；size 与 aspect_ratio 同传必须一致，否则 400"
+        },
+        {
+          "model": "wan3.0-video",
+          "field": "resolution_default",
+          "from": "未记录",
+          "to": "不传 resolution 按 1080P 出图与计费",
+          "note": "文档确证（L53712 的 WARNING）；能力表因此必须显式下发档位"
+        },
+        {
+          "model": "midjourney",
+          "field": "caps",
+          "from": "只有图生图参数",
+          "to": "补 mj.video：endpoint、motions low|high、batch 1|2|4、4 个 video_type、animate_mode manual|auto、计费 id",
+          "note": "文档确证（L19940–L19972）；能力表只留档，前端另岗接入口"
+        },
+        {
+          "model": "gpt-image-2.6-ext / -flare / -sunburst",
+          "field": "svg.reasoning.effort",
+          "from": "只有 svg.model",
+          "to": "svg.efforts = none/minimal/low/medium/high/xhigh/max（各作者模型实际支持档位不同）",
+          "note": "文档确证（L6537–L6563）；只留档，生成侧仍只下发 svg.model"
+        }
+      ]
     }
   ]
 }

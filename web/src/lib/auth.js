@@ -9,7 +9,7 @@ export const auth = reactive({
     mode: 'off',            // off | optional | required
     loggedIn: false,
     user: null,             // { id, username, role, avatar? }
-    inviteRequired: true,
+    inviteRequired: false,   // 后端默认开放注册（不需要邀请码）；管理员显式打开才为 true
     hasUsers: true,         // false = 这台 NOVAI 还没有任何账号（第一个注册的是管理员）
     dialog: '',             // '' | 'login' | 'register' | 'reset'：弹层当前视图
 });
@@ -34,6 +34,10 @@ const CODE_TEXT = {
     username_taken: '用户名已被占用，换一个试试',
     rate_limited: '尝试太频繁了，请稍后再试',
     auth_disabled: '当前没有开启账号功能',
+    bad_password: '当前密码不正确',
+    confirm_mismatch: '账号名不匹配，请输入当前账号名确认',
+    last_admin: '这是本机最后一个管理员，请先把其他账号设为管理员再注销',
+    delete_failed: '注销失败，数据未改动，请重试',
 };
 
 async function post(url, body) {
@@ -59,7 +63,7 @@ export async function loadAuth(force = false) {
     try {
         const cfg = await getJSON('/api/auth/config');
         auth.mode = cfg.auth_mode || 'off';
-        auth.inviteRequired = cfg.invite_required !== false;
+        auth.inviteRequired = cfg.invite_required === true;
         auth.hasUsers = cfg.has_users !== false;
     } catch (e) {
         // 旧后端没有 config：用 me 推断（auth_enabled=true 就是必须登录）
@@ -94,6 +98,36 @@ export async function register(username, password, inviteCode) {
     });
     await loadAuth(true);
     return data.user;
+}
+
+/** 注销前的确认清单（会被删什么 / 保留什么 / 能不能删） */
+export async function getDeleteAccountImpact() {
+    return getJSON('/api/auth/delete-account');
+}
+
+/** 自助注销：密码 + 当前账号名双重确认；成功后本地登录态立刻清空，失败保持登录 */
+export async function deleteAccount(password, confirmUsername) {
+    let r;
+    try {
+        r = await fetch('/api/auth/delete-account', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: JSON_HEADERS,
+            body: JSON.stringify({ password: String(password || ''), confirm_username: String(confirmUsername || '').trim() }),
+        });
+    } catch (e) {
+        throw new Error('连不上服务，请检查网络后重试');
+    }
+    const data = await r.json().catch(() => null);
+    if (!r.ok) {
+        const code = data && data.code;
+        const detail = data && (typeof data.detail === 'string' ? data.detail : '');
+        throw Object.assign(new Error(CODE_TEXT[code] || detail || '注销失败（' + r.status + '）'), { code, status: r.status });
+    }
+    auth.loggedIn = false;
+    auth.user = null;
+    auth.loaded = false;
+    return data || {};
 }
 
 export async function resetPassword(username, code, newPassword) {

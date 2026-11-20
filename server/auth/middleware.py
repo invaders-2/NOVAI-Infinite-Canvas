@@ -97,6 +97,15 @@ def _wants_html(request: Request) -> bool:
     return "text/html" in (request.headers.get("accept") or "").lower()
 
 
+def _lan_peer_public(path: str, method: str) -> bool:
+    """局域网好友机的投递接口（ping / 收消息 / 好友申请 / 取媒体）：只需要口令，不需要会话。"""
+    try:
+        from server.routes.lan_account import lan_api_public_without_token
+        return bool(lan_api_public_without_token(path, method))
+    except Exception:
+        return False
+
+
 def _login_redirect(path: str) -> str:
     value = str(path or "")
     if value and value != "/":
@@ -117,9 +126,7 @@ def _session_user(request: Request):
 
 
 def _assets_allowed(path: str, user) -> bool:
-    """/assets/users/{uid}/... 只允许本人；admin 全部可读。"""
-    if str(user.get("role")) == "admin":
-        return True
+    """/assets/users/{uid}/... 只允许本人（管理员也没有特权）。"""
     segments = [part for part in str(path or "").split("/") if part]
     if len(segments) < 3 or segments[0] != "assets" or segments[1] != "users":
         return False
@@ -151,7 +158,8 @@ async def _call_with_tenant(user, request: Request, call_next: Any):
 
 
 async def auth_guard(request: Request, call_next: Any):
-    if not service.auth_enabled() or request.method == "OPTIONS":
+    mode = service.auth_mode()
+    if mode == "off" or request.method == "OPTIONS":
         return await call_next(request)
 
     path = request.url.path
@@ -159,59 +167,71 @@ async def auth_guard(request: Request, call_next: Any):
     if user:
         request.state.auth_user = user
 
-    # 旧 API 设置页：非 admin 不放行（未登录去登录，登录的成员回首页）
-    if path in ("/static/api-settings.html", "/api-settings.html"):
-        if not user:
-            return RedirectResponse(url=_login_redirect(path), status_code=302)
-        if str(user.get("role")) != "admin":
-            return RedirectResponse(url="/", status_code=302)
+    # 2026-11：登录即绑定租户（optional 也绑），新上传/生成/库副本才能落 users/{uid}。
+    token = tenant.bind_user(user) if user else None
+    try:
+        # 租户素材目录：required 下必须登录；optional 下未登录保持本机模式可读；
+        # 登录后跨账号一律 403（共享画布成员走 asset_acl 的既有逻辑）。
+        if path.startswith("/assets/users/"):
+            if mode == "required" and not user:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "未登录或会话已过期", "code": "unauthorized"},
+                )
+            if user and not _assets_allowed(path, user):
+                allowed = False
+                owner_uid = _assets_owner_uid(path)
+                if owner_uid is not None:
+                    try:
+                        from server import asset_acl
+                        allowed = asset_acl.can_read_asset(owner_uid, path, user)
+                    except Exception as exc:
+                        print("[asset-acl] 共享素材判定失败：%s" % exc)
+                if not allowed:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "无权访问该素材", "code": "forbidden"},
+                    )
+            return await call_next(request)
 
-    # API 设置接口：仅 admin；auth-off 已在上方提前放行，保持旧行为
-    if path.startswith("/api/") and is_admin_only_settings(path, request.method):
-        if not user:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "未登录或会话已过期", "code": "unauthorized"},
-            )
-        if str(user.get("role")) != "admin":
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "需要管理员权限", "code": "forbidden"},
-            )
+        # optional（默认）：登录只带身份（新建画布 / 素材归属、租户目录），不拦截、不按账号隔离页面。
+        if mode != "required":
+            return await call_next(request)
 
-    # 租户素材目录：登录 + 本人（或 admin）才能读
-    if path.startswith("/assets/users/"):
-        if not user:
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "未登录或会话已过期", "code": "unauthorized"},
-            )
-        if not _assets_allowed(path, user):
-            # M5：共享画布成员可读该画布引用的素材（owner/admin/editor/viewer 复用 perms）
-            allowed = False
-            owner_uid = _assets_owner_uid(path)
-            if owner_uid is not None:
-                try:
-                    from server import asset_acl
-                    allowed = asset_acl.can_read_asset(owner_uid, path, user)
-                except Exception as exc:
-                    print("[asset-acl] 共享素材判定失败：%s" % exc)
-            if not allowed:
+        # 旧 API 设置页：非 admin 不放行（未登录去登录，登录的成员回首页）
+        if path in ("/static/api-settings.html", "/api-settings.html"):
+            if not user:
+                return RedirectResponse(url=_login_redirect(path), status_code=302)
+            if str(user.get("role")) != "admin":
+                return RedirectResponse(url="/", status_code=302)
+
+        # API 设置接口：仅 admin；auth-off 已在上方提前放行，保持旧行为
+        if path.startswith("/api/") and is_admin_only_settings(path, request.method):
+            if not user:
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "未登录或会话已过期", "code": "unauthorized"},
+                )
+            if str(user.get("role")) != "admin":
                 return JSONResponse(
                     status_code=403,
-                    content={"detail": "无权访问该素材", "code": "forbidden"},
+                    content={"detail": "需要管理员权限", "code": "forbidden"},
                 )
-        return await _call_with_tenant(user, request, call_next)
 
-    if is_public_path(path):
+        if is_public_path(path):
+            return await call_next(request)
+
+        # 好友机投递：对方没有本机会话，靠 X-NOVAI-Friend-Token 认身份（LAN 路由自己校验口令）。
+        if path.startswith("/api/lan/") and _lan_peer_public(path, request.method):
+            return await call_next(request)
+
+        if not user:
+            if not path.startswith("/api/") and _wants_html(request):
+                return RedirectResponse(url=_login_redirect(path), status_code=302)
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "未登录或会话已过期", "code": "unauthorized"},
+            )
         return await call_next(request)
-
-    if user:
-        return await _call_with_tenant(user, request, call_next)
-
-    if not path.startswith("/api/") and _wants_html(request):
-        return RedirectResponse(url=_login_redirect(path), status_code=302)
-    return JSONResponse(
-        status_code=401,
-        content={"detail": "未登录或会话已过期", "code": "unauthorized"},
-    )
+    finally:
+        tenant.reset_user(token)

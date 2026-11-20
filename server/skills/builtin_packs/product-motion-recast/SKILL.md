@@ -37,7 +37,7 @@ description: 动作复刻换产品（NOVAI 画布版）——照着一条参考�
 | 看产品图、人物图、场景图 | `view_image`，每张都看，不要只看标题 |
 | 写分析、分镜表 | `create_node(type=text)`，后续步骤直接读它 |
 | 新产品的首帧 / 尾帧 | `generate_image`：`inputs` 放产品图、人物图、场景图的节点 id，`reference_urls` 放原片对应时刻的关键帧 `frames[].url` 定构图 |
-| 深度动作捕捉（拿到深度通道） | `depth_capture`：先 `check_only=true` 查本机能不能用，能用就 `depth_capture(node_id=原视频节点)` 在本机转出 `depth_url`（最长 30 秒，不花额度）；不能用时按第 5 步 a 的备选来源找。深度视频和原片等长，按同样的 `start` / `end` 用 `analyze_video(clip=true)` 截出每段对应的深度片段 |
+| 深度动作捕捉（拿到深度通道） | `depth_capture`：先 `check_only=true` 查本机能不能用，能用就 `depth_capture(node_id=原视频节点)` 在本机转出 `depth_url`（时长不限，本机推理、不花额度）；不能用时按第 5 步 a 的备选来源找。深度视频和原片等长，按同样的 `start` / `end` 用 `analyze_video(clip=true)` 截出每段对应的深度片段 |
 | 锁原片动作的镜头 | `generate_video`：`analyze_video(start, end, clip=true)` 截出 `clip_url` 作 `reference_video`；人换成谁、产品换成什么写进提示词，素材节点 id 放进 `inputs` |
 | 不锁形状的镜头 | `generate_video(mode=start_end_to_video)`：第 1 张图是首帧、第 2 张是尾帧；只有首帧时用 `mode=image_to_video` |
 | 接镜头 | 对上一段成片再调一次 `analyze_video`，用返回的 `last_frame_url` 当下一段首帧 |
@@ -94,7 +94,7 @@ description: 动作复刻换产品（NOVAI 画布版）——照着一条参考�
    - **a. 深度动作捕捉**：深度通道按下面的顺序找，找到就停：
      第 3 步已经转好的深度视频直接用，不要重复转。
      0. **本机深度动作捕捉**：`depth_capture(check_only=true)`；返回 `ready=true` 就 `depth_capture(node_id=原视频节点)` 整条转一次，拿到 `depth_url`。
-        原片超过 30 秒时先用 `analyze_video(clip=true)` 截出含全部锁动作段的区间再转，并记下区间起点，后面截段时减掉。`ready=false` 就把原因记进审查记录，往下找。
+        深度转换不限时长，原片整条转就行；也可以先用 `analyze_video(clip=true)` 截出含全部锁动作段的区间再转，并记下区间起点，后面截段时减掉。`ready=false` 就把原因记进审查记录，往下找。
      1. **画布上已有的深度视频**：标题或文件名带「深度 / depth」，或 `analyze_video` 抽帧一看就是灰度深度图的视频节点。
         确认它对应的是这条原片（时长相同、画面轮廓对得上）。
      2. **可用模型里的深度转换模型**（标「本机」或名字带「深度 / depth」）：`generate_video` 指定它，`reference_video` 放原片的视频地址，

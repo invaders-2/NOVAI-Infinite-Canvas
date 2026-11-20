@@ -1,5 +1,5 @@
 <script setup>
-// 资产详情：预览（点开 Lightbox）、行内改名、基本信息、生成信息、智能分类（点标签筛选）、平台注册；编辑模式改名后保存
+// 资产详情：预览（点开 Lightbox）、行内改名、基本信息、生成信息、平台注册；编辑模式改名后保存
 import { ref, watch, computed } from 'vue';
 import NvIcon from '../../../components/NvIcon.vue';
 import MediaThumb from '../parts/MediaThumb.vue';
@@ -7,7 +7,6 @@ import GenInfo from '../parts/GenInfo.vue';
 import AvatarSection from './AvatarSection.vue';
 import { run } from '../lib/state.js';
 import { assetKind, assetKindLabel, formatDate } from '../lib/util.js';
-import { classChips } from '../lib/classify.js';
 import * as A from '../lib/library.js';
 
 const props = defineProps({ item: { type: Object, default: null } });
@@ -18,7 +17,6 @@ const saving = ref(false);
 watch(() => props.item && props.item.id + '|' + props.item.name, () => { name.value = props.item?.name || 'asset'; editName.value = props.item?.name || ''; }, { immediate: true });
 const kind = computed(() => assetKind(props.item));
 const gen = computed(() => props.item?.generation || null);
-const chips = computed(() => classChips(props.item, 32));
 const editing = computed(() => L.edit && props.item && (props.item.id === L.sel || !L.sel));
 function inlineSave() { if (props.item) run(A.saveInlineName(props.item.id, name.value), '保存失败'); }
 async function saveEdit() {
@@ -79,13 +77,6 @@ async function saveEdit() {
                          :size="gen.width && gen.height ? gen.width + '×' + gen.height : ''" :at="gen.at || 0" refs-title="生成自" ref-icon="locate"
                            :refs="gen.canvas_id ? [{ id: gen.canvas_id, kind: gen.canvas_kind || '', node: gen.node_id || '', title: gen.canvas_title }] : []" />
                 <div class="am-url">{{ item.url }}</div>
-                <div v-if="kind === 'image'" class="am-sec">
-                    <div class="am-sech"><b><NvIcon name="tag" />智能分类</b></div>
-                    <div class="am-cls">
-                        <button v-for="c in chips" :key="c.key" type="button" class="am-tag" :class="{ on: L.classFilter === c.key }" :title="c.label" @click="A.toggleClassFilter(c.key, A.libId())">{{ c.tag }}</button>
-                        <span v-if="!chips.length" class="empty">暂无智能分类，可以选中图片后点击“智能分类”。</span>
-                    </div>
-                </div>
                 <AvatarSection :item="item" />
             </div>
         </template>

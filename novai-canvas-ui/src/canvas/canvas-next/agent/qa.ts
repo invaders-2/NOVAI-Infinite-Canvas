@@ -97,13 +97,16 @@ export function togglePick(card: QaCard, qi: number, opt: string): QaCard {
 export const answerOf = (card: QaCard, qi: number) => [...(card.picks[qi] || []), card.other[qi]?.trim() || ""].filter(Boolean).join("、");
 export const answeredCount = (card: QaCard) => card.questions.filter((_, i) => answerOf(card, i)).length;
 
+/** 问题文本本身常带「1.」「2、」这类序号：拼回答时外面还会再编一次号，去掉自带的，免得变成「1. 1.」 */
+const stripNo = (q: string) => String(q || "").replace(/^\s*\d+\s*[.、)）]\s*/, "");
+
 /** 问答 → 发回给 Agent 的文字；没答的问题写「你来决定」 */
 export function answerText(card: QaCard): string {
   if (card.kind === "confirm") {
-    const lines = card.questions.map((q, i) => `${i + 1}. ${q.q} → ${answerOf(card, i) || "（没填）"}`);
+    const lines = card.questions.map((q, i) => `${i + 1}. ${stripNo(q.q)} → ${answerOf(card, i) || "（没填）"}`);
     return `结果确认（我的反馈）：\n${lines.join("\n")}\n\n请按我的反馈继续。`.slice(0, 1900);
   }
-  const lines = card.questions.map((q, i) => `${i + 1}. ${q.q} → ${answerOf(card, i) || "你来决定"}`);
+  const lines = card.questions.map((q, i) => `${i + 1}. ${stripNo(q.q)} → ${answerOf(card, i) || "你来决定"}`);
   return `补充信息（回答你的问题）：\n${lines.join("\n")}\n\n请按这些继续：${card.goal}`.slice(0, 1900);
 }
 

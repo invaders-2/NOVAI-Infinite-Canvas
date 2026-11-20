@@ -7,8 +7,8 @@
 
 覆盖：
 - auth-off：列表/上传与旧版一致（不写 owner_id、不过滤、落 assets/input）
-- auth-on：画布列表/打开/保存/删除/回收站/版本按 owner 隔离，admin ?all=1 可见、可认领
-- 素材：新上传落 assets/users/{uid}/，跨用户 403、admin 200、匿名 401
+- auth-on：画布列表/打开/保存/删除/回收站/版本按 owner 隔离；2026-11 起管理员也没有画布特权（不再 ?all=1 / 认领别人的）
+- 素材：新上传落 assets/users/{uid}/，跨用户 403、admin 也 403（2026-11 起无特权）、required 匿名 401
 - 管理面：停用/启用、改角色、重置密码、非 admin 403、/admin 页面权限
 - 审计：管理操作与认领都写 audit_log
 """
@@ -177,19 +177,27 @@ class B_IsolationTest(unittest.TestCase):
         self.assertEqual(client_b.get("/api/canvases/%s/versions" % canvas["id"]).status_code, 403)
         self.assertEqual(client_b.post("/api/canvases/%s/meta" % canvas["id"], json={"title": "hijack"}).status_code, 403)
 
-        # admin 默认可读全部（单条），但列表默认只看自己，?all=1 才全量
-        self.assertEqual(admin.get("/api/canvases/%s" % canvas["id"]).status_code, 200)
+        # 管理员也没有特权：别人的画布读不到、列表不放大（?all=1 不再全量）
+        self.assertEqual(admin.get("/api/canvases/%s" % canvas["id"]).status_code, 403)
         self.assertNotIn(canvas["id"], {item["id"] for item in admin.get("/api/canvases").json()["canvases"]})
-        all_ids = {item["id"] for item in admin.get("/api/canvases?all=1").json()["canvases"]}
-        self.assertIn(canvas["id"], all_ids)
+        self.assertNotIn(canvas["id"], {item["id"] for item in admin.get("/api/canvases?all=1").json()["canvases"]})
+        self.assertEqual(admin.post("/api/canvases/%s/claim" % canvas["id"]).status_code, 403)
 
-        # 认领后 owner 变成 admin，原用户看不到
-        claimed = admin.post("/api/canvases/%s/claim" % canvas["id"])
-        self.assertEqual(claimed.status_code, 200, claimed.text)
-        self.assertEqual(int(claimed.json()["canvas"]["owner_id"]), int(login(admin, ADMIN_USER, ADMIN_PASS).json()["user"]["id"]))
-        self.assertNotIn(canvas["id"], {item["id"] for item in client_a.get("/api/canvases").json()["canvases"]})
-        self.assertEqual(client_a.get("/api/canvases/%s" % canvas["id"]).status_code, 403)
-        self.assertEqual(client_b.get("/api/canvases/%s" % canvas["id"]).status_code, 403)
+        # 无主画布可以认领给自己（登录时也会自动认领）
+        legacy_id = "legacy-admin-claim"
+        os.makedirs(main.CANVAS_DIR, exist_ok=True)
+        legacy_path = os.path.join(main.CANVAS_DIR, legacy_id + ".json")
+        with open(legacy_path, "w", encoding="utf-8") as fh:
+            json.dump({"id": legacy_id, "title": "无主画布", "created_at": 1, "updated_at": 1,
+                       "nodes": [], "connections": []}, fh)
+        try:
+            claimed = admin.post("/api/canvases/%s/claim" % legacy_id)
+            self.assertEqual(claimed.status_code, 200, claimed.text)
+            admin_id = int(admin.get("/api/auth/me").json()["id"])
+            self.assertEqual(int(claimed.json()["canvas"]["owner_id"]), admin_id)
+            self.assertNotIn(legacy_id, {item["id"] for item in client_a.get("/api/canvases").json()["canvases"]})
+        finally:
+            os.remove(legacy_path)
 
     def test_trash_isolation(self) -> None:
         admin = self.admin_client()
@@ -202,8 +210,10 @@ class B_IsolationTest(unittest.TestCase):
         a_trash = {item["id"] for item in client_a.get("/api/canvases/trash").json()["canvases"]}
         self.assertIn(canvas["id"], a_trash)
         self.assertNotIn(canvas["id"], {item["id"] for item in client_b.get("/api/canvases/trash").json()["canvases"]})
+        # 管理员也不能在回收站看到/恢复别人的画布
         admin_trash = {item["id"] for item in admin.get("/api/canvases/trash?all=1").json()["canvases"]}
-        self.assertIn(canvas["id"], admin_trash)
+        self.assertNotIn(canvas["id"], admin_trash)
+        self.assertEqual(admin.post("/api/canvases/%s/restore" % canvas["id"]).status_code, 403)
         self.assertEqual(client_b.post("/api/canvases/%s/restore" % canvas["id"]).status_code, 403)
         self.assertEqual(client_a.post("/api/canvases/%s/restore" % canvas["id"]).status_code, 200)
 
@@ -226,7 +236,8 @@ class B_IsolationTest(unittest.TestCase):
         self.assertEqual(client_a.get(url).status_code, 200)
         self.assertEqual(client_a.get(url).content, PNG_1PX)
         self.assertEqual(client_b.get(url).status_code, 403)
-        self.assertEqual(admin.get(url).status_code, 200)
+        # 2026-11：管理员不再有素材读取特权
+        self.assertEqual(admin.get(url).status_code, 403)
         self.assertEqual(fresh_client().get(url).status_code, 401)
 
         # 同一份字节由 B 再传：必须落 B 自己的目录，不能复用 A 的 URL
@@ -337,9 +348,19 @@ class B_IsolationTest(unittest.TestCase):
         admin = self.admin_client()
         client_x, user_x = self.make_user(admin, "audit")
         # 先建画布再动账号：停用/重置会作废会话
-        canvas = self.make_canvas(client_x, "待认领")
-        claim = admin.post("/api/canvases/%s/claim" % canvas["id"])
-        self.assertEqual(claim.status_code, 200, claim.text)
+        self.make_canvas(client_x, "待认领")
+        # 管理员不能认领别人的画布，只能认领无主画布
+        legacy_id = "legacy-claim-audit"
+        os.makedirs(main.CANVAS_DIR, exist_ok=True)
+        legacy_path = os.path.join(main.CANVAS_DIR, legacy_id + ".json")
+        with open(legacy_path, "w", encoding="utf-8") as fh:
+            json.dump({"id": legacy_id, "title": "待认领", "created_at": 1, "updated_at": 1,
+                       "nodes": [], "connections": []}, fh)
+        try:
+            claim = admin.post("/api/canvases/%s/claim" % legacy_id)
+            self.assertEqual(claim.status_code, 200, claim.text)
+        finally:
+            os.remove(legacy_path)
 
         issued = admin.post("/api/admin/invites", json={})
         self.assertEqual(issued.status_code, 200)
@@ -354,7 +375,7 @@ class B_IsolationTest(unittest.TestCase):
         actions = {(row["action"], row["target"], row["result"], row["actor"]) for row in entries}
         for action in ("invite_create", "invite_disable", "user_disable", "user_enable", "user_role", "user_reset_password"):
             self.assertTrue(any(item[0] == action and item[2] == "ok" for item in actions), action)
-        self.assertIn(("canvas_claim", canvas["id"], "ok", ADMIN_USER), actions)
+        self.assertIn(("canvas_claim", legacy_id, "ok", ADMIN_USER), actions)
         # 管理操作的操作者必须是 admin；自助改密码等用户操作不在此断言内
         admin_actions = [row for row in entries if row["action"] in (
             "invite_create", "invite_disable", "user_disable", "user_enable",

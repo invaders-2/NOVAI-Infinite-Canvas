@@ -28,7 +28,14 @@ export class Ctl {
   /** 宿主注入：把一段话预填进右侧助手输入框（默认不自动发送） */
   agentDraft?: (text: string, opts?: { skill?: string; autoSend?: boolean }) => void;
   constructor(public store: CanvasStore, public host: HostActions) {}
-  rect() { return this.vp?.getBoundingClientRect() || new DOMRect(0, 0, innerWidth, innerHeight); }
+  /** 画布可用区域。画布底板（#vp）会延伸到助手面板下面（面板四周和磨砂背后透出画布），
+   *  但居中 / 适配 / 新建落点仍按面板左缘截断：可用宽度取 #stage 的右边界（= 面板那一列的起点） */
+  rect() {
+    const r = this.vp?.getBoundingClientRect() || new DOMRect(0, 0, innerWidth, innerHeight);
+    const stage = typeof document !== "undefined" ? document.getElementById("stage")?.getBoundingClientRect() : null;
+    if (stage && stage.right > r.left && stage.right < r.right - 1) return new DOMRect(r.left, r.top, stage.right - r.left, r.height);
+    return r;
+  }
   toWorld = (sx: number, sy: number) => { const r = this.rect(); const v = this.store.state.view; return { x: (sx - r.left - v.x) / v.k, y: (sy - r.top - v.y) / v.k }; };
   toScreen = (x: number, y: number) => { const r = this.rect(); const v = this.store.state.view; return { x: r.left + x * v.k + v.x, y: r.top + y * v.k + v.y }; };
   center() { const r = this.rect(); return this.toWorld(r.left + r.width / 2, r.top + r.height / 2); }

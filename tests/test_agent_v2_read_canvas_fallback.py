@@ -201,7 +201,7 @@ class ReadToolCanvasFallbackTests(unittest.TestCase):
         self.assertEqual(main._agent_v2_read_first_hint(), "")
         from server.agents import cli_spec
         self.assertNotIn("node.read", cli_spec.COMMANDS)
-        self.assertEqual(len(cli_spec.COMMANDS), 26)
+        self.assertEqual(len(cli_spec.COMMANDS), 28)   # 11/14 素材库新增 asset.save 等 2 条
 
 
 def _parse_events(chunks):

@@ -2,7 +2,7 @@
 
 本文讲**这一个方向**：外部 Agent（Claude Desktop / Codex / 其它 MCP 客户端）通过 MCP 调用 NOVAI 的画布能力。
 
-- 入口：仓库根目录的 `novai_mcp_server.py`（和 `novai_cli.py` 同级）。
+- 入口：源码版是仓库根目录的 `novai_mcp_server.py`（和 `novai_cli.py` 同级）；安装版由主程序 `NOVAI --mcp`（源码运行为 `python3 main.py --mcp`）直接提供同样的 stdio 服务，两者协议与 7 个工具一致。
 - 它**不 import main**、不直接读写画布文件；所有操作都通过 HTTP 调**已经运行的本机 NOVAI**（REST 接口）。
 - 支持两种 MCP 传输：`stdio`（推荐，由客户端 spawn 这个进程）与 Streamable HTTP（独立起一个 HTTP 服务）。
 
@@ -16,7 +16,7 @@
 
 ## stdio 方式（推荐）
 
-由 MCP 客户端启动进程，一条命令：
+由 MCP 客户端启动进程。安装版直接把 command 指向应用主程序并加 `--mcp`；源码版一条命令：
 
 ```bash
 NOVAI_BASE_URL=http://127.0.0.1:8000 python3 /绝对路径/NOVAI-v16/novai_mcp_server.py

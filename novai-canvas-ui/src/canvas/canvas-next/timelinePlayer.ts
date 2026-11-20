@@ -6,7 +6,7 @@
  *   · 声音走 WebAudio：每段一个增益（音量 0–2 + 转场淡入淡出），预览接扬声器，导出接录制流
  *   · 时间以墙上时钟为准；元素落后/超前超过 0.25s 就校正
  */
-import { activeAt, fadeOf, lenOf, place, speedOf, srcTime, totalOf, transOf, volOf, type Clip, type Placed, type Track } from "./timelineModel";
+import { activeAt, colorFilter, duckGain, duckOf, fadeOf, lenOf, OVERLAP_TRANS, place, speedOf, srcTime, tfAt, totalOf, transOf, voiceSpans, volOf, type Clip, type Placed, type Track, type TransKind } from "./timelineModel";
 
 /** 图片片段用 <img>，其余用 <video>/<audio>；isMedia 区分两类 */
 type Slot = { clip: Clip; url: string; el: HTMLMediaElement; img: HTMLImageElement | null; gain: GainNode | null; ready: Promise<boolean> };
@@ -21,6 +21,11 @@ export type PlayerOptions = {
   onTime?: (t: number) => void;
   onEnd?: () => void;
   subStyle?: SubStyle;
+  /** 画面适配：contain 留黑边（默认）/ cover 铺满裁切 */
+  fit?: "contain" | "cover";
+  /** 播放区间（入点 / 出点）：只在区间内播，loop 时到出点回到入点 */
+  range?: { start: number; end: number } | null;
+  loop?: boolean;
 };
 
 const waitFor = (el: HTMLMediaElement, ev: string, ms = 8000) => new Promise<boolean>((res) => {
@@ -33,6 +38,7 @@ export class TimelinePlayer {
   private o: PlayerOptions; private ctx2d: CanvasRenderingContext2D; private slots = new Map<string, Slot>();
   private clips: Clip[] = []; private ac: AudioContext | null = null; private out: AudioNode | null = null;
   private raf = 0; private wall = 0; t = 0; playing = false; private dead = false;
+  private seekWant: number | null = null; private seeking = false;
 
   constructor(o: PlayerOptions) {
     this.o = o; o.canvas.width = o.width; o.canvas.height = o.height;
@@ -80,6 +86,9 @@ export class TimelinePlayer {
   private drop(s: Slot) { try { if (s.img) s.img.src = ""; else { s.el.pause(); s.el.removeAttribute("src"); s.el.load(); } } catch { /* ignore */ } this.slots.delete(s.clip.id); }
   /** 预览 / 导出共用的字幕样式（改了立刻重画当前帧） */
   setSubStyle(st: SubStyle | undefined) { this.o.subStyle = st; if (!this.playing) this.draw(this.t); }
+  /** 适配方式 / 播放区间：不重建播放器，避免换一下就把已加载的素材全丢了 */
+  setFit(fit: "contain" | "cover") { this.o.fit = fit; if (!this.playing) this.draw(this.t); }
+  setRange(range: { start: number; end: number } | null, loop: boolean) { this.o.range = range; this.o.loop = loop; }
 
   get total() { return totalOf(this.clips); }
   /** 已加载素材的真实时长（秒），按片段 id */
@@ -89,11 +98,21 @@ export class TimelinePlayer {
     return out;
   }
 
+  /** 拖动播放头 / 点刻度尺时用：连续调用只保留最后一个目标，避免每次都等 <video> seek 完成 */
+  requestSeek(t: number) {
+    this.seekWant = t;
+    if (!this.seeking) void this.drainSeek();
+  }
+  private async drainSeek() {
+    this.seeking = true;
+    while (this.seekWant != null) { const t = this.seekWant; this.seekWant = null; await this.seek(t); }
+    this.seeking = false;
+  }
   /** 停在 t，画出这一帧 */
   async seek(t: number) {
     this.t = Math.max(0, Math.min(this.total, t));
     if (this.playing) { this.wall = performance.now() - this.t * 1000; this.sync(true); return; }
-    const vis = activeAt(this.clips, "video", this.t);
+    const vis = [...activeAt(this.clips, "video", this.t), ...activeAt(this.clips, "overlay", this.t)];
     await Promise.all(vis.map(async (p) => {
       const s = this.slots.get(p.clip.id); if (!s) return;
       await s.ready; if (s.img) return; const want = srcTime(p, this.t);
@@ -104,7 +123,9 @@ export class TimelinePlayer {
 
   async play(from = this.t) {
     if (this.playing) return;
-    if (from >= this.total - 0.05) from = 0;
+    const rg = this.o.range;
+    if (rg && (from < rg.start || from >= rg.end)) from = rg.start;
+    else if (from >= this.total - 0.05) from = 0;
     this.ensureAudio(); try { await this.ac?.resume(); } catch { /* ignore */ }
     await Promise.all([...this.slots.values()].map((s) => s.ready));
     this.t = from; this.playing = true; this.wall = performance.now() - from * 1000;
@@ -112,6 +133,12 @@ export class TimelinePlayer {
     const tick = () => {
       if (!this.playing) return;
       this.t = (performance.now() - this.wall) / 1000;
+      // 区间播放：到出点回入点（循环）或停下（不循环），停下的位置就是出点
+      const rg = this.o.range;
+      if (rg && this.t >= rg.end) {
+        if (this.o.loop) { this.wall = performance.now() - rg.start * 1000; this.t = rg.start; this.sync(true); this.draw(this.t); this.o.onTime?.(this.t); this.raf = requestAnimationFrame(tick); return; }
+        this.t = rg.end; this.draw(this.t); this.o.onTime?.(this.t); this.pause(); this.o.onEnd?.(); return;
+      }
       if (this.t >= this.total) { this.t = this.total; this.draw(this.t); this.o.onTime?.(this.t); this.pause(); this.o.onEnd?.(); return; }
       this.sync(false); this.draw(this.t); this.o.onTime?.(this.t);
       this.raf = requestAnimationFrame(tick);
@@ -126,8 +153,8 @@ export class TimelinePlayer {
 
   /** 让每个元素的播放状态和位置跟上时间轴 */
   private sync(hard: boolean) {
-    const t = this.t;
-    for (const tr of ["video", "audio"] as Track[]) {
+    const t = this.t; const spans = voiceSpans(this.clips);
+    for (const tr of ["video", "overlay", "audio"] as Track[]) {
       const placed = place(this.clips, tr);
       placed.forEach((p, i) => {
         const s = this.slots.get(p.clip.id); if (!s || s.img) return;
@@ -146,7 +173,9 @@ export class TimelinePlayer {
         const next = placed[i + 1]; const tin = transOf(p.clip, placed[i - 1]?.clip); const tnext = next ? transOf(next.clip, p.clip) : null;
         let g = volOf(p.clip);
         if (tin.kind !== "none" && tin.sec > 0) g *= Math.min(1, (t - p.start) / tin.sec);
-        if (tnext && tnext.kind === "dissolve" && tnext.sec > 0 && t > next!.start) g *= Math.max(0, 1 - (t - next!.start) / tnext.sec);
+        if (tnext && OVERLAP_TRANS.includes(tnext.kind) && tnext.sec > 0 && t > next!.start) g *= Math.max(0, 1 - (t - next!.start) / tnext.sec);
+        // 背景音乐自动压低：画面里有声音的时候降下去
+        if (tr === "audio") g *= duckGain(spans, t, duckOf(p.clip));
         // 片段自己的声音淡入 / 淡出
         const fd = fadeOf(p.clip);
         if (fd.in > 0) g *= Math.min(1, (t - p.start) / fd.in);
@@ -157,22 +186,7 @@ export class TimelinePlayer {
   }
 
   private draw(t: number) {
-    const c = this.ctx2d; const W = this.o.width, H = this.o.height;
-    c.globalAlpha = 1; c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
-    const placed = place(this.clips, "video");
-    for (const p of placed.filter((x) => t >= x.start && t < x.end)) {
-      const s = this.slots.get(p.clip.id);
-      const v = (s?.img || s?.el) as HTMLVideoElement | HTMLImageElement | undefined;
-      const vw = v ? ("videoWidth" in v ? v.videoWidth : v.naturalWidth) : 0; const vh = v ? ("videoHeight" in v ? v.videoHeight : v.naturalHeight) : 0;
-      if (!v || !vw || !vh) continue;
-      const tr = transOf(p.clip, placed[p.index - 1]?.clip);
-      c.globalAlpha = tr.kind !== "none" && tr.sec > 0 ? Math.max(0, Math.min(1, (t - p.start) / tr.sec)) : 1;
-      const k = Math.min(W / vw, H / vh); const dw = vw * k, dh = vh * k;
-      if (tr.kind === "fade" || c.globalAlpha >= 1) { const a = c.globalAlpha; c.globalAlpha = 1; c.fillStyle = "#000"; c.fillRect(0, 0, W, H); c.globalAlpha = a; }
-      try { c.drawImage(v, (W - dw) / 2, (H - dh) / 2, dw, dh); } catch { /* 还没解码 */ }
-    }
-    c.globalAlpha = 1;
-    drawSubs(c, W, H, activeAt(this.clips, "subtitle", t), this.o.subStyle);
+    composeFrame(this.ctx2d, this.o.width, this.o.height, t, this.clips, (c) => { const s = this.slots.get(c.id); return (s?.img || s?.el) as CanvasImageSource | undefined; }, this.o.fit || "contain", this.o.subStyle);
   }
 
   destroy() {
@@ -180,6 +194,58 @@ export class TimelinePlayer {
     for (const s of [...this.slots.values()]) this.drop(s);
     try { void this.ac?.close(); } catch { /* ignore */ }
   }
+}
+
+/** 画面尺寸：<video> 用 videoWidth，<img> 用 naturalWidth，其余（解码出来的帧 / canvas）用 width */
+function sizeOf(v: CanvasImageSource): [number, number] {
+  const a = v as Partial<HTMLVideoElement & HTMLImageElement & { displayWidth: number; displayHeight: number; width: number; height: number }>;
+  if (a.videoWidth) return [a.videoWidth, a.videoHeight || 0];
+  if (a.naturalWidth) return [a.naturalWidth, a.naturalHeight || 0];
+  if (a.displayWidth) return [a.displayWidth, a.displayHeight || 0];
+  return [Number(a.width) || 0, Number(a.height) || 0];
+}
+/** 按变换画一层：先按适配方式算出「铺在画幅里」的大小，再缩放 s、把中心放到 (x, y)、旋转 r、不透明度 o × 额外 alpha */
+function drawLayer(c: CanvasRenderingContext2D, W: number, H: number, v: CanvasImageSource, clip: Clip, lt: number, fit: "contain" | "cover", alpha: number) {
+  const [vw, vh] = sizeOf(v); if (!vw || !vh) return;
+  const f = tfAt(clip, lt);
+  const k = (fit === "cover" ? Math.max(W / vw, H / vh) : Math.min(W / vw, H / vh)) * Math.max(0.01, f.s);
+  const dw = vw * k, dh = vh * k;
+  c.save(); c.globalAlpha = Math.max(0, Math.min(1, alpha * f.o)); const cf = colorFilter(clip); if (cf) c.filter = cf;
+  c.translate(f.x * W, f.y * H); if (f.r) c.rotate((f.r * Math.PI) / 180);
+  try { c.drawImage(v, -dw / 2, -dh / 2, dw, dh); } catch { /* 还没解码 */ }
+  c.restore();
+}
+/**
+ * 合成一帧：主画面（含转场）→ 画中画 → 字幕。预览播放器和逐帧导出共用，保证所见即所得。
+ * src(clip) 返回这一段当前要画的画面（播放器给 <video>/<img>，导出给解码好的帧）。
+ */
+export function composeFrame(c: CanvasRenderingContext2D, W: number, H: number, t: number, clips: Clip[], src: (clip: Clip) => CanvasImageSource | null | undefined, fit: "contain" | "cover", subStyle?: SubStyle) {
+  c.globalAlpha = 1; c.fillStyle = "#000"; c.fillRect(0, 0, W, H);
+  const placed = place(clips, "video");
+  for (const p of placed.filter((x) => t >= x.start && t < x.end)) {
+    const v = src(p.clip); if (!v) continue;
+    const tr = transOf(p.clip, placed[p.index - 1]?.clip);
+    const a = tr.kind !== "none" && tr.sec > 0 ? Math.max(0, Math.min(1, (t - p.start) / tr.sec)) : 1;
+    if (tr.kind === "fade" || a >= 1) { c.globalAlpha = 1; c.fillStyle = "#000"; c.fillRect(0, 0, W, H); }
+    if (a < 1 && tr.kind !== "fade" && tr.kind !== "dissolve") { drawTrans(c, W, H, tr.kind, a, () => drawLayer(c, W, H, v, p.clip, t - p.start, fit, tr.kind === "zoom" ? a : 1)); continue; }
+    drawLayer(c, W, H, v, p.clip, t - p.start, fit, a);
+  }
+  for (const p of place(clips, "overlay").filter((x) => t >= x.start && t < x.end)) {
+    const v = src(p.clip); if (v) drawLayer(c, W, H, v, p.clip, t - p.start, "contain", 1);
+  }
+  c.globalAlpha = 1;
+  drawSubs(c, W, H, activeAt(clips, "subtitle", t), subStyle);
+}
+
+/** 擦除 / 推入 / 放大进场：a 是进场进度 0→1 */
+function drawTrans(c: CanvasRenderingContext2D, W: number, H: number, kind: TransKind, a: number, paint: () => void) {
+  const e = a * a * (3 - 2 * a);
+  c.save();
+  if (kind === "wipe") { c.beginPath(); c.rect(0, 0, W * e, H); c.clip(); }
+  else if (kind === "slide") c.translate(W * (1 - e), 0);
+  else if (kind === "zoom") { const k = 1.25 - 0.25 * e; c.translate(W / 2, H / 2); c.scale(k, k); c.translate(-W / 2, -H / 2); }
+  paint();
+  c.restore();
 }
 
 function drawSubs(c: CanvasRenderingContext2D, W: number, H: number, subs: Placed[], st?: SubStyle) {

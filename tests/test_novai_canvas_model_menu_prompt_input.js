@@ -51,7 +51,7 @@ assert.ok(/width:308px/.test(flyRule) && /border-radius:14px/.test(flyRule) && /
 assert.ok(/border:0/.test(flyRule) && !/inset/.test(flyRule), '浮层零 border / 零 inset 描边');
 assert.ok(/-webkit-backdrop-filter:blur\(42px\) saturate\(180%\);backdrop-filter:blur\(42px\) saturate\(180%\)/.test(flyRule), '二级浮层磨砂（blur 42px / saturate 180%，含 -webkit-）');
 assert.ok(/box-shadow:var\(--glass-shadow\)/.test(flyRule), '二级浮层用统一 glass-shadow（深浅色自动适配）');
-assert.ok(css.includes('.cn-root .model-flyout-portal .combo .mi.combo-item{\n  min-height:38px;padding:0 10px;border-radius:9px'), '二级行 38px / 9px 圆角');
+assert.ok(css.includes('.cn-root .model-flyout-portal .combo .mi.combo-item{\n  min-height:38px;padding:0 var(--combo-row-pad-x);border-radius:9px'), '二级行 38px / 9px 圆角，行内距引用 --combo-row-pad-x（与高亮面内缩同源）');
 assert.ok(/\.cn-root \.model-flyout-portal \.combo \.mi\.combo-item\{[^}]*font-size:13px/.test(css), '二级行文字 13px');
 assert.ok(/\.cn-root \.model-flyout-portal \.combo \.combo-item\.on\{background:transparent;color:var\(--fg\);font-weight:600\}/.test(css), '选中行不铺底 + 字重 600');
 assert.ok(/\.cn-root \.model-flyout-portal \.combo \.combo-item\.on::before\{content:none\}/.test(css), '选中行没有铺底伪元素');

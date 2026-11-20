@@ -388,25 +388,6 @@
         const path = text.split('?')[0].split('#')[0];
         return /\.(png|jpe?g|webp|gif|bmp|tiff)$/i.test(path);
     }
-    // Asset classification prompt & dimension names
-    async function fetchClassificationPrompt(){
-        try {
-            const res = await fetch('/api/asset/classification-prompt');
-            if(!res.ok) throw new Error(await responseErrorMessage(res));
-            return await res.json();
-        } catch(e) { console.warn('[NovaUtils] fetchClassificationPrompt failed:', e); return null; }
-    }
-    // Update classification prompt with extra requirements
-    async function updateClassificationPrompt(extraPrompt){
-        try {
-            const res = await fetch('/api/asset/classification-prompt', {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ extra_prompt: extraPrompt || '' }),
-            });
-            if(!res.ok) throw new Error(await responseErrorMessage(res));
-            return await res.json();
-        } catch(e) { console.warn('[NovaUtils] updateClassificationPrompt failed:', e); return null; }
-    }
     // Model name normalization (dedup & sort)
     async function normalizeModels(models, protocols){
         try {
@@ -555,7 +536,6 @@
         // API adapters
         fetchStorageSettings, saveStorageSettings, applyStorageSettings,
         detectImageMediaUrl, looksLikeImageMediaUrl,
-        fetchClassificationPrompt, updateClassificationPrompt,
         normalizeModels, fetchRhWalletStatus,
         // Shared history helpers
         loadHistoryWithPagination,

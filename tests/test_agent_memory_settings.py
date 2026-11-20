@@ -99,7 +99,7 @@ class SettingsGateTests(unittest.TestCase):
                                     json={"auto_summary": False}).status_code, 400)
         detail = CLIENT.get("/api/agent/memory/settings",
                             params={"canvas_id": canvas_id}).json()["detail"]
-        self.assertIn("NOVAI_AGENT_V2_MEMORY", detail)
+        self.assertIn("智能记忆未开启", detail)
 
     def test_canvas_id_is_required(self):
         with memory_on():

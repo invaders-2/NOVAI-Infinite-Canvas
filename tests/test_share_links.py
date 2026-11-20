@@ -171,8 +171,8 @@ class B_ShareLinkTest(unittest.TestCase):
         self.assertEqual(viewer.get("/api/canvases/%s/share-link" % canvas["id"]).status_code, 403)
         self.assertEqual(viewer.post("/api/canvases/%s/share-link" % canvas["id"], json={}).status_code, 403)
         self.assertEqual(viewer.delete("/api/canvases/%s/share-link" % canvas["id"]).status_code, 403)
-        # admin：200
-        self.assertEqual(admin.get("/api/canvases/%s/share-link" % canvas["id"]).status_code, 200)
+        # admin 也没有特权：别人的画布同样 403（2026-11）
+        self.assertEqual(admin.get("/api/canvases/%s/share-link" % canvas["id"]).status_code, 403)
         # 画布不存在
         self.assertEqual(owner.get("/api/canvases/%s/share-link" % uuid.uuid4().hex).status_code, 404)
 

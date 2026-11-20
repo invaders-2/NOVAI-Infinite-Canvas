@@ -5,6 +5,10 @@
  * desktop/source-drag-preload.js），dataTransfer.files 是空的 —— 只认 files 的话拖进来毫无反应。
  * 这里把 URL 交给 /api/local-assets/import-urls 存成本机素材文件（旧站点的时效签名链接会过期，
  * 直接引用外链迟早裂图），拿到本地 url / kind / 宽高后按图片 / 视频落成节点。
+ *
+ * 视频比图片多一层坑：小红书这类播放器用 MSE 播放，拖拽载荷里的地址是 blob:（甚至压根没有地址），
+ * 后端下载不了。所以「没有 http 地址」时先回主进程抓到的最近视频请求里找真链，再按
+ * 地址下载 → 页面内取字节 → 主进程带登录态下载 三条通道依次兜底。
  */
 import { fitSourceBox } from "../mediaFit";
 import type { CanvasStore } from "../store";
@@ -23,15 +27,46 @@ type GuestDrag = {
   bestUrl?: string;
   imageCandidates?: Array<string | { url?: string }>;
   videoCandidates?: Array<string | { url?: string }>;
+  videoUrls?: string[];
   mediaUrl?: string;
   src?: string;
   urls?: string[];
   html?: string;
+  tagName?: string;
+  sourceTag?: string;
+  pageUrl?: string;
 };
+type DesktopApi = {
+  get_last_guest_drag?: () => Promise<unknown>;
+  get_guest_drag_bytes?: () => Promise<unknown>;
+  get_recent_source_media?: () => Promise<unknown>;
+  get_source_view_fetch_bytes?: (arg: unknown, maxBytes?: number) => Promise<unknown>;
+  fetch_source_url?: (arg: unknown, referer?: string) => Promise<unknown>;
+};
+type GuestDragInfo = { http: string[]; blobs: string[]; pageUrl: string; video: boolean };
 
 /** 主进程在内嵌页上下文里预取到的图片字节（'guest-drag-bytes' 的返回，20s 内有效） */
 type GuestBytes = { url: string; dataUrl: string; contentType: string; size: number; originalUrl: string };
 type ImportItem = { url: string; data?: string; content_type?: string; name?: string };
+
+const NO_SOURCE_URL_TEXT = "没读到拖进来的素材地址，请从在线素材面板里重新拖一次";
+
+function desktopApi(): DesktopApi | null {
+  const api = (window as unknown as { pywebview?: { api?: unknown } }).pywebview?.api;
+  return api && typeof api === "object" ? (api as DesktopApi) : null;
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error || "未知原因");
+}
+
+function unique(list: string[]): string[] {
+  return Array.from(new Set(list));
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([promise, new Promise<null>((resolve) => setTimeout(() => resolve(null), ms))]);
+}
 
 function collectUrls(value: string, out: string[]) {
   for (const line of String(value || "").split(/\r?\n/)) {
@@ -39,6 +74,16 @@ function collectUrls(value: string, out: string[]) {
     // uri-list 允许以 # 开头的注释行
     if (!url || url.startsWith("#")) continue;
     if (!/^(https?:\/\/|data:(?:image|video)\/)/i.test(url)) continue;
+    out.push(url);
+  }
+}
+
+/** blob: 单收：后端下载不了这类地址，只能回到内嵌页面里取字节 */
+function collectBlobUrls(value: string, out: string[]) {
+  for (const line of String(value || "").split(/\r?\n/)) {
+    const url = line.trim();
+    if (!url || url.startsWith("#")) continue;
+    if (!/^blob:/i.test(url)) continue;
     out.push(url);
   }
 }
@@ -56,41 +101,126 @@ export function urlsFromDataTransfer(dt: DataTransfer | null): string[] {
   return Array.from(new Set(out));
 }
 
-function candidateUrls(list: GuestDrag["imageCandidates"]): string[] {
+/** 载荷里只有 blob: 时（视频走 MSE 播放）单独捞出来 */
+export function blobUrlsFromDataTransfer(dt: DataTransfer | null): string[] {
+  if (!dt) return [];
   const out: string[] = [];
+  collectBlobUrls(dt.getData("text/uri-list"), out);
+  if (!out.length) collectBlobUrls(dt.getData("text/plain"), out);
+  if (!out.length) {
+    const html = dt.getData("text/html");
+    if (html) for (const match of html.matchAll(/(?:src|href)=["']([^"']+)["']/gi)) collectBlobUrls(match[1], out);
+  }
+  return Array.from(new Set(out));
+}
+
+/** 拖拽载荷自带的一小段 HTML 里再捞一遍（<video>/<source>/<img> 的 src）：优先级最低，只做兜底 */
+function collectHtmlSources(html: string, out: string[], blobs: string[]) {
+  const text = String(html || "");
+  if (!text) return;
+  for (const match of text.matchAll(/(?:src|href)=["']([^"']+)["']/gi)) {
+    collectUrls(match[1], out);
+    collectBlobUrls(match[1], blobs);
+  }
+}
+
+/** 站点页面地址（不是素材本身）：拖错层时别把它当图片/视频导进来 */
+function isPageLikeUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    if (!/(^|\.)(xiaohongshu\.com|pinterest\.com|huaban\.com)$/i.test(parsed.hostname)) return false;
+    return /(?:^|\/)(?:explore|discovery|pins?|boards?|search)(?:\/|$)/i.test(parsed.pathname || "");
+  } catch { return false; }
+}
+
+/** HLS 播放列表：后端只能拿到一张播放列表，下不了整段视频，别白等一次下载 */
+function isHlsUrl(value: string): boolean {
+  return /\.m3u8(?:[?#]|$)/i.test(String(value || ""));
+}
+
+function candidateUrls(list: GuestDrag["imageCandidates"], out: string[], blobs: string[] = []) {
   for (const item of list || []) {
     const url = typeof item === "string" ? item : item && item.url;
-    collectUrls(String(url || ""), out);
+    const text = String(url || "");
+    collectUrls(text, out);
+    collectBlobUrls(text, blobs);
   }
-  return out;
 }
 
 /** 桥没回应时的等待上限：卡住比报错更糟——整次 drop 会静默挂死，连「没读到地址」的提示都不出现 */
 const GUEST_DRAG_TIMEOUT_MS = 1200;
 
-/** 桌面端兜底：起拖时主进程记下了那一次拖拽的元素（60s 内有效），iframe 的 drop 载荷为空时用它补 */
-async function guestDragUrls(): Promise<string[]> {
-  const api = (window as unknown as { pywebview?: { api?: { get_last_guest_drag?: () => Promise<unknown> } } }).pywebview?.api;
-  if (!api || typeof api.get_last_guest_drag !== "function") return [];
+/** 桌面端兜底：读主进程记下的那一次拖拽（60s 内有效）。同时带回 blob 地址与「拖的是视频」这个线索 */
+async function guestDragInfo(): Promise<GuestDragInfo> {
+  const empty: GuestDragInfo = { http: [], blobs: [], pageUrl: "", video: false };
+  const api = desktopApi();
+  if (!api || typeof api.get_last_guest_drag !== "function") return empty;
   let payload: unknown;
   try {
-    payload = await Promise.race([
-      api.get_last_guest_drag(),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), GUEST_DRAG_TIMEOUT_MS)),
-    ]);
-  } catch { return []; }
+    payload = await withTimeout(api.get_last_guest_drag(), GUEST_DRAG_TIMEOUT_MS);
+  } catch { return empty; }
   const row = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
   const drag = (row.drag && typeof row.drag === "object" ? row.drag : null) as GuestDrag | null;
-  if (!drag) return [];
-  const out: string[] = [];
-  collectUrls(String(drag.uriList || ""), out);
-  collectUrls(String(drag.bestUrl || ""), out);
-  collectUrls(String(drag.mediaUrl || ""), out);
-  collectUrls(String(drag.src || ""), out);
-  for (const url of drag.urls || []) collectUrls(String(url), out);
-  if (!out.length) for (const url of candidateUrls(drag.imageCandidates)) collectUrls(url, out);
-  if (!out.length) for (const url of candidateUrls(drag.videoCandidates)) collectUrls(url, out);
-  return Array.from(new Set(out));
+  if (!drag) return empty;
+  const http: string[] = [];
+  const blobs: string[] = [];
+  const add = (value: unknown) => {
+    const text = String(value || "");
+    collectUrls(text, http);
+    collectBlobUrls(text, blobs);
+  };
+  const video = /^VIDEO$/i.test(String(drag.tagName || drag.sourceTag || "")) || (drag.videoCandidates || []).length > 0;
+  // 视频元素自己的地址最准：小红书这类页面 mediaUrl 常是 blob，videoUrls 里才藏着真链
+  if (video) {
+    for (const url of drag.videoUrls || []) add(url);
+    candidateUrls(drag.videoCandidates, http, blobs);
+  }
+  add(drag.uriList);
+  add(drag.bestUrl);
+  add(drag.mediaUrl);
+  add(drag.src);
+  for (const url of drag.urls || []) add(url);
+  collectHtmlSources(String(drag.html || ""), http, blobs);
+  // 主要字段全空时才翻候选列表：同一张图常有多档尺寸地址，混进来会让「单图字节通道」失效
+  if (!http.length && !blobs.length) {
+    if (!video) candidateUrls(drag.imageCandidates, http, blobs);
+    if (!http.length && !blobs.length) candidateUrls(drag.videoCandidates, http, blobs);
+    if (!http.length && !blobs.length) for (const url of drag.videoUrls || []) add(url);
+  }
+  return { http: unique(http), blobs: unique(blobs), pageUrl: String(drag.pageUrl || ""), video };
+}
+
+const RECENT_MEDIA_TIMEOUT_MS = 900;
+const RECENT_MEDIA_MAX = 4;
+
+/** 主进程抓到的最近视频请求（120s 内）：blob 播放时靠它还原出可下载的真链 */
+async function recentVideoUrls(pageUrl: string): Promise<string[]> {
+  const api = desktopApi();
+  if (!api || typeof api.get_recent_source_media !== "function") return [];
+  let payload: unknown;
+  try {
+    payload = await withTimeout(api.get_recent_source_media(), RECENT_MEDIA_TIMEOUT_MS);
+  } catch { return []; }
+  const row = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  const list = row.items ?? row.media ?? row.urls ?? row.list;
+  const entries = Array.isArray(list) ? (list as unknown[]) : [];
+  const picked: Array<{ url: string; time: number; same: boolean; hls: boolean }> = [];
+  for (const entry of entries) {
+    const obj = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
+    const url = String(obj ? obj.url ?? obj.src ?? obj.mediaUrl ?? "" : entry ?? "").trim();
+    if (!url || !/^https?:\/\//i.test(url)) continue;
+    if (String((obj && obj.kind) || "").toLowerCase() !== "video") continue;
+    picked.push({
+      url,
+      time: Number(obj && obj.time) || 0,
+      // 同一页面拖下来的才最可能是刚拖的那一条
+      same: !pageUrl || String((obj && obj.pageUrl) || "") === pageUrl,
+      hls: /\.m3u8(?:[?#]|$)/i.test(url),
+    });
+  }
+  // 同页面优先 → mp4 优先于 m3u8（m3u8 后端下不了整段视频） → 越新越优先
+  picked.sort((a, b) => Number(b.same) - Number(a.same) || Number(a.hls) - Number(b.hls) || b.time - a.time);
+  return unique(picked.map((item) => item.url)).slice(0, RECENT_MEDIA_MAX);
 }
 
 /** 字节通道的等待上限：主进程自己 20s 超时，这里只防「父窗口不回包」把整次 drop 挂死 */
@@ -102,18 +232,15 @@ const GUEST_BYTES_TIMEOUT_MS = 21000;
  * 交给后端按 URL 下载必然失败，所以有字节就用字节。
  */
 async function guestDragBytes(urls: string[]): Promise<{ bytes: GuestBytes | null; reason: string }> {
-  const api = (window as unknown as { pywebview?: { api?: { get_guest_drag_bytes?: () => Promise<unknown> } } }).pywebview?.api;
+  const api = desktopApi();
   if (!api || typeof api.get_guest_drag_bytes !== "function") return { bytes: null, reason: "" };
   // 字节只对应「最近一次拖拽」的那一张图，多张一起拖容易串图，交给 URL 通道
   if (urls.length !== 1) return { bytes: null, reason: "" };
   let payload: unknown;
   try {
-    payload = await Promise.race([
-      api.get_guest_drag_bytes(),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), GUEST_BYTES_TIMEOUT_MS)),
-    ]);
+    payload = await withTimeout(api.get_guest_drag_bytes(), GUEST_BYTES_TIMEOUT_MS);
   } catch (error) {
-    return { bytes: null, reason: error instanceof Error ? error.message : "字节通道异常" };
+    return { bytes: null, reason: messageOf(error) || "字节通道异常" };
   }
   const row = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
   if (row.ok !== true) {
@@ -164,7 +291,7 @@ async function importItems(items: ImportItem[]): Promise<{ rows: ImportedRow[]; 
       body: JSON.stringify({ items }),
     });
   } catch (error) {
-    throw new Error("连不上本地服务：" + (error instanceof Error ? error.message : "网络错误"));
+    throw new Error("连不上本地服务：" + messageOf(error));
   }
   const data = await response.json().catch(() => null);
   if (!response.ok) throw new Error(errorOf(data, response.status));
@@ -193,6 +320,90 @@ async function importItems(items: ImportItem[]): Promise<{ rows: ImportedRow[]; 
 /** URL 版：只有地址可交（浏览器模式 / 字节通道不可用时） */
 function importUrls(urls: string[]): Promise<{ rows: ImportedRow[]; failed: string[] }> {
   return importItems(urls.map((url) => ({ url })));
+}
+
+type ChannelOutcome = { rows: ImportedRow[]; failed: string[]; reasons: string[] };
+type FetchedBytes = { ok: true; dataUrl: string; contentType: string } | { ok: false; reason: string };
+
+/** 页面内取字节 / 主进程带登录态取字节的统一收尾：通道没装或没响应时不算失败原因 */
+async function fetchedBytes(call: () => Promise<unknown>, timeoutMs: number, label: string): Promise<FetchedBytes> {
+  let payload: unknown;
+  try {
+    payload = await withTimeout(call(), timeoutMs);
+  } catch (error) {
+    return { ok: false, reason: label + "：" + messageOf(error) };
+  }
+  if (!payload) return { ok: false, reason: "" };
+  const row = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+  const dataUrl = String(row.dataUrl || "");
+  if (row.ok !== true || !dataUrl) {
+    const error = String(row.error || "").trim();
+    const status = Number(row.status) || 0;
+    if (!error && !status) return { ok: false, reason: "" };
+    const detail = error === "too-large" ? "素材超过 30MB" : status ? "HTTP " + status : error;
+    return { ok: false, reason: label + "：" + detail };
+  }
+  return { ok: true, dataUrl, contentType: String(row.contentType || "").split(";")[0].trim() };
+}
+
+const PAGE_BYTES_MAX = 30 * 1024 * 1024;
+const PAGE_BYTES_TIMEOUT_MS = 21000;
+const SESSION_FETCH_TIMEOUT_MS = 31000;
+
+/** 内嵌页面上下文里 fetch：带站点自己的 referer / cookie，blob: 也能取（MSE 的取不到） */
+async function pageBytes(url: string): Promise<FetchedBytes> {
+  const api = desktopApi();
+  const fn = api && api.get_source_view_fetch_bytes;
+  if (typeof fn !== "function") return { ok: false, reason: "" };
+  return fetchedBytes(async () => {
+    try { return await fn({ url, maxBytes: PAGE_BYTES_MAX }); }
+    catch { return await fn(url, PAGE_BYTES_MAX); }
+  }, PAGE_BYTES_TIMEOUT_MS, "页面取字节");
+}
+
+/** 主进程 session.fetch：走系统代理 / 登录态，后端直连被 403 时用 */
+async function sessionBytes(url: string, referer: string): Promise<FetchedBytes> {
+  const api = desktopApi();
+  const fn = api && api.fetch_source_url;
+  if (typeof fn !== "function") return { ok: false, reason: "" };
+  return fetchedBytes(async () => {
+    try { return await fn({ url, referer }); }
+    catch { return await fn(url, referer); }
+  }, SESSION_FETCH_TIMEOUT_MS, "带登录态下载");
+}
+
+/** 字节内联进 import-urls：后端不用再下载，站点防盗链也拦不住 */
+async function importFetched(url: string, fetched: FetchedBytes): Promise<ChannelOutcome> {
+  if (fetched.ok !== true) return { rows: [], failed: [], reasons: fetched.reason ? [fetched.reason] : [] };
+  try {
+    const result = await importItems([{ url, data: fetched.dataUrl, content_type: fetched.contentType }]);
+    return { rows: result.rows, failed: result.failed, reasons: [] };
+  } catch (error) {
+    return { rows: [], failed: [], reasons: ["内联导入：" + messageOf(error)] };
+  }
+}
+
+async function importChannel(urls: string[]): Promise<ChannelOutcome> {
+  try {
+    const result = await importUrls(urls);
+    return { rows: result.rows, failed: result.failed, reasons: [] };
+  } catch (error) {
+    return { rows: [], failed: [], reasons: ["地址下载：" + messageOf(error)] };
+  }
+}
+
+/** 地址下载失败后的两条兜底：先页面取字节，再主进程带登录态下载。成功即停，不重复落节点 */
+const MAX_FALLBACKS = 3;
+async function importFallbacks(store: CanvasStore, at: { x: number; y: number }, urls: string[], pageUrl: string, failed: string[]): Promise<boolean> {
+  for (const url of urls.slice(0, MAX_FALLBACKS)) {
+    const page = await importFetched(url, await pageBytes(url));
+    failed.push(...page.reasons, ...page.failed);
+    if (page.rows.length && await placeImported(store, at, page.rows)) return true;
+    const session = await importFetched(url, await sessionBytes(url, pageUrl));
+    failed.push(...session.reasons, ...session.failed);
+    if (session.rows.length && await placeImported(store, at, session.rows)) return true;
+  }
+  return false;
 }
 
 function probeImage(url: string): Promise<{ width: number; height: number } | null> {
@@ -264,49 +475,84 @@ async function insertSourceRows(store: CanvasStore, at: { x: number; y: number }
 async function placeImported(store: CanvasStore, at: { x: number; y: number }, rows: ImportedRow[]): Promise<boolean> {
   if (!rows.length) return false;
   await insertSourceRows(store, at, rows);
-  store.toast(rows.some((row) => row.kind === "video") ? `已从在线素材添加 ${rows.length} 个素材` : `已从在线素材添加 ${rows.length} 张图片`);
+  store.toast(rows.some((row) => row.kind === "video") ? "已从在线素材添加 " + rows.length + " 个素材" : "已从在线素材添加 " + rows.length + " 张图片");
   return true;
 }
 
-/** drop 事件统一入口：有文件走原有上传，没有文件按「桌面字节 → URL」两条通道落节点 */
+/** drop 事件统一入口：有文件走原有上传，没有文件按「桌面字节 → 地址下载 → 页面字节 → 登录态下载」落节点 */
 export async function dropSourceUrls(store: CanvasStore, at: { x: number; y: number }, dt: DataTransfer | null) {
   let urls = urlsFromDataTransfer(dt);
+  let blobs = blobUrlsFromDataTransfer(dt);
+  let drag: GuestDragInfo = { http: [], blobs: [], pageUrl: "", video: false };
   // 原生视图起拖的素材，iframe 有时只拿得到空载荷：再问一次主进程记下的那次拖拽
-  if (!urls.length) urls = await guestDragUrls();
-  if (!urls.length) { store.toast("没读到拖进来的素材地址，请从在线素材面板里重新拖一次", 4200); return; }
-  if (urls.length > MAX_URLS) { urls = urls.slice(0, MAX_URLS); store.toast(`一次最多导入 ${MAX_URLS} 个，已取前 ${MAX_URLS} 个`, 4200); }
-  store.toast(urls.length > 1 ? `正在导入 ${urls.length} 个素材…` : "正在导入素材…");
-
+  if (!urls.length) {
+    drag = await guestDragInfo();
+    urls = drag.http;
+    blobs = unique([...blobs, ...drag.blobs]);
+  }
+  const videoIntent = drag.video || blobs.length > 0;
+  // 页面地址（小红书笔记页 / Pinterest 图钉页）不是素材本身；HLS 播放列表下不了整段
+  const pageHits = urls.filter(isPageLikeUrl);
+  urls = urls.filter((url) => !isPageLikeUrl(url));
+  const hlsHits = urls.filter(isHlsUrl);
+  urls = urls.filter((url) => !isHlsUrl(url));
+  if (!urls.length && !blobs.length && (pageHits.length || hlsHits.length)) {
+    store.toast(hlsHits.length
+      ? "这条视频是 HLS（m3u8）流，只能拿到播放列表、下不了整段；换一条直链视频再拖"
+      : "拖进来的是页面地址而不是素材，请在面板里直接按住图片/视频再拖", 5200);
+    return;
+  }
+  if (!urls.length && !blobs.length) {
+    store.toast(videoIntent ? "没读到这条视频的可下载地址（页面可能用加密流播放），先在素材面板里播放几秒再拖一次" : NO_SOURCE_URL_TEXT, 4200);
+    return;
+  }
   const failed: string[] = [];
+  const reasons: string[] = [];
   let placed = false;
   let bytesFailure = "";
 
-  // 字节优先：Pinterest 的 originals 对无 referer 下载回 403、部分网络下装不上代理就超时，
-  // 而主进程在内嵌页里已经预取到同一张图的字节（中等尺寸就够，不为原图再等 60s）
-  const bytes = await guestDragBytes(urls);
-  if (bytes.bytes) {
-    try {
-      const result = await importItems([{ url: bytes.bytes.url, data: bytes.bytes.dataUrl, content_type: bytes.bytes.contentType }]);
-      placed = await placeImported(store, at, result.rows);
-      failed.push(...result.failed);
-    } catch (error) {
-      bytesFailure = "字节通道：" + (error instanceof Error ? error.message : "未知原因");
-    }
-  } else if (bytes.reason) bytesFailure = "字节通道：" + bytes.reason;
-
-  if (!placed) {
-    try {
-      const result = await importUrls(urls);
-      placed = await placeImported(store, at, result.rows);
-      failed.push(...result.failed);
-    } catch (error) {
-      failed.push("地址下载：" + (error instanceof Error ? error.message : "未知原因"));
+  if (!urls.length && blobs.length) {
+    // 视频在页面上是 blob:（MSE 播放）时，回主进程抓到的最近视频请求里找真实地址
+    urls = await recentVideoUrls(drag.pageUrl);
+    if (!urls.length) {
+      reasons.push(desktopApi()
+        ? "页面用的是加密流（blob）播放，没抓到可下载的视频地址"
+        : "浏览器模式读不到这类加密流视频的地址，请在桌面版里拖，或换一条能直接下载的视频");
     }
   }
 
+  if (urls.length) {
+    if (urls.length > MAX_URLS) { urls = urls.slice(0, MAX_URLS); store.toast("一次最多导入 " + MAX_URLS + " 个，已取前 " + MAX_URLS + " 个", 4200); }
+    store.toast(urls.length > 1 ? "正在导入 " + urls.length + " 个素材…" : "正在导入素材…");
+
+    // 字节优先：Pinterest 的 originals 对无 referer 下载回 403、部分网络下装不上代理就超时，
+    // 而主进程在内嵌页里已经预取到同一张图的字节（中等尺寸就够，不为原图再等 60s）
+    const bytes = await guestDragBytes(urls);
+    if (bytes.bytes) {
+      try {
+        const result = await importItems([{ url: bytes.bytes.url, data: bytes.bytes.dataUrl, content_type: bytes.bytes.contentType }]);
+        placed = await placeImported(store, at, result.rows);
+        failed.push(...result.failed);
+      } catch (error) {
+        bytesFailure = "字节通道：" + messageOf(error);
+      }
+    } else if (bytes.reason) bytesFailure = "字节通道：" + bytes.reason;
+
+    if (!placed) {
+      const channel = await importChannel(urls);
+      placed = await placeImported(store, at, channel.rows);
+      failed.push(...channel.failed, ...channel.reasons);
+      if (!placed) placed = await importFallbacks(store, at, urls, drag.pageUrl, failed);
+    }
+  } else if (blobs.length) {
+    // 只剩 blob: 能试：只能回内嵌页面里取字节（MSE 的 blob 取不到，会落到下面的失败提示）
+    store.toast("正在从素材面板取素材…");
+    placed = await importFallbacks(store, at, blobs, drag.pageUrl, failed);
+  }
+
   if (!placed) {
-    if (bytesFailure) failed.unshift(bytesFailure);
-    store.toast("在线素材导入失败：" + (failed.slice(0, 2).join("；") || "未知原因"), 6000);
+    const all = [...(bytesFailure ? [bytesFailure] : []), ...reasons, ...failed];
+    store.toast("在线素材导入失败：" + (all.slice(0, 2).join("；") || "未知原因"), 6000);
   } else if (failed.length) {
     store.toast("有 " + failed.length + " 个没导入：" + failed.slice(0, 2).join("；"), 6000);
   }

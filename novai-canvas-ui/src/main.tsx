@@ -16,8 +16,10 @@ installNovaiBridge();
 
 /** 输入模态：指针（鼠标/触摸）聚焦不画焦点框，键盘聚焦保留可见焦点；规则在 ui/focus-ring.css */
 const markInputMode = (mode: "pointer" | "keyboard") => {
-  if (mode === "pointer") document.documentElement.dataset.input = "pointer";
-  else delete document.documentElement.dataset.input;
+  // 只在真正切换输入模态时才动 <html>：根节点属性变化会让整页样式重算一次，能不写就不写
+  const html = document.documentElement;
+  if (mode === "pointer") { if (html.dataset.input !== "pointer") html.dataset.input = "pointer"; }
+  else if (html.dataset.input) delete html.dataset.input;
 };
 addEventListener("pointerdown", () => markInputMode("pointer"), true);
 addEventListener("keydown", () => markInputMode("keyboard"), true);

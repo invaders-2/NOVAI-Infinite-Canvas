@@ -577,6 +577,8 @@ class VisionTests(unittest.TestCase):
                    patch.object(main, "reference_to_data_url", side_effect=lambda ref, max_size=None: "data:image/png;base64,QUJD"),
                    patch.object(main, "_agent_run_chat", new=chat_mock),
                    patch.object(main, "_agent_pick_caption_model", return_value=caption_chat),
+                   # 现在转文字走候选列表（失败换下一个），也要一起桩掉，否则会用到本机真实配置的看图模型
+                   patch.object(main, "_agent_vision_candidates", return_value=[caption_chat] if caption_chat else []),
                    patch.object(main, "_agent_captions_load", return_value={}),
                    patch.object(main, "_agent_captions_save")]
         for item in patches:

@@ -209,5 +209,7 @@ export function initBridge() {
     const cid = clientId();
     openStatsSocket(cid);
     syncQueue(cid);
-    setInterval(() => syncQueue(cid), 2000);
+    // 窗口隐藏 / 最小化时不轮询排队状态（原来不管看不看得见都 2s 一次）；切回来立刻补一次
+    setInterval(() => { if (!document.hidden) syncQueue(cid); }, 2000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) syncQueue(cid); });
 }

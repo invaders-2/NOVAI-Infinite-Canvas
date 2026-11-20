@@ -161,11 +161,6 @@ class PageImportRequest(BaseModel):
     # 'og' 永远先信 og:image；'largest' 永远取页面里最大的 <img>；
     # 'auto'（默认）在 xiaohongshu/pinterest/huaban 这类 og 常是品牌图的站点上取大图，其余站点维持 og 优先。
     prefer: str = "auto"
-    classify: bool = False
-    provider: str = "comfly"
-    model: str = ""
-    ms_model: str = ""
-    prompt: str = ""
 
 
 # ---------------------------------------------------------------- 依赖读取（main 未 bind 时给默认值，方便单测）
@@ -759,7 +754,7 @@ async def _persist_items(
 ) -> Dict[str, Any]:
     """把已下载好的字节交给 /api/local-assets/import-urls 的同一个 handler 落盘。
 
-    走 base64(data) 通道，类型判定 / 魔数纠扩展 / 命名 / 分类旁车全部复用老逻辑，
+    走 base64(data) 通道，类型判定 / 魔数纠扩展 / 命名 / 生成信息旁车全部复用老逻辑，
     不重复实现一遍。
     """
     request_payload = assets_routes.LocalAssetUrlImportRequest(
@@ -773,11 +768,6 @@ async def _persist_items(
             for item in media_items
         ],
         folder=payload.folder or "",
-        classify=bool(payload.classify),
-        provider=payload.provider or "comfly",
-        model=payload.model or "",
-        ms_model=payload.ms_model or "",
-        prompt=payload.prompt or "",
     )
     return await assets_routes.import_local_assets_from_urls(request_payload)
 

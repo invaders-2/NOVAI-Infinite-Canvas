@@ -15,6 +15,7 @@ import PrefsModal from './parts/PrefsModal.vue';
 import Lightbox from './parts/Lightbox.vue';
 import AskDialog from './parts/AskDialog.vue';
 import { S, MEDIA_TABS, setTab, lastMediaTab, loadAll, softReload, loadProviders, run } from './lib/state.js';
+import { auth } from '../../lib/auth.js';
 import { L, resetToDefault, libraries as assetLibraries } from './lib/library.js';
 import { U, afterLoad as localAfterLoad } from './lib/local.js';
 import { C, uniqueItems, afterLoad as canvasAfterLoad } from './lib/canvas.js';
@@ -27,11 +28,12 @@ const counts = computed(() => ({
     'canvas-assets': uniqueItems().length,
     local: (S.localAssets || []).length,
 }));
-const SOURCES = [
-    { id: 'assets', label: '资产库', icon: 'folder', title: '自己整理的资产库：分组、智能分类' },
-    { id: 'canvas-assets', label: '画布里的', icon: 'canvas', title: '所有画布里用到的图片、视频、音频' },
-    { id: 'local', label: '本地上传', icon: 'upload', title: '上传到本机素材目录的文件' },
-];
+// 登录后素材按账号隔离：资产库只显示自己的；本地上传落自己的 users/{uid}，所以叫「我的上传」
+const SOURCES = computed(() => [
+    { id: 'assets', label: '资产库', icon: 'folder', title: auth.loggedIn ? '自己整理的资产库：只显示当前账号的' : '自己整理的资产库：分组归档' },
+    { id: 'canvas-assets', label: '画布里的', icon: 'canvas', title: auth.loggedIn ? '自己的 + 共享给自己的画布里用到的素材' : '所有画布里用到的图片、视频、音频' },
+    { id: 'local', label: auth.loggedIn ? '我的上传' : '本地上传', icon: 'upload', title: auth.loggedIn ? '当前账号自己的上传与生成结果' : '上传到本机素材目录的文件' },
+]);
 
 function clearSelections() { L.ids.clear(); U.ids.clear(); C.ids.clear(); P.ids.clear(); W.ids.clear(); }
 async function refresh() {

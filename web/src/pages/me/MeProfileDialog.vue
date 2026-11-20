@@ -5,6 +5,7 @@ import { computed, onMounted, ref, watch } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import NvSwitch from '../../components/NvSwitch.vue';
 import ProfileDialog from '../../shell/ProfileDialog.vue';
+import DeleteAccountDialog from './DeleteAccountDialog.vue';
 import { bumpCommunity, toast } from '../../lib/store.js';
 import { communityApi } from '../../lib/community.js';
 import { auth, getAuthSettings, setInviteRequired, createInvite, logout as authLogout, openAuth } from '../../lib/auth.js';
@@ -22,6 +23,8 @@ const me = computed(() => (auth.loggedIn ? auth.user : null));
 const authOn = computed(() => !!(me.value && me.value.username));
 const accountsOn = computed(() => auth.mode !== 'off');
 const roleText = computed(() => ({ admin: '管理员', team: '团队', user: '普通用户' }[(me.value && me.value.role) || ''] || '用户'));
+// 注销成功后 auth.user 会立刻清空，模板里不能再直接读 me.username
+const myName = computed(() => String((me.value && me.value.username) || ''));
 const isAdmin = computed(() => !!(me.value && me.value.role === 'admin'));
 const avatarSrc = computed(() => (String(avatar.value || '').startsWith('data:') ? avatar.value : ''));
 const avatarText = computed(() => {
@@ -82,6 +85,7 @@ async function doLogout() {
 const openReg = ref(false);
 const regBusy = ref(false);
 const lastInvite = ref('');
+const deleteOpen = ref(false);
 watch(isAdmin, async yes => {
     if (!yes) return;
     try { openReg.value = !(await getAuthSettings()).invite_required; } catch (e) { /* 读不到就保持默认 */ }
@@ -223,12 +227,19 @@ onMounted(() => {
                         <button type="button" class="nv-btn sm" @click="newInvite">生成并复制</button>
                     </div>
                 </template>
+
+                <!-- 注销：单独放最下面，弱化样式 + 危险色，不和正常操作并排 -->
+                <div v-if="authOn" class="pe-danger">
+                    <button type="button" id="delete-account-open" class="pe-danger-link" @click="deleteOpen = true">注销账号</button>
+                    <small>永久删除账号和名下画布，不可恢复</small>
+                </div>
             </div>
             <footer class="pe-f">
                 <button type="button" class="nv-btn" @click="emit('close')">取消</button>
                 <button type="button" class="nv-btn primary" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
             </footer>
             <ProfileDialog v-if="avatarOpen" :nickname="nickname" :avatar="avatar" @close="avatarOpen = false" @saved="onAvatarSaved" />
+            <DeleteAccountDialog v-if="deleteOpen" :username="myName" @close="deleteOpen = false" />
         </div>
     </Teleport>
 </template>
@@ -270,6 +281,10 @@ html.theme-dark .pe { background: color-mix(in srgb, #1a1a1a 92%, transparent); 
 .pe-blocked-row b { display: block; font: 500 12.5px/17px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pe-blocked-row small { display: block; font: 400 10.5px/14px var(--font-mono); color: var(--ink-4); }
 .pe-blocked-note { margin: 2px 0 0; font: 400 11px/16px var(--font-sans); color: var(--ink-4); }
+.pe-danger { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; padding: 4px 2px 2px; }
+.pe-danger-link { border: 0; background: transparent; padding: 0; color: var(--danger); font: 500 12.5px/20px var(--font-sans); cursor: pointer; }
+.pe-danger-link:hover { text-decoration: underline; }
+.pe-danger small { font: 400 11px/16px var(--font-sans); color: var(--ink-4); }
 .pe-f { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; }
 .pe-f .nv-btn { height: 34px; border-radius: 17px; padding: 0 18px; }
 </style>

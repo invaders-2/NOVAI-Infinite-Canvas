@@ -53,6 +53,8 @@ const coverStyle = computed(() => {
 });
 // 竖版海报走竖框：横框 contain 会把 853×1280 的图缩到只有框高（316px），两边全是空底
 const coverTall = computed(() => !!coverSize.value && coverSize.value.h > coverSize.value.w);
+// 比 16:9 明显更方 / 更竖的图（方图、竖海报）完整显示，不裁掉主体
+const coverSquareish = computed(() => !!coverSize.value && coverSize.value.w / coverSize.value.h < 1.45);
 
 async function loadDetail() {
     if (!isStore.value) return;
@@ -79,14 +81,51 @@ async function toggleInstall() {
     finally { installing.value = false; }
 }
 
+// 待发送草稿：技能已经用胶囊挂上了，去掉「请使用技能「X」（技能 ID：…）来完成。」这句；只填了补充描述时直接放那句话
+function draftText(prompt) {
+    const lines = String(prompt || '').split('\n').filter(l => !/^请使用技能「/.test(l.trim()));
+    const text = lines.join('\n').trim();
+    const only = text.match(/^输入：\n- 补充描述：([\s\S]*)$/);
+    return only ? only[1].trim() : text;
+}
+
+// 画布助手的技能列表只列「已添加到助手」的技能：没添加先自动添加，否则输入区挂不上技能胶囊
+async function ensureInstalled() {
+    if (installed.value || props.item.kind !== 'skill') return;
+    const res = await fetch('/api/store/items/' + encodeURIComponent(props.item.kind) + '/' + encodeURIComponent(props.item.name) + '/install', { method: 'POST', headers: { Accept: 'application/json' } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
+    installed.value = true;
+    emit('installed', { kind: props.item.kind, name: props.item.name, installed: true });
+}
+
 async function launch(presetId = '', prompt = '') {
     if (launching.value || !available.value) return;
     launching.value = presetId || prompt || 'main';
     try {
+        // 「在新画布里使用」：跟「试试这样说」一样只填进画布助手输入框（挂技能胶囊）等用户确认再发；点模板仍直接开跑
+        const draftOnly = !presetId;
+        if (draftOnly) await ensureInstalled();
         const body = buildLaunchBody({ prompt: prompt || note.value, fields: fields.value, references: refs.value, presetId, kind: props.item.kind, name: props.item.name });
         const r = await launchStoreItem(props.item.kind, props.item.name, body);
         if (!r.canvasId) throw new Error('没有拿到画布');
-        openStoreCanvas(r.canvasId, r.prompt, r.project, { autoSend: true, skillRef: r.skillRef });
+        openStoreCanvas(r.canvasId, draftOnly ? draftText(r.prompt) : r.prompt, r.project, { autoSend: !draftOnly, skillRef: r.skillRef });
+        emit('close');
+    } catch (e) { toast((e && e.message) || '启动失败', { danger: true, icon: 'alert' }); }
+    finally { launching.value = ''; }
+}
+
+// 「试试这样说」：建好新画布、挂上这个技能，把示例话术放进画布助手输入框，等用户改完再发（不自动发送）
+async function tryUseCase(u) {
+    const text = String((u && (u.prompt || u.title)) || '').trim();
+    if (launching.value || !available.value || !text) return;
+    launching.value = 'uc:' + (u.title || text);
+    try {
+        await ensureInstalled();
+        const body = buildLaunchBody({ prompt: '', fields: {}, references: [], presetId: '', kind: props.item.kind, name: props.item.name });
+        const r = await launchStoreItem(props.item.kind, props.item.name, body);
+        if (!r.canvasId) throw new Error('没有拿到画布');
+        openStoreCanvas(r.canvasId, text, r.project, { autoSend: false, skillRef: r.skillRef });
         emit('close');
     } catch (e) { toast((e && e.message) || '启动失败', { danger: true, icon: 'alert' }); }
     finally { launching.value = ''; }
@@ -103,7 +142,7 @@ async function useBuiltin() {
         const c = data && data.canvas;
         if (!c) throw new Error('no canvas');
         const agent = `请使用技能「${s.name}」（技能 ID：${s.id}）来完成。` + (note.value.trim() ? '\n' + note.value.trim() : '');
-        try { localStorage.setItem('novai_canvas_seed:' + c.id, JSON.stringify({ v: 1, agent, autoSend: !!note.value.trim(), skillRef: String(s.id || '') })); } catch (e) {}
+        try { localStorage.setItem('novai_canvas_seed:' + c.id, JSON.stringify({ v: 1, agent, autoSend: false, skillRef: String(s.id || '') })); } catch (e) {}
         openCanvasUrl('/static/canvas.html?id=' + encodeURIComponent(c.id) + '&project=' + encodeURIComponent(c.project || 'default'));
         emit('close');
     } catch (e) { toast('创建画布失败，请检查服务是否在运行', { danger: true, icon: 'alert' }); }
@@ -133,9 +172,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true));
                     <button type="button" class="nv-icon-btn sm round" aria-label="关闭" @click="emit('close')"><NvIcon name="x" /></button>
                 </header>
                 <div class="md-b">
-                    <div v-if="cover || coverVideo" class="cv" :class="{ tall: coverTall && !coverVideo }">
+                    <div v-if="cover || coverVideo" class="cv" :class="{ tall: coverSquareish && !coverVideo }">
                         <video v-if="coverVideo" :src="coverVideo" :poster="cover" autoplay muted loop playsinline></video>
-                        <img v-else :src="cover" alt="" :style="coverStyle" @load="onCoverLoad">
+                        <template v-else><img class="cv-bg" :src="cover" alt="" aria-hidden="true"><img class="cv-fg" :src="cover" alt="" @load="onCoverLoad"></template>
                         <span v-if="!available" class="soon">即将上线</span>
                     </div>
                     <div v-else-if="!isStore || view.builtin" class="cv ico"><NvIcon :name="view.icon && ICONS[view.icon] ? view.icon : 'wand2'" /></div>
@@ -150,14 +189,22 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true));
 
                     <div v-if="loading" class="nv-skel ld"></div>
 
-                    <template v-if="guide && guide.summary">
-                        <h4>它能做什么</h4>
-                        <p class="txt">{{ guide.summary }}</p>
-                    </template>
-                    <template v-if="guide && guide.steps && guide.steps.length">
-                        <h4>使用步骤</h4>
-                        <ol class="steps"><li v-for="(s, i) in guide.steps.slice(0, 6)" :key="i"><b>{{ s.title }}</b><span v-if="s.description">{{ s.description }}</span></li></ol>
-                    </template>
+                    <!-- 使用方法：它能做什么 / 需要准备 / 使用步骤 / 会得到（数据见 server/store_data/skill_guides.json） -->
+                    <section v-if="guide && (guide.summary || (guide.steps && guide.steps.length))" class="howto">
+                        <h4>使用方法</h4>
+                        <p v-if="guide.summary" class="txt">{{ guide.summary }}</p>
+                        <div v-if="guide.requiredContext && guide.requiredContext.length" class="prep">
+                            <span class="lbl">需要准备</span>
+                            <ul><li v-for="(r, i) in guide.requiredContext.slice(0, 6)" :key="i">{{ r.title }}<template v-if="r.description">：{{ r.description }}</template></li></ul>
+                        </div>
+                        <ol v-if="guide.steps && guide.steps.length" class="steps">
+                            <li v-for="(s, i) in guide.steps.slice(0, 6)" :key="i"><i>{{ i + 1 }}</i><div><b>{{ s.title }}</b><span v-if="s.description">{{ s.description }}</span></div></li>
+                        </ol>
+                        <div v-if="guide.outputs && guide.outputs.length" class="outs">
+                            <span class="lbl">会得到</span>
+                            <span v-for="(o, i) in guide.outputs.slice(0, 6)" :key="i" class="tag">{{ o }}</span>
+                        </div>
+                    </section>
                     <template v-if="!isStore && view.deliverables && view.deliverables.length">
                         <h4>会交付</h4>
                         <div class="meta"><span v-for="(x, i) in view.deliverables" :key="i" class="tag">{{ typeof x === 'string' ? x : (x.label || x.name || x.kind) }}</span></div>
@@ -180,7 +227,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true));
                     <template v-if="available && useCases.length">
                         <h4>试试这样说</h4>
                         <div class="uc">
-                            <button v-for="u in useCases" :key="u.title" type="button" :disabled="!!launching" @click="launch('', u.prompt || u.title)">
+                            <button v-for="u in useCases" :key="u.title" type="button" :disabled="!!launching" @click="tryUseCase(u)">
                                 <b>{{ u.title }}</b><span v-if="u.description">{{ u.description }}</span><NvIcon name="arrowr" />
                             </button>
                         </div>
@@ -231,11 +278,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true));
 .md-b { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 24px 18px; }
 .md-f { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px 16px; flex: none; }
 .md-f .nv-btn .nv-i { width: 13px; height: 13px; }
-/* 详情大图：contain 居中 + 软底，不拉伸铺满（小图不放大超过原图 1.5 倍，见 coverStyle） */
-.cv { position: relative; aspect-ratio: 16 / 8; border-radius: 14px; overflow: hidden; background: var(--fill-1); margin-bottom: 16px; display: flex; align-items: center; justify-content: center; }
-.cv img { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* 详情大图：16:9 圆角大图；横图铺满，竖图 / 方图居中完整显示，两侧用同一张图的虚化铺底，不留灰边 */
+.cv { position: relative; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: #111; margin-bottom: 18px; display: flex; align-items: center; justify-content: center; isolation: isolate; }
+.cv .cv-bg { position: absolute; inset: -24px; width: calc(100% + 48px); height: calc(100% + 48px); object-fit: cover; filter: blur(28px) saturate(1.2) brightness(.8); z-index: -1; }
+.cv .cv-fg { position: relative; width: 100%; height: 100%; object-fit: cover; display: block; }
+.cv.tall .cv-fg { object-fit: contain; }
 .cv video { width: 100%; height: 100%; object-fit: cover; display: block; }
-.cv.tall { aspect-ratio: 3 / 4; width: auto; max-width: calc(460px * 3 / 4); max-height: 460px; margin-left: auto; margin-right: auto; }
 .cv.ico { aspect-ratio: auto; height: 120px; display: flex; align-items: center; justify-content: center; color: var(--ink-2); }
 .cv.ico .nv-i { width: 36px; height: 36px; }
 .soon { position: absolute; left: 12px; top: 12px; height: 22px; padding: 0 9px; border-radius: 11px; background: rgba(0,0,0,.45); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #fff; font: 400 11px/22px var(--font-sans); }
@@ -248,8 +296,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true));
 h4 { margin: 22px 0 10px; font: 600 13px/18px var(--font-sans); }
 .txt { margin: 0; font: 400 12.5px/20px var(--font-sans); color: var(--ink-2); white-space: pre-wrap; }
 .txt.dim { margin-top: 18px; color: var(--ink-3); }
-.steps { margin: 0; padding: 0 0 0 18px; display: flex; flex-direction: column; gap: 6px; font: 400 12.5px/19px var(--font-sans); color: var(--ink-2); }
-.steps b { font-weight: 500; color: var(--ink); margin-right: 6px; }
+.howto .txt { margin-bottom: 12px; }
+.prep { display: flex; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--fill-1); margin-bottom: 12px; }
+.lbl { flex: none; font: 500 11.5px/19px var(--font-sans); color: var(--ink-3); }
+.prep ul { margin: 0; padding: 0 0 0 14px; display: flex; flex-direction: column; gap: 2px; font: 400 12.5px/19px var(--font-sans); color: var(--ink-2); }
+.steps { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.steps li { display: flex; gap: 10px; padding: 11px 12px; border-radius: 12px; background: var(--fill-1); min-width: 0; }
+.steps i { flex: none; width: 20px; height: 20px; border-radius: 10px; background: var(--ink); color: var(--solid); font: 600 11px/20px var(--font-sans); font-style: normal; text-align: center; }
+.steps div { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.steps b { font: 500 12.5px/18px var(--font-sans); color: var(--ink); }
+.steps span { font: 400 11.5px/17px var(--font-sans); color: var(--ink-3); }
+.outs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 12px; }
+.outs .lbl { margin-right: 4px; }
 .pg { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 12px; }
 .pv { border: 0; padding: 0; background: transparent; text-align: left; cursor: pointer; color: var(--ink); min-width: 0; }
 .pv:disabled { cursor: default; }
@@ -282,5 +340,5 @@ h4 { margin: 22px 0 10px; font: 600 13px/18px var(--font-sans); }
 .spin { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; display: inline-block; animation: md-rot .8s linear infinite; }
 @keyframes md-rot { to { transform: rotate(360deg); } }
 @keyframes md-fade { from { opacity: 0; } }
-@media (max-width: 560px) { .fm { grid-template-columns: 1fr; } .md-b { padding: 6px 18px 16px; } }
+@media (max-width: 560px) { .fm { grid-template-columns: 1fr; } .steps { grid-template-columns: 1fr; } .md-b { padding: 6px 18px 16px; } }
 </style>

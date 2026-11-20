@@ -7,8 +7,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
+import shutil
+import tempfile
 import time
 import secrets
 import sqlite3
@@ -40,6 +43,60 @@ def _truthy(value: Optional[str]) -> bool:
 
 AUTH_MODES = ("off", "optional", "required")
 
+# 登录 / 注册成功后的「认领无归属数据」钩子：画布与素材在 main.py，auth 模块只负责在正确时机调用。
+_CLAIM_HOOK: Optional[Any] = None
+# 注销时清理该账号名下的素材数据（库/条目/产品/提示词库 + users/{uid}）与清单统计。
+_ASSET_PURGE_HOOK: Optional[Any] = None
+_ASSET_IMPACT_HOOK: Optional[Any] = None
+
+
+def set_claim_hook(hook: Optional[Any]) -> None:
+    """main.py 启动时注入；CLI / 单测没有画布存储时保持 None（不产生副作用）。"""
+    global _CLAIM_HOOK
+    _CLAIM_HOOK = hook
+
+
+def set_asset_hooks(purge: Optional[Any] = None, impact: Optional[Any] = None) -> None:
+    """main.py 启动时注入：注销时清理素材数据、注销清单统计素材归属。"""
+    global _ASSET_PURGE_HOOK, _ASSET_IMPACT_HOOK
+    if purge is not None:
+        _ASSET_PURGE_HOOK = purge
+    if impact is not None:
+        _ASSET_IMPACT_HOOK = impact
+
+
+def _run_asset_purge(user_id: int) -> Dict[str, Any]:
+    hook = _ASSET_PURGE_HOOK
+    if hook is None:
+        return {}
+    try:
+        result = hook(int(user_id))
+        return dict(result or {})
+    except Exception as exc:
+        print("[auth] 注销清理素材数据失败（账号已注销，不回滚）：%s" % exc)
+        return {}
+
+
+def _run_asset_impact(user_id: int) -> Dict[str, Any]:
+    hook = _ASSET_IMPACT_HOOK
+    if hook is None:
+        return {}
+    try:
+        return dict(hook(int(user_id)) or {})
+    except Exception as exc:
+        print("[auth] 注销清单统计素材失败：%s" % exc)
+        return {}
+
+
+def _run_claim_hook(user: Optional[Dict[str, Any]]) -> None:
+    hook = _CLAIM_HOOK
+    if hook is None or not user:
+        return
+    try:
+        hook(user)
+    except Exception as exc:
+        print("[auth] 登录后认领无归属数据失败（不影响登录）：%s" % exc)
+
 
 def auth_mode() -> str:
     """登录模式（2026-11-07 起默认 optional）：
@@ -67,16 +124,18 @@ def accounts_enabled() -> bool:
     return auth_mode() != "off"
 
 
-# 注册是否需要邀请码：管理员在「我的」页切换，存在 users.db 的 auth_settings 里；默认需要（保持原行为）
+# 注册是否需要邀请码：管理员在「我的」页切换，存在 users.db 的 auth_settings 里；默认不需要（开放注册）
 INVITE_REQUIRED_KEY = "invite_required"
+# 只有管理员显式打开时才写 "1"；老库没有这条设置，因此升级后仍然是开放注册
+INVITE_REQUIRED_DEFAULT = "0"
 
 
 def invite_required() -> bool:
     try:
-        return store.get_setting(INVITE_REQUIRED_KEY, "1") != "0"
+        return _truthy(store.get_setting(INVITE_REQUIRED_KEY, INVITE_REQUIRED_DEFAULT))
     except Exception as exc:
-        print("[auth] 读取注册设置失败，按需要邀请码处理：%s" % exc)
-        return True
+        print("[auth] 读取注册设置失败，按不需要邀请码处理：%s" % exc)
+        return False
 
 
 def set_invite_required(required: bool) -> bool:
@@ -234,7 +293,212 @@ def register(username: Any, password: Any, invite_code: Any, ip: str = "", ua: s
     else:
         # 开放注册，或者这台 NOVAI 还没有任何账号：第一个账号是管理员
         user = store.register_open(name, passwords.hash_password(pwd), now_seconds())
-    return user, _issue_session(user["id"], ip, ua)
+    token = _issue_session(user["id"], ip, ua)
+    _run_claim_hook(user)
+    return user, token
+
+
+# ---------------------------------------------------------------- 自助注销（2026-11）
+
+def _scan_canvases(canvas_dir: str, user_id: int) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
+    """一次扫描画布目录：([(id, 路径)] 属于本账号的, [(id, 路径)] 没有 owner_id 的历史画布)。
+
+    只认 owner_id；「没有归属信息」的老画布单独返回，注销时按「整机最后一个账号」规则处理。
+    """
+    root = str(canvas_dir or "")
+    if not root or not os.path.isdir(root):
+        return [], []
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return [], []
+    owned: List[Tuple[str, str]] = []
+    unowned: List[Tuple[str, str]] = []
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(root, name)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                doc = json.load(fh)
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        canvas_id = str(doc.get("id") or name[:-5])
+        value = doc.get("owner_id")
+        if value is None or value == "":
+            unowned.append((canvas_id, path))
+            continue
+        try:
+            owner = int(value)
+        except (TypeError, ValueError):
+            unowned.append((canvas_id, path))
+            continue
+        if owner == int(user_id):
+            owned.append((canvas_id, path))
+    return owned, unowned
+
+
+def _lan_impact(user_id: int) -> Dict[str, int]:
+    """这个账号在本机的局域网数据（身份 / 好友 / 好友申请 / 聊天）；只读。"""
+    try:
+        from server.routes import lan_account as _lan
+        raw = _lan.owner_impact("u%d" % int(user_id))
+    except Exception:
+        return {"lan_account": 0, "lan_friends": 0, "lan_requests": 0, "lan_chat_messages": 0}
+    return {
+        "lan_account": int(raw.get("account") or 0),
+        "lan_friends": int(raw.get("friends") or 0),
+        "lan_requests": int(raw.get("requests") or 0),
+        "lan_chat_messages": int(raw.get("chat_messages") or 0),
+    }
+
+
+def _purge_lan(user_id: int) -> Dict[str, int]:
+    """注销成功后清掉这个账号的局域网数据（身份 / 好友 / 聊天 / 好友申请 / 待补发）。
+
+    两套存储不在一个事务里：这里失败只记日志，不回滚已经完成的账号删除。
+    返回 LAN 侧计数（accounts / friends / chats / requests），供接口结果与审计日志使用。
+    """
+    try:
+        from server.routes import lan_account as _lan
+        raw = _lan.purge_account(int(user_id))
+        return {str(key): int(value or 0) for key, value in dict(raw or {}).items()}
+    except Exception as exc:
+        print("[auth] 清理局域网数据失败（账号已注销，不回滚）：%s" % exc)
+        return {}
+
+
+def _count_user_assets(user_id: int) -> int:
+    """名下素材文件的个数（只统计，不删除：本机素材文件属于整机数据）。"""
+    try:
+        from server.auth import tenant
+        root = tenant.user_asset_root(user_id)
+    except Exception:
+        return 0
+    if not root or not os.path.isdir(root):
+        return 0
+    total = 0
+    for _dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            if not filename.startswith("."):
+                total += 1
+    return total
+
+
+def _build_impact(row: Dict[str, Any], owned: List[Tuple[str, str]], unowned: List[Tuple[str, str]]) -> Dict[str, Any]:
+    uid = int(row["id"])
+    counts = store.account_impact(uid, str(row["username"]), [cid for cid, _path in owned])
+    counts["asset_files"] = _count_user_assets(uid)
+    counts["unowned_canvases"] = len(unowned)
+    counts.update(_lan_impact(uid))
+    counts.update(_run_asset_impact(uid))
+    total_users, active_admins = store.account_counts()
+    # 整机最后一个账号：没有任何别的账号，注销后回到「第一个注册的是管理员」首启状态，
+    # 这时没有 owner_id 的历史画布没有别人会再用，一并删除；否则保留并单独提示。
+    last_account = total_users <= 1
+    blocked = ""
+    if str(row.get("role")) == "admin" and active_admins <= 1 and not last_account:
+        # 还有别的账号却没有别的管理员：删完就没人能管理账号了，先拒绝
+        blocked = "last_admin"
+    return {
+        "username": str(row["username"]),
+        "role": str(row.get("role") or "user"),
+        "counts": counts,
+        "last_account": last_account,
+        "delete_unowned": bool(last_account),
+        "blocked": blocked,
+    }
+
+
+def account_delete_impact(user: Optional[Dict[str, Any]], canvas_dir: str = "") -> Dict[str, Any]:
+    """注销前给前端确认弹窗用的清单：会被删什么、什么保留、能不能删。"""
+    if not user:
+        raise AuthError("未登录或会话已过期", 401, "unauthorized")
+    row = store.get_user_by_id(int(user["id"]))
+    if not row:
+        raise AuthError("账号不存在或已被删除", 404, "user_not_found")
+    owned, unowned = _scan_canvases(canvas_dir, int(row["id"]))
+    return _build_impact(row, owned, unowned)
+
+
+def delete_account(user: Optional[Dict[str, Any]], password: Any, confirm_username: Any, canvas_dir: str = "") -> Dict[str, Any]:
+    """自助注销：密码 + 账号名双重确认；名下数据一起删，一个事务里做完，失败全部回滚。"""
+    if not user:
+        raise AuthError("未登录或会话已过期", 401, "unauthorized")
+    row = store.get_user_by_id(int(user["id"]))
+    if not row:
+        raise AuthError("账号不存在或已被删除", 404, "user_not_found")
+    uid = int(row["id"])
+    username = str(row["username"])
+    if not passwords.verify_password(str(password or ""), row["password_hash"]):
+        raise AuthError("当前密码不正确", 400, "bad_password")
+    if str(confirm_username or "").strip() != username:
+        raise AuthError("账号名不匹配，请输入当前账号名确认", 400, "confirm_mismatch")
+    owned, unowned = _scan_canvases(canvas_dir, uid)
+    impact = _build_impact(row, owned, unowned)
+    if impact["blocked"]:
+        raise AuthError("这是本机最后一个管理员，请先把其他账号设为管理员再注销", 400, "last_admin")
+
+    # 整机最后一个账号：没有 owner_id 的历史画布也一起删；否则不动它们
+    extra = unowned if impact["last_account"] else []
+    files = owned + extra
+    canvas_ids = [cid for cid, _path in files]
+    trash = ""
+    moved: List[Tuple[str, str]] = []
+    try:
+        if files:
+            trash = tempfile.mkdtemp(prefix=".account-delete-", dir=canvas_dir)
+            for index, (_cid, path) in enumerate(files):
+                target = os.path.join(trash, "%d-%s" % (index, os.path.basename(path)))
+                shutil.move(path, target)
+                moved.append((target, path))
+        counts = store.purge_account(uid, username, canvas_ids)
+    except AuthError:
+        _restore_canvases(moved, trash)
+        raise
+    except Exception as exc:
+        _restore_canvases(moved, trash)
+        print("[auth] 注销账号失败，数据已回滚：%s" % exc)
+        raise AuthError("注销失败，数据未改动，请重试", 500, "delete_failed")
+    if trash:
+        shutil.rmtree(trash, ignore_errors=True)
+    # 素材数据不在 users.db 事务里：账号已注销后尽力清理，失败只记日志。
+    counts.update(_run_asset_purge(uid))
+
+    try:
+        from server import avatars
+        avatars.delete(uid)
+    except Exception:
+        pass
+    try:
+        from server import asset_acl
+        asset_acl.clear_cache()
+    except Exception:
+        pass
+    lan_removed = _purge_lan(uid)
+    for key in ("accounts", "friends", "chats", "requests"):
+        counts["lan_" + key + "_removed"] = int(lan_removed.get(key) or 0)
+    counts["asset_files"] = impact["counts"].get("asset_files", 0)
+    counts["unowned_canvases"] = len(extra)
+    return {
+        "counts": counts,
+        "last_account": bool(impact["last_account"]),
+        "delete_unowned": bool(impact["last_account"]),
+        "notice": "last_account" if impact["last_account"] else "",
+    }
+
+
+def _restore_canvases(moved: List[Tuple[str, str]], trash: str) -> None:
+    """事务失败时把挪走的画布文件放回原位（尽力而为，失败只打印）。"""
+    for target, path in moved:
+        try:
+            shutil.move(target, path)
+        except Exception as exc:
+            print("[auth] 画布恢复失败 %s：%s" % (path, exc))
+    if trash:
+        shutil.rmtree(trash, ignore_errors=True)
 
 
 def login(username: Any, password: Any, ip: str = "", ua: str = "") -> Tuple[Dict[str, Any], str]:
@@ -248,7 +512,9 @@ def login(username: Any, password: Any, ip: str = "", ua: str = "") -> Tuple[Dic
     if str(user.get("status")) != "active":
         raise AuthError("账号已被停用", 403, "user_disabled")
     store.delete_expired_sessions(now_seconds())
-    return user, _issue_session(user["id"], ip, ua)
+    token = _issue_session(user["id"], ip, ua)
+    _run_claim_hook(user)
+    return user, token
 
 
 # ---------------------------------------------------------------- 用户 / 邀请码

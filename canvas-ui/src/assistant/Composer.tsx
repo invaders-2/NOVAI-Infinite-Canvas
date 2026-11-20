@@ -1,5 +1,4 @@
 import {
-	ArrowUpIcon,
 	CheckIcon,
 	ChevronUpIcon,
 	LoaderCircleIcon,
@@ -12,7 +11,6 @@ import {
 	PuzzleIcon,
 	MousePointerSquareDashedIcon,
 	PencilIcon,
-	SendHorizontalIcon,
 	PlusIcon,
 	ScissorsIcon,
 	ShieldIcon,
@@ -47,6 +45,7 @@ import { ModelProviderMenu } from "./ModelMenu"
 import { PlusMenu } from "./PlusMenu"
 import { ReverseImageMenu } from "./ReverseImageMenu"
 import { listFolderFiles, restoreFolder } from "./folder"
+import { AnimatedSendIcon } from "@/components/ai-elements/AnimatedSendIcon"
 import { Kbd } from "@/components/hexta/kbd"
 import { cn } from "@/lib/utils"
 import { fetchCanvasNodes } from "./api"
@@ -462,7 +461,7 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 										title="立即发送"
 										type="button"
 									>
-										<SendHorizontalIcon className="nvca-i-xs" />
+										<AnimatedSendIcon className="nvca-i-xs" size={12} />
 									</button>
 								</div>
 							</div>
@@ -852,7 +851,7 @@ const ComposerInner = ({ store, pendingText }: ComposerProps) => {
 							onStop={() => store.abort()}
 							status={env.running ? "streaming" : "ready"}
 						>
-							{env.running ? <SquareIcon className="nvca-i-sm" /> : <ArrowUpIcon className="nvca-i-sm" />}
+							{env.running ? <SquareIcon className="nvca-i-sm" /> : <AnimatedSendIcon className="nvca-i-sm" size={16} />}
 						</PromptInputSubmit>
 					</div>
 				</div>

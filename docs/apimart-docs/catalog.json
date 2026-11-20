@@ -2,8 +2,8 @@
   "_meta": {
     "generated_by": "task-1 docs-researcher（APIMart 官方文档调研）",
     "channel": "docs.apimart.ai（/en 与 /cn 内容一致）",
-    "corpus": "llms-full.txt 2327937 bytes / 87909 lines, sha256 da7f038a4cf98a3f09c2c9fdd960c2276885ed00c084aae551aebada968387fc",
-    "report": "docs/apimart-docs/REPORT.md",
+    "corpus": "llms-full.txt 2513521 bytes / 92052 lines, sha256 94eb9c53d60e2ef7d7e57b152de7e66a296bfd628ea10f7890b4ec2e1ded205e",
+    "report": "docs/apimart-docs/REPORT.md（含 2026-11-18 增量节）+ REPORT-DELTA-20261118.md",
     "rules": [
       "只收文档里能确证的模型 ID；别名单独成条并在 notes 里写 = 哪个正式 ID。",
       "efforts 只写 low/mid/high/xhigh/max 的子集，空数组 = 不下发该字段；条目的档位建议与 VENDOR-REASONING.md §4 保持一致（按上游真实能区分的档数收敛，不是一律 5 档）。",
@@ -462,6 +462,90 @@
         "mid": "medium",
         "high": "high"
       }
+    },
+    {
+      "id": "gpt-5.2",
+      "name": "GPT-5.2",
+      "efforts": [],
+      "notes": "文档只在 Codex CLI 集成页的模型表里出现（L90116，稳定均衡档）；chat 支持模型清单没有它，也没有独立参数页 → 不下发推理档位",
+      "source_url": "https://docs.apimart.ai/en/integrations/dev-tool/codex-cli"
+    },
+    {
+      "id": "gpt-5.3-codex",
+      "name": "GPT-5.3 Codex",
+      "efforts": [],
+      "notes": "Codex CLI 集成页模型表（L90115，标注为 Codex 优化的编码模型）；无独立参数页 → 不下发推理档位",
+      "source_url": "https://docs.apimart.ai/en/integrations/dev-tool/codex-cli"
+    },
+    {
+      "id": "gpt-5.4",
+      "name": "GPT-5.4",
+      "efforts": [],
+      "notes": "gpt-image-2.6 页 SVG 作者模型对比表（L6577/L6582）与 Codex CLI 页（L90113）出现；作为 SVG 作者模型支持 none/low/medium/high/xhigh（L6577 只列了模型名，档位表见 L6559–L6563 的同类模型）；chat 侧仍无 reasoning_effort 文档 → 不下发",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation"
+    },
+    {
+      "id": "gpt-5.4-mini",
+      "name": "GPT-5.4 Mini",
+      "efforts": [],
+      "notes": "gpt-image-2.6 页 SVG 作者模型表（L6560）：支持 none/low/medium/high/xhigh，不支持 minimal/max；主程序 APIMART_SVG_DEFAULT_MODEL 用的就是它。chat 侧无档位文档 → 不下发",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation"
+    },
+    {
+      "id": "gpt-5.5",
+      "name": "GPT-5.5",
+      "efforts": [],
+      "notes": "SVG 作者模型对比表（L6583）、Claude Code 集成页（L88899）、Codex CLI 页（L90112）、/v1/usage 示例（L54247）都出现；无独立参数页 → 不下发推理档位",
+      "source_url": "https://docs.apimart.ai/en/integrations/dev-tool/codex-cli"
+    },
+    {
+      "id": "gpt-5.6-sol",
+      "name": "GPT-5.6 Sol",
+      "efforts": [],
+      "notes": "gpt-image-2.6 页 SVG 作者模型表（L6561）：支持 none/low/medium/high/xhigh/max（不支持 minimal）；另有 SVG 对比表（L6584）。chat 侧无档位文档 → 不下发",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation"
+    },
+    {
+      "id": "gpt-5.6-luna",
+      "name": "GPT-5.6 Luna",
+      "efforts": [],
+      "notes": "只出现在 /v1/usage 示例响应里（L54926）；无参数与档位文档 → 不下发",
+      "source_url": "https://docs.apimart.ai/en/api-reference/account/usage"
+    },
+    {
+      "id": "gpt-6-astra",
+      "name": "GPT-6 Astra",
+      "efforts": [],
+      "notes": "只出现在 gpt-image-2.6 页的 SVG 作者模型对比表（L6585，文档建议复杂透明背景先试它）；正文没有列它的档位 → 不下发",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation"
+    },
+    {
+      "id": "gpt-6-luna",
+      "name": "GPT-6 Luna",
+      "efforts": [],
+      "notes": "gpt-image-2.6 页 SVG 作者模型表（L6562）：支持 none/low/medium/high/xhigh/max（不支持 minimal）；无 chat 参数页 → 不下发",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation"
+    },
+    {
+      "id": "gpt-6.1-sol",
+      "name": "GPT-6.1 Sol",
+      "efforts": [],
+      "notes": "gpt-image-2.6 页 SVG 作者模型表（L6563）：支持 low/medium/high/xhigh/max（不支持 minimal/none）；无 chat 参数页 → 不下发",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-2.6/generation"
+    },
+    {
+      "id": "claude-opus-5",
+      "name": "Claude Opus 5",
+      "efforts": [],
+      "notes": "Claude Code 集成页模型表（L89176，下一代旗舰）；同页 L89183 写明所有模型可加 -thinking 后缀走思考版。chat 页支持清单仍没有它 → 不下发推理档位",
+      "source_url": "https://docs.apimart.ai/en/integrations/dev-tool/claude-code"
+    },
+    {
+      "id": "claude-opus-5-thinking",
+      "name": "Claude Opus 5（-thinking 别名）",
+      "efforts": [],
+      "notes": "= claude-opus-5 加 -thinking 后缀（L89183 的通用规则、L89192 的示例）；不是独立模型，计价与参数跟随 claude-opus-5",
+      "source_url": "https://docs.apimart.ai/en/integrations/dev-tool/claude-code"
     }
   ],
   "image": [
@@ -870,6 +954,27 @@
       "efforts": [],
       "notes": "独立族：POST /v1/midjourney/generations(imagine)、/blend、/describe、/edits、/variation、/high-variation、/low-variation、/upscale、/pan、/zoom、/reroll、/remix-strong、/inpaint(+ /modal)、/video；查询 GET /v1/midjourney/{task_id}；单图≤12MiB；inpaint 的 MODAL 状态 30 分钟超时自动取消并退款",
       "source_url": "https://docs.apimart.ai/en/api-reference/images/midjourney/generation"
+    },
+    {
+      "id": "seedream-5-5",
+      "name": "Seedream 5.5",
+      "efforts": [],
+      "notes": "[2026-11-13 批次补录] size(auto=2K)/resolution(1K/1.5K/2K，3K/4K 不支持)/n 必须 1/background(auto|transparent|opaque，透明必须 png)/output_format(png|jpeg)/watermark/optimize_prompt_options(仅 standard)/参考图 ≤10（≤30MiB、≤3600 万像素，URL 或 data:image base64）；图层拆分 layer_decomposition + layer_decomposition_options.max_images(2–100，默认30) + text_recognition(OCR)，项目无入口",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/seedream-5-5/generation"
+    },
+    {
+      "id": "minimax-h3-image",
+      "name": "MiniMax-H3 Image",
+      "efforts": [],
+      "notes": "[2026-11-13 批次补录] resolution(1K/2K/4K，**不传默认 4K**)/size(auto 或任意整数比例 1:3~3:1 或精确像素)/n 1–10/参考图 ≤16（URL 或 base64）/输出 jpeg|png|webp；精确像素与 resolution 互斥（同传 400）；quality/style/seed/mask_url 上游忽略",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/minimax-h3-image/generation"
+    },
+    {
+      "id": "minimax-h3-image-highspeed",
+      "name": "MiniMax-H3 Image Highspeed",
+      "efforts": [],
+      "notes": "[2026-11-13 批次补录] 参数与 minimax-h3-image 完全相同，只是加速通道",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/minimax-h3-image-highspeed/generation"
     }
   ],
   "video": [
@@ -1285,6 +1390,48 @@
       "efforts": [],
       "notes": "见页面",
       "source_url": "https://docs.apimart.ai/en/api-reference/videos/pixverse-v6-max/generation"
+    },
+    {
+      "id": "apimart-zoe",
+      "name": "APIMart Zoe",
+      "efforts": [],
+      "notes": "[2026-11-13 批次补录] 普通生成默认 720p/480p/1080p/2k/4k（草稿只认 480p）/比例 21:9~9:16 + adaptive/时长 4–30 或 -1/自带音轨/参考上限 图30 视频10 音频10；编辑参考走 omni_reference_task_type，不支持 extend",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/apimart-zoe/generation"
+    },
+    {
+      "id": "kling-v4-flash",
+      "name": "Kling V4 Flash",
+      "efforts": [],
+      "notes": "[2026-11-13 批次补录] 只有 720p（1080p 直接 400）/时长 3–20 秒/比例 16:9 9:16 1:1 21:9（参考生成认 auto）/首帧方式不能带 aspect_ratio/首帧只收 1 张、不收尾帧/不收参考音频",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/kling-v4-flash/generation"
+    },
+    {
+      "id": "gemini-omni-1.2-flash",
+      "name": "Gemini Omni 1.2 Flash",
+      "efforts": [],
+      "notes": "[2026-11-13 批次补录] 360p/720p/1080p/4k（默认 720p，2160p=4k）/比例只有 16:9 9:16/时长 3–15（首尾帧与延长只到 10）/参考图 ≤10 且只收公网 URL/视频输入 1 段 ≤15 秒；编辑延长靠 omni_reference_task_type",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/gemini-omni-1.2-flash/generation"
+    },
+    {
+      "id": "gemini-omni-1.2-flash-ext",
+      "name": "Gemini Omni 1.2 Flash Ext",
+      "efforts": [],
+      "notes": "[2026-11-13 批次补录] 与 gemini-omni-1.2-flash 同参数，走加速通道",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/gemini-omni-1.2-flash-ext/generation"
+    },
+    {
+      "id": "seedance-2-5-flash",
+      "name": "Seedance 2.5 Flash",
+      "efforts": [],
+      "notes": "[2026-11-18 新增页] resolution 只有 480p/720p（1080p/2k/4k 直接 400）/size 6 个比例 + adaptive（默认 adaptive；首尾帧、编辑、延长必须 adaptive）/duration 4–30 或 -1（默认 5；edit 只收 -1 或省略）/generate_audio 默认 true/watermark 默认 false/seed/output_format mp4|mov/omni_reference_task_type auto|reference|edit|extend/image_urls ≤10（含首尾帧）/video_urls ≤5（各 2–30 秒、合计 ≤30 秒）/audio_urls ≤5（纯音频参考可以）/return_last_frame/web_search/tools/nsfw_check 默认 false；不支持 draft/draft_task_id；官方别名 doubao-seedance-2-5-flash，点号写法 seedance-2.5-flash 明确不被接受（L45987–L45990）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-5-flash/generation"
+    },
+    {
+      "id": "doubao-seedance-2-5-flash",
+      "name": "Seedance 2.5 Flash（doubao 别名）",
+      "efforts": [],
+      "notes": "= seedance-2-5-flash 的官方别名（L45990）；参数与计价跟随正式 ID",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-5-flash/generation"
     }
   ],
   "audio": [

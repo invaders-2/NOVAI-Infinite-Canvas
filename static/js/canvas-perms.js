@@ -106,7 +106,7 @@
     }
 
     function render(overlay, canvas, data) {
-        var editable = data.my_role === 'owner' || data.my_role === 'admin';
+        var editable = data.my_role === 'owner';   // 2026-11：管理员没有画布特权
         var members = Array.isArray(data.members) ? data.members : [];
         var ownerName = (data.owner && data.owner.username) || '未归属';
         var rows = members.length ? members.map(function (member) {

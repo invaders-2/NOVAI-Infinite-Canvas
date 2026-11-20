@@ -5,6 +5,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import CommunityCanvasPreview from './CommunityCanvasPreview.vue';
+import LikeBurst from '../../components/community/LikeBurst.vue';
 import { ago, avatarImage, avatarText, authorInitial, communityApi, coverUrl, fmtCount, fmtSize, kindMeta } from '../../lib/community.js';
 import { bumpCommunity, openCommunityAuthor, state, toast } from '../../lib/store.js';
 import { navigate, openCanvasUrl } from '../../lib/bridge.js';
@@ -93,8 +94,15 @@ async function load() {
     }
 }
 
+// 先本地翻转再发请求，动效才能立刻响应；失败用快照回滚，busy 期间不重复发
 async function toggleLike() {
     if (busy.value) return;
+    const snapshot = { liked: liked.value, stats: item.value ? { ...(item.value.stats || {}) } : {} };
+    liked.value = !liked.value;
+    if (item.value) {
+        const likes = Number(snapshot.stats.likes) || 0;
+        item.value.stats = { ...snapshot.stats, likes: Math.max(0, likes + (liked.value ? 1 : -1)) };
+    }
     busy.value = 'like';
     try {
         const body = await communityApi('/items/' + encodeURIComponent(props.itemId) + '/like', { method: 'POST' });
@@ -102,6 +110,8 @@ async function toggleLike() {
         if (item.value && body.stats) item.value.stats = body.stats;
         bumpCommunity();
     } catch (e) {
+        liked.value = snapshot.liked;
+        if (item.value) item.value.stats = snapshot.stats;
         toast(e.message || '点赞失败', { danger: true });
     } finally { busy.value = ''; }
 }
@@ -125,12 +135,10 @@ async function doClone() {
         bumpCommunity();
         if (body.kind === 'canvas') {
             const failed = Number(body.failed) || 0;
-            toast('已克隆到我的画布' + (failed ? '（' + failed + ' 个素材没取到，已标注）' : ''), {
-                onClick: () => {
-                    openCanvasUrl('/static/canvas.html?id=' + encodeURIComponent(body.target_id) + '&project=default');
-                    emit('close');
-                },
-            });
+            const canvasUrl = '/static/canvas.html?id=' + encodeURIComponent(body.target_id) + '&project=default';
+            emit('close');
+            openCanvasUrl(canvasUrl);
+            toast('已克隆到我的画布' + (failed ? '（' + failed + ' 个素材没取到，已标注）' : ''));
         } else if (body.kind === 'skill') {
             const skillId = String(body.target_id || '');
             toast(body.message || '技能已导入，默认停用，去设置里确认后启用', {
@@ -261,13 +269,12 @@ watch(() => props.itemId, load);
                     <div v-for="row in facts" :key="row.k"><dt>{{ row.k }}</dt><dd class="mono">{{ row.v }}</dd></div>
                 </dl>
                 <div class="cd-stats">
-                    <span><NvIcon name="heart" /><b class="mono">{{ fmtCount(stats.likes) }}</b></span>
                     <span><NvIcon name="copy" /><b class="mono">{{ fmtCount(stats.clones) }}</b> 次克隆</span>
                     <span><NvIcon name="eye" /><b class="mono">{{ fmtCount(stats.views) }}</b></span>
                 </div>
                 <p class="cd-note"><NvIcon name="info" /><span>克隆后成为你自己的画布，图片和视频会复制到本机，不再依赖作者在线。模型按你的 API 设置自动选择。</span></p>
                 <div class="cd-acts">
-                    <button type="button" class="cd-ib" :class="{ on: liked }" :aria-pressed="liked" :disabled="!online && !mine" :title="liked ? '取消点赞' : '点赞'" @click="toggleLike"><NvIcon name="heart" /></button>
+                    <LikeBurst :liked="liked" :count="Number(stats.likes) || 0" :disabled="!online && !mine" @toggle="toggleLike" />
                     <button type="button" class="cd-ib" :class="{ on: favorited }" :aria-pressed="favorited" :title="favorited ? '取消收藏' : '收藏'" @click="toggleFavorite"><NvIcon name="star" /></button>
                     <div class="cd-more">
                         <button type="button" class="cd-ib" title="更多" aria-label="更多" @click="moreOpen = !moreOpen"><NvIcon name="more" /></button>

@@ -16,6 +16,15 @@ export type Mention = { id: string; section?: string; start: number; end: number
 
 export const mentionToken = (id: string, section?: string) => "@{" + id + (section ? "#" + section : "") + "}";
 
+/** 把提示词里的 @原节点（含 #段落）换成 @新节点；用于复制出结果节点时保留「@本节点」语义 */
+export function remapMention(prompt: string, from: string, to: string): string {
+  if (!prompt || !from || !to || from === to) return prompt || "";
+  const esc = from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return prompt.replace(new RegExp("@" + "\\{" + esc + "(#[^}\\n]*)?\\}", "g"), (_m, sec) => "@{" + to + (sec || "") + "}");
+}
+
+
+
 export function parseMentions(prompt: string): Mention[] {
   const out: Mention[] = []; const re = new RegExp(MENTION_RE.source, "g"); let m: RegExpExecArray | null;
   while ((m = re.exec(prompt || ""))) out.push({ id: m[1], section: m[2] || undefined, start: m.index, end: m.index + m[0].length, raw: m[0] });

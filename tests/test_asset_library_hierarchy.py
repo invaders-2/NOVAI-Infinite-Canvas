@@ -75,7 +75,6 @@ class FakeHierarchy:
             "unique_asset_category_dir": unique_dir,
             "make_asset_library_item": make_item,
             "generation_meta_for_url": lambda url: {},
-            "classify_asset_image_best_effort": lambda *a: None,
             "output_file_from_url": lambda url: f"{self.tmp.name}/{os.path.basename(str(url))}",
             "asset_library_media_kind": main.asset_library_media_kind,
             "ASSET_LIBRARY_DIR": self.tmp.name,
@@ -85,6 +84,10 @@ class FakeHierarchy:
         patcher = unittest.mock.patch.dict(deps._bound, self.bindings())
         patcher.start()
         testcase.addCleanup(patcher.stop)
+        # main.asset_library_dir() 在未登录时读 main.ASSET_LIBRARY_DIR，一起指到临时目录
+        root_patcher = unittest.mock.patch.object(main, "ASSET_LIBRARY_DIR", self.tmp.name)
+        root_patcher.start()
+        testcase.addCleanup(root_patcher.stop)
 
     def category(self, category_id):
         return next((cat for cat in self.lib["libraries"][0]["categories"] if cat.get("id") == category_id), None)
@@ -192,8 +195,7 @@ class ItemsInChildTests(unittest.TestCase):
         self.fake.patched(self)
 
     def test_add_item_to_child_category_uses_child_dir(self):
-        payload = assets_routes.AssetLibraryAddRequest(category_id="male", url="/output/a.png", name="男主图",
-                                                       classify=False)
+        payload = assets_routes.AssetLibraryAddRequest(category_id="male", url="/output/a.png", name="男主图")
         result = run(assets_routes.add_asset_library_item(payload))
         self.assertEqual(result["category"]["id"], "male")
         self.assertEqual(self.fake.dir_created[-1], "角色/男主")

@@ -518,6 +518,14 @@ def main():
 
     # 获取局域网 IP，供 main.py 的 /api/lan-info 接口使用
     def get_lan_ip():
+        # 跳过 Clash/VPN TUN、Docker 等虚拟网卡；后端运行时还会每 10s 重新选一次
+        try:
+            from server.lan_ip import pick_lan_ip
+            value = pick_lan_ip(force=True)
+            if value:
+                return value
+        except Exception:
+            pass
         import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
@@ -531,26 +539,32 @@ def main():
     lan_ip = get_lan_ip()
     if lan_ip:
         lan_url = f"http://{lan_ip}:{PORT}"
+        # 不再写 NOVAI_LAN_IP：写死后换 WiFi / DHCP 换地址，好友地址和分享链接会一直用旧 IP；
+        # 后端由 server/lan_ip.py 每 10s 现选一次。需要手动指定时设 NOVAI_LAN_IP_OVERRIDE。
         os.environ["NOVAI_LAN_URL"] = lan_url
-        os.environ["NOVAI_LAN_IP"] = lan_ip
         log(f"LAN access: {lan_url}")
         # 运行时确保防火墙规则存在（安装包已添加，此处兜底）
+        # macOS 没有 netsh：首次运行需在「系统设置 → 隐私与安全性 → 本地网络」允许 NOVAI
         try:
             import subprocess as sp
-            rule_name = "NOVAI Server (port 3000)"
-            result = sp.run(
-                f'netsh advfirewall firewall show rule name="{rule_name}"',
-                capture_output=True, text=True, shell=True, timeout=5
+            rules = (
+                ("NOVAI Server (port 3000)", "TCP", PORT),
+                ("NOVAI LAN Discovery (UDP 47823)", "UDP", 47823),
             )
-            if "未找到" in result.stdout or "No rules match" in result.stdout:
-                log("Firewall rule missing, adding...")
-                sp.run(
-                    f'netsh advfirewall firewall add rule name="{rule_name}" dir=in action=allow protocol=TCP localport={PORT}',
-                    capture_output=True, shell=True, timeout=10
+            for rule_name, protocol, port in rules:
+                result = sp.run(
+                    f'netsh advfirewall firewall show rule name="{rule_name}"',
+                    capture_output=True, text=True, shell=True, timeout=5
                 )
-                log("Firewall rule added")
-            else:
-                log("Firewall rule OK")
+                if "未找到" in result.stdout or "No rules match" in result.stdout:
+                    log(f"Firewall rule missing ({protocol} {port}), adding...")
+                    sp.run(
+                        f'netsh advfirewall firewall add rule name="{rule_name}" dir=in action=allow protocol={protocol} localport={port}',
+                        capture_output=True, shell=True, timeout=10
+                    )
+                    log("Firewall rule added")
+                else:
+                    log("Firewall rule OK")
         except Exception as e:
             log(f"Firewall check skipped: {e}")
     else:

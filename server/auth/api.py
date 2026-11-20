@@ -84,6 +84,11 @@ class RolePayload(BaseModel):
     role: str = Field(default="", max_length=16)
 
 
+class DeleteAccountPayload(BaseModel):
+    password: str = Field(default="", max_length=256)
+    confirm_username: str = Field(default="", max_length=64)
+
+
 def _client_ip(request: Request) -> str:
     client_host = request.client.host if request.client else ""
     if str(os.getenv("NOVAI_TRUST_PROXY", "")).strip().lower() in ("1", "true", "yes", "on"):
@@ -197,6 +202,45 @@ def get_avatar(user_id: int, request: Request):
     return FileResponse(path, media_type=avatars.mime_for(path), headers=headers)
 
 
+@router.get("/api/auth/delete-account")
+def delete_account_impact(request: Request) -> Dict[str, Any]:
+    """注销前的确认清单：会删哪些东西、哪些保留、能不能删（只读，不改任何数据）。"""
+    service.ensure_auth_enabled()
+    user = service.session_user(request.cookies.get(service.COOKIE_NAME, ""))
+    if not user:
+        raise AuthError("未登录或会话已过期", 401, "unauthorized")
+    return service.account_delete_impact(user, _CANVAS_DIR)
+
+
+@router.post("/api/auth/delete-account")
+def delete_account(payload: DeleteAccountPayload, request: Request, response: Response) -> Dict[str, Any]:
+    """自助注销（不可恢复）：必须登录 + 当前密码 + 账号名二次确认。"""
+    service.ensure_auth_enabled()
+    user = service.session_user(request.cookies.get(service.COOKIE_NAME, ""))
+    if not user:
+        raise AuthError("未登录或会话已过期", 401, "unauthorized")
+    try:
+        result = service.delete_account(user, payload.password, payload.confirm_username, _CANVAS_DIR)
+    except AuthError as exc:
+        _audit(user, "account_delete", str(user.get("username") or ""), "error", exc.code)
+        raise
+    _audit(user, "account_delete", str(user.get("username") or ""), "ok",
+           "canvases=%s members=%s shared=%s invites=%s lan_accounts=%s lan_friends=%s lan_chats=%s lan_requests=%s" % (
+               result["counts"].get("canvases", 0),
+               result["counts"].get("canvas_members", 0),
+               result["counts"].get("canvas_shares_out", 0),
+               result["counts"].get("invites", 0),
+               result["counts"].get("lan_accounts_removed", 0),
+               result["counts"].get("lan_friends_removed", 0),
+               result["counts"].get("lan_chats_removed", 0),
+               result["counts"].get("lan_requests_removed", 0),
+           ))
+    response.delete_cookie(service.COOKIE_NAME, path="/")
+    payload_out: Dict[str, Any] = {"ok": True}
+    payload_out.update(result)
+    return payload_out
+
+
 @router.post("/api/auth/password")
 def change_password(payload: PasswordPayload, request: Request) -> Dict[str, Any]:
     """自助改密码：保留当前会话，踢掉该用户其它设备，并写审计。"""
@@ -300,7 +344,8 @@ def auth_config() -> Dict[str, Any]:
 
 
 class AuthSettingsPayload(BaseModel):
-    invite_required: bool = True
+    # 与 service.invite_required() 的默认一致：默认开放注册，只有显式传 true 才要求邀请码
+    invite_required: bool = False
 
 
 @router.get("/api/admin/auth-settings")

@@ -14,6 +14,12 @@ export type ToolStep = {
     tool?: string;
     /** 这次调用的「真实命令」一行（tool_call_delta.command，或由 step_start 的 args 拼出来）：收起态实时行 + 展开后每步下面那行等宽字 */
     cmd?: string;
+    /** 这次调用的完整参数（step_start / step_result 的 args）：展开步骤后的「代码」区按 JSON 显示 */
+    args?: unknown;
+    /** 工具返回（step_result.result）：同样在「代码」区显示；技能脚本的输出也在这里 */
+    result?: unknown;
+    /** 失败原因（step_result.error） */
+    error?: string;
 };
 export type AgentMsg = {
   id: string;
@@ -35,7 +41,8 @@ export type AgentMsg = {
   selfCheck?: { round: number; passed: boolean; items: Array<{ text: string; ok: boolean; status?: string }> };
   tools?: ToolStep[];
   toolsOpen?: boolean;
-  task?: { taskId: string; status: string; modelConfigId?: string | null; stopRequested?: boolean; plan?: import("../backend/types").AgentTaskPlan | null };
+  /** checklist = 执行进度清单（plan 步骤 + 工具事件对账的结果）：每次任务都有，方案卡之外的进展卡 */
+  task?: { taskId: string; status: string; modelConfigId?: string | null; stopRequested?: boolean; plan?: import("../backend/types").AgentTaskPlan | null; checklist?: import("./task").TaskChecklistItem[] };
   results?: string[];
   acts?: string[];
   memSaved?: { scope: string; text: string };
@@ -121,16 +128,27 @@ export function historyMessage(raw: Record<string, any>, index: number): AgentMs
   const at = Number(raw.at || 0) * 1000;
   const msg: AgentMsg = { id: "h" + index + "_" + Math.round(at), role, text: String(raw.text ?? raw.content ?? ""), at: at || undefined };
   if (typeof raw.origin === "string" && raw.origin) msg.origin = raw.origin;
+  // 本轮挂的技能：只用来在消息上方显示，不进给模型的 history 文本（_agent_thread_history* 不读这个字段）
+  if (typeof raw.skill === "string" && raw.skill.trim()) msg.skill = raw.skill.trim();
   if (Array.isArray(raw.suggestions)) msg.suggestions = raw.suggestions.map((item: unknown) => String(item || "").trim()).filter(Boolean).slice(0, 3);
   // 历史里的问答卡：先当已回答，最后一条在 markOpenQa 里放开
   if (Array.isArray(raw._qa)) msg.qa = { ...newCard("", raw._qa, raw._qaKind, raw._qaRegen), status: "answered" };
   const steps = Array.isArray(raw.steps) ? raw.steps : [];
   if (steps.length) {
-    msg.tools = steps.map((step: Record<string, any>) => ({
-      label: String(step.tool || "步骤"),
-      state: step.ok === false ? "error" as const : "done" as const,
-      secs: step.duration_ms != null ? (Number(step.duration_ms) / 1000).toFixed(1) : undefined,
-    }));
+    msg.tools = steps.map((step: Record<string, any>) => {
+      // 历史步骤带着 args / output：刷新后「代码」区照样能看参数与返回（output 是 JSON 字符串就解开）
+      let result: unknown = step.result ?? step.output;
+      if (typeof result === "string") { try { result = JSON.parse(result); } catch { /* 原样当文本 */ } }
+      return {
+        label: String(step.description || step.tool || "步骤"),
+        tool: step.tool ? String(step.tool) : undefined,
+        state: step.ok === false ? "error" as const : "done" as const,
+        secs: step.duration_ms != null ? (Number(step.duration_ms) / 1000).toFixed(1) : undefined,
+        args: step.args && typeof step.args === "object" ? step.args : undefined,
+        result: result === "" ? undefined : result,
+        error: step.error ? String(step.error) : undefined,
+      };
+    });
     msg.took = steps.reduce((sum: number, step: Record<string, any>) => sum + (Number(step.duration_ms) || 0), 0) / 1000;
   }
   // K2：思考内容 / 自检结果 / 待确认方案 / 思考时长都随线程持久化过，刷新页面后按原样还原，
@@ -205,6 +223,12 @@ export class AgentState {
   memUser: MemoryRecord[] = [];
   memCanvas: MemoryRecord[] = [];
   skills: Skill[] = customSkills();
+  /** 技能列表有没有成功拉到过：从没成功过时面板显示「正在加载技能…」，失败保留旧列表等下次重试 */
+  skillsLoaded = false;
+  /** 技能列表请求是否在飞：面板打开时不重复发请求 */
+  skillsLoading = false;
+  /** 上次技能列表成功拉到的时间：打开弹层 / 切回窗口时按间隔节流 */
+  private skillsFetchedAt = 0;
   /** 本画布的对话线程（标题 / 条数 / 更新时间），菜单与「新建对话」用 */
   threads: ThreadRow[] = [];
   /** 当前对话线程 id；发送时带给后端，历史从这里读 */
@@ -389,6 +413,7 @@ export class AgentState {
 
   async loadSkills(generation = this.generation) {
     const command = skillCommand(); if (!command) return false;
+    this.skillsLoading = true; this.emit();
     try {
       const result = await command({ command: "skill/list", payload: {} });
       if (!result?.ok) return false;
@@ -400,8 +425,21 @@ export class AgentState {
         md: String(s.source?.instructions || s.systemPrompt || s.description || ""),
       }));
       if (generation !== this.generation) return true;
-      this.skills = available; this.emit(); return true;
+      this.skills = available; this.skillsLoaded = true; this.skillsFetchedAt = Date.now();
+      this.emit(); return true;
     } catch { return false; }
+    finally {
+      this.skillsLoading = false;
+      if (generation === this.generation) this.emit();
+    }
+  }
+
+  /** 面板打开（/ 面板、+ → 我的技能）/ 切回窗口时刷新技能：不挡弹层、失败静默留旧列表；
+   *  同一间隔内不重复请求（打开弹层用 1s 去抖，focus / visibilitychange 用 5s）。 */
+  async refreshSkills(minGapMs = 1000) {
+    if (this.skillsLoading) return false;
+    if (Date.now() - this.skillsFetchedAt < minGapMs) return false;
+    return this.loadSkills();
   }
 
   async saveSkills(changed?: Skill, definition = false) {

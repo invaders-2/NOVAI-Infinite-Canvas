@@ -17,6 +17,11 @@ const { resolveBaseUrl } = require('./cloud-config');
 const { trayIconCandidates, firstExistingTrayIcon } = require('./tray-icon');
 const updateState = require('./update-state');
 
+// 窗口被切到后台/被别的 app 遮住时不让 Chromium 停画：否则切回来那一瞬整窗要重新栅格化，
+// 画布这种满是玻璃层（backdrop-filter）的界面会明显闪一下。
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+
 // 后端端口：与正式版一致使用 3000（数据目录也相同，Electron 版就是正式版的桌面壳）。
 // 若 3000 上已有 NOVAI 后端在跑（正式版/网页版），直接复用而不重复启动；
 // 若被无关程序占用，resolvePort 自动顺延到 3001+。
@@ -2777,8 +2782,16 @@ function registerIpc() {
       if (!payload || typeof payload !== 'object') return;
       const record = { payload: payload, receivedAt: Date.now(), bytesPromise: null, bytesResult: null, originalPromise: null, originalUrl: '' };
       lastGuestDrag = record;
+      // 记下这次拖拽最终会被当成素材的那个地址：视频拖不进来时先看这里（blob: 说明站点用 MSE 播放）
+      const dragUrl = String(payload.bestUrl || payload.mediaUrl || payload.uriList
+        || (Array.isArray(payload.videoUrls) && payload.videoUrls[0])
+        || (Array.isArray(payload.imageCandidates) && payload.imageCandidates[0] && payload.imageCandidates[0].url)
+        || '').slice(0, 200);
+      const videoUrls = String(payload.tagName || '') === 'VIDEO' ? JSON.stringify(payload.videoUrls || []).slice(0, 300) : '';
       clog('source-view', '记录拖拽元素 <' + String(payload.tagName || '') + '> hitMethod=' + String(payload.hitMethod || '')
-        + ' sourceTag=' + String(payload.sourceTag || '') + ' pointerGuard=' + Boolean(payload.pointerGuard) + ' stack=' + JSON.stringify(payload.elementsStack || []));
+        + ' sourceTag=' + String(payload.sourceTag || '') + ' pointerGuard=' + Boolean(payload.pointerGuard)
+        + ' url=' + (dragUrl || '(空)') + (videoUrls ? ' videoUrls=' + videoUrls : '')
+        + ' stack=' + JSON.stringify(payload.elementsStack || []));
       // 只对图片并行预取（视频走现有网络捕获/流式）
       const prefetch = prefetchGuestDragImage(payload);
       record.originalPromise = prefetch.originalPromise;
@@ -2934,9 +2947,13 @@ function registerIpc() {
   });
 
   ipcMain.handle('novai:set-titlebar-theme', (e, { r, g, b }) => {
+    const ch = (v) => Math.max(0, Math.min(255, Math.round(Number(v) || 0)));
+    const color = `rgb(${ch(r)}, ${ch(g)}, ${ch(b)})`;
     if (mainWindow && process.platform === 'darwin') {
-      try { mainWindow.setBackgroundColor(`rgb(${r}, ${g}, ${b})`); } catch (_) {}
+      try { mainWindow.setBackgroundColor(color); } catch (_) {}
     }
+    // 记下来：下次启动主窗口直接用这个底色，不再先闪一下写死的深色
+    saveWindowBg(color);
     return true;
   });
 
@@ -4552,6 +4569,30 @@ function installApplicationMenuWithoutZoom() {
   }
 }
 
+// 主窗口底色：跟上次界面的 --bg 走（theme.js 每次切主题都会报给主进程，这里落盘），
+// 首次安装还没有记录时按界面默认的浅色主题。原来写死深色 #0f1115：浅色界面（含全新安装的默认主题）
+// 在窗口亮出、页面还没盖满的那几帧会先闪一下黑底，窗口拉大时新露出的边缘也会闪黑。
+const WINDOW_BG_LIGHT = '#fafafa';
+function windowBgFile() {
+  try { return path.join(app.getPath('userData'), 'window-bg.json'); } catch (_) { return ''; }
+}
+function readWindowBg() {
+  const file = windowBgFile();
+  if (!file) return WINDOW_BG_LIGHT;
+  try {
+    const color = String(JSON.parse(fs.readFileSync(file, 'utf8')).color || '');
+    return /^rgb\(\d{1,3}, \d{1,3}, \d{1,3}\)$/.test(color) ? color : WINDOW_BG_LIGHT;
+  } catch (_) { return WINDOW_BG_LIGHT; }
+}
+function saveWindowBg(color) {
+  const file = windowBgFile();
+  if (!file) return;
+  try {
+    if (readWindowBg() === color) return;
+    fs.writeFileSync(file, JSON.stringify({ color }));
+  } catch (_) {}
+}
+
 function createWindow(url) {
   appBaseUrl = url;
   clog('win', '创建窗口，加载 ' + url);
@@ -4563,7 +4604,7 @@ function createWindow(url) {
   mainWindow = new BrowserWindow({
     ...bounds,
     title: 'NOVAI — 无限画布',
-    backgroundColor: '#0f1115',
+    backgroundColor: readWindowBg(),
     autoHideMenuBar: true,
     ...chrome,
     show: false,
@@ -4573,6 +4614,8 @@ function createWindow(url) {
       preload: path.join(__dirname, 'preload.js'),
       // 画布面板内嵌素材站点需要 <webview>；安全参数由 will-attach-webview 强制。
       webviewTag: true,
+      // 失焦/被遮挡时照常出帧，避免切回来的第一帧是空层（画布会闪一下）
+      backgroundThrottling: false,
     },
   });
 

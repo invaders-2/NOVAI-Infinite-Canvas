@@ -8,7 +8,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { attachOptimizeView, cancelOptimize, isOptimizing, optimizeDraft, startOptimize, subscribeOptimizeTasks } from "./optimizeTasks";
 import { useCtl } from "./ctx";
-import { Icon } from "./Icon";
+import { AiEditingIcon } from "./HugeAnimatedIcons";
 import { keyHint } from "./shortcuts";
 
 export function OptimizeButton({ node, draft, setDraft, className }: { node: CanvasNode; draft: string; setDraft: (v: string) => void; className: string }) {
@@ -33,6 +33,6 @@ export function OptimizeButton({ node, draft, setDraft, className }: { node: Can
   };
 
   return <button className={className + " tipT" + (busy ? " busy" : "")} data-p="optimize" data-tip={busy ? "停止优化" : "优化提示词"} aria-label={busy ? "停止优化" : "优化提示词"} onClick={run}>
-    {busy ? <i className="opt-spin" /> : <Icon name="wand" size="s" />}
+    {busy ? <i className="opt-spin" /> : <AiEditingIcon size={14} />}
   </button>;
 }

@@ -516,3 +516,51 @@ Suno 版本/限制（**原文** L70320–L70357）：public version 仅 `v6` / `
 | U9 | `veo3.1-*-official` 官方档 | 没建能力条目、没进模型列表 | `apimart_veo31_model()` 只认 fast/quality/lite，官方档名字会被归一到 ext 档；给它们建条目只会让编辑器发出 8 秒以外的时长被上游拒。要支持得先拆 veo 分支的模型白名单 |
 | U10 | 价格目录 `server/credits/apimart_pricing.json` 未刷新 | 仍是 2026-10-24 快照（341 条）；新抓的价目页只有 275 条（页面下架了 87 个老模型），且视频/音频详情页没抓，档位价会丢 | 直接覆盖会让 87 个老模型失去计价、视频丢失分档价；正确做法是先抓 60 个视频/音频详情页再全量重建，属于计费口径变更，单独一轮做 |
 | U11 | 参数契约接口没接成运行时校验 | 项目仍是「构建期离线能力表」 | 接成运行时要把 `/v1/models?expand=parameters` 拉下来做预校验，得用户 key 实测覆盖面（U7 仍未关闭） |
+
+---
+
+# H. 2026-11-18 文档增量（第三茬：协议为主，模型只有 1 个）
+
+> 新版语料：`/tmp/apimart-llms-full-new.txt`，2513521 bytes / 92052 行，sha256 `94eb9c53d60e2ef7d7e57b152de7e66a296bfd628ea10f7890b4ec2e1ded205e`。
+> 逐条证据（含行号）、"多 62 个模型 ID"的核对、价格实测记录都在 `docs/apimart-docs/REPORT-DELTA-20261118.md`；本节只留结论，旧内容未删改。
+
+## H.1 模型增量（净新增 15 个 ID：文本 12 / 视频 1 / 别名 2）
+
+| 类别 | 新增 | 说明 |
+| - | - | - |
+| chat | `gpt-5.2`、`gpt-5.3-codex`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.5`、`gpt-5.6-sol`、`gpt-5.6-luna`、`gpt-6-astra`、`gpt-6-luna`、`gpt-6.1-sol`、`claude-opus-5`、`claude-opus-5-thinking` | **没有独立参数页**：只出现在 gpt-image-2.6 页的 SVG 作者模型档位/对比表、Claude Code 与 Codex CLI 集成页的模型表、`/v1/usage` 示例。chat/completions 的 Supported Models 清单与 11-06 完全一致 → 不下发推理档位 |
+| image | 无 | 11-13 记录的 2.6/grok-2.0/qwen-3.0/seedream-5.5/nano-banana-2.1/minimax-h3-image 全部仍在，没有新增；只有 `svg.reasoning.effort` 这个嵌套参数 |
+| video | `seedance-2-5-flash`（别名 `doubao-seedance-2-5-flash`） | 480p/720p、4–30 秒或 `-1`、6 比例 + `adaptive`、图 10/视频 5/音频 5、mp4\|mov、**不支持草稿**；点号写法 `seedance-2.5-flash` 明确不被接受 |
+| audio | 无 | Suno 仍是 v6/v6-wild/v6-mini，FlowMusic 路径未变 |
+
+已有模型的参数变化：`seedance-2.5` 分辨率补 **4k** 并新增**草稿模式**（draft → draft_task_id，3 天过期，继承字段不得重发）；`wan3.0-video` 支持 `duration=-1`、比例补 `21:9`/`adaptive`、**不传 resolution 按 1080P 计费**、`audio` 默认 true、新增 `file_url`/`link_url`/`generation_type`。
+
+## H.2 协议侧增量
+
+| 字段 | 文档现值 | 项目处理 |
+| - | - | - |
+| `webhook_secret` / `X-Webhook-Signature` | 回调可带 HMAC-SHA256 签名（`hex(HMAC-SHA256(secret, raw body))`），控制台可配默认密钥 | 不用 webhook（只轮询）→ 无影响，已记入更新包 v5 |
+| 上传保留期/超量计费 | `retention_days=3\|7\|15\|30`，长档按字节计费；响应新增 `bytes`/`retention_days`/`expires_at`/`overage` | **未改代码**：现在不传 `retention_days`，跟随控制台默认；默认若是 7/15/30 天会每次上传都扣费（见 §5 P2） |
+| 账户/用量/消费记录 | `GET /v1/balance`、`/v1/user/balance`、`/v1/usage`、`/v1/logs/requests(+/{id})` | 未接 |
+| 模型定价 | `GET /api/pricing/model`（免鉴权）、`GET /v1/pricing/model`（鉴权，按档位报价） | 本轮新价格条目用免鉴权接口实测，见 §7 |
+| 上下文缓存 | `cache_control`(5m/1h)、`/v1/responses` 的 `prompt_cache_options.ttl`(30m/12h) | 未接 |
+| 虚拟人资产 | `/v1/seedance2/private-avatar(/assets\|/groups)`，通过后得 `asset://`，资产接口免费 | 未接；带人脸参考图会失败 |
+| Midjourney 视频 | `POST /v1/midjourney/generations/video`，固定 FAST ~5 秒，计费 `midjourney@video`/`@video-720p` | 能力表 `mj.video` 留档，无入口 |
+
+## H.3 本轮代码/数据改动
+
+- `main.py`：`seedance-2-5` 补 4k；新增 `seedance-2-5-flash` 能力条目；`wan3-0-video` 改 `durations=(-1,2..30)`、比例补 21:9/adaptive；`gpt-image-2-6-*` 的 svg 加 `efforts`；`midjourney` 的 mj 加 `video` 参数块（只留档，`/api/model-caps` 仍只暴露 versions/speeds/hd）。
+- `catalog.json`：补 12 个 chat + `seedance-2-5-flash`/`doubao-seedance-2-5-flash`，并补录 11-13 漏收的 6 条（`seedream-5-5`、`minimax-h3-image`、`minimax-h3-image-highspeed`、`apimart-zoe`、`kling-v4-flash`、`gemini-omni-1.2-flash`/`-ext`）；`_meta.corpus` 换成新 sha/行数。
+- `server/protocols/protocol_updates.json`：新增 **v5**（v2 已被 11-06 的"模型参数更新"占用，版本号必须单调，所以下一版是 5）：11 条协议变更 + 8 条参数变更 + 13 个 new_models。
+- `server/credits/apimart_pricing.json`：补 `seedance-2-5-flash`、`midjourney@video`、`midjourney@video-720p`、`gpt-5.6-sol`，`seedance-2.5` 补 4 个 4K 档，alias_map 补 4 条；coverage 从 340 更新到 345。
+
+## H.4 遗留与未知（补充 U10/U12–U17）
+
+| # | 项 | 现状 | 为什么没做 |
+| - | - | - | - |
+| U12 | `gpt-5.6-sol` 分档价（>272K 输入：input 8 / output 30） | 没写进价目 | 现有 schema 只有单组 token_rates，写进去会被 `_max_token_rates` 取最大值、对普通请求过度计价 |
+| U13 | 12 个新 chat ID 是否真能调、真实档位 | 只有示例/清单级证据 | 需要用户 key 真机实测 |
+| U14 | 上传 `retention_days` 默认档 | 未知 | 要登录控制台看；见 §5 P2 的计费风险 |
+| U15 | `seedance-2-5-flash` 以后是否加 1080p/4k | 文档明确只有 480p/720p | 按文档写死，传高档会 400 |
+| U16 | Midjourney 视频 / 虚拟人资产的产品入口 | 只有 API 与计价 | 属于前端与画布侧改动，本轮不动前端 |
+

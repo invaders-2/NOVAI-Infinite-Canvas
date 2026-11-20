@@ -22,6 +22,7 @@ const HAND_DRAWN = {
     rect: '<rect x="4" y="5" width="16" height="14" rx="1"/>',
     rundown: '<path d="M5 4l10 8-10 8zM19 5v14"/>',
     runup: '<path d="M19 4L9 12l10 8zM5 5v14"/>',
+    code: '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
 } as const;
 
 type HandName = keyof typeof HAND_DRAWN;

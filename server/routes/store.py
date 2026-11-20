@@ -708,8 +708,43 @@ def extra_detail(entry: Dict[str, Any]) -> Dict[str, Any]:
     return item
 
 
+_SKILL_GUIDES_CACHE: Dict[str, Any] = {"mtime": None, "data": {}}
+
+
+def load_skill_guides() -> Dict[str, Any]:
+    """技能「使用方法」（server/store_data/skill_guides.json，按条目 name 索引）；文件改了自动重读。"""
+    path = os.path.join(_repo_root(), "server", "store_data", "skill_guides.json")
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return {}
+    if _SKILL_GUIDES_CACHE["mtime"] != mtime:
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            _SKILL_GUIDES_CACHE.update({"mtime": mtime, "data": data if isinstance(data, dict) else {}})
+        except Exception as exc:
+            print("[Store] 读取技能使用方法失败: %s" % exc)
+            return {}
+    return _SKILL_GUIDES_CACHE["data"]
+
+
+def _attach_guide(item: Dict[str, Any]) -> Dict[str, Any]:
+    """上游详情自带 guide 时以上游为准；没有就补上我们写的使用方法。"""
+    if isinstance(item.get("guide"), dict) and item["guide"]:
+        return item
+    guide = load_skill_guides().get(str(item.get("name") or ""))
+    if isinstance(guide, dict) and guide:
+        item["guide"] = guide
+    return item
+
+
 def build_detail(kind: str, name: str) -> Dict[str, Any]:
     """详情：内置技能走注册表；市场条目上游 detail 优先，上游 404 时回退成 catalog 条目 + 降级标记。"""
+    return _attach_guide(_build_detail(kind, name))
+
+
+def _build_detail(kind: str, name: str) -> Dict[str, Any]:
     entry, builtin = _lookup(kind, name)
     if not entry:
         _resolve(kind, name)          # 不存在的条目按统一文案 404

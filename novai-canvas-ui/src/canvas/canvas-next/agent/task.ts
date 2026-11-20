@@ -160,12 +160,108 @@ export function taskToolSteps(snapshot: AgentTaskSnapshot): ToolStep[] {
     }
     const stepCmd = textOf(payload.command) || commandPreview(tool || step.tool || "", payload.args);
     if (stepCmd) step.cmd = stepCmd;
+    if (payload.args && typeof payload.args === "object") step.args = payload.args;
+    if (payload.result !== undefined && payload.result !== null) step.result = payload.result;
+    if (payload.error) step.error = textOf(payload.error);
     if (/waiting_approval|approval_required/.test(type)) step.state = "wait";
     else if (/execution_started|execution\.started|verification_started/.test(type)) step.state = "run";
     else if (/succeeded|verification_passed|verification_applied/.test(type)) step.state = "done";
     else if (/denied|blocked|failed|abandoned|revoke|not_applied|unknown_effect/.test(type)) step.state = "error";
   }
   return steps;
+}
+
+/** 任务清单一行：卡面完全按状态画（不猜、不补） */
+export type TaskChecklistItem = {
+    /** plan 步骤的 index（后端 step 事件的 callId 是 step:<index>）；计划里没写 index 时用负数占位，只排序不参与对账 */
+    index: number;
+    label: string;
+    /**
+     * failed = 真失败（没做成、要人介入）；info = 可纠正的失败：工具明确在提示模型补参数 / 消歧义
+     * （失败事件带 recoverable 标记），模型拿到错误原文就能改道，所以按中性态展示、不计入「N 步失败」。
+     */
+    state: "todo" | "run" | "done" | "failed" | "info";
+};
+
+/**
+ * 执行进度清单：把这次运行每一轮的 plan 步骤收成一条清单，再用工具事件把每步标成 待办 / 进行中 / 已完成 / 失败 /
+ * 可纠正的失败（失败事件带 recoverable 标记，中性态）。
+ * 数据全部来自已有事件，不额外要求后端字段：
+ *   · harness.tool_proposed 的 plan.steps（待确认方案与自动执行每轮都会发，带 index / tool / description）
+ *   · step_start / step_result → tool.execution.* 的 callId 是 step:<index>，按它和 plan 的 index 对齐
+ * 同一 index 只保留第一次出现的顺序；后来重发的 plan 只更新文案（多阶段任务会逐轮往后追加）。
+ */
+export function taskChecklist(snapshot: AgentTaskSnapshot): TaskChecklistItem[] {
+    const items: TaskChecklistItem[] = [];
+    const byIndex = new Map<number, TaskChecklistItem>();
+    const labelOf = (step: any): string => textOf(step?.description).trim() || textOf(step?.tool).trim() || "步骤";
+    for (const event of snapshot.events) {
+        const type = String(event.eventType || "");
+        const payload = event.safePayload && typeof event.safePayload === "object" ? event.safePayload : {};
+        if (type === "harness.tool_proposed") {
+            const plan = (payload as { plan?: { steps?: unknown } }).plan;
+            const rows = plan && Array.isArray(plan.steps) ? plan.steps : null;
+            if (!rows) continue;
+            rows.forEach((row: any) => {
+                const raw = Number(row?.index);
+                const index = Number.isFinite(raw) ? raw : -1 - items.length;
+                const existing = byIndex.get(index);
+                if (existing) { existing.label = labelOf(row) || existing.label; return; }
+                const item: TaskChecklistItem = { index, label: labelOf(row), state: "todo" };
+                byIndex.set(index, item);
+                items.push(item);
+            });
+            continue;
+        }
+        if (!/^tool\.|^harness\.tool_/.test(type)) continue;
+        const match = /^step:(-?\d+)$/.exec(textOf(payload.callId));
+        if (!match) continue;
+        const item = byIndex.get(Number(match[1]));
+        if (!item) continue;
+        if (/execution_started|execution\.started|verification_started/.test(type)) item.state = "run";
+        else if (/succeeded|verification_passed|verification_applied/.test(type)) item.state = "done";
+        else if (/denied|blocked|failed|abandoned|revoke|not_applied|unknown_effect/.test(type)) {
+            // 后端在失败事件上显式标了 recoverable（工具在要参数 / 消歧义）才转中性态，前端不按文案猜
+            item.state = (payload as { recoverable?: unknown }).recoverable === true ? "info" : "failed";
+        }
+    }
+    return items;
+}
+
+/** 清单汇总：完成 / 真失败 / 需补充信息分开数；失败只算真失败 */
+export type TaskChecklistTally = {
+    total: number;
+    done: number;
+    failed: number;
+    /** 可纠正的失败（中性态），不计入 failed */
+    needsInfo: number;
+    running?: TaskChecklistItem;
+    settled: boolean;
+    succeeded: boolean;
+    allDone: boolean;
+};
+export function taskChecklistTally(items: TaskChecklistItem[], status: string): TaskChecklistTally {
+    const total = items.length;
+    const done = items.filter((item) => item.state === "done").length;
+    return {
+        total,
+        done,
+        failed: items.filter((item) => item.state === "failed").length,
+        needsInfo: items.filter((item) => item.state === "info").length,
+        running: items.find((item) => item.state === "run"),
+        settled: TASK_UI_SETTLED.has(String(status || "")),
+        succeeded: status === "SUCCEEDED" || status === "COMPLETED",
+        allDone: total > 0 && done === total,
+    };
+}
+
+/** 收起态那一行：真失败沿用「N 步失败」，只有可纠正的失败时说「N 步需补充信息」 */
+export function taskChecklistHint(tally: TaskChecklistTally): string {
+    if (tally.running) return "正在做：" + tally.running.label;
+    if (tally.failed) return tally.failed + " 步失败";
+    if (tally.needsInfo) return tally.needsInfo + " 步需补充信息";
+    if (tally.settled) return tally.allDone ? "全部完成" : "已结束 · 完成 " + tally.done + "/" + tally.total;
+    return "准备下一步";
 }
 
 export type AgentReview = {

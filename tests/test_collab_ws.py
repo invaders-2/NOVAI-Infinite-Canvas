@@ -363,16 +363,13 @@ class B_CollabTest(unittest.TestCase):
                     by_id = {u["id"]: u for u in viewer_presence["users"]}
                     self.assertEqual(by_id[viewer_user["id"]]["avatar_url"], "")
 
-    # ---------------------------------------------------------------- admin
-    def test_admin_can_join_any_canvas(self) -> None:
+    # ---------------------------------------------------------------- admin（2026-11：没有画布特权）
+    def test_admin_cannot_join_others_canvas(self) -> None:
         admin = self.admin_client()
         ctx = self.setup_canvas(admin)
         canvas_id = ctx["canvas"]["id"]
         with admin.websocket_connect(self.url(canvas_id)) as ws:
-            self.assertEqual(ws.receive_json()["type"], "snapshot")
-            hello = ws.receive_json()
-            self.assertEqual(hello["role"], "admin")
-            self.assertIn("admin", [u["username"] for u in hello["users"]])
+            expect_close(ws, 4403, "FORBIDDEN")
 
     # ---------------------------------------------------------------- 房间满
     def test_room_full_4409(self) -> None:

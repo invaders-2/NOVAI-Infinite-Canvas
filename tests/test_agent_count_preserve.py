@@ -47,9 +47,10 @@ class RequestBatchTests(unittest.TestCase):
     def test_unknown_caps_keep_old_behavior_but_do_not_swallow(self):
         self.assertEqual(self._batches(4, 0), [1, 1, 1, 1])
 
-    def test_compat_count_helper_returns_per_batch(self):
+    def test_compat_count_helper_returns_request_count(self):
+        # 兼容入口数的是「请求次数」：n_max=1、要 4 张 → 4 次单张请求
         with patch.object(main, "model_caps_for", new=lambda *a, **k: {"n_max": 1}):
-            self.assertEqual(main.direct_image_request_count("p", "m", 4), 1)
+            self.assertEqual(main.direct_image_request_count("p", "m", 4), 4)
 
 
 class GenerateImageValidateTests(unittest.TestCase):

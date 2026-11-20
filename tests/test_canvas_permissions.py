@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""M3 画布权限回归测试（owner / admin / editor / viewer + 共享列表 + 审计）。
+"""M3 画布权限回归测试（owner / editor / viewer + 共享列表 + 审计；admin 不做画布特权，2026-11）。
 
 跑法：
     venv/bin/python -m unittest tests.test_canvas_permissions -v
@@ -178,7 +178,7 @@ class B_CanvasPermissionTest(unittest.TestCase):
 
         self.assertEqual(editor.put("/api/canvases/%s" % canvas["id"], json={"title": "edited"}).status_code, 200)
         self.assertEqual(editor.post("/api/canvases/%s/touch" % canvas["id"]).status_code, 200)
-        # meta 非标题字段可改；重命名仍然只有 owner/admin
+        # meta 非标题字段可改；重命名只有 owner（管理员没有特权）
         self.assertEqual(editor.post("/api/canvases/%s/meta" % canvas["id"], json={"color": "#ff0000"}).status_code, 200)
         rename = editor.post("/api/canvases/%s/meta" % canvas["id"], json={"title": "renamed-by-editor"})
         self.assertEqual(rename.status_code, 403)
@@ -254,8 +254,8 @@ class B_CanvasPermissionTest(unittest.TestCase):
         )
         self.assertEqual(stranger.delete("/api/canvases/%s/members/%d" % (canvas["id"], member["user_id"])).status_code, 403)
 
-    # ---------------------------------------------------------------- admin
-    def test_admin_can_manage_any_canvas(self) -> None:
+    # ---------------------------------------------------------------- admin（2026-11：没有画布特权）
+    def test_admin_has_no_canvas_privilege(self) -> None:
         admin = self.admin_client()
         owner, owner_user = self.make_user(admin, "adminowner")
         member, member_user = self.make_user(admin, "adminmember")
@@ -263,23 +263,21 @@ class B_CanvasPermissionTest(unittest.TestCase):
         self.assertEqual(self.add_member(owner, canvas["id"], member_user["username"], "viewer").status_code, 200)
         member_row = self.permission_row(owner, canvas["id"], member_user["username"])
 
-        permissions = admin.get("/api/canvases/%s/permissions" % canvas["id"])
-        self.assertEqual(permissions.status_code, 200)
-        self.assertEqual(permissions.json()["my_role"], "admin")
-        self.assertEqual(permissions.json()["owner"]["username"], owner_user["username"])
-
+        # 管理员和普通账号一样：看不到、管不了别人的画布
+        self.assertEqual(admin.get("/api/canvases/%s/permissions" % canvas["id"]).status_code, 403)
         self.assertEqual(
             admin.patch("/api/canvases/%s/members/%d" % (canvas["id"], member_row["user_id"]), json={"role": "editor"}).status_code,
-            200,
+            403,
         )
-        self.assertEqual(self.permission_row(admin, canvas["id"], member_user["username"])["role"], "editor")
-
         admin_list = admin.get("/api/canvases?all=1").json()["canvases"]
-        row = next(item for item in admin_list if item["id"] == canvas["id"])
-        self.assertEqual(row["access_role"], "admin")
-        self.assertEqual(row["owner_username"], owner_user["username"])
+        self.assertFalse(any(item["id"] == canvas["id"] for item in admin_list))
 
-        self.assertEqual(admin.delete("/api/canvases/%s/members/%d" % (canvas["id"], member_row["user_id"])).status_code, 200)
+        # 自己的画布照常（owner 角色）
+        mine = self.make_canvas(admin)
+        self.assertEqual(admin.get("/api/canvases/%s/permissions" % mine["id"]).json()["my_role"], "owner")
+
+        self.assertEqual(admin.delete("/api/canvases/%s/members/%d" % (canvas["id"], member_row["user_id"])).status_code, 403)
+        self.assertEqual(admin.delete("/api/canvases/%s" % canvas["id"]).status_code, 403)
 
     # ---------------------------------------------------------------- 列表 scope
     def test_scope_filters(self) -> None:

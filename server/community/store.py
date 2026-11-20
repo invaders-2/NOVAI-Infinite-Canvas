@@ -50,7 +50,8 @@ MAX_BLOCKED = 200
 
 # <作者账号码 6 位>-<随机 6 位>；账号码历史上出现过字母码，整体放宽到字母数字
 ITEM_ID_RE = re.compile(r"^[A-Za-z0-9]{4,12}-[A-Za-z0-9]{4,12}$")
-FILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
+# 与 packager.media_file_name() 允许的字符集保持一致（基本汉字），否则包里写完的中文名素材自己都取不出来
+FILE_RE = re.compile(r"^[A-Za-z0-9\u4e00-\u9fa5][A-Za-z0-9\u4e00-\u9fa5._-]{0,80}$")
 CATEGORY_RE = re.compile(r"^[A-Za-z0-9\u4e00-\u9fa5 _-]{0,24}$")
 
 _LOCK = threading.RLock()

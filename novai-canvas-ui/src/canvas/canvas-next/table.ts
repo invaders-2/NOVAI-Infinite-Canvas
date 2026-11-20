@@ -105,7 +105,9 @@ export function previewThumbUrl(url: string, width = 512): string {
   if (!raw) return "";
   if (!/^\/(?:assets|output)\//i.test(raw)) return raw;
   const w = Math.max(64, Math.min(2048, Math.round(Number(width) || 512)));
-  return `/api/media-preview?w=${w}&url=${encodeURIComponent(raw)}`;
+  // 视频封面改过取帧规则（避开开头黑场）：地址带个版本号，浏览器里缓存的旧黑图不再命中
+  const vf = /\.(mp4|webm|mov|m4v|avi|mkv)(?:[?#]|$)/i.test(raw) ? "&vf=2" : "";
+  return `/api/media-preview?w=${w}&url=${encodeURIComponent(raw)}${vf}`;
 }
 /** 「5s」「约 4.5 秒」「10」→ 秒数 */
 export function parseDur(v: string): number | null {
@@ -299,6 +301,10 @@ export function tablePrompt(task: string, mode: TextOutputMode, mediaCount: numb
     "示例：第 1 组是 3 张静物图（逐行），第 2 组是同一个产品的 2 张白底多角度图（全部）→ 第 1 行 = 静物 1 + 白底 1、2；第 2 行 = 静物 2 + 白底 1、2；第 3 行 = 静物 3 + 白底 1、2。",
     "**产品替换**任务：待替换的「场景 / 参考图」组用 per-row（几张就几行）；用来替换的「产品图 / 白底多角度图」组用 every-row（整组每行都带上，绝不因为白底图张数多就增加行数）。",
     "产品替换的行数必须等于 per-row 组的张数；同一个产品的白底 / 多角度图再多，也只是一组 every-row，不是多行。",
+    "产品替换里两组的角色必须写清楚：待替换组（场景 / 白膜图）只提供机位、构图、光影和背景；它里面如果已经有占位商品（白膜人台 / 旧商品），那个占位商品的造型、缝线、鞋底花纹、鞋带结构、logo、装饰在成品里一律不允许保留，必须被新产品完全替换掉。",
+    "产品组（产品图 / 白底多角度图）是新品外观的唯一权威：成品里新品的形状、比例、配色、材质和细节必须和产品组一致，不能从待替换组里的占位商品上推。",
+    "产品替换的每一行文案都要把这两层关系显式写出来（例如「保留该机位的构图、光影与背景，把占位商品完整替换为产品组里的新品」），不要只写「参考图 1」这类占位说明 —— 行文案会直接进入图像生成的提示词。",
+    "只有「产品替换」这类任务用上面这几条角色规则；其它任务（分镜、文案、多角度）不要套用产品替换的说法。",
     "同时回报每一组的用法 inputGroups：{\"group\":组号,\"rowMode\":\"per-row\"或\"every-row\"}。per-row = 行驱动（第 N 行用第 N 张）；every-row = 每一行都要用上整组。",
     "没有声明 per-row 时，表格行数按用户要求确定（例如「每行一个场景」就按场景组的张数）；同一主体的三视图 / 姿势 / 多角度 / 白底产品图整组每行都用、不增加行数；只有实在判断不了时才用素材最多那组的张数。",
     "如果任务区分了「目标主体」和「风格/版式参考」，每行内容都必须显式写清它们的关系。",

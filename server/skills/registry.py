@@ -372,6 +372,34 @@ def get_skill(skill_id):
     return None
 
 
+SCRIPT_EXTS = (".py", ".sh", ".js", ".mjs", ".cjs")
+
+
+def package_scripts(skill_id):
+    """技能包目录里可被 run_skill_script 执行的脚本（相对路径，最多 50 个）。
+
+    只扫 skills_dir/<id>/（zip / RedSkill 安装的完整包）；只有一份 SKILL.md 的技能没有这个目录。
+    """
+    sid = str(skill_id or "").strip()
+    if not _ID_RE.match(sid):
+        return []
+    root = os.path.join(skills_dir(), sid)
+    if not os.path.isdir(root):
+        return []
+    found = []
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames.sort()
+            for name in sorted(filenames):
+                if os.path.splitext(name)[1].lower() in SCRIPT_EXTS:
+                    found.append(os.path.relpath(os.path.join(dirpath, name), root).replace(os.sep, "/"))
+                    if len(found) >= 50:
+                        return found
+    except OSError:
+        return found
+    return found
+
+
 def public_skill(skill, kind: str = "skill", usage_count=None):
     """列表 / 详情字段（契约冻结；source_skill_code / skill_type / usage_count 为可选新增字段）。
 
@@ -381,6 +409,7 @@ def public_skill(skill, kind: str = "skill", usage_count=None):
     usage_count：调用方传入的真实运行次数（server/agents/store.usage_counts），没给就是 0。
     """
     sid = str(skill.get("id") or "")
+    scripts = package_scripts(sid)
     declared = str(skill.get("skill_type") or "").strip().lower()
     if declared in SKILL_TYPES:
         skill_type = declared
@@ -397,6 +426,8 @@ def public_skill(skill, kind: str = "skill", usage_count=None):
         "deliverables": skill.get("deliverables") or [],
         "enabled": bool(skill.get("enabled", True)),
         "available": bool(skill.get("available", True)),
+        "has_scripts": bool(scripts),
+        "scripts": scripts,
         "source_skill_code": str(skill.get("source_skill_code") or ""),
         "skill_type": skill_type,
         "builtin_pack": str(skill.get("builtin_pack") or ""),

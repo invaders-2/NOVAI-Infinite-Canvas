@@ -74,7 +74,8 @@ class SkillIndexPromptTests(unittest.TestCase):
         prompt = build_prompt("")
         self.assertIn("【技能索引】", prompt)
         self.assertIn("activate_skill(name)", prompt)
-        listed = [line for line in prompt.splitlines() if line.startswith("- ")]
+        # 只数技能索引行（「- id | 名称 | 描述」）：提示词里还有按本机配置列出的可用模型行，也以「- 」开头
+        listed = [line for line in prompt.splitlines() if line.startswith("- ") and " | " in line]
         self.assertEqual(len(listed), min(len(skills), main.AGENT_SKILL_INDEX_MAX))
         self.assertGreaterEqual(len(listed), 2)
 

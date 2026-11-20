@@ -101,7 +101,7 @@ class CandidateGateTests(unittest.TestCase):
             fn = getattr(CLIENT, method)
             resp = fn(path, params={"canvas_id": canvas_id}) if payload is None else fn(path, json=payload)
             self.assertEqual(resp.status_code, 400, "%s %s 要 400" % (method, path))
-            self.assertIn("NOVAI_AGENT_V2_MEMORY", resp.json()["detail"])
+            self.assertIn("智能记忆未开启", resp.json()["detail"])
 
     def test_canvas_id_and_ids_are_required_when_on(self):
         canvas_id = new_canvas("参数画布")

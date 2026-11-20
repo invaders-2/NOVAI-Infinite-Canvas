@@ -1,0 +1,209 @@
+/* StreamingResponse 的 NOVAI Glass 皮肤：不用 border / 发丝线，层级靠填充、柔影和间距。 */
+
+.nvca-sr {
+	--nvsr-mono: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+	display: flex;
+	flex-direction: column;
+	font-size: 13.5px;
+	line-height: 1.75;
+	color: var(--nvca-ink);
+}
+
+.nvca-sr-body {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	overflow-wrap: anywhere;
+}
+
+.nvca-sr-body > *:first-child {
+	margin-top: 0;
+}
+
+.nvca-sr-p {
+	margin: 0;
+}
+
+.nvca-sr-h {
+	margin: 0;
+	font-weight: 600;
+	letter-spacing: -0.01em;
+	line-height: 1.4;
+	color: var(--nvca-ink);
+}
+
+.nvca-sr-h1 { font-size: 15px; }
+.nvca-sr-h2 { font-size: 14px; }
+.nvca-sr-h3 { font-size: 13.5px; }
+
+.nvca-sr-quote {
+	margin: 0;
+	padding: 7px 12px;
+	border-radius: 10px;
+	background: var(--nvca-fill-1);
+	color: var(--nvca-ink-2);
+}
+
+.nvca-sr-list {
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding-left: 18px;
+}
+
+.nvca-sr-list.is-bullet { list-style: disc; }
+.nvca-sr-list.is-ordered { list-style: decimal; }
+.nvca-sr-list li { padding-left: 2px; }
+.nvca-sr-list li::marker { color: var(--nvca-ink-3); }
+
+.nvca-sr-strong { font-weight: 600; }
+
+.nvca-sr-em { font-style: italic; }
+
+.nvca-sr-code {
+	padding: 1px 5px;
+	border-radius: 5px;
+	background: var(--nvca-fill-2);
+	font-family: var(--nvsr-mono);
+	font-size: 0.92em;
+	overflow-wrap: anywhere;
+}
+
+.nvca-sr-link {
+	text-decoration: underline;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 3px;
+	text-decoration-color: color-mix(in srgb, currentColor 38%, transparent);
+}
+
+.nvca-sr-link.is-plain {
+	opacity: 0.85;
+}
+
+.nvca-sr-codeblock {
+	border-radius: 14px;
+	background: var(--nvca-fill-1);
+	box-shadow: var(--nvca-shadow-float);
+	overflow: hidden;
+}
+
+.nvca-sr-codeblock-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	height: 32px;
+	padding: 0 6px 0 12px;
+	font-size: 11px;
+	color: var(--nvca-ink-3);
+}
+
+.nvca-sr-codeblock-lang {
+	font-family: var(--nvsr-mono);
+	letter-spacing: 0.02em;
+}
+
+.nvca-sr-pre {
+	margin: 0;
+	padding: 0 14px 12px;
+	overflow-x: auto;
+	font-family: var(--nvsr-mono);
+	font-size: 12px;
+	line-height: 1.7;
+	color: var(--nvca-ink);
+}
+
+.nvca-sr-pre code {
+	font-family: inherit;
+	white-space: pre;
+}
+
+.nvca-sr-caret {
+	display: inline-block;
+	width: 0.4em;
+	height: 0.4em;
+	margin-left: 6px;
+	border-radius: 50%;
+	background: currentColor;
+	opacity: 0.55;
+	vertical-align: 0.05em;
+	animation: nvca-sr-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes nvca-sr-pulse {
+	0%, 100% { opacity: 0.55; }
+	50% { opacity: 0.18; }
+}
+
+.nvca-sr-actions {
+	display: flex;
+	align-items: center;
+	margin: 4px 0 0 -8px;
+	color: var(--nvca-ink-3);
+}
+
+.nvca-sr-action {
+	display: inline-flex;
+}
+
+.nvca-sr-btn {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	border: 0;
+	border-radius: 999px;
+	background: transparent;
+	color: inherit;
+	cursor: pointer;
+	transition: background 0.16s var(--nvca-ease), color 0.16s var(--nvca-ease);
+}
+
+.nvca-sr-btn.is-small {
+	width: 26px;
+	height: 26px;
+}
+
+.nvca-sr-btn:hover {
+	background: var(--nvca-fill-1);
+	color: var(--nvca-ink);
+}
+
+.nvca-sr-btn[aria-pressed="true"] {
+	background: var(--nvca-fill-2);
+	color: var(--nvca-ink);
+}
+
+.nvca-sr-btn:focus-visible {
+	outline: 2px solid var(--nvca-ring);
+	outline-offset: 2px;
+}
+
+.nvca-sr-swap {
+	position: relative;
+	display: inline-grid;
+	place-items: center;
+}
+
+.nvca-sr-i {
+	width: 15px;
+	height: 15px;
+	stroke-width: 1.7;
+}
+
+.nvca-sr-i-sm {
+	width: 13px;
+	height: 13px;
+	stroke-width: 1.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.nvca-sr-caret {
+		animation: none;
+	}
+	.nvca-sr-btn {
+		transition: none;
+	}
+}

@@ -30,6 +30,17 @@ import { buildDebugBatchRatio } from "./agent/debugBatchRatio";
 import type { AgentDraft } from "./homeSeed";
 import { probe, usePerf } from "./perf";
 
+/** 技能胶囊配色验收口：?skillTone=teal|teal-icon|amber|mist|forest|terracotta|cocoa|graphite|purple|dot|badge-only|neutral
+ *  （缺省 / 未知值 = teal，这是正式默认；显式 ?skillTone=neutral 才回到改前的中性灰）。
+ *  只有输入区的技能记号听它的，素材 / 节点 / 应用胶囊照旧中性灰；样式在 agent-panel-v2.css 末尾。 */
+const SKILL_TONES = ["teal", "teal-icon", "amber", "mist", "forest", "terracotta", "cocoa", "graphite", "purple", "dot", "badge-only", "neutral"];
+const SKILL_TONE = (() => {
+  try {
+    const value = new URLSearchParams(location.search).get("skillTone") || "";
+    return SKILL_TONES.includes(value) ? value : "teal";
+  } catch { return "teal"; }
+})();
+
 /** 作用域根：所有样式都在 .cn-root 之下，主题写在它的 data-theme 上，不影响外壳 */
 function Root({ children, inset }: { children: React.ReactNode; inset?: number }) {
   const theme = useS((s) => s.ui.theme); const ref = useRef<HTMLDivElement>(null);
@@ -59,8 +70,11 @@ function Root({ children, inset }: { children: React.ReactNode; inset?: number }
     try { parent.postMessage({ type: "novai:canvas-chrome-request" }, "*"); } catch { /* 普通窗口里 parent 就是自己 */ }
     return () => removeEventListener("message", onMsg);
   }, []);
-  return <div ref={ref} className={"cn-root" + (inset ? " in-win" : "")} data-theme={theme} data-perf={perf.mode} style={inset ? ({ ["--win-inset" as string]: inset + "px" } as React.CSSProperties) : undefined}>{children}</div>;
+  return <div ref={ref} className={"cn-root" + (inset ? " in-win" : "")} data-theme={theme} data-perf={perf.mode} data-skill-tone={SKILL_TONE} style={inset ? ({ ["--win-inset" as string]: inset + "px" } as React.CSSProperties) : undefined}>{children}</div>;
 }
+
+/** 文件选择框的默认类型；个别上传入口（空视频节点的「上传视频」）用 detail.accept 收窄成单一类型 */
+const UPLOAD_ACCEPT = "image/*,video/*,audio/*," + DOC_ACCEPT;
 
 /** winInset：嵌在桌面窗口里时左上角给系统红绿灯留出的宽度（px） */
 export type CanvasAppProps = { backend: CanvasBackend; canvasId: string; name?: string; host?: HostActions; onReady?: (store: CanvasStore) => void; winInset?: number; agentDraft?: AgentDraft | null };
@@ -86,7 +100,8 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
   useEffect(() => { if (name && ctl.store.state.name !== name) ctl.store.set({ name }); }, [name, ctl]);
   // onReady 用引用保存：调用方每次渲染传新函数也不会触发重新载入画布（重载会冲掉还没保存的改动）
   const readyRef = useRef(onReady); readyRef.current = onReady;
-  const store = ctl.store; const fileRef = useRef<HTMLInputElement>(null); const uploadOpts = useRef<{ at?: { x: number; y: number }; target?: string; linkTo?: string; replace?: string }>({});
+  const store = ctl.store; const fileRef = useRef<HTMLInputElement>(null);
+  const uploadOpts = useRef<{ at?: { x: number; y: number }; target?: string; linkTo?: string; replace?: string; accept?: string }>({});
 
   useEffect(() => {
     applyTheme(store); const off = watchSystemTheme(store);
@@ -121,8 +136,14 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
   }, [store, ctl]);
 
   // 上传入口（菜单 / 工具条 / 面板都发这个事件）
+  // 空视频节点的「上传视频」在 detail 里带 accept=video/*，只筛视频；别的入口不带，恢复默认全量类型。
+  // accept 直接写 DOM 而不是走 state：setState 要等这次事件结束才重渲染，文件选择框已经开出来用不上新值。
   useEffect(() => {
-    const on = (e: Event) => { uploadOpts.current = (e as CustomEvent).detail || {}; fileRef.current?.click(); };
+    const on = (e: Event) => {
+      const d = (e as CustomEvent).detail || {}; uploadOpts.current = d;
+      const el = fileRef.current; if (!el) return;
+      el.accept = d.accept || UPLOAD_ACCEPT; el.click();
+    };
     addEventListener("cn:upload", on); return () => removeEventListener("cn:upload", on);
   }, []);
   // 粘贴图片
@@ -149,7 +170,7 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
         </div>
         <AgentPanel draft={draft ?? agentDraft} />
       </div>
-      <input type="file" ref={fileRef} accept={"image/*,video/*,audio/*," + DOC_ACCEPT} multiple hidden onChange={(e) => { const files = [...(e.target.files || [])]; e.target.value = ""; const o = uploadOpts.current; void addFiles(store, files, o.at || ctl.center(), { target: o.target, linkTo: o.linkTo, replace: o.replace }); }} />
+      <input type="file" ref={fileRef} accept={UPLOAD_ACCEPT} multiple hidden onChange={(e) => { const el = e.target; const files = [...(el.files || [])]; el.value = ""; el.accept = UPLOAD_ACCEPT; const o = uploadOpts.current; void addFiles(store, files, o.at || ctl.center(), { target: o.target, linkTo: o.linkTo, replace: o.replace }); }} />
       <Toasts />
       <Lightbox />
       <TextDocLayer />

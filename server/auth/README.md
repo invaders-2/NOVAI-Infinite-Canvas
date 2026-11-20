@@ -28,6 +28,8 @@
 | POST | `/api/auth/username` | `{new_username,password}`：验密码 + 格式/唯一校验，成功写审计 `user_change_username` |
 | POST | `/api/auth/reset-password` | 公开：`{username,code,new_password}`，凭管理员发的重置码改密码（见下） |
 | GET | `/api/auth/account` | 我的账户：用户信息（含 `created_at`）+ 画布数 |
+| GET | `/api/auth/delete-account` | 注销前的确认清单（只读，见「自助注销」） |
+| POST | `/api/auth/delete-account` | 自助注销：`{password,confirm_username}`，不可恢复 |
 | GET | `/login` | 登录/注册页（`static/login.html`） |
 | GET | `/account` | 我的账户页（`static/account.html`）：auth-off 404，未登录 302 `/login?next=/account` |
 | GET | `/reset` | 忘记密码页（`static/reset.html`）：公开可访问（等价于未登录也能看），auth-off 404 |
@@ -80,12 +82,16 @@
 ### 画布隔离（`/api/canvases*`）
 
 - 画布 JSON 新增 `owner_id`（数字）；旧画布没有该字段时视为无主。
-- auth-on：列表 / 回收站 / 最近画布只返回自己的；打开 / 保存 / 重命名（meta）/ 删除 / 恢复 / 彻底删除 /
-  版本列表 / 读版本 / 还原版本 / 删除版本 / 清日志 一律校验 owner，非本人 403；admin 例外可读写全部。
-- admin 默认列表仍只看自己，`?all=1` 才看全部（包括无主旧画布）。
-- 新建画布写入当前用户 `owner_id`；版本还原保留 `owner_id`。
-- 旧画布过渡：`POST /api/canvases/{id}/claim`（仅 admin）把无主画布认领到当前管理员，写审计。
-- auth-off：不写 `owner_id`、不过滤、不校验，行为与旧版一致（有单测锁定）。
+- **2026-11 新规则：账号彼此独立、管理员不做画布特权**。判定只看「本次请求有没有登录用户」：
+  - 有登录用户（任意模式，含 optional）：列表 / 回收站 / 最近画布只返回自己的 + 别人共享给自己的；
+    打开 / 保存 / 重命名（meta）/ 删除 / 恢复 / 彻底删除 / 版本等一律按 owner/share 角色校验，非本人 403；
+    **admin 也一样**（`?all=1` 不再放大范围，只为老前端兼容保留参数）。
+  - 没有登录用户（本机模式）：看到全部、照常能用，不校验归属（与旧版一致；登录后看到的范围才收窄）。
+- 新建画布写入当前用户 `owner_id`（登录时）；未登录创建不写。
+- **登录自动认领无主画布**：每次登录 / 注册成功后，把当时仍无 `owner_id`、未删除的画布认领给该账号
+  （原子写 + 失效列表缓存 + 审计 `canvas_claim_unowned`；已有归属的一律不碰，不动 created_at/updated_at）。
+  之后这些画布只属于该账号。`POST /api/canvases/{id}/claim` 仍保留手动入口（登录用户可认领无主画布）。
+- 账号管理接口（`/api/admin/*`、`/admin`）不受影响：管理员照样能停用/改角色/重置密码，只是不再能看别人的画布。
 
 ### 素材隔离（`ASSETS_DIR` + `/assets`）
 
@@ -102,16 +108,17 @@
 
 - 存储：同一个 `users.db` 的 `canvas_shares(canvas_id,user_id,role,created_by,created_at)`，
   `role CHECK IN ('viewer','editor')`，幂等建表（`server/perms.py`）。
-- 角色：owner 全权；admin 全权（可读/可改/可删）；editor = 打开 / 保存 / meta 非标题字段 / touch / 版本读；
-  viewer = 只读；无关系 = 列表不可见、GET/PUT 403；auth-off 完全不查这张表、不校验。
-- 列表：`GET /api/canvases` 返回「自己 + 被共享」，每项带 `access_role`（owner/admin/editor/viewer）
-  与 `owner_username`；`?scope=mine|shared|all`（默认 all）；admin 另支持 `?all=1` 全量（含无主旧画布）。
-- 权限接口（仅 auth-on；owner/admin 能改）：
+- 角色：owner 全权；editor = 打开 / 保存 / meta 非标题字段 / touch / 版本读；
+  viewer = 只读；无关系 = 列表不可见、GET/PUT 403；auth-off / 未登录完全不查这张表、不校验。
+  （2026-11 起 `admin` 不再画布通吃。）
+- 列表：`GET /api/canvases` 返回「自己 + 被共享」，每项带 `access_role`（owner/editor/viewer）
+  与 `owner_username`；`?scope=mine|shared|all`（默认 all）。
+- 权限接口（登录后即可用，含 optional；仅 owner 能改）：
   - `GET /api/canvases/{id}/permissions` → `{owner:{id,username}, members:[{user_id,username,role}], my_role}`
   - `POST /api/canvases/{id}/members {username,role}`（用户不存在 404、重复 409、角色非法 400）
   - `PATCH /api/canvases/{id}/members/{user_id} {role}`
   - `DELETE /api/canvases/{id}/members/{user_id}`
-- 成员打开权限弹窗为只读视图；owner/admin 可添加/改角色/移除，即时生效。
+- 成员打开权限弹窗为只读视图；只有 owner 可添加/改角色/移除，即时生效。
 - 审计：`canvas_share_add` / `canvas_share_update` / `canvas_share_remove`，
   target 形如 `{canvas_id}:{username}`，失败也记 `result=error`。
 - 前端：`static/js/canvas-perms.js` + `static/css/canvas-perms.css`；
@@ -148,8 +155,8 @@
   - 无画布权限：`FORBIDDEN` + close **4403**
   - 房间满（含 viewer，上限 10）：`ROOM_FULL` + close **4409**
   - auth-off：已 accept 后直接 `FORBIDDEN` + close 4403，不查 users.db / canvas_shares。
-- 权限复用 M3：owner/admin/editor 可发 patch，viewer 只读（发 patch 回 `error READ_ONLY`）；
-  admin 可进任意画布；颜色按 userId 从固定 10 色调色板取，跨房间一致。
+- 权限复用 M3：owner/editor 可发 patch，viewer 只读（发 patch 回 `error READ_ONLY`）；
+  admin 也没有画布特权（不进别人的画布）；颜色按 userId 从固定 10 色调色板取，跨房间一致。
 - 新加入顺序：`snapshot`（磁盘画布 JSON）→ `hello`（self/role/users/revision）→ 补发房间历史 patch
   → `presence` 广播。owner/editor/viewer 的 role 直接下发。
 - 用户数据（`hello.self`、`hello.users[]`、`presence.users[]`）都带 `avatar_url`
@@ -199,13 +206,13 @@
   `CREATE TABLE IF NOT EXISTS`（幂等迁移，不批量改旧数据）。
 - token：`secrets` 生成 **10 位**，字符集去掉 I/O/0/1（`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`）；
   更新设置时 token 不变，已发出的链接继续有效；撤销后同 token 重新 POST 会恢复。
-- Owner/admin API（走现有会话 + perms，manage 权限）：
+- Owner API（走现有会话 + perms，manage 权限；admin 不再例外）：
   - `GET /api/canvases/{id}/share-link` → `{link:null}` 或 link 对象
     （token/url/role/expires_at/expires_in_days/has_password/allow_clone/created_at）
   - `POST /api/canvases/{id}/share-link` `{expires_in_days:0|1|7|30, password:string|null,
     allow_clone:bool, role:"viewer"}`：无则创建、有则更新；密码传空/null 关闭密码，重设覆盖 hash
   - `DELETE /api/canvases/{id}/share-link` → revoked=1，token 立即失效
-  - 非 owner/admin 403；画布不存在 404；auth-off 这些接口 404
+  - 非 owner 403；画布不存在 404；auth-off 这些接口 404
 - 公开访问（**必须登录**）：
   - `GET /api/share/{token}`：未登录 401 `AUTH_REQUIRED`；链接不存在/撤销 404 `NOT_FOUND`；
     过期 410 `EXPIRED`；有密码且未解锁 401 `PASSWORD_REQUIRED`；通过后返回
@@ -278,10 +285,35 @@
   - required：等同原来的 `NOVAI_AUTH_ENABLED=1`（全站拦截 + 按账号隔离）；
   - off：没有账号体系（`NOVAI_AUTH_DISABLED=1` 也是 off，优先级最高）。
 - `service.auth_enabled()` 只在 required 为真（所有门禁 / 隔离代码不变）；账号接口改用 `service.accounts_enabled()`。
-- 注册：`auth_settings.invite_required`（默认需要邀请码）；管理员 `GET/PUT /api/admin/auth-settings {invite_required}` 切换开放注册；
+- **optional 也解析会话并写 `request.state.auth_user`**（2026-11）：登录后按账号隔离画布
+  （只看到自己的 + 共享给自己的），未登录 = 本机模式全量；不绑定租户目录（素材路径不变）。
+  代码里 `auth_isolation(request)` = 「本次请求有登录用户」；画布列表过滤、画布访问、回收站过滤、
+  画布共享接口、认领、改名权限都按它判定，**管理员不再有画布特权**。
+- 注册：`auth_settings.invite_required`（2026-11 起**默认开放注册，不需要邀请码**；老库没有这条设置也按开放处理）；
+  管理员 `GET/PUT /api/admin/auth-settings {invite_required}` 切换成凭邀请码注册（显式写 `1` 才要求邀请码）；
   开放注册时填了邀请码仍按邀请码角色注册；库里还没有任何账号时第一个注册的直接是管理员（不需要邀请码）。
 - 公开 `GET /api/auth/config` → `{auth_mode, accounts_enabled, invite_required, has_users}`；
   `/api/auth/me` 增加 `auth_mode`、`logged_in`（optional 下 auth_enabled 仍为 false）。
 - `/login`、`/reset` 改由新版界面（static/v2，`web/src/shell/AuthDialog.vue`）提供，没构建出 v2 时退回旧静态页；
   外壳里「我的」页可打开登录 / 注册弹层，管理员在「注册设置」里切换开放注册、生成邀请码。
 - 测试：`tests/test_auth_optional.py`；原来的 auth-off 用例显式设 `NOVAI_AUTH_MODE=off`。
+
+## 自助注销（2026-11）
+
+- `GET /api/auth/delete-account`：只读确认清单 `{username, role, counts, last_account, blocked}`；
+  `counts` 含 `canvases / canvas_members / shared_canvases / invites / share_links / credit_records / asset_files`。
+- `POST /api/auth/delete-account` `{password, confirm_username}`：必须登录 + 当前密码 + 手输当前账号名，
+  成功后清 cookie、返回 `{ok, counts, last_account, notice}`。
+- 删除范围（② 连数据一起删，不可恢复）：账号行、全部会话、重置码、**自己生成**的邀请码、
+  名下画布（含回收站里的画布文件、这些画布的成员记录与分享链接）、**别人共享给自己的画布只退出共享**、
+  积分流水与任务扣费记录、头像文件、这个账号的局域网桶（身份 / 好友 / 好友申请 / 聊天记录，见下）；
+  画布文件先挪到同目录临时目录，数据库事务失败时挪回（整体回滚）。
+- 局域网数据（2026-11 修正）：`lan_*.json` / `lan_chat/<owner>/` 是**按账号分桶**的（`u<云账号id>`，未登录用 `_local`），
+  注销时删掉该账号的桶；`_local` 与别的账号的桶不动；聊天媒体文件（`lan_media/`）属于本机文件，保留。
+- 无归属历史画布（没有 `owner_id` 的老画布）：只在**整机最后一个账号**注销时一起删除（否则保留），
+  确认清单里单独列出（`counts.unowned_canvases` / `delete_unowned`）。
+- 不删：本机素材文件（`assets/users/{uid}/`，整机数据，避免误删）、公共素材库、审计日志。
+- 最后一个管理员：若还有其他账号则返回 400 `last_admin`（先给别人管理员权限，否则没人能管理账号）；
+  若是整台机器最后一个账号则允许删除并返回 `last_account: true`，回到「第一个注册的账号是管理员」的首启状态。
+- 前端：「我的」→ 编辑资料 → 最下面的「注销账号」，两步确认（清单 → 账号名 + 密码），见 `web/src/pages/me/DeleteAccountDialog.vue`。
+- 测试：`tests/test_account_delete.py`。

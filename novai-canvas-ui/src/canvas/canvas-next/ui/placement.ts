@@ -6,7 +6,7 @@
 export type PopRect = { x: number; y: number; width: number; height: number };
 export type PopViewport = { width: number; height: number };
 export type PopDir = "down" | "up" | "right";
-export type PopAlign = "left" | "right";
+export type PopAlign = "left" | "right" | "center";
 export type PopPlacement = { x: number; y: number; maxWidth: number; maxHeight: number; origin: string; flipped: boolean; menu: boolean; scrollX: boolean; scrollY: boolean };
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(v, hi));
@@ -39,7 +39,8 @@ export function placePopover(opts: {
   const a = opts.anchor;
   const dir: PopDir = opts.dir ?? "down";
   const align: PopAlign = opts.align ?? "left";
-  const left = align === "right" ? a.x + a.width - w : a.x;
+  // center：水平以锚点（icon）中轴居中；越界仍走下面的 clamp 到 8px 边距
+  const left = align === "right" ? a.x + a.width - w : align === "center" ? a.x + a.width / 2 - w / 2 : a.x;
   const below = a.y + a.height + gap;
   const above = a.y - gap - h;
   const spaceBelow = vh - margin - (a.y + a.height + gap);

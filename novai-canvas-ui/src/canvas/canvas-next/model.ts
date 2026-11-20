@@ -134,6 +134,13 @@ export type ModelSpec = {
    * 可选能力（联网 / 风格 / 摄影机 / 批量 / 参考图上限）只在 spec 里出现才算支持。
    */
   specSource?: "spec" | "guess";
+  /**
+   * 后端 /api/model-caps 里有这条规格、但没登记进「设置 → API」的模型清单：节点编辑器里当候选显示，
+   * 选中它不改设置里的清单（见 novaiBackend.listModels 的候选合并）。
+   */
+  unlisted?: boolean;
+  /** 用户在下拉里从上游目录挑的清单外模型（只存本机，见 modelExtras）：和 unlisted 一样只是入口，不是配置 */
+  extra?: boolean;
 };
 
 /** TapNow 视频 modelType 全集：中文名 → 接口值 + 需要的输入 */

@@ -13,13 +13,16 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 
 const ui = 'novai-canvas-ui/src/canvas/canvas-next/ui';
 
-/* ---------- 工具条入口：打开弹窗，不再建「拆分结果」节点 ---------- */
+/* ---------- 「更多」菜单入口：拆分图层 ▸ 浮层（自动 / 自定义），不再建「拆分结果」节点 ---------- */
 const gen = read(ui + '/GenPanel.tsx');
-const imgRow = gen.split('\n').find((l) => l.includes('B("crop"') && l.includes('B("more"'));
+const imgRow = gen.split('\n').find((l) => l.includes('B("mask"') && l.includes('B("more"'));
 assert(imgRow, '找到图片节点工具条那一行');
-assert(imgRow.includes('B("split", "layers", "拆分图层"'), '工具条仍保留「拆分图层」按钮');
-assert(!gen.includes('startSplitNode(ctl, id, mode)'), 'splitMenu 不再调用 startSplitNode');
-assert(gen.includes('openSplitEditor(id, mode)'), 'splitMenu 改为打开拆分弹窗');
+assert(!imgRow.includes('B("split"'), '「拆分图层」不在工具条上（已收进「更多」菜单）');
+const reg = read(ui + '/editors/registry.tsx');
+assert(reg.includes('data-k="layersplit-menu"') && reg.includes('<Icon name="layers" size="s" />拆分图层'), '「更多」菜单里有「拆分图层 ▸」行');
+assert(reg.includes('data-k="layersplit-flyout"'), '拆分图层有二级浮层');
+assert(!reg.includes('startSplitNode(ctl, id, mode)'), '拆分浮层不再调用 startSplitNode');
+assert(reg.includes('openSplitEditor(id, "auto")') && reg.includes('openSplitEditor(id, "custom")'), '浮层两项分别打开自动 / 自定义拆分弹窗');
 
 /* ---------- 宿主层：对话框挂进 Editors ---------- */
 const editors = read(ui + '/Editors.tsx');

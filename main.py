@@ -14,6 +14,8 @@ import io
 import hashlib
 import hmac
 import datetime
+import atexit
+import queue
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -48,7 +50,7 @@ from types import SimpleNamespace
 from threading import Lock, RLock, Thread
 import httpx
 import ssl
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageStat
 from io import BytesIO
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Form, Header, Request
 from fastapi.exceptions import RequestValidationError
@@ -596,6 +598,20 @@ async def startup_event():
         _agent_run_suspended_index_rebuild()
     except Exception as exc:
         print(f"[Agent] 挂起运行索引构建失败（不影响启动）: {exc}")
+    # 视频超分后台任务：载入落盘任务、把遗留的 queued/running 标成 interrupted 并清临时目录、拉起独立单 worker
+    try:
+        video_upscale_engine_start()
+    except Exception as exc:
+        print(f"Video Upscale 启动失败: {exc}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    # 退出清理：删掉所有未完成视频超分任务的临时工作目录（$TMPDIR/novai_video_hd_*），
+    # 不留孤儿目录；真正的中断状态由下次启动扫描统一标记。
+    try:
+        _video_upscale_shutdown_cleanup()
+    except Exception as exc:
+        print(f"[VideoUpscale] 退出清理失败：{exc}")
 
 @app.websocket("/ws/stats")
 async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
@@ -1192,6 +1208,17 @@ def load_settings() -> Dict[str, Any]:
     except Exception:
         pass
     return {}
+
+
+def skill_scripts_disabled() -> bool:
+    """设置里的全局开关：关闭后任何技能脚本都不执行（run_skill_script 直接拒绝）。
+
+    默认关闭（= 允许运行），保持老行为；用户可在 设置 → 技能 打开这个开关。
+    """
+    try:
+        return bool(load_settings().get("skill_scripts_disabled", False))
+    except Exception:
+        return False
 
 
 def refresh_network_settings():
@@ -10169,8 +10196,10 @@ def image_has_alpha(img: Image.Image) -> bool:
 
 def media_preview_cache_paths(path: str, width: int):
     stat = os.stat(path)
+    # 视频预览帧换了取帧规则（避开开头黑场）：视频的缓存键带上版本号，旧的黑色封面不再命中
+    tag = "|vf2" if is_video_preview_file(path) else ""
     key = hashlib.sha1(
-        f"{os.path.abspath(path)}|{stat.st_mtime_ns}|{stat.st_size}|{width}".encode("utf-8", "ignore")
+        f"{os.path.abspath(path)}|{stat.st_mtime_ns}|{stat.st_size}|{width}{tag}".encode("utf-8", "ignore")
     ).hexdigest()
     return (
         os.path.join(MEDIA_PREVIEW_DIR, f"{key}.webp"),
@@ -10209,25 +10238,46 @@ def generate_video_preview_image(path: str, width: int) -> Image.Image:
             raise RuntimeError(f"未找到 ffmpeg，opencv 兜底也失败：{exc}") from exc
     fd, frame_path = tempfile.mkstemp(prefix="media_preview_frame_", suffix=".jpg")
     os.close(fd)
+    best, best_light, last_err = None, -1.0, ""
     try:
-        cmd = [
-            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-            "-ss", "0.5",
-            "-i", path,
-            "-frames:v", "1",
-            "-vf", f"scale='min({width},iw)':-2",
-            frame_path,
-        ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if proc.returncode != 0 or not os.path.exists(frame_path) or os.path.getsize(frame_path) <= 0:
+        # 很多成片开头是黑场 / 淡入：0.5s 那帧常常一片黑，缩略图看着像坏了。
+        # 依次试 0.5s → 2s → 5s → 12s，取到够亮的就停；都偏暗就用最亮的那帧（短视频超出时长的那次会失败，跳过即可）
+        for offset in ("0.5", "2", "5", "12"):
+            cmd = [
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                "-ss", offset,
+                "-i", path,
+                "-frames:v", "1",
+                "-vf", f"scale='min({width},iw)':-2",
+                frame_path,
+            ]
             try:
-                return _video_preview_image_via_cv2(path, width)
-            except Exception:
-                raise RuntimeError((proc.stderr or "ffmpeg 未能抽取视频首帧").strip()[:300])
-        with Image.open(frame_path) as frame:
-            img = ImageOps.exif_transpose(frame).copy()
+                if os.path.exists(frame_path):
+                    os.remove(frame_path)
+            except OSError:
+                pass
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if proc.returncode != 0 or not os.path.exists(frame_path) or os.path.getsize(frame_path) <= 0:
+                last_err = (proc.stderr or "").strip()
+                continue
+            with Image.open(frame_path) as frame:
+                img = ImageOps.exif_transpose(frame).copy()
             img.thumbnail((width, width), Image.LANCZOS)
-            return img.convert("RGB")
+            img = img.convert("RGB")
+            try:
+                light = float(ImageStat.Stat(img.convert("L")).mean[0])
+            except Exception:
+                light = 255.0
+            if light > best_light:
+                best, best_light = img, light
+            if light >= 18:
+                break
+        if best is not None:
+            return best
+        try:
+            return _video_preview_image_via_cv2(path, width)
+        except Exception:
+            raise RuntimeError((last_err or "ffmpeg 未能抽取视频首帧")[:300])
     finally:
         try:
             os.remove(frame_path)
@@ -15619,6 +15669,11 @@ def is_apimart_official_image_model(model=""):
 # 结论：flare/sunburst 不是漏表，是「同家族多版本」；上游文档若给出差异能力，才在这里单独加条目。
 # SVG 输出的文本模型（上游 svg.model 必填，按该文本模型的 token 计费）：文档举例 gpt-5.4-mini / gpt-5.6-sol。
 APIMART_SVG_DEFAULT_MODEL = "gpt-5.4-mini"
+# 文档确证（2026-11-18，gpt-image-2.6 页 "Example author model effort support"）：平台层 svg.reasoning.effort
+# 收 none/minimal/low/medium/high/xhigh/max（大小写不敏感），各作者模型实际支持档位不同
+# （gpt-5.4-mini 不支持 minimal/max；gpt-6.1-sol 不支持 minimal/none）；不传或 null = 用作者模型默认。
+# 只在这里留档：生成侧目前只下发 svg.model，不下发 reasoning。
+APIMART_SVG_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
 APIMART_IMAGE_MODEL_CAPS = {
     # GPT-Image-2 家族共用上游文档的像素上限（长边 3840 / 总像素约 829 万 / 最低 655360）：
     # 精确像素请求（exact_size）也按它收敛，否则 4K 16:9 的 4096x2304 会被上游直接 400 拒掉。
@@ -15651,7 +15706,7 @@ APIMART_IMAGE_MODEL_CAPS = {
         "quality_levels_documented": True, "official_fallback": False,
         "output_formats": ("png", "jpeg", "webp", "svg", "gif"),
         "gif_frames": {"min": 2, "max": 16, "default": 9, "durationDefault": 200},
-        "svg": {"model": APIMART_SVG_DEFAULT_MODEL},
+        "svg": {"model": APIMART_SVG_DEFAULT_MODEL, "efforts": APIMART_SVG_EFFORTS},
     },
     "gpt-image-2-6-flare": {
         # 文档确证：auto + 15 个比例；分辨率 1k/2k/4k；quality 6 档；n 1–4；
@@ -15664,7 +15719,7 @@ APIMART_IMAGE_MODEL_CAPS = {
         "qualities": ("auto", "low", "medium", "high", "xhigh", "max"), "official_fallback": False,
         "output_formats": ("png", "jpeg", "webp", "svg", "gif"), "native_background": True,
         "gif_frames": {"min": 2, "max": 16, "default": 9, "durationDefault": 200},
-        "svg": {"model": APIMART_SVG_DEFAULT_MODEL},
+        "svg": {"model": APIMART_SVG_DEFAULT_MODEL, "efforts": APIMART_SVG_EFFORTS},
         "max_long_edge": 3840, "max_pixels": 8294400, "min_pixels": 655360,
     },
     "gpt-image-2-6-sunburst": {
@@ -15675,7 +15730,7 @@ APIMART_IMAGE_MODEL_CAPS = {
         "qualities": ("auto", "low", "medium", "high", "xhigh", "max"), "official_fallback": False,
         "output_formats": ("png", "jpeg", "webp", "svg", "gif"), "native_background": True,
         "gif_frames": {"min": 2, "max": 16, "default": 9, "durationDefault": 200},
-        "svg": {"model": APIMART_SVG_DEFAULT_MODEL},
+        "svg": {"model": APIMART_SVG_DEFAULT_MODEL, "efforts": APIMART_SVG_EFFORTS},
         "max_long_edge": 3840, "max_pixels": 8294400, "min_pixels": 655360,
     },
     # muse-image-ext：文档只给了 aspect_ratio/size/n/webhook/language + ≤9 张参考图，
@@ -15856,8 +15911,22 @@ APIMART_IMAGE_MODEL_CAPS = {
         "ratios": ("1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2", "7:4", "4:7"),
         "sizes": ("2K",), "batch": (4,), "qualities": (),
         "mask_url": False, "base64_refs": False, "official_fallback": False,
+        # 文档确证（2026-11-18，midjourney/video）：图生视频走 POST /v1/midjourney/generations/video，
+        # 只有 FAST、约 5 秒、不支持文生视频；motion low|high（默认 high，不影响计费）、
+        # batch_size 1|2|4（默认 1，按 N 倍计费）、video_type 480p/720p × 基础/首尾帧 4 个值、
+        # end_url 设了会自动升级成 start_end_*。计费 id：midjourney@video / @video-720p。
         "mj": {"versions": ["8.2", "8.1", "7", "6.1", "5.2", "5.1"],
-               "speeds": ["fast"], "hd": ["8.2", "8.1"]},
+               "speeds": ["fast"], "hd": ["8.2", "8.1"],
+               "video": {
+                   "endpoint": "/v1/midjourney/generations/video",
+                   "motions": ("low", "high"), "motion_default": "high",
+                   "batch": (1, 2, 4), "batch_default": 1,
+                   "video_types": ("vid_1.1_i2v_480", "vid_1.1_i2v_720",
+                                   "vid_1.1_i2v_start_end_480", "vid_1.1_i2v_start_end_720"),
+                   "video_type_default": "vid_1.1_i2v_480",
+                   "animate_modes": ("manual", "auto"),
+                   "billing": ("midjourney@video", "midjourney@video-720p"),
+               }},
     },
 }
 
@@ -19106,21 +19175,14 @@ async def lan_info():
     import io as _io
     import base64 as _b64
     port = int(_os.environ.get("NOVAI_PORT", "3000"))
-    lan_ip = _os.environ.get("NOVAI_LAN_IP")
-    lan_url = _os.environ.get("NOVAI_LAN_URL")
-    # dev 模式（直接跑 main.py）下环境变量没设，自己算
-    if not lan_ip:
-        import socket as _socket
-        s = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
-        try:
-            s.connect(("8.8.8.8", 80))
-            lan_ip = s.getsockname()[0]
-        except Exception:
-            lan_ip = None
-        finally:
-            s.close()
-        if lan_ip:
-            lan_url = f"http://{lan_ip}:{port}"
+    # 每次现算（10s 缓存）：启动时写死的 NOVAI_LAN_IP 换 WiFi 后会过期，
+    # 8.8.8.8 出口法在 Clash/VPN TUN 模式下会拿到 198.18.x.x 这类别人连不上的地址。
+    try:
+        from server.lan_ip import pick_lan_ip as _pick_lan_ip
+        lan_ip = _pick_lan_ip() or None
+    except Exception:
+        lan_ip = _os.environ.get("NOVAI_LAN_IP") or None
+    lan_url = f"http://{lan_ip}:{port}" if lan_ip else None
     if not lan_url:
         return {"available": False, "url": None, "token": None, "ip": None, "port": port, "qr_data_url": None}
     # 分享地址带口令：扫码/打开即通过鉴权。本接口本身也走中间件，非本机调用需先有口令，不会把口令漏给未授权方。
@@ -21700,6 +21762,810 @@ async def image_upscale(payload: ImageUpscaleRequest):
     }
 
 
+# ===== 视频超分（本地 Real-ESRGAN 逐帧 + ffmpeg 分片拼接） =====
+# 为什么不整段拆帧：4K PNG 单帧十几 MB，整段解开能把临时盘写满；所以按片处理，
+# 一片超分完立刻编码成片段并删掉帧，最后 concat 拼接。
+# 为什么按片调 realesrgan 而不是一帧起一个进程：它每次启动都要重新加载模型（实测约 0.95 秒），
+# 一帧一进程时加载比推理还慢；目录模式是官方视频流程，取消靠轮询杀进程一样够快。
+_VIDEO_UPSCALE_TARGET_LONG = _UPSCALE_TARGET_LONG
+_VIDEO_UPSCALE_MODEL_NAME = {"anime": "realesr-animevideov3", "live": "realesrgan-x4plus"}
+_VIDEO_UPSCALE_MAX_SECONDS = 120
+_VIDEO_UPSCALE_MAX_WIDTH = 1920
+_VIDEO_UPSCALE_MAX_HEIGHT = 1080
+# 一片的帧数按「输入帧 + 4 倍帧」的 PNG 体积估（约 1.2 字节/像素），512MB 预算内不会写爆临时盘
+_VIDEO_UPSCALE_CHUNK_BUDGET_BYTES = 512 * 1024 * 1024
+_VIDEO_UPSCALE_TASKS: Dict[str, Dict[str, Any]] = {}
+_VIDEO_UPSCALE_LOCK = Lock()
+
+# —— 后台运行（最小档）：任务落盘 + 独立单 worker 队列 ——
+# 为什么不复用 TaskEngine：它的 worker 同时在跑图片生成，视频超分一次要几十分钟，
+# 占住一个生成 worker 会把出图卡死；所以这里只借它的「原子写盘 + 状态机」写法，队列自己一套。
+# 为什么不能断点续跑：分片超分完就把帧删了，重启后没有可续的中途产物，只能标 interrupted。
+_VIDEO_UPSCALE_DIR = os.path.join(DATA_DIR, "video_upscale")
+_VIDEO_UPSCALE_STORE_PATH = os.path.join(_VIDEO_UPSCALE_DIR, "tasks.json")
+_VIDEO_UPSCALE_STORE_VERSION = 1
+_VIDEO_UPSCALE_STORE_MAX = 100          # 落盘上限：单条记录很小，留足历史但别无限长
+_VIDEO_UPSCALE_RECENT_LIMIT = 20        # /tasks 返回的已结束任务条数
+_VIDEO_UPSCALE_ACTIVE_STATES = ("queued", "running")
+_VIDEO_UPSCALE_TERMINAL_STATES = ("done", "error", "cancelled", "interrupted")
+_VIDEO_UPSCALE_QUEUE = queue.Queue()
+_VIDEO_UPSCALE_WORKER: Optional[Thread] = None
+_VIDEO_UPSCALE_WORKER_LOCK = Lock()
+_VIDEO_UPSCALE_LOADED = False
+# 帧进度落盘节流：tick 每 0.25 秒一次，全量原子写会把临时盘 IO 打满；重启扫描只需要「状态」准确
+_VIDEO_UPSCALE_PROGRESS_SAVE_INTERVAL = 2.0
+_VIDEO_UPSCALE_PROGRESS_SAVED_AT: Dict[str, float] = {}
+# 当前在跑的子进程（task_id → Popen）：退出清理要先收子进程再删目录，否则孤儿进程会把目录写回来
+_VIDEO_UPSCALE_PROCS: Dict[str, Any] = {}
+_VIDEO_UPSCALE_SHUTTING_DOWN = False
+
+
+def _video_upscale_prune_locked() -> None:
+    """按创建时间裁掉最老的已结束任务（进行中的绝不裁，否则重启扫描会漏掉 interrupted）。"""
+    if len(_VIDEO_UPSCALE_TASKS) <= _VIDEO_UPSCALE_STORE_MAX:
+        return
+    finished = [tid for tid, item in _VIDEO_UPSCALE_TASKS.items()
+                if (item.get("state") or "") not in _VIDEO_UPSCALE_ACTIVE_STATES]
+    finished.sort(key=lambda tid: _VIDEO_UPSCALE_TASKS[tid].get("created_at") or 0)
+    for tid in finished[:max(0, len(_VIDEO_UPSCALE_TASKS) - _VIDEO_UPSCALE_STORE_MAX)]:
+        _VIDEO_UPSCALE_TASKS.pop(tid, None)
+        _VIDEO_UPSCALE_PROGRESS_SAVED_AT.pop(tid, None)
+
+
+def _video_upscale_store_write_locked() -> None:
+    """把全部任务原子写回单个文件（调用方必须持有 _VIDEO_UPSCALE_LOCK）。
+    单文件而非按日分片：任务量小、总要在启动时全量扫描，分片只会让「读全量」变麻烦。"""
+    try:
+        _video_upscale_prune_locked()
+        write_json_atomic(_VIDEO_UPSCALE_STORE_PATH,
+                          {"version": _VIDEO_UPSCALE_STORE_VERSION, "tasks": _VIDEO_UPSCALE_TASKS},
+                          ensure_ascii=False, indent=2)
+    except Exception as exc:
+        print(f"[VideoUpscale] 任务落盘失败：{exc}")
+
+
+def _video_upscale_store_load() -> None:
+    global _VIDEO_UPSCALE_TASKS, _VIDEO_UPSCALE_LOADED
+    loaded: Dict[str, Dict[str, Any]] = {}
+    try:
+        if os.path.isfile(_VIDEO_UPSCALE_STORE_PATH):
+            with open(_VIDEO_UPSCALE_STORE_PATH, "r", encoding="utf-8") as handle:
+                payload = json.load(handle) or {}
+            loaded = dict((payload.get("tasks") or {}) if isinstance(payload, dict) else {})
+    except Exception as exc:
+        # 读不出来就按空处理并让下一次写盘覆盖：坏文件不能把整个功能卡死，但要出声
+        print(f"[VideoUpscale] 读取任务存储失败（按空处理）：{exc}")
+    _VIDEO_UPSCALE_TASKS = loaded
+    _VIDEO_UPSCALE_LOADED = True
+    print(f"[VideoUpscale] 已载入 {len(loaded)} 条历史任务", flush=True)
+
+
+def _video_upscale_work_dir(task: Dict[str, Any]) -> str:
+    work_dir = str(task.get("work_dir") or "")
+    if not work_dir or not os.path.isabs(work_dir):
+        return ""
+    # 只认本引擎按约定建出来的 $TMPDIR/novai_video_hd_*：损坏的记录不能变成任意路径删除
+    if "novai_video_hd_" not in os.path.basename(work_dir.rstrip(os.sep)):
+        return ""
+    return work_dir
+
+
+def _video_upscale_kill_orphans(work_dir: str) -> None:
+    """上次是被硬杀（kill -9 / 崩溃）时，ffmpeg / realesrgan 子进程会成孤儿继续往工作目录写帧，
+    不先收掉它们，rmtree 会和写入打架，目录删完又被重建。按命令行里的工作目录路径精确定位。
+    Windows 没有 ps，跳过（那一侧只能靠正常退出钩子）。"""
+    if not work_dir:
+        return
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return
+    killed = 0
+    for line in (out or "").splitlines():
+        line = line.strip()
+        if not line or work_dir not in line:
+            continue
+        pid_text, _, command = line.partition(" ")
+        if not pid_text.isdigit():
+            continue
+        # 只收我们自己拉起来的媒体工具进程，绝不对其它进程动手
+        if not any(name in command for name in ("ffmpeg", "ffprobe", "realesrgan")):
+            continue
+        pid = int(pid_text)
+        if pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, 9)
+            killed += 1
+        except OSError:
+            pass
+    if killed:
+        print(f"[VideoUpscale] 已清理 {killed} 个残留子进程：{work_dir}", flush=True)
+        time.sleep(0.2)
+
+
+def _video_upscale_cleanup_work_dir(task: Dict[str, Any]) -> None:
+    work_dir = _video_upscale_work_dir(task)
+    if not work_dir:
+        return
+    if os.path.isfile(work_dir):
+        work_dir = os.path.dirname(work_dir)
+    _video_upscale_kill_orphans(work_dir)
+    # 硬删有时会撞上没收干净的句柄：短暂重试几次，别留下半个目录
+    for attempt in range(3):
+        shutil.rmtree(work_dir, ignore_errors=True)
+        if not os.path.exists(work_dir):
+            return
+        time.sleep(0.4 * (attempt + 1))
+    print(f"[VideoUpscale] 临时目录清理失败（best-effort）：{work_dir}", flush=True)
+
+
+def video_upscale_engine_start() -> None:
+    """启动扫描：遗留的 queued/running 一律置 interrupted 并清掉临时工作目录，然后拉起唯一 worker。"""
+    _video_upscale_store_load()
+    interrupted = 0
+    with _VIDEO_UPSCALE_LOCK:
+        for task in _VIDEO_UPSCALE_TASKS.values():
+            if (task.get("state") or "") not in _VIDEO_UPSCALE_ACTIVE_STATES:
+                continue
+            interrupted += 1
+            now = time.time()
+            task["state"] = "interrupted"
+            task["error"] = "应用重启，任务已中断（视频超分不支持断点续跑），请重新发起"
+            task["eta_sec"] = None
+            task["cancel"] = False
+            task["updated_at"] = now
+            task["finished_at"] = now
+        if interrupted:
+            _video_upscale_store_write_locked()
+        cleanup = [dict(item) for item in _VIDEO_UPSCALE_TASKS.values() if item.get("state") == "interrupted"]
+    for task in cleanup:
+        _video_upscale_cleanup_work_dir(task)
+    _video_upscale_ensure_worker()
+    print(f"[VideoUpscale] 启动完成：任务 {len(_VIDEO_UPSCALE_TASKS)} 条，中断标记 {interrupted} 条", flush=True)
+
+
+def _video_upscale_ensure_loaded() -> None:
+    if _VIDEO_UPSCALE_LOADED:
+        return
+    video_upscale_engine_start()
+
+
+def _video_upscale_ensure_worker() -> None:
+    global _VIDEO_UPSCALE_WORKER
+    with _VIDEO_UPSCALE_WORKER_LOCK:
+        if _VIDEO_UPSCALE_WORKER and _VIDEO_UPSCALE_WORKER.is_alive():
+            return
+        _VIDEO_UPSCALE_WORKER = Thread(target=_video_upscale_queue_loop,
+                                       name="video-upscale-worker", daemon=True)
+        _VIDEO_UPSCALE_WORKER.start()
+
+
+def _video_upscale_queue_loop() -> None:
+    """独立单 worker：视频超分串行执行，同一时刻只占一块 GPU。"""
+    while True:
+        task_id = _VIDEO_UPSCALE_QUEUE.get()
+        try:
+            _video_upscale_dequeue_run(task_id)
+        except Exception:
+            traceback.print_exc()
+            _video_upscale_update(task_id, state="error",
+                                  error=("任务执行异常：" + traceback.format_exc()[-600:])[:800],
+                                  eta_sec=None)
+        finally:
+            _VIDEO_UPSCALE_QUEUE.task_done()
+
+
+def _video_upscale_dequeue_run(task_id: str) -> None:
+    with _VIDEO_UPSCALE_LOCK:
+        task = _VIDEO_UPSCALE_TASKS.get(task_id)
+        if not task or (task.get("state") or "") != "queued":
+            return
+        now = time.time()
+        if task.get("cancel"):
+            task["state"] = "cancelled"
+            task["eta_sec"] = None
+            task["error"] = None
+            task["updated_at"] = now
+            task["finished_at"] = now
+            _video_upscale_store_write_locked()
+            print(f"[VideoUpscale] 排队时已取消：{task_id}", flush=True)
+            return
+        task["state"] = "running"
+        task["started_at"] = now
+        task["updated_at"] = now
+        task["finished_at"] = None
+        task["error"] = None
+        _video_upscale_store_write_locked()
+        _VIDEO_UPSCALE_PROGRESS_SAVED_AT[task_id] = now
+    print(f"[VideoUpscale] 开始执行：{task_id}（独立 worker，不占生成队列）", flush=True)
+    _video_upscale_worker(task_id)
+
+
+def _video_upscale_shutdown_cleanup() -> None:
+    """进程退出：删掉所有未完成任务的临时工作目录（都在 $TMPDIR/novai_video_hd_*）。
+    先收子进程再删目录：只删目录的话 ffmpeg / realesrgan 还活着，会把内容写回来。
+    退出过程中不再写终态，任务保持 running/queued，交给下次启动扫描统一标 interrupted。"""
+    global _VIDEO_UPSCALE_SHUTTING_DOWN
+    _VIDEO_UPSCALE_SHUTTING_DOWN = True
+    try:
+        deadline = time.time() + 3.0
+        while time.time() < deadline and not _VIDEO_UPSCALE_QUEUE.empty():
+            time.sleep(0.05)
+    except Exception:
+        pass
+    with _VIDEO_UPSCALE_LOCK:
+        pending = [dict(item) for item in _VIDEO_UPSCALE_TASKS.values()
+                   if (item.get("state") or "") not in _VIDEO_UPSCALE_TERMINAL_STATES]
+    for task in pending:
+        proc = _VIDEO_UPSCALE_PROCS.get(str(task.get("id") or ""))
+        if proc is not None:
+            _video_upscale_kill(proc)
+        _video_upscale_cleanup_work_dir(task)
+    if pending:
+        print(f"[VideoUpscale] 退出清理 {len(pending)} 个未完成任务的临时目录", flush=True)
+
+
+atexit.register(_video_upscale_shutdown_cleanup)
+
+
+class VideoUpscaleRequest(BaseModel):
+    src_path: str = ""        # 画布视频 URL（/assets/、/output/ 开头）或本机绝对路径
+    target: str               # 2k=长边2048，4k=长边4096
+    model: str = "anime"      # anime=realesr-animevideov3（视频模型，闪烁小）；live=realesrgan-x4plus
+    canvas_id: str = ""
+    node_id: str = ""
+
+
+class VideoUpscaleCancelRequest(BaseModel):
+    task_id: str = ""
+
+
+class _VideoUpscaleCancelled(Exception):
+    """用户中途取消：只用来跳出流水线，不写进 status.error。"""
+
+
+def _video_upscale_parse_fps(value: Any) -> float:
+    text = str(value or "").strip()
+    if "/" in text:
+        numerator, _, denominator = text.partition("/")
+        try:
+            top = float(numerator)
+            bottom = float(denominator)
+        except ValueError:
+            return 0.0
+        return top / bottom if bottom else 0.0
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def _video_upscale_probe(src_path: str) -> Dict[str, Any]:
+    ffprobe = ffprobe_binary()
+    if not ffprobe:
+        raise RuntimeError("未找到 ffprobe，无法读取视频信息")
+    proc = subprocess.run(
+        [ffprobe, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", src_path],
+        capture_output=True, text=True, timeout=60,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip()[:200] or "ffprobe 没有输出"
+        raise RuntimeError(f"读取视频信息失败：{detail}")
+    payload = json.loads(proc.stdout or "{}")
+    streams = payload.get("streams") or []
+    video = next((item for item in streams if item.get("codec_type") == "video"), None)
+    if not video:
+        raise RuntimeError("文件里没有视频流")
+    width = int(video.get("width") or 0)
+    height = int(video.get("height") or 0)
+    if width <= 0 or height <= 0:
+        raise RuntimeError("读取视频分辨率失败")
+    fps = _video_upscale_parse_fps(video.get("avg_frame_rate") or video.get("r_frame_rate"))
+    if not math.isfinite(fps) or fps <= 0:
+        raise RuntimeError("读取视频帧率失败")
+    duration = 0.0
+    for candidate in ((payload.get("format") or {}).get("duration"), video.get("duration")):
+        try:
+            duration = float(candidate)
+        except (TypeError, ValueError):
+            duration = 0.0
+        if duration > 0:
+            break
+    if not math.isfinite(duration) or duration <= 0:
+        raise RuntimeError("读取视频时长失败")
+    try:
+        total_frames = int(str(video.get("nb_frames") or "0").strip() or 0)
+    except ValueError:
+        total_frames = 0
+    if total_frames <= 0:
+        total_frames = max(1, int(round(duration * fps)))
+    return {
+        "width": width,
+        "height": height,
+        "fps": fps,
+        "duration": duration,
+        "total_frames": total_frames,
+        "has_audio": any(item.get("codec_type") == "audio" for item in streams),
+        "has_subtitles": any(item.get("codec_type") == "subtitle" for item in streams),
+    }
+
+
+def _video_upscale_target_size(src_width: int, src_height: int, target_long: int) -> Tuple[int, int]:
+    # 固定 4 倍超分再按长边 LANCZOS 缩到目标（与图片同一套换算）。yuv420p 要求宽高都是偶数：
+    # 长边本身落在偶数上，只把另一边向下取偶，长边保持精确值。
+    width, height = _upscale_target_size((src_width * 4, src_height * 4), target_long)
+    return max(2, width - width % 2), max(2, height - height % 2)
+
+
+def _video_upscale_chunk_frames(src_width: int, src_height: int) -> int:
+    source_bytes = float(src_width * src_height) * 1.2
+    upscaled_bytes = float(src_width * 4 * src_height * 4) * 1.2
+    return max(4, min(96, int(_VIDEO_UPSCALE_CHUNK_BUDGET_BYTES // max(1.0, source_bytes + upscaled_bytes))))
+
+
+def _video_upscale_count_frames(directory: str) -> int:
+    try:
+        return sum(1 for name in os.listdir(directory) if name.lower().endswith(".png"))
+    except OSError:
+        return 0
+
+
+def _video_upscale_update(task_id: str, **fields) -> None:
+    with _VIDEO_UPSCALE_LOCK:
+        task = _VIDEO_UPSCALE_TASKS.get(task_id)
+        if not task:
+            return
+        if fields.get("state") and fields["state"] != "running":
+            fields.setdefault("finished_at", time.time())
+        if _VIDEO_UPSCALE_SHUTTING_DOWN and fields.get("state") in ("done", "error", "cancelled"):
+            # 退出把子进程收掉了，worker 会看到非 0 退出码：别把它写成 failed/done，
+            # 保持 running 让下次启动扫描如实标成 interrupted
+            return
+        task.update(fields)
+        task["updated_at"] = time.time()
+        # 去掉开始时的 running 旧时间戳：重试/重开会残留上一轮的 finished_at
+        if fields.get("state") == "running":
+            task["finished_at"] = None
+        # 对外统一字段 output（成片地址）；output_path 保持老语义给 /status 用
+        if task.get("state") == "done" and not task.get("output"):
+            task["output"] = task.get("output_url") or ""
+        _video_upscale_store_write_locked()
+
+
+def _video_upscale_advance(task: Dict[str, Any], processed: int) -> None:
+    total = max(1, int(task.get("total_frames") or 0))
+    processed = max(0, min(int(processed), total))
+    with _VIDEO_UPSCALE_LOCK:
+        task["processed_frames"] = processed
+        percent = 1 + 90.0 * processed / total
+        task["progress"] = max(int(task.get("progress") or 0), min(91, int(percent)))
+        elapsed = max(0.0, time.time() - float(task.get("started_at") or 0))
+        if processed >= total:
+            task["eta_sec"] = 0
+        elif processed > 0 and elapsed > 0:
+            task["eta_sec"] = max(0, int(round(elapsed / processed * (total - processed))))
+        now = time.time()
+        task_id = str(task.get("id") or "")
+        if now - float(_VIDEO_UPSCALE_PROGRESS_SAVED_AT.get(task_id) or 0) >= _VIDEO_UPSCALE_PROGRESS_SAVE_INTERVAL:
+            _VIDEO_UPSCALE_PROGRESS_SAVED_AT[task_id] = now
+            task["updated_at"] = now
+            _video_upscale_store_write_locked()
+
+
+def _video_upscale_raise_if_cancelled(task: Dict[str, Any]) -> None:
+    if task.get("cancel"):
+        raise _VideoUpscaleCancelled()
+
+
+def _video_upscale_kill(proc) -> None:
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        proc.kill()
+        proc.wait(timeout=5)
+    except Exception:
+        pass
+
+
+def _video_upscale_log_tail(path: str, limit: int = 300) -> str:
+    try:
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - 4096))
+            text = handle.read().decode("utf-8", errors="replace").strip()
+    except OSError:
+        return "无输出"
+    return text[-limit:] or "无输出"
+
+
+def _video_upscale_run(task: Dict[str, Any], cmd: List[str], log_path: str,
+                       cwd: Optional[str] = None, timeout: float = 1800.0,
+                       tick: Optional[Callable[[], None]] = None) -> None:
+    """跑一个子进程，每 0.25 秒轮询一次：取消立刻杀进程，tick 用来按真实产出刷新进度。"""
+    with open(log_path, "wb") as log:
+        proc = subprocess.Popen(cmd, cwd=cwd, stdout=log, stderr=subprocess.STDOUT)
+    task_id = str(task.get("id") or "")
+    if task_id:
+        _VIDEO_UPSCALE_PROCS[task_id] = proc   # 退出清理要能直接收掉它，不能只删目录
+    tool_name = os.path.basename(cmd[0])
+    deadline = time.time() + timeout
+    try:
+        while proc.poll() is None:
+            if task.get("cancel") or _VIDEO_UPSCALE_SHUTTING_DOWN:
+                _video_upscale_kill(proc)
+                raise _VideoUpscaleCancelled()
+            if time.time() > deadline:
+                _video_upscale_kill(proc)
+                raise RuntimeError(f"{tool_name} 运行超过 {int(timeout)} 秒，已中止")
+            if tick:
+                tick()
+            time.sleep(0.25)
+    finally:
+        if task_id:
+            _VIDEO_UPSCALE_PROCS.pop(task_id, None)
+        if proc.poll() is None:
+            _video_upscale_kill(proc)
+    if proc.returncode != 0:
+        raise RuntimeError(f"{tool_name} 失败（退出码 {proc.returncode}）：{_video_upscale_log_tail(log_path)}")
+
+
+def _video_upscale_worker(task_id: str) -> None:
+    task = _VIDEO_UPSCALE_TASKS[task_id]
+    src_path = task["src_file"]
+    out_path = task["out_file"]
+    work_dir = task["work_dir"]
+    try:
+        probe = _video_upscale_probe(src_path)
+        total = int(probe["total_frames"])
+        fps = float(probe["fps"])
+        _video_upscale_update(task_id, total_frames=total, fps=fps)
+        target_width, target_height = _video_upscale_target_size(
+            probe["width"], probe["height"], task["target_long"])
+        _video_upscale_update(task_id, output_width=target_width, output_height=target_height, progress=1)
+        chunk_size = _video_upscale_chunk_frames(probe["width"], probe["height"])
+        ffmpeg = ffmpeg_binary()
+        binary = _upscale_binary_path()
+        try:
+            os.chmod(binary, 0o755)
+        except OSError:
+            pass
+        model_name = _VIDEO_UPSCALE_MODEL_NAME[task["model"]]
+        parts_dir = os.path.join(work_dir, "parts")
+        os.makedirs(parts_dir, exist_ok=True)
+        chunk_paths: List[str] = []
+        processed = 0
+        index = 0
+        while processed < total:
+            _video_upscale_raise_if_cancelled(task)
+            current = min(chunk_size, total - processed)
+            chunk_root = os.path.join(work_dir, "frames", f"{index:04d}")
+            frames_in = os.path.join(chunk_root, "in")
+            frames_up = os.path.join(chunk_root, "up")
+            os.makedirs(frames_in, exist_ok=True)
+            os.makedirs(frames_up, exist_ok=True)
+            # 用起始帧号换算时间做精确寻址（实测 30 / 29.97fps 分片取帧与整段逐帧完全一致），
+            # 每片只解自己那一段，不用把整段视频的帧都落盘。
+            _video_upscale_run(
+                task,
+                [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                 "-ss", f"{processed / fps:.6f}", "-i", src_path,
+                 "-frames:v", str(current), "-vsync", "0",
+                 "-f", "image2", "-start_number", "1",
+                 os.path.join(frames_in, "frame_%05d.png")],
+                os.path.join(chunk_root, "extract.log"),
+                timeout=1200,
+            )
+            extracted = _video_upscale_count_frames(frames_in)
+            if extracted <= 0:
+                if processed == 0:
+                    raise RuntimeError("抽帧为空，请确认文件是可解码的视频")
+                break
+            if extracted < current:
+                # 源片实际帧数比 ffprobe 估算少（VFR / 尾部截断）时按实际收尾，别再多跑一个空片
+                total = processed + extracted
+                _video_upscale_update(task_id, total_frames=total)
+
+            def _tick(_base=processed, _up=frames_up) -> None:
+                _video_upscale_advance(task, _base + _video_upscale_count_frames(_up))
+
+            _video_upscale_run(
+                task,
+                [binary, "-i", frames_in, "-o", frames_up, "-s", "4", "-t", "0",
+                 "-n", model_name, "-f", "png"],
+                os.path.join(chunk_root, "upscale.log"),
+                cwd=os.path.dirname(binary),
+                timeout=7200,
+                tick=_tick,
+            )
+            upscaled = _video_upscale_count_frames(frames_up)
+            if upscaled < extracted:
+                # 少帧不做「凑合接着跑」：静默丢帧会让成片错位，直接把错误抛出来
+                raise RuntimeError(f"第 {index + 1} 片超分输出 {upscaled} 帧，少于输入 {extracted} 帧")
+            _video_upscale_advance(task, processed + extracted)
+            part_path = os.path.join(parts_dir, f"part_{index:04d}.mp4")
+            # 缩放放在编码这一步：4 倍帧不再另存一份目标尺寸，临时目录只留一份
+            _video_upscale_run(
+                task,
+                [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                 "-framerate", f"{fps:.6f}", "-start_number", "1",
+                 "-i", os.path.join(frames_up, "frame_%05d.png"),
+                 "-vf", f"scale={target_width}:{target_height}:flags=lanczos,setsar=1",
+                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                 "-pix_fmt", "yuv420p", "-r", f"{fps:.6f}", "-an", part_path],
+                os.path.join(chunk_root, "encode.log"),
+                timeout=3600,
+            )
+            chunk_paths.append(part_path)
+            processed += extracted
+            _video_upscale_advance(task, processed)
+            shutil.rmtree(chunk_root, ignore_errors=True)
+            index += 1
+        if not chunk_paths:
+            raise RuntimeError("没有生成任何视频片段")
+        joined_path = chunk_paths[0]
+        if len(chunk_paths) > 1:
+            _video_upscale_update(task_id, progress=93)
+            concat_list = os.path.join(work_dir, "concat.txt")
+            escaped_quote = "'" + chr(92) + "'" + chr(92) + "'"
+            with open(concat_list, "w", encoding="utf-8") as handle:
+                for path in chunk_paths:
+                    safe = path.replace(os.sep, "/").replace("'", escaped_quote)
+                    handle.write("file '%s'" % safe)
+                    handle.write(chr(10))
+            joined_path = os.path.join(work_dir, "joined.mp4")
+            _video_upscale_run(
+                task,
+                [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                 "-f", "concat", "-safe", "0", "-i", concat_list,
+                 "-c", "copy", joined_path],
+                os.path.join(work_dir, "concat.log"),
+                timeout=3600,
+            )
+        _video_upscale_update(task_id, progress=97)
+        mux = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+               "-i", joined_path, "-i", src_path,
+               "-map", "0:v:0", "-map", "1:a?", "-map", "1:s?",
+               "-c:v", "copy", "-c:a", "copy", "-c:s", "copy",
+               "-movflags", "+faststart", out_path]
+        try:
+            _video_upscale_run(task, mux, os.path.join(work_dir, "mux.log"), timeout=1800)
+        except RuntimeError:
+            # 少数源音轨/字幕 mp4 装不下（opus、ass 之类）：转成 mp4 兼容编码重试一次，
+            # 片子已经跑完，不能因为一个可选流整条废掉；两次都失败才把错误抛出去。
+            _video_upscale_raise_if_cancelled(task)
+            if not (probe["has_audio"] or probe["has_subtitles"]):
+                raise
+            retry = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                     "-i", joined_path, "-i", src_path,
+                     "-map", "0:v:0", "-map", "1:a?", "-map", "1:s?",
+                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-c:s", "mov_text",
+                     "-movflags", "+faststart", out_path]
+            _video_upscale_run(task, retry, os.path.join(work_dir, "mux-retry.log"), timeout=1800)
+        _video_upscale_update(
+            task_id, state="done", progress=100, eta_sec=0,
+            processed_frames=total, total_frames=total,
+            output_path=task.get("output_url"),
+        )
+        print(f"[VideoUpscale] 完成：{task.get('output_url')}（{total} 帧，{target_width}x{target_height}）")
+    except _VideoUpscaleCancelled:
+        _video_upscale_update(task_id, state="cancelled", eta_sec=None, error=None)
+        print(f"[VideoUpscale] 已取消：{task_id}")
+    except Exception as exc:
+        message = str(exc).strip() or "视频超分失败"
+        _video_upscale_update(task_id, state="error", error=message[:800], eta_sec=None)
+        print(f"[VideoUpscale] 失败：{message}")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        if task.get("state") != "done":
+            try:
+                os.remove(out_path)
+            except OSError:
+                pass
+
+
+def _video_upscale_resolve_source(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("/output/") or text.startswith("/assets/"):
+        return output_file_from_url(text) or ""
+    path = os.path.abspath(os.path.expanduser(text))
+    return path if os.path.isfile(path) else ""
+
+
+def _video_upscale_http_error(code: str, message: str) -> HTTPException:
+    # 前端要按 code 判断「去下载运行时」这类分支，光给一句中文没法区分原因
+    return HTTPException(status_code=400, detail={"code": code, "message": message})
+
+
+def _video_upscale_model_installed(model_name: str) -> bool:
+    models_dir = os.path.join(_models_path("realesrgan-ncnn-vulkan"), "models")
+    base = model_name + "-x4" if model_name == "realesr-animevideov3" else model_name
+    return all(os.path.isfile(os.path.join(models_dir, base + ext)) for ext in (".param", ".bin"))
+
+
+def _video_upscale_snapshot(task: Dict[str, Any]) -> Dict[str, Any]:
+    with _VIDEO_UPSCALE_LOCK:
+        return {
+            "state": task.get("state") or "running",
+            "progress": int(task.get("progress") or 0),
+            "eta_sec": task.get("eta_sec"),
+            "output_path": task.get("output_path"),
+            "error": task.get("error"),
+            "processed_frames": int(task.get("processed_frames") or 0),
+            "total_frames": int(task.get("total_frames") or 0),
+        }
+
+
+def _video_upscale_task_view(task: Dict[str, Any]) -> Dict[str, Any]:
+    """/tasks 单条视图：前 7 个字段与 /status 同形（前端复用同一套轮询/渲染），
+    后面是刷新恢复需要的身份字段；内部路径（work_dir/out_file）不对外。"""
+    return {
+        "id": task.get("id") or "",
+        "kind": task.get("kind") or "video_upscale",
+        "state": task.get("state") or "queued",
+        "progress": int(task.get("progress") or 0),
+        "eta_sec": task.get("eta_sec"),
+        "output_path": task.get("output_path"),
+        "error": task.get("error"),
+        "processed_frames": int(task.get("processed_frames") or 0),
+        "total_frames": int(task.get("total_frames") or 0),
+        "output": task.get("output") or "",
+        "source": task.get("source") or "",
+        "source_url": task.get("source_url") or "",
+        "model": task.get("model") or "",
+        "target": task.get("target") or "",
+        "canvas_id": task.get("canvas_id") or "",
+        "node_id": task.get("node_id") or "",
+        "created_at": task.get("created_at"),
+        "updated_at": task.get("updated_at"),
+        "finished_at": task.get("finished_at"),
+    }
+
+
+@app.post("/api/video/upscale")
+async def video_upscale(payload: VideoUpscaleRequest):
+    """提交视频超分：立即返回 task_id，流水线在后台线程里分片跑。"""
+    target = (payload.target or "").strip().lower()
+    if target not in _VIDEO_UPSCALE_TARGET_LONG:
+        raise _video_upscale_http_error("invalid_target", "target 仅支持 2k / 4k")
+    model = (payload.model or "anime").strip().lower()
+    if model not in _VIDEO_UPSCALE_MODEL_NAME:
+        raise _video_upscale_http_error("invalid_model", "model 仅支持 anime / live")
+    if not ffmpeg_binary() or not ffprobe_binary():
+        raise _video_upscale_http_error("ffmpeg_missing", "未找到 ffmpeg / ffprobe，无法处理视频")
+    src_file = _video_upscale_resolve_source(payload.src_path)
+    if not src_file or not os.path.isfile(src_file):
+        raise _video_upscale_http_error("source_missing", "视频文件不存在（只支持画布里的本地视频或本机路径）")
+    if not _upscale_runtime_installed():
+        raise _video_upscale_http_error(
+            "upscale_runtime_missing",
+            "本地高清放大组件未安装，请先下载运行时（约 50MB）再试",
+        )
+    if not _video_upscale_model_installed(_VIDEO_UPSCALE_MODEL_NAME[model]):
+        raise _video_upscale_http_error(
+            "upscale_model_missing",
+            f"缺少超分模型 {_VIDEO_UPSCALE_MODEL_NAME[model]}，请重新下载运行时",
+        )
+    try:
+        probe = await asyncio.to_thread(_video_upscale_probe, src_file)
+    except Exception as exc:
+        raise _video_upscale_http_error("probe_failed", f"读取视频信息失败：{exc}")
+    if probe["duration"] > _VIDEO_UPSCALE_MAX_SECONDS + 0.05:
+        raise _video_upscale_http_error(
+            "duration_limit",
+            f"视频时长 {probe['duration']:.1f} 秒，超过 {_VIDEO_UPSCALE_MAX_SECONDS} 秒上限，请先裁剪再超分",
+        )
+    if probe["width"] > _VIDEO_UPSCALE_MAX_WIDTH or probe["height"] > _VIDEO_UPSCALE_MAX_HEIGHT:
+        raise _video_upscale_http_error(
+            "resolution_limit",
+            f"视频分辨率 {probe['width']}×{probe['height']} 超过 "
+            f"{_VIDEO_UPSCALE_MAX_WIDTH}×{_VIDEO_UPSCALE_MAX_HEIGHT} 上限，请先缩小再超分",
+        )
+    now = time.time()
+    task_id = f"vupscale_{uuid.uuid4().hex}"
+    out_filename = f"video_hd_{uuid.uuid4().hex[:12]}.mp4"
+    _video_upscale_ensure_loaded()
+    with _VIDEO_UPSCALE_LOCK:
+        _VIDEO_UPSCALE_TASKS[task_id] = {
+            "id": task_id,
+            "kind": "video_upscale",
+            # 单 worker 串行：提交即 queued，worker 取到才转 running，前端据此显示「排队中」
+            "state": "queued",
+            "progress": 0,
+            "eta_sec": None,
+            "output": "",
+            "output_path": None,
+            "error": None,
+            "processed_frames": 0,
+            "total_frames": int(probe["total_frames"]),
+            "source": src_file,
+            "source_url": str(payload.src_path or ""),
+            "target": target,
+            "model": model,
+            "created_at": now,
+            "updated_at": now,
+            "started_at": None,
+            "finished_at": None,
+            "cancel": False,
+            "src_file": src_file,
+            # 输出目录按当前登录用户分，必须在请求上下文里算；后台线程拿不到这个上下文
+            "out_file": output_path_for(out_filename, "output"),
+            "output_url": output_url_for(out_filename, "output"),
+            "work_dir": tempfile.mkdtemp(prefix="novai_video_hd_"),
+            "target_long": _VIDEO_UPSCALE_TARGET_LONG[target],
+            "canvas_id": str(payload.canvas_id or ""),
+            "node_id": str(payload.node_id or ""),
+        }
+        _video_upscale_store_write_locked()
+    _video_upscale_ensure_worker()
+    _VIDEO_UPSCALE_QUEUE.put(task_id)
+    print(f"[VideoUpscale] 提交 {task_id}：{src_file} → {target} / {model}（队列 {_VIDEO_UPSCALE_QUEUE.qsize()}）", flush=True)
+    return {"task_id": task_id, "state": "queued"}
+
+
+@app.get("/api/video/upscale/status")
+async def video_upscale_status(task_id: str = ""):
+    """轮询视频超分进度：前端按 state 决定继续轮询还是拿 output_path。"""
+    task = _VIDEO_UPSCALE_TASKS.get(str(task_id or "").strip())
+    if not task:
+        raise HTTPException(status_code=404, detail="视频超分任务不存在")
+    return _video_upscale_snapshot(task)
+
+
+@app.get("/api/video/upscale/tasks")
+async def video_upscale_tasks(limit: int = _VIDEO_UPSCALE_RECENT_LIMIT):
+    """视频超分任务清单：活跃任务（queued/running）+ 最近若干条已结束任务。
+    给前端刷新恢复和「后台任务」展示用；字段与 /status 同形，前端复用同一套渲染与轮询。"""
+    try:
+        limit = max(1, min(int(limit), _VIDEO_UPSCALE_STORE_MAX))
+    except (TypeError, ValueError):
+        limit = _VIDEO_UPSCALE_RECENT_LIMIT
+    with _VIDEO_UPSCALE_LOCK:
+        items = [_video_upscale_task_view(item) for item in _VIDEO_UPSCALE_TASKS.values()]
+    active = [item for item in items if (item.get("state") or "") in _VIDEO_UPSCALE_ACTIVE_STATES]
+    recent = [item for item in items if (item.get("state") or "") not in _VIDEO_UPSCALE_ACTIVE_STATES]
+    active.sort(key=lambda item: item.get("created_at") or 0)
+    recent.sort(key=lambda item: item.get("finished_at") or item.get("updated_at") or item.get("created_at") or 0,
+                reverse=True)
+    return {"active": active, "recent": recent[:limit], "limit": limit}
+
+
+@app.post("/api/video/upscale/cancel")
+async def video_upscale_cancel(payload: VideoUpscaleCancelRequest):
+    """取消视频超分：排队中的直接落 cancelled；运行中的置标记，由流水线轮询去杀子进程并清临时目录。"""
+    task_id = str(payload.task_id or "").strip()
+    with _VIDEO_UPSCALE_LOCK:
+        task = _VIDEO_UPSCALE_TASKS.get(task_id)
+        if not task or (task.get("state") or "") not in _VIDEO_UPSCALE_ACTIVE_STATES:
+            return {"ok": False}
+        if (task.get("state") or "") == "queued":
+            # 还在排队就没有子进程：直接收尾并清掉提交时建的临时目录
+            now = time.time()
+            task["state"] = "cancelled"
+            task["eta_sec"] = None
+            task["error"] = None
+            task["updated_at"] = now
+            task["finished_at"] = now
+            work_dir = str(task.get("work_dir") or "")
+            _video_upscale_store_write_locked()
+        else:
+            task["cancel"] = True
+            work_dir = ""
+    if work_dir:
+        _video_upscale_cleanup_work_dir({"work_dir": work_dir})
+    return {"ok": True}
+
+
 class Base64UploadRequest(BaseModel):
     data: str = ""            # 纯 base64 或 data:URL
     name: str = ""
@@ -23091,7 +23957,7 @@ def _caps_payload(ratios=None, resolutions=None, n_max=None, durations=None, mod
                   max_long_edge=None, max_pixels=None, min_pixels=None, thinking_mode=False,
                    ref_max=None, video_ref_max=None, audio_ref_max=None, output_formats=None,
                    sizes=None, batch=None, mj=None, prompt_only=False, gif_frames=None,
-                   native_background=False):
+                   native_background=False, audio=False):
     """caps 条目：n_max / modes 用「字段缺失 = 后端不掌握」的表达，不再下发 null/空占位。
     max_long_edge / max_pixels / min_pixels 只给「精确像素生成」的模型（目前是 GPT-Image 家族）：
     前端据此在组装请求时就把尺寸钳进上游上限。"""
@@ -23121,6 +23987,9 @@ def _caps_payload(ratios=None, resolutions=None, n_max=None, durations=None, mod
     if native_background:
         # 布尔能力标记：前端据此显示透明背景入口（只有文档确证支持 background 参数的模型才带这个字段）
         payload["native_background"] = True
+    if audio:
+        # 布尔能力标记：模型能出声音、且请求里能把声音明确开关（前端据此启用视频节点的「音频」开关）
+        payload["audio"] = True
     for key, value in (("ref_max", ref_max), ("video_ref_max", video_ref_max), ("audio_ref_max", audio_ref_max)):
         try:
             number = int(value)
@@ -23214,6 +24083,24 @@ def apimart_video_modes(model, table):
     return modes
 
 
+def apimart_video_audio_field(table):
+    """模型能出声音、且请求体里能把声音明确开关时，返回它的音频字段名（= caps 的 audio 标记）。
+
+    只给文档确证「有 audio / generate_audio 布尔参数」的模型声明 audio_field：
+      * generate_audio —— Seedance 2.x / 2.5 Flash、APIMart Zoe（文档：audio 的别名）；
+      * audio          —— Seedance 1.5 Pro、Kling v3 / v3 Omni。
+    不声明的（给了开关就是假开关）：
+      * Kling v4 / v4 Flash：文档写「始终带立体声音轨」，只有 audio_setting 选沿用原声还是重新生成，
+        且仅在视频编辑 / 带参考视频的参考生视频下有效；
+      * Muse Video Ext：恒定带声音，传 false 直接 400；
+      * Gemini Omni / MiniMax-H3：没有音频参数，输出恒定带音轨；
+      * VEO3.1（非官方渠道）：整份参数表里没有音频字段。"""
+    if not isinstance(table, dict):
+        return ""
+    field = str(table.get("audio_field") or "").strip()
+    return field if field in ("generate_audio", "audio") else ""
+
+
 def model_caps_for(provider, model, kind):
     """(平台, 模型, image/video) 的权威规格；没有明确规格表就返回 None（不猜）。"""
     provider = _model_caps_provider_config(provider)
@@ -23304,7 +24191,8 @@ def model_caps_for(provider, model, kind):
                                     modes=apimart_video_modes(name, table),
                                     ref_max=table.get("ref_max"),
                                     video_ref_max=table.get("video_ref_max"),
-                                    audio_ref_max=table.get("audio_ref_max"))
+                                    audio_ref_max=table.get("audio_ref_max"),
+                                    audio=bool(apimart_video_audio_field(table)))
             # 更新包覆盖优先：modes/durations/ratios/resolutions/n_max 直接替换内置推导值
             payload["durations"] = _caps_int_list(override.get("durations")) if "durations" in override else payload.get("durations", [])
             if "modes" in override:
@@ -23325,8 +24213,12 @@ def model_caps_for(provider, model, kind):
             # 输入视频按完整视频提交（as_target），所以视频编辑与视频延长都算支持。
             volc_modes = ["text_to_video", "image_to_video", "start_end_to_video",
                           "reference_to_video", "reference_video_to_video", "video_edit", "video_extend"]
+            # 声音开关：Seedance 2.x 请求体分支已经做到「开则发 true、关则显式发 false」
+            # （_canvas_video_run_unlimited 的火山分支），能力表只补这个标记让面板给入口；
+            # Seedance 1.x 请求侧没有 generate_audio，不声明。
             return _caps_payload([], volcengine_video_resolutions(name), n_max=1,
-                                 durations=durations, modes=volc_modes)
+                                 durations=durations, modes=volc_modes,
+                                 audio="seedance-2" in re.sub(r"[^a-z0-9]+", "-", lower))
         return None
     return None
 
@@ -23354,9 +24246,11 @@ def direct_image_request_batches(provider, model, n):
 
 
 def direct_image_request_count(provider, model, n):
-    """兼容旧调用：返回每批张数（总数请用 direct_image_request_batches，不要在这里吞掉）。"""
-    batches = direct_image_request_batches(provider, model, n)
-    return batches[0] if batches else 1
+    """兼容入口：这次「一共要发几次请求」，不是每批几张。
+
+    总张数 = sum(direct_image_request_batches(provider, model, n))，每批张数 = batches[0]；
+    真正执行生成的是 /api/online-image 里的 request_batches（asyncio.gather 逐批发），不经过这里。"""
+    return len(direct_image_request_batches(provider, model, n))
 
 
 def _caps_ratio_label(value):
@@ -23421,9 +24315,138 @@ def direct_image_size_caps(provider, model, size):
     return new_size, notice
 
 
-def _model_caps_items(admin=True):
-    """当前已启用平台 + 已声明模型里，有权威规格的那些；顺序按配置顺序，稳定可缓存。"""
-    items, seen = [], set()
+# ---------------------------------------------------------------------------
+# 内置 APIMart 模型（GET /api/model-caps?include_builtin=1 才下发）：
+# 能力表里有完整规格、但用户 provider 清单通常没登记的模型，编辑器据此也能选到。
+# key = 能力表 key（归一化名），value = 上游可下发的正式模型 ID（一个 key 多个 ID 的是家族条目）。
+# 只收文档确证过正式 ID 的：docs/apimart-docs/catalog.json + REPORT.md A 段 + 2026-11-18 语料。
+# 没把握的（比如 nano-banana-lite、无版本号的 grok-imagine）宁可不收，也不把能力表 key 当模型名发给上游。
+# ---------------------------------------------------------------------------
+APIMART_BUILTIN_MODEL_IDS = {
+    "image": {
+        "gpt-image-1": ("gpt-image-1",),
+        "gpt-image-2": ("gpt-image-2",),
+        "gpt-image-2-5": ("gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"),
+        "gpt-image-2-5-ext": ("gpt-image-2.5-ext",),
+        "gpt-image-2-6-ext": ("gpt-image-2.6-ext",),
+        "gpt-image-2-6-flare": ("gpt-image-2.6-flare",),
+        "gpt-image-2-6-sunburst": ("gpt-image-2.6-sunburst",),
+        "muse-image-ext": ("muse-image-ext",),
+        "gemini-2-5-flash-image-preview": ("gemini-2.5-flash-image-preview",),
+        "nano-banana": ("nano-banana",),
+        "gemini-3-pro-image-preview": ("gemini-3-pro-image-preview",),
+        "nano-banana-pro": ("nano-banana-pro",),
+        "gemini-3-1-flash-image-preview": ("gemini-3.1-flash-image-preview",),
+        "gemini-3-1-flash-lite-image": ("gemini-3.1-flash-lite-image",),
+        "gemini-nano-banana-2-1": ("gemini-nano-banana-2.1",),
+        "gemini-nano-banana-2-1-ext": ("gemini-nano-banana-2.1-ext",),
+        "imagen-4-0-apimart": ("imagen-4.0-apimart",),
+        "mai-image-2-6": ("mai-image-2.6",),
+        "qwen-image-2-0": ("qwen-image-2.0",),
+        "qwen-image-3-0": ("qwen-image-3.0",),
+        "seedream-4-0": ("seedream-4.0",),
+        "seedream-4-5": ("seedream-4.5",),
+        "seedream-5-0-flash": ("seedream-5-0-flash",),
+        "seedream-5-0-pro": ("seedream-5-0-pro",),
+        "seedream-5-0-lite": ("seedream-5-0-lite",),
+        "seedream-5-5": ("seedream-5-5",),
+        "minimax-h3-image": ("minimax-h3-image",),
+        "flux-2": ("flux-2-flex", "flux-2-pro", "flux-2-max"),
+        "flux-3-image": ("flux-3-image",),
+        "flux-3-image-klein": ("flux-3-image-klein",),
+        "flux-kontext": ("flux-kontext-pro", "flux-kontext-max"),
+        "hy-image-v3-5-preview": ("hy-image-v3.5-preview",),
+        "grok-imagine-2-0": ("grok-imagine-2.0-ext",),
+        "grok-imagine-image-2-0": ("grok-imagine-image-2.0",),
+        "grok-imagine-image-quality": ("grok-imagine-image-quality",),
+        "grok-imagine-image": ("grok-imagine-image",),
+        "grok-imagine": ("grok-imagine-1.5-apimart",),
+        "wan2-7-image": ("wan2.7-image",),
+        "wan2-7-image-pro": ("wan2.7-image-pro",),
+        "z-image-turbo": ("z-image-turbo",),
+        "midjourney": ("midjourney",),
+    },
+    "video": {
+        "muse-video-ext": ("muse-video-ext",),
+        "seedance-2-0": ("seedance-2.0",),
+        "seedance-1-5-pro": ("seedance-1-5-pro",),
+        "seedance-1-0-pro": ("seedance-1-0-pro-quality", "seedance-1-0-pro-fast"),
+        "seedance-2-5": ("seedance-2.5",),
+        "seedance-2-5-flash": ("seedance-2-5-flash",),
+        "kling-v2-6": ("kling-v2-6",),
+        "kling-v3": ("kling-v3",),
+        "kling-v3-omni": ("kling-v3-omni",),
+        "kling-video-o1": ("kling-video-o1",),
+        "kling-3-0-turbo": ("kling-3.0-turbo",),
+        "kling-v4": ("kling-v4",),
+        "kling-v4-flash": ("kling-v4-flash",),
+        "minimax-h3": ("MiniMax-H3",),
+        "minimax-h3-max": ("MiniMax-H3-Max",),
+        "minimax-h3-context-ir": ("MiniMax-H3-Context-IR",),
+        "minimax-hailuo-2-3": ("MiniMax-Hailuo-2.3",),
+        "minimax-hailuo": ("MiniMax-Hailuo-02",),
+        "wan2-5": ("wan2.5-preview",),
+        "wan2-6": ("wan2.6",),
+        "wan2-7": ("wan2.7",),
+        "wan2-7-r2v": ("wan2.7-r2v",),
+        "wan2-7-videoedit": ("wan2.7-videoedit",),
+        "wan3-0-video": ("wan3.0-video",),
+        "viduq3": ("viduq3",),
+        "viduq3-mix": ("viduq3-mix",),
+        "viduq3-pro": ("viduq3-pro",),
+        "viduq4-preview": ("viduq4-preview",),
+        "pixverse-v6": ("pixverse-v6",),
+        "flux-3-video": ("flux-3-video",),
+        "happyhorse-1-0": ("happyhorse-1.0",),
+        "happyhorse-1-1": ("happyhorse-1.1",),
+        "skyreels-v4": ("skyreels-v4-fast", "skyreels-v4-std"),
+        "grok-imagine-1-5-video": ("grok-imagine-1.5-video-ext",),
+        "grok-imagine-video": ("grok-imagine-video",),
+        "gemini-omni-1-1-flash": ("gemini-omni-1.1-flash",),
+        "gemini-omni-1-1-flash-ext": ("gemini-omni-1.1-flash-ext",),
+        "gemini-omni-1-2-flash": ("gemini-omni-1.2-flash",),
+        "gemini-omni-1-2-flash-ext": ("gemini-omni-1.2-flash-ext",),
+        "gemini-omni-flash-preview": ("gemini-omni-flash-preview",),
+        "apimart-zoe": ("apimart-zoe",),
+        "veo3-1": ("veo3.1-fast", "veo3.1-quality"),
+        "veo3-1-lite": ("veo3.1-lite",),
+        "omni-flash-ext": ("Omni-Flash-Ext",),
+    },
+}
+
+
+def _model_caps_builtin_items(provider, seen, registered):
+    """include_builtin=1 时追加的内置模型：能力表有规格、但 provider 清单没登记的那些。
+
+    只对 protocol=apimart 的 provider 生效（其他协议的能力表是别的厂商的，不补）；
+    模型名用 APIMART_BUILTIN_MODEL_IDS 里的上游正式 ID，不用能力表 key（否则 seedance-2-0 会被原样发给上游）。
+    去重同时看「已登记名归一化」与 items 已有的 (provider, model, kind)。"""
+    pid = str(provider.get("id") or "").strip()
+    if not pid:
+        return []
+    out = []
+    for kind in ("image", "video"):
+        table = APIMART_IMAGE_MODEL_CAPS if kind == "image" else APIMART_VIDEO_MODEL_CAPS
+        normalize = apimart_image_caps_key if kind == "image" else apimart_video_normalized_name
+        for caps_key, models in (APIMART_BUILTIN_MODEL_IDS.get(kind) or {}).items():
+            if caps_key not in table:
+                continue
+            for model in models:
+                key = (pid, model.lower(), kind)
+                if key in seen or normalize(model) in registered.get(kind, ()):
+                    continue
+                caps = model_caps_for(provider, model, kind)
+                if not caps:
+                    continue
+                seen.add(key)
+                out.append({"provider": pid, "model": model, "kind": kind, **caps, "builtin": True})
+    return out
+
+
+def _model_caps_items(admin=True, include_builtin=False):
+    """当前已启用平台 + 已声明模型里，有权威规格的那些；顺序按配置顺序，稳定可缓存。
+    include_builtin=True 时，在每个 APIMart provider 的条目后面补「能力表有、清单没登记」的模型。"""
+    items, seen, builtin_items = [], set(), []
     for provider in load_api_providers():
         if not isinstance(provider, dict) or provider.get("enabled") is False:
             continue
@@ -23432,13 +24455,16 @@ def _model_caps_items(admin=True):
             continue
         if not admin and pid != MEMBER_PROVIDER_ID:
             continue
+        registered = {"image": set(), "video": set()}
         for kind, field in (("image", "image_models"), ("video", "video_models")):
+            normalize = apimart_image_caps_key if kind == "image" else apimart_video_normalized_name
             models = _caps_list(provider.get(field) or [])
             if kind == "image":
                 single = str(provider.get("image_model") or "").strip()
                 if single:
                     models = [single] + [item for item in models if item != single]
             for model in models:
+                registered[kind].add(normalize(model))
                 key = (pid, model.lower(), kind)
                 if key in seen:
                     continue
@@ -23461,16 +24487,22 @@ def _model_caps_items(admin=True):
                 continue
             seen.add(key)
             items.append({"provider": pid, "model": model, "kind": kind, **caps})
+        # 能力表里有、清单没登记的模型（只对 APIMart 协议补，别的协议不编造模型）
+        if include_builtin and str(provider.get("protocol") or "").strip().lower() == "apimart":
+            builtin_items.extend(_model_caps_builtin_items(provider, seen, registered))
+    # 内置条统一追加在末尾：与「已登记 items」的顺序完全解耦，默认响应永远是它的前缀
+    items.extend(builtin_items)
     return items
 
 
-def _model_caps_payload(admin=True):
+def _model_caps_payload(admin=True, include_builtin=False):
     now = time.time()
-    key = (_model_caps_config_signature(), bool(admin))
+    key = (_model_caps_config_signature(), bool(admin), bool(include_builtin))
     cached = _MODEL_CAPS_CACHE.get(key)
     if cached and now - cached[0] < MODEL_CAPS_CACHE_TTL:
         return cached[1]
-    payload = {"items": _model_caps_items(admin=admin), "generated_at": int(now)}
+    payload = {"items": _model_caps_items(admin=admin, include_builtin=include_builtin),
+               "generated_at": int(now)}
     for old in [item for item in _MODEL_CAPS_CACHE if item != key]:
         _MODEL_CAPS_CACHE.pop(old, None)      # 配置指纹变了：旧缓存没意义
     _MODEL_CAPS_CACHE[key] = (now, payload)
@@ -23669,10 +24701,17 @@ def model_caps_converge(provider, model, kind, ratio="", size="", count=None,
     return out
 
 
+MODEL_CAPS_TRUTHY = {"1", "true", "yes", "on"}
+
+
 @app.get("/api/model-caps")
 async def model_caps_api(request: Request):
-    """只读：当前可见平台里「有权威规格」的模型比例/分辨率/张数/时长。没有规格的模型不出现。"""
-    return _model_caps_payload(admin=_is_admin_actor(request))
+    """只读：当前可见平台里「有权威规格」的模型比例/分辨率/张数/时长。没有规格的模型不出现。
+
+    include_builtin=1 时额外补「能力表里有、用户清单没登记」的 APIMart 模型（带 builtin:true），
+    默认不带该参数，响应形状与既有行为完全不变。"""
+    include_builtin = str(request.query_params.get("include_builtin") or "").strip().lower() in MODEL_CAPS_TRUTHY
+    return _model_caps_payload(admin=_is_admin_actor(request), include_builtin=include_builtin)
 
 
 @app.get("/api/models")
@@ -23945,6 +24984,22 @@ async def api_set_output_dir(payload: OutputDirPayload):
 
     return {"output_dir": expanded, "effective_output_dir": expanded, "message": "输出目录已更新，重启后生效"}
 
+
+@app.get("/api/settings/skill-scripts")
+async def api_get_skill_scripts():
+    """是否禁止技能包脚本执行（默认允许；true 时 run_skill_script 一律拒绝）。"""
+    return {"disabled": skill_scripts_disabled()}
+
+
+@app.put("/api/settings/skill-scripts")
+async def api_set_skill_scripts(data: Dict[str, Any]):
+    """全局开关：禁止 / 允许运行技能脚本。只改设置文件，不改任何已装技能。"""
+    cfg = load_settings()
+    cfg["skill_scripts_disabled"] = bool((data or {}).get("disabled"))
+    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+    write_json_atomic(SETTINGS_FILE, cfg, ensure_ascii=False, indent=2)
+    return {"disabled": bool(cfg["skill_scripts_disabled"])}
+
 # ── 视频口播转写（ASR）平台与模型（设置 → 通用 用）──
 
 class AsrSettingsPayload(BaseModel):
@@ -24027,6 +25082,13 @@ async def api_asr_transcribe(audio: UploadFile = File(...), lang: str = Form("zh
     from server.integrations.asr import MAX_AUDIO_BYTES, transcribe_audio
     raw = await audio.read(MAX_AUDIO_BYTES + 1)
     return await transcribe_audio(raw, audio.filename or "", lang)
+
+@app.post("/api/asr/subtitles")
+async def api_asr_subtitles(audio: UploadFile = File(...), lang: str = Form("zh"), total: float = Form(0.0)):
+    """剪辑时间线「自动字幕」：收整条时间线的混音，返回带时间的逐句字幕；业务失败 200 + ok=false。"""
+    from server.integrations.asr import MAX_AUDIO_BYTES, transcribe_segments
+    raw = await audio.read(MAX_AUDIO_BYTES + 1)
+    return await transcribe_segments(raw, audio.filename or "", lang, total)
 
 # ── 存储用量与上限（设置页用）──
 
@@ -26681,14 +27743,17 @@ APIMART_VIDEO_MODEL_CAPS = {
         "duration": (4, 15), "ratio_key": "size",
         "ratios": ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"),
         "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p", "4k"),
-        "generate_audio": True, "watermark": False, "seed": True,
+        "generate_audio": True, "audio_field": "generate_audio", "audio_default_on": True,
+        "watermark": False, "seed": True,
         "image_with_roles": True, "video_urls": True, "audio_urls": True,
     },
     "seedance-1-5-pro": {
         "duration": (4, 12), "ratio_key": "aspect_ratio",
         "ratios": ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9"),
         "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p"),
-        "generate_audio": False, "watermark": False, "seed": True,
+        # 文档：支持音频生成，参数名是 audio（默认 true）→ 默认带声音，关要显式发 false
+        "generate_audio": False, "audio_field": "audio", "audio_default_on": True,
+        "watermark": False, "seed": True,
         "image_with_roles": True, "video_urls": False, "audio_urls": False,
     },
     "seedance-1-0-pro": {
@@ -26699,25 +27764,49 @@ APIMART_VIDEO_MODEL_CAPS = {
         "image_with_roles": True, "video_urls": False, "audio_urls": False,
     },
     "seedance-2-5": {
-        # 官方文档：分辨率只有 480p/720p/1080p（无 2k/4k）；比例含 adaptive；
-        # 时长支持 -1（自动/自选）；参考上限 图30 / 视频10 / 音频10。
+        # 官方文档（2026-11-18 复核）：分辨率 480p/720p/1080p/**4k**（2k/2160p 不支持）；
+        # 比例含 adaptive；时长 4–30 或 -1（自动/自选）；参考上限 图30 / 视频10 / 音频10；
+        # 另有草稿模式（draft:true 出 480p 草稿 → draft_task_id 出 1080p/4k 成片，草稿 3 天过期，
+        # 继承字段重发即 400），项目未提供草稿入口，只在 REPORT 与更新包里留档。
         "durations": (-1,) + tuple(range(4, 31)), "ratio_key": "size",
         "ratios": ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"),
-        "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p"),
-        "generate_audio": True, "watermark": True, "seed": True,
+        "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p", "4k"),
+        "generate_audio": True, "audio_field": "generate_audio", "audio_default_on": True,
+        "watermark": True, "seed": True,
         "image_with_roles": True, "video_urls": True, "audio_urls": True,
         "ref_max": 30, "video_ref_max": 10, "audio_ref_max": 10,
+    },
+    # Seedance 2.5 Flash（文档 2026-11-18 新增页）：只有 480p/720p（1080p/2k/4k 直接 400），
+    # 时长 4–30 或 -1，比例 6 个 + adaptive（首尾帧/编辑/延长必须 adaptive），
+    # 参考上限 图 10（含首尾帧）/ 视频 5 / 音频 5（各 2–30 秒、合计 ≤30 秒），支持纯音频参考；
+    # generate_audio 默认 true、watermark 默认 false、output_format mp4|mov、nsfw_check 默认 false；
+    # 不支持 draft/draft_task_id；官方别名 doubao-seedance-2-5-flash，点号写法 seedance-2.5-flash 不被接受。
+    # 匹配规则按最长 key 命中，所以这条会先于 "seedance-2-5" 命中。
+    "seedance-2-5-flash": {
+        "durations": (-1,) + tuple(range(4, 31)), "ratio_key": "size",
+        "ratios": ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"),
+        "resolution_key": "resolution", "resolutions": ("480p", "720p"),
+        "generate_audio": True, "audio_field": "generate_audio", "audio_default_on": True,
+        "watermark": True, "seed": True,
+        "image_with_roles": True, "video_urls": True, "audio_urls": True,
+        "omni_task_type": True, "ref_max": 10, "video_ref_max": 5, "audio_ref_max": 5,
+        "modes": ("text_to_video", "image_to_video", "start_end_to_video", "reference_to_video",
+                  "video_edit", "video_extend"),
     },
     "kling-v3-omni": {
         "duration": (3, 15), "ratio_key": "aspect_ratio", "ratios": ("16:9", "1:1", "9:16"),
         "resolution_key": "mode", "resolutions": ("std", "pro", "4k"),
-        "generate_audio": False, "watermark": True, "seed": False,
+        # 文档：audio 布尔，默认 false（开了有声，比无声贵 33%~50%）→ 只开的时候发 true
+        "generate_audio": False, "audio_field": "audio", "audio_default_on": False,
+        "watermark": True, "seed": False,
         "image_with_roles": True, "video_urls": False, "audio_urls": False,
     },
     "kling-v3": {
         "duration": (3, 15), "ratio_key": "aspect_ratio", "ratios": ("16:9", "1:1", "9:16"),
         "resolution_key": "mode", "resolutions": ("std", "pro", "4k"),
-        "generate_audio": False, "watermark": True, "seed": False,
+        # 文档：audio 布尔，默认 false（开了有声，比无声贵 33%~50%）→ 只开的时候发 true
+        "generate_audio": False, "audio_field": "audio", "audio_default_on": False,
+        "watermark": True, "seed": False,
         "image_with_roles": False, "video_urls": False, "audio_urls": False,
     },
     "kling-video-o1": {
@@ -26786,7 +27875,9 @@ APIMART_VIDEO_MODEL_CAPS = {
         "durations": (5, 10, 15), "ratio_key": "aspect_ratio",
         "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
         "resolution_key": "resolution", "resolutions": ("720p", "1080p"),
-        "generate_audio": False, "watermark": True, "seed": True,
+        # 文档：audio 布尔（可关成静音片，i2v-flash 明确默认 true）→ 两种值都显式下发
+        "generate_audio": False, "audio_field": "audio", "audio_default_on": True,
+        "watermark": True, "seed": True,
         "image_with_roles": False, "video_urls": False, "audio_urls": False,
     },
     "wan2-7-videoedit": {
@@ -26814,11 +27905,19 @@ APIMART_VIDEO_MODEL_CAPS = {
         "image_with_roles": True, "video_urls": True, "audio_urls": False,
     },
     "wan3-0-video": {
-        "duration": (2, 30), "ratio_key": "size",
-        "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
+        # 文档（2026-11-18 复核）：duration 2–30 或 -1（模型自选）；size/aspect_ratio 收
+        # adaptive + 21:9/16:9/4:3/1:1/3:4/9:16；resolution 480P/720P/1080P，**不传按 1080P 出图与计费**，
+        # 所以必须显式下发档位（与 minimax-h3-image 的 4K 默认同类问题）；audio 默认 true（省略即带音轨，
+        # 本表 generate_audio=False 表示「不下发该字段」，行为与上游默认一致）。
+        # 文档另有 file_url/link_url（≤1 个文档/网页参考）与 generation_type(frame|reference)，
+        # 项目没有这两个入口，只在 REPORT 留档。
+        "durations": (-1,) + tuple(range(2, 31)), "ratio_key": "size",
+        "ratios": ("21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"),
         "resolution_key": "resolution", "resolutions": ("480P", "720P", "1080P"),
         "resolution_aliases": {"720p": "720P", "1080p": "1080P", "4k": "1080P"},
-        "generate_audio": False, "watermark": True, "seed": True,
+        # 文档：audio 默认 true、有无音轨同价 → 两种值都显式下发
+        "generate_audio": False, "audio_field": "audio", "audio_default_on": True,
+        "watermark": True, "seed": True,
         "image_with_roles": True, "video_urls": True, "audio_urls": True,
     },
     "viduq3-mix": {
@@ -26826,7 +27925,9 @@ APIMART_VIDEO_MODEL_CAPS = {
         "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
         "resolution_key": "resolution", "resolutions": ("540p", "720p", "1080p"),
         "resolution_aliases": {"480p": "540p"},
-        "generate_audio": False, "watermark": False, "seed": True,
+        # 文档：audio 默认 true（Vidu Q3 系列），false 出静音片
+        "generate_audio": False, "audio_field": "audio", "audio_default_on": True,
+        "watermark": False, "seed": True,
         "image_with_roles": False, "video_urls": False, "audio_urls": False,
     },
     "viduq3-pro": {
@@ -26834,7 +27935,8 @@ APIMART_VIDEO_MODEL_CAPS = {
         "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
         "resolution_key": "resolution", "resolutions": ("540p", "720p", "1080p"),
         "resolution_aliases": {"480p": "540p"},
-        "generate_audio": False, "watermark": False, "seed": True,
+        "generate_audio": False, "audio_field": "audio", "audio_default_on": True,
+        "watermark": False, "seed": True,
         "image_with_roles": False, "video_urls": False, "audio_urls": False,
     },
     "viduq3": {
@@ -26842,7 +27944,9 @@ APIMART_VIDEO_MODEL_CAPS = {
         "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
         "resolution_key": "resolution", "resolutions": ("540p", "720p", "1080p"),
         "resolution_aliases": {"480p": "540p"},
-        "generate_audio": False, "watermark": False, "seed": True,
+        # 文档：audio 默认 true（对话/音效），false 出静音片
+        "generate_audio": False, "audio_field": "audio", "audio_default_on": True,
+        "watermark": False, "seed": True,
         "image_with_roles": False, "video_urls": False, "audio_urls": False,
     },
     "viduq4-preview": {
@@ -26850,7 +27954,9 @@ APIMART_VIDEO_MODEL_CAPS = {
         "ratios": ("16:9", "1:1", "4:3", "3:4", "9:16"),
         "resolution_key": "resolution", "resolutions": ("540p", "720p", "1080p", "2K", "4K"),
         "resolution_aliases": {"480p": "540p"},
-        "generate_audio": False, "watermark": False, "seed": True,
+        # 文档：audio 默认 true、有无音轨同价
+        "generate_audio": False, "audio_field": "audio", "audio_default_on": True,
+        "watermark": False, "seed": True,
         "image_with_roles": True, "video_urls": False, "audio_urls": True,
     },
     "pixverse-v6": {
@@ -26858,7 +27964,9 @@ APIMART_VIDEO_MODEL_CAPS = {
         "ratios": ("16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9"),
         "resolution_key": "resolution", "resolutions": ("360p", "540p", "720p", "1080p"),
         "resolution_aliases": {"480p": "540p"},
-        "generate_audio": False, "watermark": True, "seed": True,
+        # 文档：audio 默认 false、开了按秒更贵 → 只在开的时候发 true
+        "generate_audio": False, "audio_field": "audio", "audio_default_on": False,
+        "watermark": True, "seed": True,
         "image_with_roles": False, "video_urls": False, "audio_urls": False,
     },
     "flux-3-video": {
@@ -26866,7 +27974,9 @@ APIMART_VIDEO_MODEL_CAPS = {
         "ratios": ("21:9", "2:1", "16:9", "4:3", "1:1", "3:4", "9:16", "auto"),
         "resolution_key": "resolution", "resolutions": ("hd", "fhd"),
         "resolution_aliases": {"480p": "hd", "512p": "hd", "720p": "hd", "1080p": "fhd", "4k": "fhd"},
-        "generate_audio": False, "watermark": False, "seed": False,
+        # 文档：audio 默认 true、关掉不降价 → 两种值都显式下发
+        "generate_audio": False, "audio_field": "audio", "audio_default_on": True,
+        "watermark": False, "seed": False,
         "image_with_roles": False, "video_urls": True, "audio_urls": False,
     },
     "happyhorse-1-1": {
@@ -26936,7 +28046,9 @@ APIMART_VIDEO_MODEL_CAPS = {
         "durations": (-1,) + tuple(range(4, 31)), "ratio_key": "aspect_ratio",
         "ratios": ("21:9", "16:9", "4:3", "1:1", "3:4", "9:16", "adaptive"),
         "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p", "2k", "4k"),
-        "generate_audio": True, "watermark": False, "seed": True,
+        # 文档：audio 布尔，别名 generate_audio，省略时「通常也会生成声音」→ 关要显式发 false
+        "generate_audio": True, "audio_field": "generate_audio", "audio_default_on": True,
+        "watermark": False, "seed": True,
         "image_with_roles": True, "video_urls": True, "audio_urls": True,
         "omni_task_type": True, "ref_max": 9, "video_ref_max": 3, "audio_ref_max": 3,
         "modes": ("text_to_video", "image_to_video", "start_end_to_video", "reference_to_video",
@@ -28154,11 +29266,15 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                         body["seed"] = payload.seed
                     if payload.return_last_frame:
                         body["return_last_frame"] = True
-                    if (apimart_video_caps is not None and apimart_video_caps.get("generate_audio")
-                            and "seedance" in str(apimart_seedance_model or "").lower()):
-                        # 能出声音的模型（Seedance 2.x 等）上游默认 generate_audio=true：关声音必须显式发 false，
-                        # 否则节点上「声音」关着、出来的片段照样带一段随机配乐，剪到一起音乐一段一段地跳
-                        body["generate_audio"] = bool(payload.generate_audio)
+                    apimart_audio_field = apimart_video_audio_field(apimart_video_caps)
+                    if apimart_audio_field:
+                        # 能出声且能开关的模型分两类：默认就带声音的（Seedance 2.x / Zoe / Seedance 1.5 Pro）
+                        # 关声音必须显式发 false，否则节点上「声音」关着、出来的片段照样带一段随机配乐，
+                        # 剪到一起音乐一段一段地跳；默认静音的（Kling v3）只在开的时候发 true。
+                        if (apimart_video_caps or {}).get("audio_default_on"):
+                            body[apimart_audio_field] = bool(payload.generate_audio)
+                        elif payload.generate_audio:
+                            body[apimart_audio_field] = True
                     elif payload.generate_audio and (apimart_video_caps is None or apimart_video_caps.get("generate_audio")):
                         body["generate_audio"] = True
                     # 水印：H3-Max 1080P 一律不发（连 false 都不能带）；其余模型按 caps.watermark 且用户显式开启才发
@@ -35909,15 +37025,18 @@ AGENT_SESSIONS_LOCK = Lock()
 
 
 class AgentToolError(Exception):
-    """工具校验/执行错误。code 供前端机器判断，requires_force 表示需 force 确认。"""
+    """工具校验/执行错误。code 供前端机器判断，requires_force 表示需 force 确认。
+    recoverable 表示错误本身在提示模型补参数 / 消除歧义（模型改道即可继续），清单里按中性态展示、不算真失败。"""
 
-    def __init__(self, message, code="tool_error", status_code=400, warnings=None, requires_force=False):
+    def __init__(self, message, code="tool_error", status_code=400, warnings=None, requires_force=False,
+                 recoverable=False):
         super().__init__(message)
         self.message = str(message)
         self.code = code
         self.status_code = status_code
         self.warnings = warnings or []
         self.requires_force = requires_force
+        self.recoverable = bool(recoverable)
 
 
 def _agent_mutate_canvas(canvas_id, mutator):
@@ -41841,7 +42960,7 @@ def _agent_tool_activate_skill_validate(args):
 
 
 def _agent_tool_activate_skill_run(args):
-    """按需加载技能完整说明：返回 skill_prompt（截断 2 万字）；同一轮重复调用只回提示。"""
+    """按需加载技能完整说明：返回 skill_prompt（超长截断并标注）；同一轮重复调用只回提示。"""
     name = str(args.get("name") or "").strip()
     activated = _agent_activated_skills_set()
     if name in activated:
@@ -41915,14 +43034,18 @@ async def _agent_tool_install_skill_run(args):
     except redskill_install.RedSkillError as exc:
         raise AgentToolError(str(exc), code="redskill_install_failed", status_code=exc.status_code)
     except github_install.GitHubSkillError as exc:
-        raise AgentToolError(str(exc), code="github_skill_install_failed", status_code=exc.status_code)
+        raise AgentToolError(str(exc), code="github_skill_install_failed", status_code=exc.status_code,
+                             recoverable=exc.recoverable)
     except HTTPException as exc:
         detail = str(exc.detail)
         if exc.status_code == 400:          # 400 只有正文为空/超限/解析失败这三种
             detail = "该地址返回的不是合法 SKILL.md：%s" % detail
         raise AgentToolError(detail, code="skill_import_failed", status_code=exc.status_code)
     skill = installed["skill"]
-    activation = _agent_tool_activate_skill_run({"name": skill["id"]})
+    # 导入默认不启用（安全加固）：只有本来就 enabled 的技能才顺手激活并回正文；
+    # 否则明确告诉模型「已导入未启用」，避免它假装已经能用。
+    enabled = bool(skill.get("enabled"))
+    activation = _agent_tool_activate_skill_run({"name": skill["id"]}) if enabled else None
     payload = {
         "ok": True,
         "skill": skill,
@@ -41930,8 +43053,12 @@ async def _agent_tool_install_skill_run(args):
         "repository": source["repository"],
         "ref": source["ref"],
         "path": source["path"],
+        "enabled": enabled,
         "activation": activation,
     }
+    if not enabled:
+        payload["note"] = ("已导入但未启用：请告诉用户到「设置 → 技能」打开「%s」的开关后再用，"
+                           "不要假装它已经可用。" % (skill.get("name") or skill.get("id")))
     if redskill_meta is not None:
         payload["redskill"] = redskill_meta
     return payload
@@ -41941,6 +43068,101 @@ def _agent_tool_install_skill_preview(args):
     url = str((args or {}).get("url") or "").strip()
     return {"type": "skill_install", "url": url,
             "title": "从 RedSkill 技能名、SKILL.md 直链或 GitHub 仓库安装技能"}
+
+
+def _agent_tool_run_skill_script_validate(args):
+    from server.skills import script_runner
+
+    if skill_scripts_disabled():
+        raise AgentToolError("已在设置里关闭「允许运行技能脚本」，本次不执行任何脚本；需要时请让用户到 设置 → 技能 打开开关。",
+                             code="skill_script_disabled", status_code=403)
+    args = args if isinstance(args, dict) else {}
+    skill = str(args.get("skill") or args.get("name") or "").strip()
+    script = str(args.get("script") or "").strip()
+    if not skill:
+        raise AgentToolError("skill 不能为空（技能 id，见技能索引每行第一个）", code="invalid_args")
+    if not script:
+        raise AgentToolError("script 不能为空（技能包内的脚本相对路径，例如 scripts/build.py）", code="invalid_args")
+    try:
+        resolved = script_runner.resolve_script(skill, script)
+        argv = script_runner.normalize_args(args.get("args"))
+    except script_runner.ScriptError as exc:
+        raise AgentToolError(str(exc), code=exc.code, status_code=exc.status_code)
+    try:
+        timeout = int(args.get("timeout") or script_runner.DEFAULT_TIMEOUT)
+    except (TypeError, ValueError):
+        timeout = script_runner.DEFAULT_TIMEOUT
+    timeout = max(5, min(timeout, script_runner.MAX_TIMEOUT))
+    rel = os.path.relpath(resolved, os.path.realpath(script_runner.package_dir(skill))).replace(os.sep, "/")
+    return {"skill": skill, "script": rel, "args": argv, "timeout": timeout}
+
+
+async def _agent_tool_run_skill_script_run(args):
+    from server.skills import script_runner
+
+    if skill_scripts_disabled():
+        raise AgentToolError("已在设置里关闭「允许运行技能脚本」，本次不执行任何脚本；需要时请让用户到 设置 → 技能 打开开关。",
+                             code="skill_script_disabled", status_code=403)
+
+    run_dir = "skill_runs/%s-%s" % (time.strftime("%Y%m%d-%H%M%S"), uuid.uuid4().hex[:6])
+    out_root, _sub = output_storage("output")
+    output_dir = os.path.join(out_root, *run_dir.split("/"))
+    try:
+        result = await asyncio.to_thread(script_runner.run_script, args["skill"], args["script"],
+                                         args.get("args") or [], output_dir, args.get("timeout"))
+    except script_runner.ScriptError as exc:
+        raise AgentToolError(str(exc), code=exc.code, status_code=exc.status_code)
+    except OSError as exc:
+        raise AgentToolError("脚本启动失败：%s" % exc, code="skill_script_failed", status_code=500)
+    result["files"] = [{"name": rel, "url": output_url_for("%s/%s" % (run_dir, rel))} for rel in result["files"]]
+    result["skill"] = args["skill"]
+    if result["timed_out"]:
+        raise AgentToolError("脚本运行超过 %d 秒被终止（%s）；已输出：%s" % (
+            result["timeout"], result["script"], (result["stdout"] or result["stderr"])[-400:] or "（无）"),
+            code="skill_script_timeout", status_code=504)
+    if not result["ok"]:
+        if result["missing_modules"]:
+            hint = "缺少 Python 依赖：%s。" % "、".join(result["missing_modules"])
+            if result.get("requirements"):
+                hint += "技能包里有 requirements.txt，"
+            hint += "请告诉用户需要先安装这些依赖（不要自行安装），装好后再运行。"
+            raise AgentToolError(hint, code="skill_script_missing_deps", status_code=424, recoverable=False)
+        raise AgentToolError("脚本退出码 %s（%s）：%s" % (
+            result["exit_code"], result["script"], (result["stderr"] or result["stdout"])[-1200:] or "（无输出）"),
+            code="skill_script_failed", status_code=422)
+    return result
+
+
+def _agent_tool_run_skill_script_preview(args):
+    args = args if isinstance(args, dict) else {}
+    raw = args.get("args")
+    argv = raw if isinstance(raw, list) else ([raw] if raw else [])
+    return {"type": "skill_script", "skill": str(args.get("skill") or ""), "script": str(args.get("script") or ""),
+            "args": [str(a) for a in argv][:32],
+            "title": "运行技能脚本：%s %s" % (args.get("script") or "", " ".join(str(a) for a in argv)[:200])}
+
+
+def _agent_skill_script_key(args):
+    args = args if isinstance(args, dict) else {}
+    raw = args.get("args")
+    argv = raw if isinstance(raw, list) else ([raw] if raw not in (None, "") else [])
+    script = str(args.get("script") or "").strip().replace("\\", "/")
+    while script.startswith("./"):
+        script = script[2:]
+    return json.dumps([str(args.get("skill") or args.get("name") or "").strip(), script,
+                       [str(a) for a in argv]], ensure_ascii=False)
+
+
+def _agent_skill_script_unapproved(steps, approved_steps=None):
+    """运行技能脚本永远要用户逐次确认：托管 / 自动执行也不放行。
+    只有这一步（技能 + 脚本 + 参数完全一致）出现在用户刚点过「执行」的 approved_steps 里才算批准。"""
+    approved = {_agent_skill_script_key(step.get("args")) for step in (approved_steps or [])
+                if isinstance(step, dict) and str(step.get("tool") or "") == "run_skill_script"}
+    for step in (steps or []):
+        if isinstance(step, dict) and str(step.get("tool") or "") == "run_skill_script":
+            if _agent_skill_script_key(step.get("args")) not in approved:
+                return True
+    return False
 
 
 def _agent_tool_activate_skill_preview(args):
@@ -43574,7 +44796,7 @@ class AgentMemoryCandidateIdsRequest(BaseModel):
 def _agent_memory_v2_store():
     """记忆候选 / recall 这类阶段二·3 功能：开关关闭时如实 400，不静默降级。"""
     if not _agent_v2_memory_enabled():
-        raise HTTPException(status_code=400, detail="记忆候选需要打开 NOVAI_AGENT_V2_MEMORY=1")
+        raise HTTPException(status_code=400, detail="智能记忆未开启：请在 设置 → 记忆 → 画布助手智能记忆 里打开")
     return _agent_memory_store
 
 
@@ -43880,7 +45102,7 @@ async def agent_recall(request: Request, q: str = "", canvas_id: str = "", threa
     """按关键词翻历史（面板搜索用）：返回命中片段 + 出处；没有命中就如实返回 count=0。
     与 recall 工具同一实现，只是这里还要做画布 view 权限校验。"""
     if not _agent_v2_memory_enabled():
-        raise HTTPException(status_code=400, detail="记忆检索需要打开 NOVAI_AGENT_V2_MEMORY=1")
+        raise HTTPException(status_code=400, detail="智能记忆未开启：请在 设置 → 记忆 → 画布助手智能记忆 里打开")
     query = str(q or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="q 不能为空")
@@ -44950,9 +46172,23 @@ def _agent_thought_max_chars():
     return 1200 if _agent_v2_stream_enabled() else 300
 
 
+def agent_smart_memory_setting() -> bool:
+    """设置页「智能记忆」开关（settings.json 的 agent_smart_memory，默认关）。"""
+    try:
+        return bool(load_settings().get("agent_smart_memory") is True)
+    except Exception:
+        return False
+
+
 def _agent_v2_memory_enabled():
-    """阶段二：线程摘要 + 画布项目档案 + 新对话开场注入（运行结束后后台更新，失败只打日志）。"""
-    return _agent_v2_flag("MEMORY") and _agent_memory_store is not None
+    """阶段二：线程摘要 + 画布项目档案 + 新对话开场注入（运行结束后后台更新，失败只打日志）。
+
+    由用户在设置页「智能记忆」里自己打开；环境变量 NOVAI_AGENT_V2_MEMORY 配了就以它为准（排查 / 验收用）。"""
+    if _agent_memory_store is None:
+        return False
+    if os.environ.get("NOVAI_AGENT_V2_MEMORY") is not None:
+        return _agent_v2_flag("MEMORY")
+    return agent_smart_memory_setting()
 
 
 def _agent_v2_read_first_hint():
@@ -45350,7 +46586,7 @@ AGENT_TOOLS = {
         "mutates_canvas": False,
     },
     "activate_skill": {
-        "description": "加载某个技能的完整说明（截断 2 万字），只读、不改画布。系统提示里只有技能索引；"
+        "description": "加载某个技能的完整说明（超长截断并标注），只读、不改画布。系统提示里只有技能索引；"
                        "需要某个技能的完整操作手册时调用它，name 用索引里的技能 id。同一轮重复调用会直接返回已加载提示。",
         "schema": {"type": "object", "properties": {
             "name": {"type": "string", "description": "技能 id（索引里每行第一个）"}},
@@ -45375,6 +46611,22 @@ AGENT_TOOLS = {
         "validate": _agent_tool_install_skill_validate,
         "run": _agent_tool_install_skill_run,
         "preview": _agent_tool_install_skill_preview,
+        "mutates_canvas": False,
+    },
+    "run_skill_script": {
+        "description": "在本机运行某个技能包里自带的脚本（.py / .sh / .js），工作目录限定在该技能目录内，默认 120 秒超时。"
+                       "只在技能说明里写了要跑脚本、且技能附录列出了这个脚本时使用；每次运行前都会弹确认卡等用户点执行。"
+                       "要产出文件就在 args 里用 {output_dir} 占位（运行时替换成本次输出目录），产物以 URL 返回。"
+                       "缺依赖时会报错，按报错告诉用户，不要尝试自己安装依赖。",
+        "schema": {"type": "object", "properties": {
+            "skill": {"type": "string", "description": "技能 id（技能索引里每行第一个）"},
+            "script": {"type": "string", "description": "技能包内脚本的相对路径，例如 scripts/build.py"},
+            "args": {"type": "array", "items": {"type": "string"}, "description": "命令行参数列表，可用 {output_dir} 占位"},
+            "timeout": {"type": "integer", "description": "超时秒数，默认 120，最多 600"}},
+            "required": ["skill", "script"]},
+        "validate": _agent_tool_run_skill_script_validate,
+        "run": _agent_tool_run_skill_script_run,
+        "preview": _agent_tool_run_skill_script_preview,
         "mutates_canvas": False,
     },
     "lipsync_video": {
@@ -45865,6 +47117,389 @@ AGENT_TOOLS["mux_audio"] = {
     "run": _agent_tool_mux_audio_run,
     "preview": _agent_tool_mux_audio_preview,
     "mutates_canvas": False,
+}
+
+
+# ---------------------------------------------------------------------------
+# 画布助手剪辑时间线：edit_timeline（列出 / 切开 / 删除 / 修剪 / 换位置 / 转场 / 音量 / 变速 / 字幕 / 画中画 / 调色 / 自动压低）
+# 片段模型和前端 timelineModel.ts 一致：画面 / 音频是首尾相接的吸附轨，画中画 / 字幕是自由轨。
+# ---------------------------------------------------------------------------
+
+_TL_OVERLAP = ("dissolve", "wipe", "slide", "zoom")
+_TL_TRANS = ("none", "fade", "dissolve", "wipe", "slide", "zoom")
+_TL_TRACK_LABEL = {"video": "画面", "overlay": "画中画", "audio": "音频", "subtitle": "字幕"}
+
+
+def _tl_track(c):
+    if c.get("type") == "subtitle":
+        return "subtitle"
+    if c.get("mediaKind") == "audio":
+        return "audio"
+    return "overlay" if c.get("layer") == "overlay" else "video"
+
+
+def _tl_num(v, d=0.0):
+    try:
+        f = float(v)
+        return f if f == f else d
+    except (TypeError, ValueError):
+        return d
+
+
+def _tl_speed(c):
+    v = _tl_num(c.get("speed"), 1.0)
+    return max(0.25, min(4.0, v)) if v > 0 else 1.0
+
+
+def _tl_len(c):
+    return max(0.0, _tl_num(c.get("outPoint")) - _tl_num(c.get("inPoint"))) / _tl_speed(c)
+
+
+def _tl_trans(c, prev):
+    kind = c.get("trans") if c.get("trans") in _TL_TRANS else "none"
+    if kind == "none":
+        return kind, 0.0
+    want = max(0.0, min(2000.0, _tl_num(c.get("transMs"), 500) or 500)) / 1000
+    cap = min(_tl_len(c), _tl_len(prev) if prev else _tl_len(c)) / 2
+    if kind in _TL_OVERLAP and not prev:
+        return "fade", round(min(want, cap), 3)
+    return kind, round(max(0.0, min(want, cap)), 3)
+
+
+def _tl_place(clips, track):
+    lst = sorted([c for c in clips if _tl_track(c) == track], key=lambda c: _tl_num(c.get("order")))
+    if track == "subtitle":
+        return [(c, _tl_num(c.get("start")), max(_tl_num(c.get("start")) + 0.1, _tl_num(c.get("end")))) for c in lst]
+    if track == "overlay":
+        return [(c, round(_tl_num(c.get("start")), 3), round(_tl_num(c.get("start")) + max(0.1, _tl_len(c)), 3)) for c in lst]
+    out, cursor = [], 0.0
+    for i, c in enumerate(lst):
+        kind, sec = _tl_trans(c, lst[i - 1] if i else None)
+        start = round(max(0.0, cursor - (sec if kind in _TL_OVERLAP else 0.0)), 3)
+        end = round(start + _tl_len(c), 3)
+        out.append((c, start, end))
+        cursor = end
+    return out
+
+
+def _tl_normalize(clips):
+    out = []
+    for track in ("video", "overlay", "audio", "subtitle"):
+        lst = [c for c in clips if _tl_track(c) == track]
+        key = (lambda c: _tl_num(c.get("start"))) if track in ("overlay", "subtitle") else (lambda c: _tl_num(c.get("order")))
+        for i, c in enumerate(sorted(lst, key=key)):
+            out.append(dict(c, order=i))
+    return out
+
+
+def _tl_listing(clips):
+    rows, total = [], 0.0
+    for track in ("video", "overlay", "audio", "subtitle"):
+        for i, (c, s, e) in enumerate(_tl_place(clips, track)):
+            total = max(total, e)
+            row = {"ref": "%s:%d" % (track, i + 1), "id": c.get("id"), "start": round(s, 2), "end": round(e, 2)}
+            if track == "subtitle":
+                row["text"] = str(c.get("text") or "")[:40]
+            else:
+                row.update({"title": str(c.get("title") or "")[:24], "in": round(_tl_num(c.get("inPoint")), 2),
+                            "out": round(_tl_num(c.get("outPoint")), 2)})
+                if c.get("srcDur"):
+                    row["source_duration"] = round(_tl_num(c.get("srcDur")), 2)
+                for key in ("speed", "volume", "trans", "duck"):
+                    if c.get(key) not in (None, "", "none"):
+                        row[key] = c.get(key)
+            rows.append(row)
+    return rows, round(total, 2)
+
+
+def _tl_find(clips, ref):
+    """clip 参数：片段 id，或「轨道:序号」（video:2 = 画面第 2 段，序号从 1 开始，按时间顺序）。"""
+    text = str(ref or "").strip()
+    if not text:
+        raise AgentToolError("要指明哪一段：clip 给片段 id，或 video:2 / audio:1 / overlay:1 / subtitle:3 这种「轨道:序号」", code="invalid_args")
+    for c in clips:
+        if str(c.get("id")) == text:
+            return c
+    m = re.match(r"^(video|overlay|audio|subtitle|画面|画中画|音频|字幕)\s*[:：#]\s*(\d+)$", text)
+    if m:
+        track = {"画面": "video", "画中画": "overlay", "音频": "audio", "字幕": "subtitle"}.get(m.group(1), m.group(1))
+        placed = _tl_place(clips, track)
+        idx = int(m.group(2)) - 1
+        if 0 <= idx < len(placed):
+            return placed[idx][0]
+    raise AgentToolError("时间线里没有片段「%s」：先用 op=list 看一下片段编号" % text, code="invalid_args")
+
+
+def _tl_split(clips, c, at):
+    track = _tl_track(c)
+    span = next(((s, e) for (x, s, e) in _tl_place(clips, track) if x is c), None)
+    if not span or at <= span[0] + 0.1 or at >= span[1] - 0.1:
+        raise AgentToolError("切点 %.2f 秒不在这段中间（这段是 %.2f–%.2f 秒）" % (at, span[0] if span else 0, span[1] if span else 0), code="invalid_args")
+    nid = "clip_%s" % uuid.uuid4().hex[:10]
+    if track == "subtitle":
+        a, b = dict(c, end=round(at, 3)), dict(c, id=nid, start=round(at, 3))
+    else:
+        cut = round(_tl_num(c.get("inPoint")) + (at - span[0]) * _tl_speed(c), 3)
+        a = dict(c, outPoint=cut)
+        b = dict(c, id=nid, inPoint=cut, order=_tl_num(c.get("order")) + 0.5, trans="none", transMs=0)
+        if track == "overlay":
+            b["start"] = round(at, 3)
+        a.pop("kf", None)
+        b.pop("kf", None)
+    out = []
+    for x in clips:
+        out.extend([a, b] if x is c else [x])
+    return out, nid
+
+
+_TL_RATIOS = ("16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9", "9:21", "2.39:1")
+_TL_RESES = ("720p", "1080p", "2K", "4K")
+# 和前端 timelineModel.EXPORT_PRESETS 一致
+_TL_PRESETS = {
+    "douyin": {"label": "抖音 / 视频号 / 快手", "ratio": "9:16", "res": "1080p"},
+    "xiaohongshu": {"label": "小红书", "ratio": "3:4", "res": "1080p"},
+    "bilibili": {"label": "B站 / YouTube", "ratio": "16:9", "res": "1080p"},
+    "square": {"label": "方形", "ratio": "1:1", "res": "1080p"},
+    "4k": {"label": "横版 4K", "ratio": "16:9", "res": "4K"},
+}
+
+
+def _agent_tool_edit_timeline_validate(args):
+    args = dict(args or {})
+    canvas_id = str(args.get("canvas_id") or "").strip() or str(_AGENT_RUN_CANVAS_ID.get() or "").strip()
+    if not canvas_id:
+        raise AgentToolError("canvas_id 不能为空", code="invalid_args")
+    ops = args.get("ops")
+    if isinstance(ops, dict):
+        ops = [ops]
+    if ops is None and args.get("op"):
+        ops = [{k: v for k, v in args.items() if k not in ("canvas_id", "node_id", "ops")}]
+    if not isinstance(ops, list) or not ops:
+        raise AgentToolError("ops 要给操作列表，例如 [{\"op\":\"list\"}] 或 [{\"op\":\"split\",\"at\":3.2}]", code="invalid_args")
+    if len(ops) > 60:
+        raise AgentToolError("一次最多 60 个操作", code="invalid_args")
+    norm = []
+    for raw in ops:
+        if not isinstance(raw, dict) or not str(raw.get("op") or "").strip():
+            raise AgentToolError("每个操作都要有 op 字段", code="invalid_args")
+        norm.append(dict(raw, op=str(raw["op"]).strip().lower()))
+    return {"canvas_id": canvas_id, "node_id": str(args.get("node_id") or "").strip(), "ops": norm}
+
+
+def _agent_tool_edit_timeline_preview(args, canvas=None):
+    names = {"list": "看片段", "split": "切开", "remove": "删片段", "trim": "修剪", "move": "换位置", "transition": "转场",
+             "volume": "音量", "speed": "变速", "subtitle": "加字幕", "clear_subtitles": "清空字幕", "overlay": "加画中画",
+             "color": "调色", "duck": "自动压低", "format": "成片规格"}
+    ops = [names.get(o.get("op"), o.get("op")) for o in args.get("ops") or []]
+    return "剪辑时间线：" + "、".join(ops[:8]) + ("等 %d 个操作" % len(ops) if len(ops) > 8 else "")
+
+
+def _agent_tool_edit_timeline_run(args):
+    state = {}
+
+    def _mutate(canvas):
+        nodes = [n for n in canvas.get("nodes") or [] if str(n.get("kind") or n.get("type")) == "timeline"]
+        node = next((n for n in nodes if str(n.get("id")) == args["node_id"]), None) if args["node_id"] else (nodes[-1] if len(nodes) else None)
+        if not node:
+            raise AgentToolError("画布上没有剪辑时间线节点" if not nodes else "找不到时间线节点 %s" % args["node_id"],
+                                 code="node_not_found", status_code=404)
+        by_id = _agent_nodes_by_id(canvas)
+        clips = [dict(c) for c in node.get("clips") or [] if isinstance(c, dict)]
+        done = []
+        for op in args["ops"]:
+            kind = op["op"]
+            if kind == "list":
+                continue
+            if kind == "split":
+                at = _tl_num(op.get("at"), -1)
+                if op.get("clip"):
+                    targets = [_tl_find(clips, op["clip"])]
+                else:
+                    targets = [c for track in ("video", "overlay", "audio") for (c, s, e) in _tl_place(clips, track) if s + 0.1 < at < e - 0.1]
+                if not targets:
+                    raise AgentToolError("%.2f 秒处没有可以切开的片段" % at, code="invalid_args")
+                for c in targets:
+                    clips, _ = _tl_split(clips, c, at)
+                done.append("在 %.2f 秒切开" % at)
+            elif kind == "remove":
+                c = _tl_find(clips, op.get("clip"))
+                clips = [x for x in clips if x is not c]
+                done.append("删除 %s" % (c.get("title") or c.get("text") or c.get("id")))
+            elif kind == "trim":
+                c = _tl_find(clips, op.get("clip"))
+                if _tl_track(c) == "subtitle":
+                    raise AgentToolError("字幕用 start/end 调时间（op=subtitle 重新加），trim 只用于画面 / 音频片段", code="invalid_args")
+                src_max = _tl_num(c.get("srcDur"), 0) or 1e9
+                new_in = _tl_num(op.get("in"), _tl_num(c.get("inPoint"))) if op.get("in") is not None else _tl_num(c.get("inPoint"))
+                new_out = _tl_num(op.get("out"), _tl_num(c.get("outPoint"))) if op.get("out") is not None else _tl_num(c.get("outPoint"))
+                if op.get("duration") is not None:
+                    new_out = new_in + max(0.1, _tl_num(op.get("duration"))) * _tl_speed(c)
+                if c.get("mediaKind") == "image":
+                    new_in, new_out = 0.0, max(0.1, min(600.0, new_out - new_in))
+                else:
+                    new_in = max(0.0, min(new_in, src_max - 0.1))
+                    new_out = max(new_in + 0.1, min(new_out, src_max))
+                c["inPoint"], c["outPoint"] = round(new_in, 3), round(new_out, 3)
+                done.append("修剪 %s → %.2f–%.2f" % (c.get("title") or c.get("id"), new_in, new_out))
+            elif kind == "move":
+                c = _tl_find(clips, op.get("clip"))
+                track = _tl_track(c)
+                if track in ("overlay", "subtitle"):
+                    shift = _tl_num(op.get("start"), _tl_num(c.get("start")))
+                    if track == "subtitle":
+                        dur = _tl_num(c.get("end")) - _tl_num(c.get("start"))
+                        c["start"], c["end"] = round(max(0.0, shift), 3), round(max(0.0, shift) + dur, 3)
+                    else:
+                        c["start"] = round(max(0.0, shift), 3)
+                else:
+                    lst = [x for (x, _, _) in _tl_place(clips, track) if x is not c]
+                    to = int(_tl_num(op.get("to"), len(lst) + 1)) - 1
+                    lst.insert(max(0, min(len(lst), to)), c)
+                    for i, x in enumerate(lst):
+                        x["order"] = i
+                done.append("调整 %s 的位置" % (c.get("title") or c.get("id")))
+            elif kind == "transition":
+                c = _tl_find(clips, op.get("clip"))
+                tk = str(op.get("kind") or "dissolve")
+                if tk not in _TL_TRANS:
+                    raise AgentToolError("转场 kind 只能是 %s" % "/".join(_TL_TRANS), code="invalid_args")
+                c["trans"], c["transMs"] = tk, int(max(100, min(2000, _tl_num(op.get("ms"), 500))))
+                done.append("%s 进场转场 %s" % (c.get("title") or c.get("id"), tk))
+            elif kind in ("volume", "speed"):
+                c = _tl_find(clips, op.get("clip"))
+                if kind == "volume":
+                    c["volume"] = round(max(0.0, min(2.0, _tl_num(op.get("value"), 1))), 3)
+                else:
+                    c["speed"] = round(max(0.25, min(4.0, _tl_num(op.get("value"), 1))), 3)
+                done.append("%s %s=%s" % (c.get("title") or c.get("id"), kind, c[kind]))
+            elif kind == "subtitle":
+                text = str(op.get("text") or "").strip()
+                if not text:
+                    raise AgentToolError("字幕 text 不能为空", code="invalid_args")
+                start = max(0.0, _tl_num(op.get("start")))
+                end = max(start + 0.3, _tl_num(op.get("end"), start + 2))
+                clips.append({"id": "sub_%s" % uuid.uuid4().hex[:10], "sourceNodeId": "", "url": "", "mediaKind": "video",
+                              "inPoint": 0, "outPoint": 2, "order": 9999, "type": "subtitle", "text": text[:200],
+                              "start": round(start, 2), "end": round(end, 2)})
+                done.append("加字幕「%s」" % text[:12])
+            elif kind == "clear_subtitles":
+                clips = [x for x in clips if x.get("type") != "subtitle"]
+                done.append("清空字幕")
+            elif kind == "overlay":
+                src = by_id.get(str(op.get("node") or ""))
+                url = _agent_beat_url(src) if src else ""
+                if not src or not url or str(src.get("kind")) not in ("video", "image"):
+                    raise AgentToolError("画中画 node 要给有结果的视频 / 图片节点 id", code="invalid_args")
+                is_img = str(src.get("kind")) == "image"
+                dur = 3.0 if is_img else (_agent_beat_out_dur(src) or 5.0)
+                clip = {"id": "clip_%s" % uuid.uuid4().hex[:10], "sourceNodeId": src["id"], "url": url,
+                        "mediaKind": "image" if is_img else "video", "inPoint": 0,
+                        "outPoint": round(max(0.1, _tl_num(op.get("duration"), dur)), 3), "order": 9999,
+                        "layer": "overlay", "start": round(max(0.0, _tl_num(op.get("start"))), 3),
+                        "title": _agent_beat_title(src)}
+                if not is_img:
+                    clip["srcDur"] = round(dur, 3)
+                tf = {k: _tl_num(op.get(k)) for k in ("x", "y", "s", "o") if op.get(k) is not None}
+                if tf:
+                    clip["tf"] = tf
+                clips.append(clip)
+                done.append("加画中画 %s" % clip["title"])
+            elif kind == "color":
+                c = _tl_find(clips, op.get("clip"))
+                col = dict(c.get("color") or {})
+                for key, name in (("b", "brightness"), ("c", "contrast"), ("s", "saturation")):
+                    v = op.get(key, op.get(name))
+                    if v is not None:
+                        col[key] = max(0.0, min(300.0, _tl_num(v, 100)))
+                c["color"] = col
+                done.append("调色 %s" % (c.get("title") or c.get("id")))
+            elif kind == "duck":
+                c = _tl_find(clips, op.get("clip"))
+                if _tl_track(c) != "audio":
+                    raise AgentToolError("自动压低只用在音频轨上的片段（通常是背景音乐）", code="invalid_args")
+                level = _tl_num(op.get("level"), 0.25)
+                if 0 < level < 1:
+                    c["duck"] = round(level, 3)
+                else:
+                    c.pop("duck", None)
+                done.append("背景音乐自动压低到 %d%%" % round(level * 100) if 0 < level < 1 else "关闭自动压低")
+            elif kind == "format":
+                preset = _TL_PRESETS.get(str(op.get("preset") or "").strip().lower())
+                ratio = str(op.get("ratio") or (preset or {}).get("ratio") or "").strip()
+                res = str(op.get("res") or (preset or {}).get("res") or "").strip()
+                if op.get("preset") and not preset:
+                    raise AgentToolError("不认识的平台预设 %s，可用：%s" % (op.get("preset"), "、".join(_TL_PRESETS)), code="invalid_args")
+                if ratio and ratio not in _TL_RATIOS:
+                    raise AgentToolError("画幅只能是 %s" % " / ".join(_TL_RATIOS), code="invalid_args")
+                if res and res not in _TL_RESES:
+                    raise AgentToolError("清晰度只能是 %s" % " / ".join(_TL_RESES), code="invalid_args")
+                if not ratio and not res:
+                    raise AgentToolError("format 要给 preset，或 ratio / res", code="invalid_args")
+                if ratio:
+                    node["ratio"] = ratio
+                if res:
+                    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+                    node["data"] = dict(data, tlRes=res)
+                done.append("成片规格改为 %s%s" % ((preset or {}).get("label", "") + " " if preset else "",
+                                                 " · ".join(x for x in (node.get("ratio") if ratio else "", res) if x)))
+            else:
+                raise AgentToolError("不认识的操作 op=%s" % kind, code="invalid_args")
+        clips = _tl_normalize(clips)
+        if done:
+            node["clips"] = clips
+            # 来源连线和片段保持一致（前端也会补，这里先把新加的画中画来源连上）
+            conns = canvas.setdefault("connections", [])
+            have = {(str(e.get("from")), str(e.get("to"))) for e in conns if isinstance(e, dict)}
+            for c in clips:
+                sid = str(c.get("sourceNodeId") or "")
+                if sid and sid in by_id and (sid, str(node["id"])) not in have:
+                    conns.append(_agent_beat_edge(sid, node["id"]))
+                    have.add((sid, str(node["id"])))
+        state.update({"node": node, "clips": clips, "done": done})
+        return None
+
+    _agent_mutate_canvas(args["canvas_id"], _mutate)
+    rows, total = _tl_listing(state["clips"])
+    msg = ("已修改剪辑时间线：" + "；".join(state["done"])) if state["done"] else "剪辑时间线现状如下"
+    node = state["node"]
+    return {"node_id": node["id"], "duration": total, "clips": rows, "changed": bool(state["done"]),
+            "ratio": node.get("ratio") or "16:9", "res": (node.get("data") or {}).get("tlRes") or "1080p",
+            "message": msg + "（共 %.1f 秒，%d 段）" % (total, len(rows))}
+
+
+AGENT_TOOLS["edit_timeline"] = {
+    "description": "查看和修改画布上的剪辑时间线（不花额度）。ops 是按顺序执行的操作列表：\n"
+                   "· list：列出全部片段（ref=轨道:序号、id、在时间线上的 start/end、素材 in/out）——改之前先 list\n"
+                   "· split{at, clip?}：在时间线第 at 秒切开（不给 clip 就切开压着这一秒的所有片段）\n"
+                   "· remove{clip}：删除片段（画面 / 音频轨后面的片段自动往前补）\n"
+                   "· trim{clip, in?, out?, duration?}：改用素材的哪一段（in/out 是素材里的秒数）或直接给时间线上的时长\n"
+                   "· move{clip, to}：画面 / 音频轨上挪到第 to 位；画中画 / 字幕用 move{clip, start} 改开始时间\n"
+                   "· transition{clip, kind, ms}：进场转场 kind=none|fade|dissolve|wipe|slide|zoom\n"
+                   "· volume{clip, value 0–2} / speed{clip, value 0.25–4}\n"
+                   "· subtitle{text, start, end} 加字幕；clear_subtitles 清空字幕\n"
+                   "· overlay{node, start, duration?, x?, y?, s?, o?}：把视频 / 图片节点叠到主画面上（x/y 是中心位置 0–1，s 缩放，o 不透明度）\n"
+                   "· color{clip, b?, c?, s?}：亮度 / 对比 / 饱和（百分比，100=原样）\n"
+                   "· duck{clip, level}：音频轨的背景音乐在画面有声音时自动压低到 level（0–1，给 1 关闭）\n"
+                   "· format{preset? | ratio?, res?}：成片规格。preset=douyin(9:16)|xiaohongshu(3:4)|bilibili(16:9)|square(1:1)|4k；"
+                   "或直接给 ratio（16:9 / 9:16 / 1:1 / 3:4 …）和 res（720p / 1080p / 2K / 4K）。改完运行时间线节点就按这个规格导出成片\n"
+                   "clip 用片段 id 或 video:2 / audio:1 / overlay:1 / subtitle:3（从 1 开始按时间顺序）。返回改完后的片段列表。",
+    "schema": {"type": "object", "properties": {
+        "canvas_id": {"type": "string", "description": "不填就用当前画布"},
+        "node_id": {"type": "string", "description": "剪辑时间线节点 id；画布上只有一条时间线时可以不填"},
+        "ops": {"type": "array", "description": "操作列表，按顺序执行", "items": {"type": "object", "properties": {
+            "op": {"type": "string", "enum": ["list", "split", "remove", "trim", "move", "transition", "volume", "speed", "subtitle", "clear_subtitles", "overlay", "color", "duck", "format"]},
+            "preset": {"type": "string", "enum": ["douyin", "xiaohongshu", "bilibili", "square", "4k"]},
+            "ratio": {"type": "string"}, "res": {"type": "string"},
+            "clip": {"type": "string"}, "at": {"type": "number"}, "in": {"type": "number"}, "out": {"type": "number"},
+            "duration": {"type": "number"}, "to": {"type": "number"}, "start": {"type": "number"}, "end": {"type": "number"},
+            "kind": {"type": "string"}, "ms": {"type": "number"}, "value": {"type": "number"}, "text": {"type": "string"},
+            "node": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "s": {"type": "number"}, "o": {"type": "number"},
+            "b": {"type": "number"}, "c": {"type": "number"}, "level": {"type": "number"}}, "required": ["op"]}}},
+        "required": ["ops"]},
+    "validate": _agent_tool_edit_timeline_validate,
+    "run": _agent_tool_edit_timeline_run,
+    "preview": _agent_tool_edit_timeline_preview,
+    "mutates_canvas": True,
 }
 
 
@@ -46409,7 +48044,7 @@ async def agent_execute_step(tool_name, args):
     except AgentToolError as exc:
         return {"ok": False, "tool": tool_name, "error": exc.message, "code": exc.code,
                 "status_code": exc.status_code, "warnings": exc.warnings,
-                "requires_force": exc.requires_force}
+                "requires_force": exc.requires_force, "recoverable": exc.recoverable}
     except _AgentFileToolError as exc:
         return {"ok": False, "tool": tool_name, "error": exc.message, "code": exc.code,
                 "status_code": exc.status_code}
@@ -46618,6 +48253,32 @@ def set_agent_web_access(payload: AgentWebAccessPayload):
     os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
     write_json_atomic(SETTINGS_FILE, cfg, ensure_ascii=False, indent=2)
     return {"enabled": agent_web_enabled()}
+
+
+class AgentSmartMemoryPayload(BaseModel):
+    enabled: bool = False
+
+
+@app.get("/api/agent/smart-memory")
+def get_agent_smart_memory():
+    """设置页「画布助手智能记忆」：自动摘要 / 项目档案 / 记忆候选卡片 / 跨画布检索的总开关。
+    locked=true 表示被环境变量 NOVAI_AGENT_V2_MEMORY 固定住了，设置页只读。"""
+    return {"enabled": _agent_v2_memory_enabled(),
+            "locked": os.environ.get("NOVAI_AGENT_V2_MEMORY") is not None,
+            "available": _agent_memory_store is not None}
+
+
+@app.put("/api/agent/smart-memory")
+def set_agent_smart_memory(payload: AgentSmartMemoryPayload):
+    cfg = load_settings()
+    cfg["agent_smart_memory"] = bool(payload.enabled)
+    os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+    write_json_atomic(SETTINGS_FILE, cfg, ensure_ascii=False, indent=2)
+    try:
+        _agent_v2_sync_recall_tool()       # recall 工具立即跟着开关注册 / 撤下，不用重启
+    except Exception as exc:
+        print(f"[Agent] 同步 recall 工具失败（重启后生效）: {exc}", flush=True)
+    return get_agent_smart_memory()
 
 
 class AgentWebProxyPayload(BaseModel):
@@ -48133,6 +49794,11 @@ class AgentRunStep(BaseModel):
         return value if isinstance(value, str) else ""
 
 
+# 技能正文注入上限（字符）：绑定的技能正文会整段进系统提示，超长截断并标注；BEAT 技能胶囊的请求字段同口径。
+# 2026-11-19 从 20000 提到 40000：官方技能包正文动辄上万字，2 万字符会把执行协议 / 检查清单切掉。
+AGENT_SKILL_PROMPT_MAX_CHARS = 40000
+
+
 class AgentRunRequest(BaseModel):
     canvas_id: str
     instruction: str = Field(min_length=1, max_length=4000)
@@ -48167,7 +49833,7 @@ class AgentRunRequest(BaseModel):
     # 思考强度：low/mid/high/xhigh/max，空串 = 不传（默认）；透传到本轮所有真实模型调用
     think_level: str = ""
     # 面板挂载的技能正文（BEAT 的 / 技能胶囊）：进系统提示，不再塞进 instruction 被 4000 字截断
-    skill_prompt: str = Field("", max_length=20000)
+    skill_prompt: str = Field("", max_length=AGENT_SKILL_PROMPT_MAX_CHARS)
     skill_name: str = Field("", max_length=120)
     # 用户 @ 点名的应用（工具）：[{name, title, description}]，系统提示里要求本轮用它
     apps: List[Dict[str, Any]] = []
@@ -48646,7 +50312,7 @@ AGENT_PLAN_GENERATION_TOOLS = {"generate_image", "generate_video", "lipsync_vide
 AGENT_PLAN_WRITE_TOOLS = {"create_node", "connect_nodes", "update_node", "disconnect_nodes", "batch_generate", "apply_template",
                         "add_image_to_canvas"}
 # 写操作 / 生成操作的并集：未确认时一律不落盘，先出方案等用户点执行
-AGENT_PLAN_CONFIRM_TOOLS = AGENT_PLAN_WRITE_TOOLS | AGENT_PLAN_GENERATION_TOOLS | {"install_skill"}
+AGENT_PLAN_CONFIRM_TOOLS = AGENT_PLAN_WRITE_TOOLS | AGENT_PLAN_GENERATION_TOOLS | {"install_skill", "run_skill_script"}
 
 
 def agent_plan_confirmation_needed(steps, confirmed=False):
@@ -49387,8 +51053,9 @@ _AGENT_STEP_LABELS = {
     "remember": "写入记忆", "forget": "删除记忆", "save_asset": "存入素材库", "save_product": "保存产品档案", "arrange_canvas": "整理画布", "get_canvas": "读取画布",
     "web_search": "联网搜索", "fetch_url": "读取网页", "search_images": "搜索参考图",
     "find_similar_images": "以图搜图", "lipsync_video": "对口型", "check_task": "查询任务",
-    "activate_skill": "加载技能", "use_asset": "使用素材",
+    "activate_skill": "加载技能", "run_skill_script": "运行技能脚本", "use_asset": "使用素材",
     "batch_generate": "建多维表格并批量生成", "run_batch": "运行批量生成", "review_table": "检查表格", "analyze_video": "读参考视频", "depth_capture": "本机深度动作捕捉",
+    "edit_timeline": "剪辑时间线",
 }
 _AGENT_NODE_TYPE_LABELS = {"text": "文本", "prompt": "提示词", "image": "图片", "video": "视频",
                            "audio": "配音", "timeline": "时间线", "group": "分组",
@@ -52372,7 +54039,10 @@ def _agent_emit_stream_whole(raw):
 _AGENT_STREAM_FIRST_BYTE_TIMEOUT_SECONDS = float(os.getenv("NOVAI_AGENT_STREAM_FIRST_TIMEOUT", "8"))
 # 建连单独更短：连接都建不上（TCP/TLS/网关）就不值得等 8 秒，4 秒直接回退非流式
 _AGENT_STREAM_CONNECT_TIMEOUT_SECONDS = float(os.getenv("NOVAI_AGENT_STREAM_CONNECT_TIMEOUT", "4"))
-_AGENT_STREAM_IDLE_TIMEOUT_SECONDS = 15.0
+_AGENT_STREAM_IDLE_TIMEOUT_SECONDS = float(os.getenv("NOVAI_AGENT_STREAM_IDLE_TIMEOUT", "30"))
+# 思考型模型中途「憋」推理时上游可能几十秒不吐字（中转站也只隔 30s 发一次保活）：15s 无增量就判超时，
+# 会把已经收到一半的回答扔掉、改走更慢的非流式重来一遍（日志里大量 stream_idle → non_stream_total 120s）
+_AGENT_STREAM_IDLE_TIMEOUT_THINK_SECONDS = float(os.getenv("NOVAI_AGENT_STREAM_IDLE_TIMEOUT_THINK", "75"))
 _AGENT_STREAM_TOTAL_TIMEOUT_SECONDS = 90.0
 # 思考型模型（带推理的）：首包天然慢——一个字都还没吐的时候上游可能在算推理。
 # 跟普通模型共用 8 秒会让「带思考的模型」几乎每次都超时降级，所以按模型能力单独放宽；
@@ -52412,6 +54082,13 @@ def _agent_stream_first_timeout(chat):
     if _agent_chat_thinks(chat):
         return max(0.001, float(_AGENT_STREAM_FIRST_BYTE_TIMEOUT_THINK_SECONDS))
     return max(0.001, float(_AGENT_STREAM_FIRST_BYTE_TIMEOUT_SECONDS))
+
+
+def _agent_stream_idle_timeout(chat):
+    """首包之后「多久没新数据算断流」：思考型放宽。"""
+    if _agent_chat_thinks(chat):
+        return max(0.001, float(_AGENT_STREAM_IDLE_TIMEOUT_THINK_SECONDS))
+    return max(0.001, float(_AGENT_STREAM_IDLE_TIMEOUT_SECONDS))
 
 
 def _agent_stream_total_timeout(chat):
@@ -52465,7 +54142,7 @@ def _agent_decision_timeout_log(kind, key="", elapsed=0.0):
 
 
 async def _agent_stream_next_line(lines, started_at, key="", first=False,
-                                 first_timeout=None, total_timeout=None):
+                                 first_timeout=None, total_timeout=None, idle_timeout=None):
     """从响应行迭代器取下一行：首包 / 之后无增量 15s / 整体 三重上限。
 
     首包与整体上限按模型来（思考型放宽，见 _agent_stream_first_timeout / _agent_stream_total_timeout），
@@ -52473,7 +54150,7 @@ async def _agent_stream_next_line(lines, started_at, key="", first=False,
     正常结束抛 StopAsyncIteration。"""
     idle = float(first_timeout if (first and first_timeout) else _AGENT_STREAM_FIRST_BYTE_TIMEOUT_SECONDS)
     if not first:
-        idle = float(_AGENT_STREAM_IDLE_TIMEOUT_SECONDS)
+        idle = float(idle_timeout or _AGENT_STREAM_IDLE_TIMEOUT_SECONDS)
     total = float(total_timeout or _AGENT_STREAM_TOTAL_TIMEOUT_SECONDS)
     key_text = str(key or "模型")
     elapsed = time.monotonic() - started_at
@@ -52624,12 +54301,13 @@ async def _agent_run_stream_chat(chat, messages, tools=None):
     # K3：思考型模型首包放宽（默认 60s），普通模型仍是 8s；都在环境变量里可调
     first_timeout = _agent_stream_first_timeout(chat)
     total_timeout = _agent_stream_total_timeout(chat)
+    idle_timeout = _agent_stream_idle_timeout(chat)
     first_delta_at = [0.0]
     try:
         # 流式建连/等响应头也要有上限：httpx 的 read 超时覆盖「等响应头 + 每块数据」，
         # 否则上游迟迟不回响应头时，会一直等到全局 AI_REQUEST_TIMEOUT（1800s）。
         stream_client_timeout = httpx.Timeout(connect=float(_AGENT_STREAM_CONNECT_TIMEOUT_SECONDS),
-                                              read=first_timeout,
+                                              read=max(first_timeout, idle_timeout),
                                               write=30.0, pool=15.0)
         async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT,
                                      trust_env=provider_trust_env(chat.get("provider_cfg")),
@@ -52660,7 +54338,8 @@ async def _agent_run_stream_chat(chat, messages, tools=None):
                                                              _agent_stream_key(chat),
                                                              first=stream_first,
                                                              first_timeout=first_timeout,
-                                                             total_timeout=total_timeout)
+                                                             total_timeout=total_timeout,
+                                                             idle_timeout=idle_timeout)
                     except StopAsyncIteration:
                         break
                     stream_first = False
@@ -52669,6 +54348,10 @@ async def _agent_run_stream_chat(chat, messages, tools=None):
                         if not first_delta_at[0]:
                             first_delta_at[0] = time.monotonic() - stream_started
                         _agent_stream_collect(deltas, counters, content_state)
+                    # 收到 finish_reason / [DONE] 就算读完：有的中转站（APIMART 等）回答早发完了
+                    # 却不关连接、隔 30s 发一次保活，等到断开要好几分钟，还会被判成断流超时扔掉整段回答
+                    if parser.done or parser.finish_reason:
+                        break
     except AgentRunError:
         raise
     except httpx.ConnectTimeout:
@@ -52765,10 +54448,11 @@ async def _agent_run_stream_text(chat, messages):
     # K3：JSON 模式同样按模型放宽首包 / 总时限
     first_timeout = _agent_stream_first_timeout(chat)
     total_timeout = _agent_stream_total_timeout(chat)
+    idle_timeout = _agent_stream_idle_timeout(chat)
     try:
         # 流式建连/等响应头也受首包上限保护（httpx read 超时覆盖等响应头与每块数据）
         stream_client_timeout = httpx.Timeout(connect=float(_AGENT_STREAM_CONNECT_TIMEOUT_SECONDS),
-                                              read=first_timeout,
+                                              read=max(first_timeout, idle_timeout),
                                               write=30.0, pool=15.0)
         async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT,
                                      trust_env=provider_trust_env(chat.get("provider_cfg")),
@@ -52805,7 +54489,8 @@ async def _agent_run_stream_text(chat, messages):
                                                              _agent_stream_key(chat),
                                                              first=stream_first,
                                                              first_timeout=first_timeout,
-                                                             total_timeout=total_timeout)
+                                                             total_timeout=total_timeout,
+                                                             idle_timeout=idle_timeout)
                     except StopAsyncIteration:
                         break
                     stream_first = False
@@ -52813,6 +54498,8 @@ async def _agent_run_stream_text(chat, messages):
                         if str(delta.get("type") or "") == _agent_stream.DELTA_REASONING:
                             _agent_stream_publish([delta], counters)
                     _flush_message()
+                    if parser.done or parser.finish_reason:      # 同上：收尾标记到了就不再等连接关闭
+                        break
     except AgentRunError:
         raise
     except httpx.ConnectTimeout:
@@ -53132,7 +54819,6 @@ def _agent_run_persist_session(session, status, message, history, rounds, steps_
         print(f"[Agent] run {run_id} 会话持久化失败: {exc}")
 
 
-AGENT_SKILL_PROMPT_MAX_CHARS = 20000
 AGENT_SKILL_TRUNCATED_NOTE = "（技能说明过长，已截断）"
 
 
@@ -53175,7 +54861,7 @@ def _agent_skill_index_block():
     lines = ["\n\n【技能索引】当前可用技能（系统只给了索引；需要完整操作说明时调用 "
              "activate_skill(name)，name 用每行开头的技能 id。没调用前不要假设技能细节。"
              "用户给 RedSkill 技能名（redskill:<名>）、任意 HTTPS 的 SKILL.md 直链或 GitHub 仓库地址"
-             "并要求安装时调用 install_skill(url)，只下载并校验文本，不执行仓库脚本、git clone 或终端命令）："]
+             "并要求安装时调用 install_skill(url)，只下载并校验文本，不执行仓库脚本、git clone 或终端命令；技能说明附录列出了包内脚本时，可用 run_skill_script 运行，每次都会先请用户确认）："]
     for skill in skills[:AGENT_SKILL_INDEX_MAX]:
         desc = str(skill.get("description") or "").strip().replace("\n", " ")
         lines.append("- %s | %s | %s" % (skill.get("id"), skill.get("name") or skill.get("id"), desc[:80]))
@@ -53286,6 +54972,7 @@ def _agent_output_format_block():
 
 _AGENT_BEAT_SYSTEM_PROMPT = (
     '你是 NOVAI「智能画布」里的创作搭档 Agent：一位懂电商视觉、广告片和短视频的创意总监兼执行制片。你运行在服务端循环里：每一轮你决定接下来做哪几步，系统真实执行后把结果回灌给你，你再决定下一轮，直到整件事做完。\n'
+    '被问到「你是什么模型 / 谁做的」时，每次都用同一个口径回答：你是 NOVAI 智能画布BEAT 的创作搭档；底层大模型由用户在设置里配置，当前用的是哪个看输入框下方的模型按钮。不要自称某个厂商或某个具体型号，也不要前后说法不一。\n'
     '\n'
     '# 你怎么工作\n'
     '1. 先想清楚再动手。每轮在 thought 里写你的真实判断（2-4 句人话）：用户要的到底是什么、现在进行到哪个阶段、这一轮为什么这么做。这段会实时展示给用户看，写成「我在想……」的口吻，不出现工具名、参数名、节点 ID。\n'
@@ -53626,7 +55313,7 @@ class _CanvasRunContext(_AgentRunContext):
         if self.skill_prompt:
             prompt += ("\n\n【本轮用户挂载了技能「" + (self.skill_name or "技能") + "」——整个任务必须按它的流程和要求来做，"
                        "它和上面的规则冲突时以它为准（但不能扩大工具权限）。先按技能拆出整体方案再动手】\n"
-                       + self.skill_prompt[:20000])
+                       + self.skill_prompt[:AGENT_SKILL_PROMPT_MAX_CHARS])
         if self.apps:
             prompt += ("\n\n【本轮用户点名要用的应用——必须在方案里真的调用这些工具，不能只口头描述或换别的做法】\n"
                        + "\n".join("- 工具名 " + x.get("name", "") + "（" + (x.get("title") or "") + "）：" + (x.get("description") or "")
@@ -55155,13 +56842,26 @@ def _agent_v2_recall_tool_entry():
     }
 
 
-if _agent_v2_memory_enabled():
-    # 开关关闭时完全不注册：工具面与改造前逐字一致（开关关闭的行为快照靠这条保证）
-    AGENT_TOOLS[RECALL_TOOL_NAME] = _agent_v2_recall_tool_entry()
-    AGENT_RUN_STEP_FREE_TOOLS.add(RECALL_TOOL_NAME)
-    # 纯检索：不改画布、不花钱，plan 模式下也不必先出方案卡等用户点执行
-    AGENT_FREE_TOOLS.add(RECALL_TOOL_NAME)
-    _AGENT_FREE_SIGNATURE_TOOLS = _AGENT_FREE_SIGNATURE_TOOLS + (RECALL_TOOL_NAME,)
+def _agent_v2_sync_recall_tool():
+    """recall 工具跟着「智能记忆」开关注册 / 撤下。
+    开关关闭时完全不注册：工具面与改造前逐字一致（开关关闭的行为快照靠这条保证）；
+    设置页里打开 / 关闭后立即调用一次，不用重启后端。"""
+    global _AGENT_FREE_SIGNATURE_TOOLS
+    if _agent_v2_memory_enabled():
+        AGENT_TOOLS[RECALL_TOOL_NAME] = _agent_v2_recall_tool_entry()
+        AGENT_RUN_STEP_FREE_TOOLS.add(RECALL_TOOL_NAME)
+        # 纯检索：不改画布、不花钱，plan 模式下也不必先出方案卡等用户点执行
+        AGENT_FREE_TOOLS.add(RECALL_TOOL_NAME)
+        if RECALL_TOOL_NAME not in _AGENT_FREE_SIGNATURE_TOOLS:
+            _AGENT_FREE_SIGNATURE_TOOLS = _AGENT_FREE_SIGNATURE_TOOLS + (RECALL_TOOL_NAME,)
+    else:
+        AGENT_TOOLS.pop(RECALL_TOOL_NAME, None)
+        AGENT_RUN_STEP_FREE_TOOLS.discard(RECALL_TOOL_NAME)
+        AGENT_FREE_TOOLS.discard(RECALL_TOOL_NAME)
+        _AGENT_FREE_SIGNATURE_TOOLS = tuple(t for t in _AGENT_FREE_SIGNATURE_TOOLS if t != RECALL_TOOL_NAME)
+
+
+_agent_v2_sync_recall_tool()
 
 
 async def _agent_v2_round_context(ctx, chat, snapshot, transcript, chat_history, instruction, rounds,
@@ -56103,6 +57803,10 @@ async def _agent_run_producer(req, queue, bus=None):
                     steps, approved=bool(approved_steps),
                     auto_execute=bool(req.get("auto_execute")) or autonomy == "managed",
                     beat_flow=beat_flow))
+            # 技能脚本单独一道闸：托管 / auto_execute 也不放行，只认本轮用户刚批准过的同一脚本 + 同一参数
+            if _agent_skill_script_unapproved(steps, approved_steps if rounds == 1 else []):
+                gate = {"needed": True,
+                        "tools": sorted(set(list(gate.get("tools") or []) + ["run_skill_script"]))}
             # 方案文案的人话三件套（目标 / 为什么这么选 / 假设）都来自模型这一轮的 JSON，脏值后端收敛
             round_details = _agent_plan_details(decision)
             if gate["needed"]:
@@ -56323,7 +58027,9 @@ async def _agent_run_producer(req, queue, bus=None):
                     last_error = f"第 {rounds} 轮第 {index} 步（{tool}）失败：{error_text}（code={code}）"
                     ctx.record_step(index, tool, description, False, error=error_text)
                     emit("step_result", {"index": index, "tool": tool, "ok": False, "error": error_text,
-                                         "code": code, "retryable": retryable})
+                                         "code": code, "retryable": retryable,
+                                         # 工具明确在要参数 / 消歧义：模型改道即可，清单不当成真失败
+                                         "recoverable": bool(result.get("recoverable"))})
             _agent_timing_log("tools", run_id, rounds,
                               (time.monotonic() - round_tools_started) * 1000.0, chat.get("model"))
             if budget_blocked:
@@ -56881,6 +58587,7 @@ def _agent_run_task_snapshot(bus):
                 "callId": f"step:{index}", "toolId": str(data.get("tool") or ""),
                 "description": str(data.get("description") or ""), "result": data.get("result"),
                 "error": data.get("error"), "code": data.get("code"),
+                "recoverable": data.get("recoverable") is True,
                 "args": data.get("args"), "command": str(data.get("command") or ""),
             }
         elif name == "plan":
@@ -57463,6 +59170,8 @@ app.include_router(_lan_account_router)
 # 与 canvas_share 共用 LOAD_CANVAS / SAVE_CANVAS；克隆画布复用 new_canvas 建一张空白画布再写入节点
 _deps.bind(
     NEW_CANVAS=lambda title, owner_id=None: new_canvas(title, owner_id=owner_id),
+    # 克隆出来的画布归属当前登录用户，否则打开时会被判「无权访问该画布」
+    CURRENT_CANVAS_OWNER_ID=current_canvas_owner_id,
 )
 from server.routes.community import router as _community_router  # noqa: E402
 app.include_router(_community_router)

@@ -63,7 +63,24 @@ class AgentDepthCaptureToolTests(unittest.TestCase):
         self.assertTrue(result["ready"])
         self.assertTrue(result["depth_url"].startswith(("/output/", "/assets/")))
         self.assertEqual(result["frames"], 48)
-        self.assertEqual(calls["max_seconds"], 30.0)
+        self.assertEqual(calls["max_seconds"], 0.0)
+        self.assertTrue(calls["keep_audio"])
+
+    def test_explicit_silent_keeps_keep_audio_false(self):
+        """用户明确要静音时不能偷偷保留音轨。"""
+        src = main.output_path_for("depth_src_silent.mp4", "output")
+        Path(src).write_bytes(b"x")
+        calls = {}
+
+        def capture_video(ffmpeg, s, dst, *, max_seconds=0.0, keep_audio=True):
+            calls.update(src=s, max_seconds=max_seconds, keep_audio=keep_audio)
+            Path(dst).write_bytes(b"d")
+            return {"path": dst, "frames": 24, "duration": 1.0, "width": 720, "height": 1280}, ""
+
+        fake = types.SimpleNamespace(available=lambda ffmpeg: (True, ""), capture_video=capture_video)
+        with mock.patch.object(main, "_agent_depth_capture_module", return_value=(fake, "")):
+            result = run({"url": main.output_url_for("depth_src_silent.mp4", "output"), "keep_audio": False})
+        self.assertTrue(result["ready"])
         self.assertFalse(calls["keep_audio"])
 
     def test_rejects_remote_url(self):

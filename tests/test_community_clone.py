@@ -37,6 +37,7 @@ SKILL_ID = "222222-bbbbbb"
 PROMPT_ID = "333333-cccccc"
 CLOSED_ID = "444444-dddddd"
 COLD_ID = "555555-eeeeee"
+CN_MEDIA = "剪辑时间线_原声重导版_aff035-fb654eb7f8.mp4"
 PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 )
@@ -138,7 +139,7 @@ def main() -> int:
                     return 200, json.dumps({"package": package_of(items[item_id], payloads[item_id])}).encode()
         if path.startswith("/api/community/public/media/"):
             rest = path[len("/api/community/public/media/"):]
-            if rest.endswith("/shot.png"):
+            if rest.endswith("/shot.png") or urllib.parse.unquote(rest).endswith(CN_MEDIA):
                 return 200, PNG_BYTES
             return 404, b""
         if path.endswith("/event"):
@@ -186,6 +187,7 @@ def main() -> int:
         COMMUNITY_NODES=lambda: [{"id": "peer-account-a", "nickname": "同事 A", "base": PEER_BASE,
                                   "token": PEER_TOKEN, "online": True}],
         COMMUNITY_HTTP=fake_http,
+        CURRENT_CANVAS_OWNER_ID=lambda request: 42,
         _local_upload_safe_folder=lambda rel: (str(rel or "").strip("/"),
                                                os.path.join(assets_dir, "uploads", str(rel or "").strip("/"))),
         _local_upload_kind_ext=lambda name, ctype: ("image", ".png") if "png" in str(ctype) or str(name).endswith(".png") else (None, ""),
@@ -222,6 +224,10 @@ def main() -> int:
     # 3. 详情预缓存媒体：本机把素材落到 cache/media（作者离线后还能克隆）
     asyncio.run(transport.prefetch_media(CANVAS_ID, ["shot.png"]))
     check("媒体进了本机缓存", bool(transport.cached_media_path(CANVAS_ID, "shot.png")))
+    # 3.5 中文名素材：白名单与 packager 一致后，远端拉取（局域网克隆走同一条 download_media）也要能拿到
+    check("中文名素材文件名通过白名单", store.valid_file_name(CN_MEDIA))
+    pulled = asyncio.run(transport.get_transport().download_media(CANVAS_ID, CN_MEDIA))
+    check("中文名素材能通过代理拉取", bool(pulled) and pulled == PNG_BYTES, str(len(pulled or b"")))
 
     # 4. 克隆画布：新画布 + 媒体全部本地化 + 写 source
     cloned = client.post("/api/community/items/" + CANVAS_ID + "/clone")
@@ -232,6 +238,7 @@ def main() -> int:
     saved = canvases.get(target_id) or {}
     check("克隆标题带（克隆）", str(saved.get("title") or "").endswith("（克隆）"), str(saved.get("title")))
     check("克隆画布节点数一致", len(saved.get("nodes") or []) == 2)
+    check("克隆画布归属当前用户", int(saved.get("owner_id") or 0) == 42, str(saved.get("owner_id")))
     check("克隆写了来源信息",
           (saved.get("source") or {}).get("item_id") == CANVAS_ID and (saved.get("source") or {}).get("version") == 2)
     node_url = str((((saved.get("nodes") or [{}])[0].get("data") or {}).get("gen") or {}).get("hist", [{}])[0].get("url") or "")

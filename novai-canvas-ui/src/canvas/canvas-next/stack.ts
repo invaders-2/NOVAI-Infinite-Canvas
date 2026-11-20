@@ -6,7 +6,7 @@
  * 取消堆叠后原样回到画布。这样旧版画布读到的也只是一个普通分组，不会丢节点。
  */
 import type { CanvasDoc, CanvasNode } from "../react-canvas/reactCanvasStore";
-import { genOf, isGenKind, outOf, uid } from "./model";
+import { genOf, isGenKind, outOf, srcOf, uid } from "./model";
 import type { CanvasStore } from "./store";
 
 export const STACK_MIN = 2;
@@ -14,6 +14,17 @@ export const STACK_MAX = 50;
 export const STACK_SIZE = { w: 260, h: 260 };
 
 export const isStack = (n: CanvasNode | undefined | null): boolean => !!n && n.kind === "group" && !!(n.data && typeof n.data === "object" && (n.data as { stack?: unknown }).stack);
+
+/** 节点用来展示的那张图：图片 / 视频取自己的当前结果；分组 / 堆叠取成员里第一张有图的（嵌套分组逐层往下找）。
+ *  助手里 @ 分组 / 堆叠时，输入区、消息气泡、@ 面板都用它当缩略图，不再只给一个图层图标。 */
+export function displaySrc(nodes: CanvasNode[], n: CanvasNode | undefined | null, depth = 0): string {
+  if (!n) return "";
+  if (isGenKind(n.kind)) return srcOf(n) || "";
+  if (n.kind !== "group" || depth > 4) return "";
+  const byId = new Map(nodes.map((x) => [x.id, x]));
+  for (const id of n.children || []) { const hit = displaySrc(nodes, byId.get(id), depth + 1); if (hit) return hit; }
+  return "";
+}
 
 /** 叠里的成员（按叠内顺序，已删除的跳过） */
 export function stackItems(doc: CanvasDoc, stack: CanvasNode): CanvasNode[] {

@@ -1,5 +1,5 @@
 <script setup>
-// 本地上传详情：重命名 / 下载 / 新窗口打开 / 复制链接 / 删除；行内改名；生成信息；智能分类（点标签筛选）；
+// 本地上传详情：重命名 / 下载 / 新窗口打开 / 复制链接 / 删除；行内改名；生成信息；
 // 反推提示词（单张反推、复制、编辑后保存）
 import { ref, watch, computed } from 'vue';
 import NvIcon from '../../../components/NvIcon.vue';
@@ -7,7 +7,6 @@ import MediaThumb from '../parts/MediaThumb.vue';
 import GenInfo from '../parts/GenInfo.vue';
 import { setStatus, run } from '../lib/state.js';
 import { assetKind, assetKindLabel, formatDate, formatFileSize, copyText } from '../lib/util.js';
-import { classChips } from '../lib/classify.js';
 import * as U from '../lib/local.js';
 
 const props = defineProps({ item: { type: Object, default: null } });
@@ -21,7 +20,6 @@ watch(() => props.item && props.item.id + '|' + (props.item.caption || ''), () =
 const kind = computed(() => assetKind(props.item));
 const isImage = computed(() => kind.value === 'image');
 const gen = computed(() => props.item?.generation || null);
-const chips = computed(() => classChips(props.item, 28));
 const delKey = computed(() => 'one:' + (props.item?.id || ''));
 // 「画布生成」里的生成物只读：可以预览 / 下载 / 复制链接，不能改名、删除、反推
 const readonly = computed(() => U.isReadonlyAsset(props.item));
@@ -72,17 +70,10 @@ async function saveCaption() {
                          :refs="gen.canvas_id ? [{ id: gen.canvas_id, kind: gen.canvas_kind || '', node: gen.node_id || '', title: gen.canvas_title }] : []" />
                 <div class="am-url">{{ item.url }}</div>
                 <div v-if="isImage" class="am-sec">
-                    <div class="am-sech"><b><NvIcon name="tag" />智能分类</b></div>
-                    <div class="am-cls">
-                        <button v-for="c in chips" :key="c.key" type="button" class="am-tag" :class="{ on: X.classFilter === c.key }" :title="c.label" @click="U.toggleClassFilter(c.key)">{{ c.tag }}</button>
-                        <span v-if="!chips.length" class="empty">暂无智能分类，可以上传时自动生成或后续批量分类。</span>
-                    </div>
-                </div>
-                <div v-if="isImage" class="am-sec">
                     <div class="am-sech">
                         <b>反推提示词</b>
                         <div class="row">
-                            <button type="button" class="am-mini" :disabled="X.captionBusy || X.classifyBusy" @click="U.captionOne(item.id)"><span v-if="X.captionBusy" class="am-spin"></span><NvIcon v-else name="wand2" />{{ X.captionBusy ? '反推中' : '反推' }}</button>
+                            <button type="button" class="am-mini" :disabled="X.captionBusy" @click="U.captionOne(item.id)"><span v-if="X.captionBusy" class="am-spin"></span><NvIcon v-else name="wand2" />{{ X.captionBusy ? '反推中' : '反推' }}</button>
                             <button type="button" class="am-mini" @click="copyCaption"><NvIcon name="copy" />复制</button>
                             <button type="button" class="am-mini pri" :disabled="saving" @click="saveCaption"><span v-if="saving" class="am-spin"></span><NvIcon v-else name="save" />保存</button>
                         </div>

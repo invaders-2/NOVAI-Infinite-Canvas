@@ -5,7 +5,7 @@
 import { readMigratedKey, readMigratedSessionKey } from "../../../novaiStorage";
 import { SharePanels } from "./SharePanels";
 import { ShareLinkHost, shareMenu } from "./ShareSheet";
-import { LanAvatarFace, LanChatHost, LanIdentity, LanNoticeHost, LanUnread, openChatEntry, openMyProfile } from "./LanChat";
+import { LanAvatarFace, LanChatHost, LanIdentity, LanNoticeHost, LanRequestHost, LanUnread, openChatEntry, openFriendList, openMyProfile } from "./LanChat";
 import { LibrarySection } from "./Library";
 import { VendorLogo } from "./VendorLogo";
 import { ElementsSection } from "./Elements";
@@ -14,7 +14,7 @@ import { clearOf, filterHistory, histNode, historyItems, histTime, usable, type 
 import { createPortal } from "react-dom";
 import type { CanvasComment, CanvasDoc, CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { renderCanvasThumb } from "../../react-canvas/exportCanvas";
-import { alignSelection, deleteSelection, extractCurrentVersion, layoutSelection, title } from "../actions";
+import { alignSelection, deleteSelection, extractCurrentVersion, layoutSelection, resolveLayoutTargets, title } from "../actions";
 import { runNode, stopGroup } from "../engine";
 import { minimapVisible } from "./minimap";
 import { setPerfPref, usePerf } from "../perf";
@@ -37,6 +37,7 @@ import { BeatAvatar } from "./BeatAvatar";
 import { useOrbActivity } from "./useOrbActivity";
 import { addMenu } from "./menus";
 import { ModalHead, closePop, openModal, openPop } from "./overlay";
+import { openAgentConnect } from "./AgentConnect";
 import { IS_MAC, keyHint, showKeys } from "./shortcuts";
 export { showKeys };
 import { computeExportBounds, exportCanvas, exportFileName, exportPixels, pickExportNodes, saveCanvasBlob, type ExportFormat, type ExportRange } from "../exportCanvas";
@@ -72,7 +73,7 @@ export function Chrome() {
     <div id="tr" className="float">
       <button id="extBtn" className="ib tipB" data-tip="扩展" aria-label="扩展" onClick={(e) => openPop(e.currentTarget, (close) => <>
         <div className="mh">扩展</div>
-        <button className="mi" data-ext="mcp" onClick={() => { close(); if (ctl.host.openMcpCenter) ctl.host.openMcpCenter(); else store.toast("MCP 中心要在桌面版里打开"); }}><Icon name="plug" size="s" />MCP 中心<span className="k">已接入的工具</span></button>
+        <button className="mi" data-ext="mcp" onClick={() => { close(); openAgentConnect(ctl); }}><Icon name="plug" size="s" />MCP 中心<span className="k">已接入的工具</span></button>
         <button className="mi" data-ext="models" onClick={() => { close(); if (ctl.host.openModelSettings) ctl.host.openModelSettings(); else store.toast("模型与 API 要在桌面版里打开"); }}><Icon name="settings" size="s" />模型与 API</button>
       </>, "down", "right")}><Icon name="plug" /></button>
       {ctl.host.features?.organization === false ? null : <button id="orgBtn" className="ib tipB" data-tip="社区 · 组织治理" aria-label="社区" onClick={() => { if (ctl.host.openApp) ctl.host.openApp("organization"); else store.toast("社区 / 组织治理要在桌面版里打开"); }}><Icon name="share" /></button>}
@@ -90,7 +91,7 @@ export function Chrome() {
       <button className="ib tipR" id="sourceBrowserBtn" data-tip="在线素材" aria-label="在线素材" onClick={() => openSourceBrowser(store)}><Icon name="image" /></button>
       <AnimateIcon asChild><button className={"ib tipR" + (ui.drawer === "history" ? " on" : "")} data-drawer="history" data-tip="生成历史" onClick={() => store.setUI({ drawer: ui.drawer === "history" ? null : "history" })}><Icon name="history" /></button></AnimateIcon>
       <span className="div" />
-      <button className="av tipR" id="avatar" data-tip="账户 · 点开好友与聊天，右键账户菜单" aria-label="账户与好友聊天" onClick={() => { closePop(); void openChatEntry(); }} onContextMenu={(e) => { e.preventDefault(); openPop(e.currentTarget, (close) => <><div className="mh">账户</div><LanIdentity role={ctl.host.user?.role} onOpen={() => { close(); openMyProfile(); }} /><div className="msep" /><button className="mi" onClick={() => { close(); void openChatEntry(); }}><Icon name="msg" size="s" />好友与聊天</button><button className="mi" onClick={() => { close(); canvasSettings(ctl); }}><Icon name="settings" size="s" />画布设置</button><button className="mi" onClick={() => { close(); showKeys(ctl.store); }}><Icon name="grid" size="s" />快捷键</button></>, "right"); }}><LanAvatarFace /><LanUnread /></button>
+      <button className="av tipR" id="avatar" data-tip="账户 · 点开好友列表，右键账户菜单" aria-label="账户与好友列表" onClick={() => { closePop(); void openFriendList(); }} onContextMenu={(e) => { e.preventDefault(); openPop(e.currentTarget, (close) => <><div className="mh">账户</div><LanIdentity role={ctl.host.user?.role} onOpen={() => { close(); openMyProfile(); }} /><div className="msep" /><button className="mi" onClick={() => { close(); void openChatEntry(); }}><Icon name="msg" size="s" />好友与聊天</button><button className="mi" onClick={() => { close(); canvasSettings(ctl); }}><Icon name="settings" size="s" />画布设置</button><button className="mi" onClick={() => { close(); showKeys(ctl.store); }}><Icon name="grid" size="s" />快捷键</button></>, "right"); }}><LanAvatarFace /><LanUnread /></button>
     </div>
     <div id="zb" className="float">
       <div className="cap">
@@ -126,6 +127,7 @@ export function Chrome() {
     {ctl.host.features?.share === false ? null : <ShareLinkHost />}
     <LanChatHost />
     <LanNoticeHost />
+    <LanRequestHost />
     {!ui.agentOpen ? <AgentOrb /> : null}
   </>;
 }
@@ -406,9 +408,12 @@ function canvasMenu(ctl: Ctl, anchor: Element, rename: () => void) {
 }
 function CanvasList({ ctl, close }: { ctl: Ctl; close: () => void }) {
   const [list, setList] = useState<Array<{ id: string; name: string; nodes?: number }> | null>(null);
+  const currentRef = useRef<HTMLButtonElement>(null);
   useEffect(() => { void ctl.host.listCanvases?.().then(setList).catch(() => setList([])); }, [ctl]);
+  // 当前画布可能被排到第 5 行之后，打开菜单时先把它滚进可视区
+  useEffect(() => { if (list) currentRef.current?.scrollIntoView({ block: "nearest" }); }, [list]);
   if (!ctl.host.listCanvases) return null;
-  return <><div className="msep" /><div className="mh">切换画布</div>{(list || []).map((c) => <button key={c.id} className={"mi" + (c.id === ctl.store.state.canvasId ? " on" : "")} onClick={() => { close(); if (c.id !== ctl.store.state.canvasId) ctl.host.openCanvas?.(c.id); }}><Icon name="layers" size="s" /><span>{c.name}</span></button>)}{!list ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>读取中…</span></div> : null}</>;
+  return <><div className="msep" /><div className="mh">切换画布</div><div className="canvas-switch">{(list || []).map((c) => { const on = c.id === ctl.store.state.canvasId; return <button key={c.id} ref={on ? currentRef : undefined} title={c.name} className={"mi" + (on ? " on" : "")} onClick={() => { close(); if (!on) ctl.host.openCanvas?.(c.id); }}><Icon name="layers" size="s" /><span>{c.name}</span></button>; })}</div>{!list ? <div className="row" style={{ color: "var(--fg3)", fontSize: 12 }}><span>读取中…</span></div> : null}</>;
 }
 function canvasSettings(ctl: Ctl) {
   const store = ctl.store;
@@ -1444,11 +1449,19 @@ function MultiBar() {
     const next = Math.max(5, top);
     setBarPos((prev) => (prev && prev.left === left && prev.top === next ? prev : { left, top: next }));
   });
+  // 排版有效目标：分组 / 堆叠算块、自由节点照旧；成员属于未选中分组时提醒，不参与
+  const layoutInfo = resolveLayoutTargets(store);
+  const selKey = [...ui.sel].sort().join("|");
+  const layoutWarned = useRef("");
+  useEffect(() => {
+    if (nodes.length < 2 || layoutInfo.targets.length >= 2 || !layoutInfo.blocked.length) return;
+    if (layoutWarned.current === selKey) return;
+    layoutWarned.current = selKey;
+    store.toast(layoutInfo.reason);
+  }, [selKey, nodes.length, layoutInfo.targets.length, layoutInfo.blocked.length, layoutInfo.reason, store]);
   // 单个分组不再走底部条：分组自己的工具都浮在组框上方（ui/LegacyNodes.tsx 的 GroupTools）
   if (nodes.length < 2) return null;
-  // 排版只对自由节点生效：分组本身和组员都不参与，否则组框会和成员拆开
-  const grouped = new Set(doc.nodes.filter((n) => n.kind === "group").flatMap((n) => n.children || []));
-  const layoutable = nodes.length >= 2 && nodes.every((n) => n.kind !== "group" && !grouped.has(n.id));
+  const layoutable = layoutInfo.targets.length >= 2;
   const runnable = runnableIds(store, nodes); const b = batches[runKeyOf(nodes)];
   // 多选条挂在 #layer 上（不在画布 world 的缩放里），屏幕像素就是最终大小：
   // 内联 scale:1 压掉 float-menu.css 里基于 --zinv 的反向缩放（--zinv 会从上层继承下来）
@@ -1458,7 +1471,7 @@ function MultiBar() {
     style={{ scale: 1, ...(barPos ? { left: barPos.left, top: barPos.top } : {}) }}>
     <span className="cn-fm-count tnum" data-mb-count>已选 {nodes.length} 个</span>
     {layoutable ? <FloatMenuButton icon="layoutgrid" label="布局" data={{ "data-mb": "layout" }} onClick={(e) => openPop(e.currentTarget, (close) => <>
-      <div className="mh">排版 {nodes.length} 个节点</div>
+      <div className="mh">排版 {layoutInfo.targets.length} 个目标</div>
       <button className="mi" data-layout="grid" onClick={() => { close(); layoutSelection(store, "grid"); }}><Icon name="grid" size="s" />宫格布局</button>
       <button className="mi" data-layout="horizontal" onClick={() => { close(); layoutSelection(store, "horizontal"); }}><Icon name="right" size="s" />水平流布局</button>
     </>, "down")} /> : null}

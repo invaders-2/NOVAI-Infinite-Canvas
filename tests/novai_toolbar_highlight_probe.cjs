@@ -290,7 +290,7 @@ async function shotTimeline(page, selector, prefix) {
         result.groups.push(await sampleSingle(page, '#ntb [data-tb="stop"]', 'R 生成中·无动画(reduced-motion)'));
         await page.emulateMedia({ reducedMotion: null });
 
-        /* 普通 12 项工具条 */
+        /* 普通图片工具条（低频 AI 特效已收进「更多」菜单） */
         const normalId = await page.evaluate(() => {
             const store = window.__cn;
             const node = store.newNode('image', 620, 160, { hist: [{ url: '/output/hl-seed.png', w: 800, h: 600, meta: { model: 'seed' } }], hi: 0, title: '普通工具条对照图' });
@@ -298,7 +298,7 @@ async function shotTimeline(page, selector, prefix) {
             return node.id;
         });
         await page.waitForTimeout(900);
-        c.check('N1 对照组是普通 12 项图片工具条', await page.locator('#ntb [data-tb="lossless"]').count() === 1 && await page.locator('#ntb .est').count() === 0);
+        c.check('N1 对照组是普通图片工具条', await page.locator('#ntb [data-tb="mask"]').count() === 1 && await page.locator('#ntb .est').count() === 0);
         result.notes.normalId = normalId;
         result.groups.push(await sampleSingle(page, '#ntb [data-tb="adjust"]', 'B 普通·直接落中间'));
         result.notes.diagNormal = await page.evaluate(() => window.__hlProbe.diagnose());
@@ -319,13 +319,13 @@ async function shotTimeline(page, selector, prefix) {
             return file;
         })();
 
-        /* F. 回归重点：窄视口 → 12 项条被 max-width 截断，末尾按钮溢出，滑块必须夹在胶囊内
+        /* F. 回归重点：窄视口 → 工具条被 max-width 截断，末尾按钮溢出，滑块必须夹在胶囊内
            做法：先悬停第一颗让条展开（位置稳定），再移到一颗「本身会溢出胶囊」的按钮（下载 dl）上 */
         await page.setViewportSize({ width: 900, height: 950 });
         await page.evaluate((id) => window.__cn.updateNode(id, (n) => ({ ...n, x: 0 })), normalId);
         await page.waitForTimeout(900);
         await moveAway(page);
-        const firstBox = await page.locator('#ntb [data-tb="crop"]').first().boundingBox();
+        const firstBox = await page.locator('#ntb [data-tb="mask"]').first().boundingBox();
         await page.mouse.move(firstBox.x + firstBox.width / 2, firstBox.y + firstBox.height / 2);
         await page.waitForTimeout(600); // 展开完成
         await hoverStable(page, '#ntb [data-tb="dl"]');
@@ -348,7 +348,7 @@ async function shotTimeline(page, selector, prefix) {
         await page.waitForTimeout(700);
         await moveAway(page);
         {
-            const first = await page.locator('#ntb [data-tb="crop"]').first().boundingBox();
+            const first = await page.locator('#ntb [data-tb="mask"]').first().boundingBox();
             await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
             await page.waitForTimeout(600); // 展开完成，位置稳定
         }

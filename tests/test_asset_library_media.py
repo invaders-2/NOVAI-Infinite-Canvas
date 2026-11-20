@@ -32,7 +32,6 @@ def make_library(extra_categories=None):
 
 class AssetLibraryMediaTests(unittest.TestCase):
     def setUp(self):
-        self.classify_calls = []
         self.saved = []
         self.files = {}
         self.lib = None
@@ -49,10 +48,6 @@ class AssetLibraryMediaTests(unittest.TestCase):
             return name, {"id": f"asset_{len(self.files)}", "name": name,
                           "url": f"/assets/library/lib_{len(self.files)}", "kind": kind, "created_at": 1}
 
-        async def classify(_src):
-            self.classify_calls.append(_src)
-            return {"summary": "一张图"}
-
         def output_url(url):
             return self.files.get(str(url))
 
@@ -64,7 +59,6 @@ class AssetLibraryMediaTests(unittest.TestCase):
             "output_file_from_url": output_url,
             "make_asset_library_item": make_item,
             "generation_meta_for_url": lambda url: {},
-            "classify_asset_image_best_effort": classify,
             "save_asset_library": lambda lib_obj: self.saved.append(lib_obj),
             "asset_library_media_kind": main.asset_library_media_kind,
         }
@@ -86,13 +80,14 @@ class AssetLibraryMediaTests(unittest.TestCase):
         cats = lib["libraries"][0]["categories"]
         return next((cat for cat in cats if cat.get("id") == category_id), None)
 
-    def test_image_item_into_image_category_and_classified(self):
+    def test_image_item_into_image_category_without_classification(self):
         lib = make_library()
         result = self.add(lib, "/output/cover.png", category_id="characters")
         self.assertEqual(result["item"]["kind"], "image")
         self.assertEqual(result["category"]["id"], "characters")
         self.assertEqual(self.category(lib, "characters")["items"][0]["id"], result["item"]["id"])
-        self.assertEqual(len(self.classify_calls), 1)
+        # 智能分类已下线：保存不再写 classification
+        self.assertNotIn("classification", result["item"])
 
     def test_video_item_auto_creates_video_category(self):
         lib = make_library()
@@ -101,7 +96,7 @@ class AssetLibraryMediaTests(unittest.TestCase):
         self.assertEqual(result["category"]["id"], "videos")
         self.assertEqual(result["category"]["type"], "video")
         self.assertEqual(self.category(lib, "videos")["items"][0]["kind"], "video")
-        self.assertEqual(self.classify_calls, [])
+        self.assertNotIn("classification", result["item"])
         # 自动建分类是追加，不修改既有 characters/scenes/workflows
         cats = lib["libraries"][0]["categories"]
         self.assertEqual([c["id"] for c in cats[:3]], ["characters", "scenes", "workflows"])

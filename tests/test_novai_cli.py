@@ -34,7 +34,7 @@ ALLOWED_TOOLS = {
 }
 
 # 注册在 AGENT_TOOLS 里、但不进入通用画布 CLI 命令表的专用工具。
-NON_CANVAS_TOOLS = {"activate_skill", "install_skill", "lipsync_video"}
+NON_CANVAS_TOOLS = {"activate_skill", "install_skill", "run_skill_script", "lipsync_video"}
 
 # 会产生持久化副作用的命令（写画布 / 写素材库或记忆 / 落盘产物 / 发起生成任务）
 EXPECTED_WRITE_COMMANDS = {

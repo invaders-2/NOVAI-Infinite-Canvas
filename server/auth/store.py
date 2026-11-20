@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from server.auth.errors import AuthError
 
@@ -499,6 +499,152 @@ def set_setting(key: str, value: str) -> None:
         )
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------- 注销账号（2026-11）
+
+def _table_names(conn: sqlite3.Connection) -> set:
+    """users.db 里的表是各功能按需建的（画布共享 / 分享链接 / 积分），老库可能没有。"""
+    rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def account_counts() -> Tuple[int, int]:
+    """(账号总数, 在职管理员数)：注销时判断「是不是最后一个管理员」。"""
+    conn = connect()
+    try:
+        total = int(conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"])
+        admins = int(conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND status = 'active'"
+        ).fetchone()["n"])
+        return total, admins
+    finally:
+        conn.close()
+
+
+def account_impact(user_id: int, username: str, canvas_ids: Optional[List[str]] = None) -> Dict[str, int]:
+    """注销前的影响面统计（只读）：画布 / 成员 / 别人的共享 / 邀请码 / 分享链接 / 积分流水。"""
+    uid = int(user_id)
+    owned = [str(cid) for cid in (canvas_ids or [])]
+    counts: Dict[str, int] = {
+        "canvases": len(owned),
+        "canvas_members": 0,
+        "shared_canvases": 0,
+        "invites": 0,
+        "share_links": 0,
+        "credit_records": 0,
+    }
+    conn = connect()
+    try:
+        tables = _table_names(conn)
+        if "canvas_shares" in tables:
+            for cid in owned:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS n FROM canvas_shares WHERE canvas_id = ?", (cid,)
+                ).fetchone()
+                counts["canvas_members"] += int(row["n"] if row else 0)
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM canvas_shares WHERE user_id = ?", (uid,)
+            ).fetchone()
+            counts["shared_canvases"] = int(row["n"] if row else 0)
+        if "invite_codes" in tables:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM invite_codes WHERE created_by = ?", (str(username),)
+            ).fetchone()
+            counts["invites"] = int(row["n"] if row else 0)
+        if "canvas_share_links" in tables:
+            # 同一行可能既在名下画布又由本人创建：按 distinct 行数统计，别重复算
+            if owned:
+                placeholders = ",".join("?" for _ in owned)
+                row = conn.execute(
+                    "SELECT COUNT(*) AS n FROM canvas_share_links "
+                    "WHERE created_by = ? OR canvas_id IN (%s)" % placeholders,
+                    tuple([uid] + owned),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS n FROM canvas_share_links WHERE created_by = ?", (uid,)
+                ).fetchone()
+            counts["share_links"] = int(row["n"] if row else 0)
+        for table in ("credit_transactions", "credit_charges"):
+            if table in tables:
+                row = conn.execute(
+                    "SELECT COUNT(*) AS n FROM %s WHERE user_id = ?" % table, (uid,)
+                ).fetchone()
+                counts["credit_records"] += int(row["n"] if row else 0)
+        return counts
+    finally:
+        conn.close()
+
+
+def purge_account(user_id: int, username: str, canvas_ids: Optional[List[str]] = None) -> Dict[str, int]:
+    """删账号与它独占的数据库数据：单个事务，任何一步失败整体回滚，库里一行都不动。
+
+    调用方要先把名下画布的 JSON 文件挪走（失败时再挪回来），这里只删数据库归属。
+    别人的画布只退出共享（canvas_shares.user_id），不动画布本身。
+    """
+    uid = int(user_id)
+    name = str(username or "")
+    owned = [str(cid) for cid in (canvas_ids or [])]
+    counts: Dict[str, int] = {
+        "users": 0,
+        "canvases": len(owned),
+        "sessions": 0,
+        "reset_codes": 0,
+        "canvas_members": 0,
+        "canvas_shares_out": 0,
+        "invites": 0,
+        "share_links": 0,
+        "credit_records": 0,
+    }
+    conn = connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        tables = _table_names(conn)
+        if "sessions" in tables:
+            counts["sessions"] = int(conn.execute("DELETE FROM sessions WHERE user_id = ?", (uid,)).rowcount or 0)
+        if "reset_codes" in tables:
+            counts["reset_codes"] = int(conn.execute("DELETE FROM reset_codes WHERE user_id = ?", (uid,)).rowcount or 0)
+        if "invite_codes" in tables:
+            counts["invites"] = int(conn.execute(
+                "DELETE FROM invite_codes WHERE created_by = ?", (name,)
+            ).rowcount or 0)
+        if "canvas_shares" in tables:
+            # 名下画布整本删：这些画布的成员记录一起清掉
+            for cid in owned:
+                counts["canvas_members"] += int(conn.execute(
+                    "DELETE FROM canvas_shares WHERE canvas_id = ?", (cid,)
+                ).rowcount or 0)
+            # 别人分享给我的画布：只退出，画布本身保留
+            counts["canvas_shares_out"] = int(conn.execute(
+                "DELETE FROM canvas_shares WHERE user_id = ?", (uid,)
+            ).rowcount or 0)
+        if "canvas_share_links" in tables:
+            for cid in owned:
+                counts["share_links"] += int(conn.execute(
+                    "DELETE FROM canvas_share_links WHERE canvas_id = ?", (cid,)
+                ).rowcount or 0)
+            counts["share_links"] += int(conn.execute(
+                "DELETE FROM canvas_share_links WHERE created_by = ?", (uid,)
+            ).rowcount or 0)
+        for table in ("credit_transactions", "credit_charges"):
+            if table in tables:
+                counts["credit_records"] += int(conn.execute(
+                    "DELETE FROM %s WHERE user_id = ?" % table, (uid,)
+                ).rowcount or 0)
+        counts["users"] = int(conn.execute("DELETE FROM users WHERE id = ?", (uid,)).rowcount or 0)
+        if counts["users"] != 1:
+            raise AuthError("账号不存在或已被删除", 404, "user_not_found")
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        conn.close()
+    return counts
 
 
 def register_open(username: str, password_hash: str, now: int, first_user_role: str = "admin") -> Dict[str, Any]:

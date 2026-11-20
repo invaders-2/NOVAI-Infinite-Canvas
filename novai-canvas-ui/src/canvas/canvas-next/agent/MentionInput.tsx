@@ -3,7 +3,7 @@
  *   · 输入 @ 或 / 时把「触发字符」的位置记下来，外部打开选择面板；选中后删掉这个字符、在光标处插入胶囊；
  *   · 胶囊整块 contentEditable=false：退格 / Delete 整体删除，点 × 也能删；删除时回调 onRemove 让上层同步引用；
  *   · 序列化成纯文本时胶囊写成记号：节点 @{id}（与 mentions.ts 一致）、素材 @ref{id}、应用 @app{id}、技能 @skill{名}；
- *   · 输入法组字期间不重建 DOM；Enter 发送 / Shift+Enter 换行 / 粘贴纯文本 / 空态 placeholder 都保持可用。
+ *   · 输入法组字期间不重建 DOM；Enter 发送 / Shift+Enter 换行 / 粘贴纯文本或剪贴板图片 / 空态 placeholder 都保持可用。
  */
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from "react";
 import { useCtl } from "../ui/ctx";
@@ -40,6 +40,8 @@ export type MentionInputProps = {
   resolve: (kind: MentionKind, id: string) => MentionChip | null;
   /** 胶囊被删（退格 / Delete / 点 ×）时同步上层引用 */
   onRemove?: (kind: MentionKind, id: string) => void;
+  /** 剪贴板里是文件（图片 / 其它）：交给上层判断并变成附件（纯文本粘贴仍然走原来的路） */
+  onPasteFiles?: (files: File[]) => void;
   /** 悬停胶囊（chip 为 null 表示移开）；rect 是胶囊的屏幕矩形，用来定位预览卡 */
   onChipHover?: (chip: { kind: MentionKind; id: string } | null, rect?: DOMRect) => void;
 };
@@ -65,10 +67,12 @@ export function removeMentionTokens(text: string, kind: MentionKind, id: string)
   return String(text || "").replace(new RegExp(raw, "g"), "").replace(/[ \t]{2,}/g, " ").replace(/[ \t]+\n/g, "\n");
 }
 
-/** 发送前还原成人话：节点 / 素材 / 应用 → 「@标题」，技能交给 context.skillName，不留在正文里 */
-export function plainMentionText(text: string, resolve: (kind: MentionKind, id: string) => MentionChip | null): string {
+/** 发送前还原成人话：节点 / 素材 / 应用 → 「@标题」，技能默认交给 context.skillName、不留在正文里；
+ *  keepSkill 时保留 @skill{名} 记号（消息气泡按用户放的位置渲染行内胶囊）；发给后端的 goal 仍用默认版。 */
+export function plainMentionText(text: string, resolve: (kind: MentionKind, id: string) => MentionChip | null, opts?: { keepSkill?: boolean }): string {
+  const keepSkill = opts?.keepSkill === true;
   return parseMentionTokens(text).reduce((out, token) => {
-    if (token.kind === "skill") return out.replace(token.raw, "");
+    if (token.kind === "skill") return keepSkill ? out : out.replace(token.raw, "");
     const chip = resolve(token.kind, token.id);
     return out.replace(token.raw, chip ? "@" + chip.title : "");
   }, String(text || "")).replace(/[ \t]{2,}/g, " ").trim();
@@ -335,8 +339,20 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(fu
     if (e.key === "Escape") propsRef.current.onEscape?.();
   };
   const handlePaste = (e: React.ClipboardEvent) => {
+    const dt = e.clipboardData;
+    const files: File[] = [];
+    for (const item of Array.from(dt.items || [])) {
+      if (item.kind !== "file") continue;
+      const file = item.getAsFile(); if (file) files.push(file);
+    }
+    if (!files.length) for (const file of Array.from(dt.files || [])) files.push(file);
+    if (files.length && propsRef.current.onPasteFiles) {
+      e.preventDefault(); e.stopPropagation();
+      propsRef.current.onPasteFiles(files);
+      return;
+    }
     e.preventDefault(); e.stopPropagation();
-    const text = e.clipboardData.getData("text/plain"); if (!text) return;
+    const text = dt.getData("text/plain"); if (!text) return;
     const s = getSelection(); if (!s || !s.rangeCount) return;
     const r = s.getRangeAt(0); r.deleteContents();
     if (new RegExp(TOKEN_SRC).test(text)) { const mark = document.createTextNode("\u2063"); r.insertNode(mark); const all = serialize(ref.current!); const parts = all.split("\u2063"); paint(parts[0] + text + (parts[1] || "")); caretToEnd(); emit(); return; }

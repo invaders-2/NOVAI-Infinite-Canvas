@@ -69,9 +69,10 @@ const panel = read('novai-canvas-ui/src/canvas/tapnow/AgentPanel.tsx');
 ok(/import \{ matchSkillRef \} from "\.\.\/canvas-next\/agent\/skillRef";/.test(panel), 'AgentPanel 引入 matchSkillRef');
 ok(panel.includes('if (draft.skillRef && !a.skill) {'), '处理草稿时看 draft.skillRef（用户已选技能就不覆盖）');
 ok(panel.includes('const name = matchSkillRef(draft.skillRef, a.skills);'), '按当前已加载技能列表匹配');
-ok(panel.includes('else pendingSkillRef.current = draft.skillRef;'), '匹配不到先暂存，不报错、不动草稿');
+ok(panel.includes('else { pendingSkillRef.current = draft.skillRef; pendingSkillChip.current = !draft.autoSend; }'), '匹配不到先暂存，不报错、不动草稿');
+ok(panel.includes('setDraft(!draft.autoSend && chipName ? withSkillChip(text, chipName) : text);'), '不自动发送的草稿在输入区最前面插技能胶囊');
 ok(panel.includes('const ref = pendingSkillRef.current;') && panel.includes('}, [a.skills, a]);'), '技能列表变化后重试（依赖 a.skills）');
-ok(panel.includes('if (!name) return;') && panel.includes('if (!a.skill) { a.skill = name; a.emit(); }'), '补胶囊：查不到就放弃，查到了也不抢用户已选的');
+ok(panel.includes('if (!name) return;') && panel.includes('if (!a.skill) { a.skill = name; if (pendingSkillChip.current && !a.busy) a.draft = withSkillChip(a.draft, name); a.emit(); }'), '补胶囊：查不到就放弃，查到了也不抢用户已选的');
 
 /* ───────── [4] 构建产物 ───────── */
 console.log('[4] 构建产物 static/novai-canvas/canvas.js');

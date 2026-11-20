@@ -1,7 +1,7 @@
 import { fileURLToPath, URL } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, searchForWorkspaceRoot } from "vite";
 
 // 库模式：产物直接落到 NOVAI 的 static/canvas-assistant/，由 canvas-assistant-bridge.js 动态加载。
 export default defineConfig({
@@ -12,8 +12,23 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   server: {
+    // 仅 dev：回放入口读取 _verification-thinking-integration/ 里录制的真实 SSE 事件
+    fs: {
+      allow: [
+        searchForWorkspaceRoot(process.cwd()),
+        fileURLToPath(new URL("../_verification-thinking-integration", import.meta.url)),
+      ],
+    },
     proxy: {
-      "/api": "http://127.0.0.1:" + (process.env.NOVAI_PORT || 3000),
+      "/api": {
+        target: "http://127.0.0.1:" + (process.env.NOVAI_PORT || 3000),
+        // 本机 starlette 0.41 的 GZipMiddleware 没有排除 text/event-stream，浏览器默认带
+        // Accept-Encoding: gzip 会把 SSE 压成一整块再吐出来，逐词流式直接看不到。
+        // 开发代理强制 identity，后端就不压缩，SSE 才能一条条到浏览器（仅影响 dev）。
+        configure(proxy) {
+          proxy.on("proxyReq", (proxyReq) => proxyReq.setHeader("accept-encoding", "identity"));
+        },
+      },
     },
   },
   build: {

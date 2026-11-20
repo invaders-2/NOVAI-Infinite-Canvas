@@ -12,8 +12,8 @@ import { OptCards, ratioShape } from "../ui/OptCards";
 import { openPop } from "../ui/overlay";
 import { ratioDisplayLabel } from "../originalRatio";
 import type { ModelSpec } from "../model";
+import { modelVendorOf, openModelPicker } from "./ModelPicker";
 
-const vendorOf = (m: ModelSpec) => (m.vendor || "").trim() || (String(m.id).includes("::") ? String(m.id).split("::")[0] : "其它");
 
 function PlanField({ label, text, busy, disabled, title, render }: {
   label: string; text: ReactNode; busy: boolean; disabled?: boolean; title?: string;
@@ -28,43 +28,22 @@ function PlanField({ label, text, busy, disabled, title, render }: {
   </div>;
 }
 
-/** 模型：平台 → 模型 两级；第一级顶部有「跟随助手默认」（回调空串） */
+/** 模型：供应商 → 模型 两级（共用 ModelPicker，第二级带「返回供应商列表」）；第一级顶部有「跟随助手默认」（回调空串） */
 export function PlanModelField({ models, value, busy, onChange }: {
   models: ModelSpec[]; value: string; busy: boolean; onChange: (id: string) => void;
 }) {
   const hit = models.find((m) => m.id === value);
-  const currentVendor = hit ? vendorOf(hit) : "";
-  const vendors = [...new Set(models.map(vendorOf))];
-  const showModels = (anchor: Element, vendor: string) => openPop(anchor, (close) => <ComboMenu
-    autoFocus searchable searchPlaceholder="搜索模型"
-    header={<div className="mh">{vendor}</div>}
-    empty={<span>这个供应商还没有可用模型</span>}
-    items={models.filter((m) => vendorOf(m) === vendor)}
-    label={(m) => m.name}
-    itemClassName={(m) => "mi combo-item" + (m.id === value ? " on" : "")}
-    itemAttrs={(m) => ({ "data-model": m.id })}
-    onPick={(m) => { close(); onChange(m.id); }}
-    renderItem={(m) => <><span style={{ flex: 1 }}>{m.name}<span className="d">{vendorOf(m)}</span></span></>}
-  />, "up", "left", "model-pop combo-pop gen-pop");
-  return <PlanField label="模型" busy={busy} disabled={!models.length} text={hit ? hit.name : "跟随助手默认"} title={hit ? vendorOf(hit) + " · " + hit.name : "跟随助手默认"}
-    render={() => {
-      // 第一级列表顶部放「跟随助手默认」：用空串哨兵，不额外改 ComboMenu 的 API
-      const rows = ["", ...vendors];
-      return <ComboMenu
-        autoFocus searchable searchPlaceholder="搜索供应商"
-        header={<div className="mh">选择模型</div>}
-        empty={<span>还没有配置模型</span>}
-        items={rows}
-        label={(v) => (v ? v : "跟随助手默认")}
-        filterText={(v) => (v ? v : "跟随助手默认")}
-        itemClassName={(v) => "mi combo-item" + ((v === currentVendor) || (!value && !v) ? " on" : "")}
-        itemAttrs={(v) => ({ "data-vendor": v || "default" })}
-        onPick={(v) => { if (!v) { onChange(""); return; } showModels(document.getElementById("pop")!, v); }}
-        renderItem={(v) => v
-          ? <><span style={{ flex: 1 }}>{v}<span className="d">{models.filter((m) => vendorOf(m) === v).length} 个模型</span></span><Icon name="right" size="s" /></>
-          : <><span style={{ flex: 1 }}>跟随助手默认<span className="d">用运行上下文的默认模型</span></span></>}
-      />;
-    }} />;
+  /* 调用方把这一类的默认模型排在最前（AgentPanel 的 planModels）：「跟随助手默认」后面带上它的名字，
+     选项按谁算、执行用谁，一眼看得见 */
+  const fallback = models[0];
+  const defaultText = "跟随助手默认" + (fallback ? "（" + fallback.name + "）" : "");
+  return <div className="pr">
+    <span>模型</span>
+    <button type="button" className="pr-btn" disabled={busy || !models.length} title={hit ? modelVendorOf(hit) + " · " + hit.name : defaultText} aria-label="模型"
+      onClick={(e) => openModelPicker(e.currentTarget, { models, value, onPick: onChange, title: "选择模型", allowDefault: true, dir: "up", cls: "gen-pop param-pop model-pop combo-pop" })}>
+      <span className="t">{hit ? hit.name : defaultText}</span><Icon name="down" size="xs" />
+    </button>
+  </div>;
 }
 
 /** 比例：格子（带画幅形状） */

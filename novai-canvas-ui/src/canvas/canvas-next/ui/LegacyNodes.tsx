@@ -163,7 +163,7 @@ export function ungroup(store: ReturnType<typeof useCtl>["store"], gid?: string)
 }
 
 /* ---------------- 剪辑时间线：见 TimelineEditor.tsx ---------------- */
-export { TimelineEditor as TimelineBody } from "./TimelineEditor";
+export { TimelineNodeBody as TimelineBody } from "./TimelineEditor";
 
 /* ---------------- 3D 模型（文生 / 图生 3D） ---------------- */
 export function Model3DBody({ node }: { node: CanvasNode }) {

@@ -35,6 +35,19 @@ import "./message-cards.css";
  * 待确认的执行方案卡：生成类步骤的参数在这里直接改，改完的参数写进批准给后端的 steps。
  * 后端闸门只认 approved_steps，这张卡是它唯一的人工入口。
  */
+// 运行技能脚本：确认卡上必须原样写明跑哪个技能的哪个脚本、带什么参数，用户看清楚才点执行
+function SkillScriptBrief({ args }: { args: Record<string, unknown> }) {
+  const raw = args.args;
+  const argv = Array.isArray(raw) ? raw.map((a) => String(a)) : raw ? [String(raw)] : [];
+  const timeout = Number(args.timeout) || 120;
+  return <div className="plan-script">
+    <div className="plan-script-row"><span>技能</span><code>{String(args.skill || args.name || "")}</code></div>
+    <div className="plan-script-row"><span>脚本</span><code>{String(args.script || "")}</code></div>
+    <div className="plan-script-row"><span>参数</span>{argv.length ? <code className="plan-script-args">{argv.map((a) => /\s/.test(a) ? JSON.stringify(a) : a).join(" ")}</code> : <em>无</em>}</div>
+    <div className="pnote">在本机技能目录内运行，最长 {timeout} 秒；每次运行都需要你确认</div>
+  </div>;
+}
+
 export function TaskPlanCard({ plan, models, busy, onApprove, onDiscard }: {
   plan: AgentTaskPlan;
   models: ModelSpec[];
@@ -127,6 +140,7 @@ export function TaskPlanCard({ plan, models, busy, onApprove, onDiscard }: {
             <span className="plan-step-num tnum">{index + 1}</span>
             <ItemContent className="plan-step-body">
               <div className="plan-step-head"><b>{step.description || step.tool}</b></div>
+              {step.tool === "run_skill_script" ? <SkillScriptBrief args={(step.args || {}) as Record<string, unknown>} /> : null}
               {kind && params ? <div className="plan-params">
                 <PlanModelField models={kindModels} value={explicitSpec?.id || ""} busy={busy} onChange={(id) => change(index, { modelConfigId: id })} />
                 {modeOpts.length ? <PlanListField label="生成方式" busy={busy} current={params.mode}
@@ -156,9 +170,18 @@ export function TaskPlanCard({ plan, models, busy, onApprove, onDiscard }: {
     <CardFooter className="mc-foot">
       {summary ? <div className="mc-summary">{summary}</div> : null}
       <div className="mc-note">{plan.summary || (generation ? "将执行 " + steps.length + " 步，含 " + generation + " 次生成" : "将执行 " + steps.length + " 步画布操作")}</div>
-      {roadmap.length > 1 ? <div className="mc-why">{"批准后会按整体方案自动推进后续阶段" + (totalGen ? "（整套约 " + totalGen + " 次生成，超出会再问你）" : "")}</div> : null}
-      {reason && !(plan.summary || "").includes(reason.slice(0, 24)) ? <div className="mc-why">{"理由：" + reason}</div> : null}
-      {assumptions.length ? <div className="mc-why">{"假设：" + assumptions.slice(0, 3).join("；")}</div> : null}
+      {/* 理由 / 假设 / 自动推进说明：默认收进「为什么这样安排」，卡片先只给要做什么和执行按钮 */}
+      {(() => {
+        const why = [
+          roadmap.length > 1 ? "批准后会按整体方案自动推进后续阶段" + (totalGen ? "（整套约 " + totalGen + " 次生成，超出会再问你）" : "") : "",
+          reason && !(plan.summary || "").includes(reason.slice(0, 24)) ? "理由：" + reason : "",
+          assumptions.length ? "假设：" + assumptions.slice(0, 3).join("；") : "",
+        ].filter(Boolean);
+        return why.length ? <details className="mc-why-fold">
+          <summary>为什么这样安排</summary>
+          {why.map((w, k) => <div className="mc-why" key={k}>{w}</div>)}
+        </details> : null;
+      })()}
       <div className="mc-actions">
         <Button className="mc-btn-solid" disabled={busy || !keptCount} onClick={() => {
           if (excluded.size === 0) {

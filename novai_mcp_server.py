@@ -8,6 +8,9 @@
     # Streamable HTTP（独立起服务，POST JSON-RPC 到 /mcp）
     NOVAI_BASE_URL=http://127.0.0.1:8000 python3 novai_mcp_server.py --transport http --port 8765
 
+stdin/stdout 协议实现已经下沉到 server/mcp/stdio_entry.py（主程序 main.py --mcp 也用它）；
+本脚本保留 CLI 参数与 HTTP 传输，单独部署时行为不变。
+
 它**不 import main**，而是通过 HTTP 调本机已运行的 NOVAI（默认 http://127.0.0.1:8000）：
     NOVAI_BASE_URL   可选，默认 http://127.0.0.1:8000
     NOVAI_API_TOKEN  可选，有就带 Authorization: Bearer <token>
@@ -35,145 +38,26 @@ REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from server.mcp import server_tools  # noqa: E402
-
-PROTOCOL_VERSION = "2024-11-05"
-MAX_INPUT_BYTES = 1024 * 1024
-SERVER_INFO = {"name": "novai-mcp-server", "version": "1.0"}
-
-PARSE_ERROR = -32700
-INVALID_REQUEST = -32600
-METHOD_NOT_FOUND = -32601
-INTERNAL_ERROR = -32603
-
-
-def log(message: str) -> None:
-    """日志只走 stderr（stdio 下 stdout 是协议通道）。"""
-    try:
-        sys.stderr.write("[novai-mcp] %s\n" % message)
-        sys.stderr.flush()
-    except Exception:
-        pass
-
-
-def _ok(request_id: Any, result: Any) -> Dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": request_id, "result": result}
-
-
-def _err(request_id: Any, code: int, message: str) -> Dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": request_id, "error": {"code": int(code), "message": str(message)}}
-
-
-def _tool_result(outcome: Dict[str, Any]) -> Dict[str, Any]:
-    ok = bool(outcome.get("ok"))
-    text = str(outcome.get("text") or ("" if ok else "工具执行失败"))
-    result: Dict[str, Any] = {"content": [{"type": "text", "text": text}], "isError": not ok}
-    data = outcome.get("data")
-    if ok and isinstance(data, dict):
-        result["structuredContent"] = data
-    return result
-
-
-def build_response(message: Any, base_url: str, token: str,
-                   timeout: float) -> Optional[Dict[str, Any]]:
-    """单条 JSON-RPC 消息 → 响应（通知返回 None）。stdio 与 http 共用这一份。"""
-    if not isinstance(message, dict):
-        return _err(None, INVALID_REQUEST, "只支持单条 JSON-RPC 消息")
-    request_id = message.get("id")
-    method = str(message.get("method") or "")
-    params = message.get("params")
-    if not isinstance(params, dict):
-        params = {}
-    if not method:
-        return _err(request_id, INVALID_REQUEST, "缺少 method")
-    if request_id is None:
-        return None                                # 通知：不需要回包
-    if method == "initialize":
-        requested = str(params.get("protocolVersion") or "")
-        version = PROTOCOL_VERSION if requested != PROTOCOL_VERSION else requested
-        return _ok(request_id, {"protocolVersion": version,
-                                "capabilities": {"tools": {"listChanged": False}},
-                                "serverInfo": SERVER_INFO})
-    if method == "ping":
-        return _ok(request_id, {})
-    if method == "tools/list":
-        return _ok(request_id, {"tools": server_tools.TOOLS})
-    if method == "tools/call":
-        name = str(params.get("name") or "").strip()
-        arguments = params.get("arguments")
-        if not isinstance(arguments, dict):
-            arguments = {}
-        return _ok(request_id, _tool_result(
-            server_tools.dispatch(base_url, token, name, arguments, timeout=timeout)))
-    return _err(request_id, METHOD_NOT_FOUND, "method not found: %s" % method)
-
-
-def build_batch(payload: Any, base_url: str, token: str,
-                timeout: float) -> List[Dict[str, Any]]:
-    """一条 POST body（单条或批量）→ 响应数组（通知不产生响应）。"""
-    items = payload if isinstance(payload, list) else [payload]
-    responses = []
-    for item in items:
-        try:
-            response = build_response(item, base_url, token, timeout)
-        except Exception as exc:
-            log("处理消息异常：%r" % (exc,))
-            request_id = item.get("id") if isinstance(item, dict) else None
-            response = _err(request_id, INTERNAL_ERROR, "内部错误：%s: %s" % (type(exc).__name__, exc))
-        if response is not None:
-            responses.append(response)
-    return responses
+# 协议逻辑统一放在 server/mcp/protocol.py：主程序 --mcp 与本脚本共用一份，避免行为漂移
+from server.mcp.protocol import (  # noqa: E402
+    INVALID_REQUEST,
+    MAX_INPUT_BYTES,
+    PARSE_ERROR,
+    _err,
+    build_batch,
+    build_response,
+    log,
+)
+from server.mcp.stdio_entry import run_stdio as _run_stdio  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # stdio 传输
 # ---------------------------------------------------------------------------
 
-def _drain_line(stream: Any) -> None:
-    """超长行：把这一行剩下的字节读完丢掉，避免下一轮读到半截 JSON。"""
-    while True:
-        chunk = stream.readline(MAX_INPUT_BYTES)
-        if not chunk or chunk.endswith(b"\n"):
-            return
-
-
 def serve_stdio(base_url: str, token: str, timeout: float) -> int:
-    stream = sys.stdin.buffer
-    while True:
-        raw = stream.readline(MAX_INPUT_BYTES + 1)
-        if not raw:
-            break
-        if len(raw) > MAX_INPUT_BYTES and not raw.endswith(b"\n"):
-            _drain_line(stream)
-            sys.stdout.write(json.dumps(_err(None, INVALID_REQUEST, "输入超过 1MB 上限"),
-                                        ensure_ascii=False) + "\n")
-            sys.stdout.flush()
-            continue
-        text = raw.decode("utf-8", "replace").strip()
-        if not text:
-            continue
-        try:
-            message = json.loads(text)
-        except Exception as exc:
-            sys.stdout.write(json.dumps(_err(None, PARSE_ERROR, "不是合法 JSON：%s" % exc),
-                                        ensure_ascii=False) + "\n")
-            sys.stdout.flush()
-            continue
-        if isinstance(message, list):
-            response: Any = _err(None, INVALID_REQUEST, "stdio 传输只支持单条 JSON-RPC 消息")
-        else:
-            try:
-                response = build_response(message, base_url, token, timeout)
-            except Exception as exc:
-                log("处理消息异常：%r" % (exc,))
-                response = _err(message.get("id") if isinstance(message, dict) else None,
-                                INTERNAL_ERROR, "内部错误：%s: %s" % (type(exc).__name__, exc))
-        if response is None:
-            continue
-        sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
-        sys.stdout.flush()
-    log("stdin 关闭，退出")
-    return 0
+    """stdio 传输复用主程序内置实现（server/mcp/stdio_entry.py），两边保证逐字一致。"""
+    return _run_stdio(base_url=base_url, token=token, timeout=timeout)
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +198,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.transport == "http":
         return serve_http(base_url, token, timeout, args.host, args.port,
                           str(args.path or "/mcp"))
-    log("stdio 启动：base_url=%s timeout=%s" % (base_url, timeout))
     return serve_stdio(base_url, token, timeout)
 
 

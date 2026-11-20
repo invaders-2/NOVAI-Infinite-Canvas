@@ -213,5 +213,78 @@ class ApimartImageBranchSourceTests(unittest.TestCase):
         self.assertIn("apimart_image_resolution_for_model(model, resolution, caps=apimart_caps)", source)
 
 
+class ApimartVideoAudioCapsTests(unittest.TestCase):
+    """视频原生音频：caps 只在「能出声音且请求里能明确开关」时才下发 audio。
+
+    判据与请求体分支共用 apimart_video_audio_field，全部来自 APIMart 文档（docs.apimart.ai/cn）：
+      * 有 audio / generate_audio 布尔参数的才算开关（seedance 2.x / 2.5-flash / 1.5-pro、apimart-zoe、
+        kling-v3 / v3-omni）；
+      * Kling v4 / v4-flash 文档写「始终带立体声音轨」（只有 audio_setting 选沿用原声还是重生成）、
+        Muse Video Ext 传 false 直接 400、Gemini Omni / MiniMax-H3 / VEO3.1 没有音频参数、恒定带音轨 →
+        一律不下发，免得面板给一个关不掉（或开了也没用）的开关。"""
+
+    provider = {"id": "apimart", "protocol": "apimart"}
+
+    def caps(self, model):
+        return main.model_caps_for(self.provider, model, "video") or {}
+
+    def test_switchable_models_declare_audio(self):
+        for model in ("seedance-2.5", "seedance-2.0", "seedance-2-5-flash", "seedance-1-5-pro",
+                      "apimart-zoe", "kling-v3", "kling-v3-omni"):
+            self.assertIs(self.caps(model).get("audio"), True, model)
+
+    def test_auto_audio_models_do_not_declare_switch(self):
+        # 恒定带音轨 / 没有音频参数 / 只有 audio_setting → 不给开关
+        for model in ("kling-v4", "kling-v4-flash", "gemini-omni-1.2-flash", "gemini-omni-1.2-flash-ext",
+                      "muse-video-ext", "MiniMax-H3", "MiniMax-H3-Max", "veo3.1-fast", "veo3.1-quality"):
+            self.assertNotIn("audio", self.caps(model), model)
+
+    def test_audio_field_per_family(self):
+        # 字段名与「默认是否带声音」按文档区分：Seedance 2.x / Zoe 默认有声（要显式 false 才关），
+        # Seedance 1.5 Pro 的字段叫 audio、默认 true；Kling v3 默认 false（只开时发 true）
+        self.assertEqual(main.apimart_video_audio_field(main.APIMART_VIDEO_MODEL_CAPS["seedance-2-5"]), "generate_audio")
+        self.assertEqual(main.apimart_video_audio_field(main.APIMART_VIDEO_MODEL_CAPS["apimart-zoe"]), "generate_audio")
+        self.assertEqual(main.apimart_video_audio_field(main.APIMART_VIDEO_MODEL_CAPS["seedance-1-5-pro"]), "audio")
+        self.assertEqual(main.apimart_video_audio_field(main.APIMART_VIDEO_MODEL_CAPS["kling-v3"]), "audio")
+        self.assertTrue(main.APIMART_VIDEO_MODEL_CAPS["kling-v3"]["audio_default_on"] is False)
+        self.assertTrue(main.APIMART_VIDEO_MODEL_CAPS["apimart-zoe"]["audio_default_on"] is True)
+        self.assertEqual(main.apimart_video_audio_field(main.APIMART_VIDEO_MODEL_CAPS["kling-v4"]), "")
+        self.assertEqual(main.apimart_video_audio_field(None), "")
+
+    def test_wan_vidu_pixverse_flux_audio(self):
+        # 文档都写明 audio 布尔、false 出静音片
+        for model in ("wan2.6", "wan2.6-i2v-flash", "wan3.0-video-prime", "viduq3-turbo",
+                      "viduq4-preview", "pixverse-v6-max", "flux-3-video"):
+            self.assertIs(self.caps(model).get("audio"), True, model)
+        # wan2.5 文档写明「只支持 audio=true」；happyhorse 只有 audio_setting；skyreels 只收参考音频
+        for model in ("wan2.5-preview", "happyhorse-1.0", "skyreels-v4-fast"):
+            self.assertNotIn("audio", self.caps(model), model)
+        # 默认静音的（pixverse，开了更贵）只在开时发 true；默认带声音的两种值都发
+        self.assertIs(main.APIMART_VIDEO_MODEL_CAPS["pixverse-v6"]["audio_default_on"], False)
+        self.assertIs(main.APIMART_VIDEO_MODEL_CAPS["wan2-6"]["audio_default_on"], True)
+        self.assertIs(main.APIMART_VIDEO_MODEL_CAPS["flux-3-video"]["audio_default_on"], True)
+
+    def test_volcengine_seedance_2x_declares_audio(self):
+        # 火山分支请求体本来就发 generate_audio（开 true / 关显式 false）→ 能力表要给入口
+        volc = {"id": "volcengine", "protocol": "volcengine"}
+        for model in ("doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128", "doubao-seedance-2-5-260628"):
+            caps = main.model_caps_for(volc, model, "video") or {}
+            self.assertIs(caps.get("audio"), True, model)
+        # Seedance 1.x 请求侧没有 generate_audio → 不声明
+        for model in ("doubao-seedance-1-0-pro-250528", "doubao-seedance-1-5-pro-250528"):
+            caps = main.model_caps_for(volc, model, "video") or {}
+            self.assertNotIn("audio", caps, model)
+
+    def test_request_branch_uses_shared_field(self):
+        source = Path(main.__file__).read_text(encoding="utf-8")
+        self.assertIn("apimart_audio_field = apimart_video_audio_field(apimart_video_caps)", source)
+        self.assertIn('elif payload.generate_audio and (apimart_video_caps is None or apimart_video_caps.get("generate_audio")):', source)
+        # 默认带声音的模型（seedance / zoe / 1.5-pro）关声音必须显式发 false
+        self.assertIn('if (apimart_video_caps or {}).get("audio_default_on"):', source)
+        # 上游字段名按模型来：Seedance / Zoe 用 generate_audio，Wan / Vidu / PixVerse / FLUX / Kling 用 audio
+        self.assertIn("body[apimart_audio_field] = bool(payload.generate_audio)", source)
+        self.assertIn("body[apimart_audio_field] = True", source)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -346,7 +346,17 @@ export class CanvasStore {
   }
   removeEdge(id: string) {
     const e = this.state.doc.edges.find((x) => x.id === id); if (!e) return;
-    this.mutate((d) => ({ ...d, edges: d.edges.filter((x) => x.id !== id), nodes: d.nodes.map((n) => (n.id === e.to && isGenKind(n.kind) ? withGen(n, { order: genOf(n).order.filter((x) => x !== id) }) : n)) }), { history: true });
+    this.mutate((d) => ({
+      ...d,
+      edges: d.edges.filter((x) => x.id !== id),
+      nodes: d.nodes.map((n) => {
+        if (n.id !== e.to) return n;
+        // 断开剪辑时间线的来源 = 把该来源的片段一起撤掉，两者不能各说各话（同一步历史，⌘Z 一起回来）
+        if (n.kind === "timeline") return { ...n, clips: (n.clips || []).filter((c) => c.sourceNodeId !== e.from) };
+        if (isGenKind(n.kind)) return withGen(n, { order: genOf(n).order.filter((x) => x !== id) });
+        return n;
+      }),
+    }), { history: true });
   }
   addEdge(from: string, to: string): CanvasEdge {
     const edge: CanvasEdge = { id: uid("e"), from, to };

@@ -107,7 +107,8 @@ onMounted(() => {
 .route-canvas .body { padding: var(--tbh) 0 0; }
 .route-canvas .stage { border-radius: 0; box-shadow: none; }
 
-/* 渐变磨砂（参照 Apple Music 顶栏）：没有硬边，越往下越清楚 */
+/* 渐变磨砂（参照 Apple Music 顶栏）：三层模糊由强到弱向下淡出 + 一层底色渐变，没有硬边，越往下越清楚。
+   首页 / 画布列表 / 素材库 / 应用市场 / 社区 / 我的共用。 */
 .tb-fx { position: absolute; left: 0; right: 0; top: 0; height: calc(var(--tbh) + 36px); z-index: 59; pointer-events: none; }
 .tb-fx i { position: absolute; inset: 0; display: block; }
 .tb-fx i:nth-child(1) { backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); -webkit-mask: linear-gradient(#000 55%, transparent); mask: linear-gradient(#000 55%, transparent); }

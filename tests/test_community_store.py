@@ -45,9 +45,11 @@ def main() -> int:
     check("含斜杠的 ID 被拒", not store.valid_item_id("483920/../x"))
     check("空 ID 被拒", not store.valid_item_id(""))
     check("合法文件名", store.valid_file_name("shot-abc123.png"))
+    check("中文名合法（与 packager 字符集一致）",
+          store.valid_file_name("剪辑时间线_原声重导版_aff035-fb654eb7f8.mp4"))
     check("目录穿越文件名被拒", not store.valid_file_name("../secret.json"))
     check("隐藏文件被拒", not store.valid_file_name(".env"))
-    for bad in ("a..b.png", "a/b.png", ""):
+    for bad in ("a..b.png", "a/b.png", "", "中文/../x.mp4", "../中文.mp4", ".中文", "中文\\x.mp4", "a b.png"):
         check("非法文件名被拒: %r" % bad, not store.valid_file_name(bad))
 
     # 3. 作品读写

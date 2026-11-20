@@ -246,17 +246,12 @@ def revoke_share(canvas_id: str) -> bool:
 # ---------------------------------------------------------------- 地址与快照
 
 def _lan_ip() -> str:
-    env_ip = os.environ.get("NOVAI_LAN_IP", "").strip()
-    if env_ip:
-        return env_ip
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    """本机局域网 IP：跳过 Clash/VPN TUN、Docker 等虚拟网卡（见 server/lan_ip.py）。"""
     try:
-        sock.connect(("8.8.8.8", 80))
-        return str(sock.getsockname()[0])
+        from server.lan_ip import pick_lan_ip
+        return pick_lan_ip()
     except Exception:
-        return ""
-    finally:
-        sock.close()
+        return os.environ.get("NOVAI_LAN_IP", "").strip()
 
 
 def page_url_base(request: Request) -> str:
@@ -747,7 +742,10 @@ async def localize_media_urls(urls: List[str], share_url: str = "", request: Opt
                 if remaining <= 0:
                     return _media_fail(url, "超过本次 200MB 下载上限")
                 try:
-                    async with httpx.AsyncClient(http2=False, verify=ssl_context, trust_env=trust_env, timeout=timeout) as client:
+                    # 局域网素材强制直连：系统代理只对公网地址生效
+                    trust_env_here = trust_env and not is_private_media_url(url)
+                    async with httpx.AsyncClient(http2=False, verify=ssl_context,
+                                                 trust_env=trust_env_here, timeout=timeout) as client:
                         ok, content, content_type, error = await asyncio.wait_for(
                             _download_media(client, url, token, remaining), MEDIA_TIMEOUT_SECONDS + 2)
                 except asyncio.TimeoutError:
@@ -862,7 +860,10 @@ async def localize_private_media_url(url: str) -> str:
     trust_env = bool(deps.get("_TRUST_ENV", False))
     timeout = httpx.Timeout(MEDIA_TIMEOUT_SECONDS, connect=MEDIA_TIMEOUT_SECONDS)
     try:
-        async with httpx.AsyncClient(http2=False, verify=ssl_context, trust_env=trust_env, timeout=timeout) as client:
+        # 私网素材强制直连：系统代理只对公网地址生效
+        trust_env_here = trust_env and not is_private_media_url(text)
+        async with httpx.AsyncClient(http2=False, verify=ssl_context,
+                                     trust_env=trust_env_here, timeout=timeout) as client:
             status, content, content_type, error = await asyncio.wait_for(
                 _download_media(client, text, _url_token(text)), MEDIA_TIMEOUT_SECONDS + 2)
     except asyncio.TimeoutError:
@@ -940,12 +941,19 @@ async def create_share(payload: ShareCreateRequest, request: Request) -> Dict[st
     owner_name = str(request.cookies.get("novai_local_name") or "").strip()
     if not owner_name:
         user = None
-        request_user = deps.get("REQUEST_AUTH_USER")
-        if callable(request_user):
-            try:
-                user = request_user(request)
-            except Exception:
-                user = None
+        # optional 下登录只记身份、不接管分享页署名（与原行为一致）；required 才用账号名
+        try:
+            from server.auth import service as _auth_service
+            isolation = _auth_service.auth_enabled()
+        except Exception:
+            isolation = False
+        if isolation:
+            request_user = deps.get("REQUEST_AUTH_USER")
+            if callable(request_user):
+                try:
+                    user = request_user(request)
+                except Exception:
+                    user = None
         owner_name = str((user or {}).get("username") or payload.owner_name or DEFAULT_OWNER_NAME)
     share = upsert_share(
         canvas_key,

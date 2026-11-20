@@ -101,7 +101,8 @@ const seedFromTpl = sliceBetween(home, 'function seedFromTemplate', 'function us
 ok(/const seed = \{ v: 1, nodes, toast: t\.toast \}/.test(seedFromTpl), 'seedFromTemplate 仍是 { v:1, nodes, toast }');
 ok(/if \(opts\.agent\) \{/.test(seedFromTpl) && /seed\.autoSend = true/.test(seedFromTpl), '只有 opts.agent 才 autoSend（普通模板不自动发送）');
 ok(/if \(copy\.ref && rs\.length\) copy\.images = rs/.test(seedFromTpl), 'ref 节点仍由首页素材填 images');
-ok(/if \(copy\.brief\) copy\.text = tx/.test(seedFromTpl), 'brief 节点仍由输入框文字填 text');
+ok(/if \(copy\.brief && tx\) copy\.text = tx/.test(seedFromTpl), 'brief 节点仍由输入框文字填 text（tx 非空才填）');
+ok(!/if \(copy\.brief\) copy\.text = tx/.test(seedFromTpl), '输入框为空（tx 为空）时不覆盖 brief 节点的原引导文案');
 
 /* ───────── [3] homeSeed.ts：六类节点翻译 ───────── */
 console.log('[3] novai-canvas-ui homeSeed.ts 读-删-铺-连-居中-交草稿');

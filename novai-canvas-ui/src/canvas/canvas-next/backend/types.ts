@@ -79,7 +79,7 @@ export type MattingModelStatus = {
 export type UpscaleRuntimeStatus = { installed: boolean; downloading: boolean; progress: number; message: string; platform?: string };
 /** 本地超分结果：skipped 表示原图已经达到目标精度，url 指回原图，调用方不要再写一个新版本 */
 export type UpscaleResult = GenOutput & { skipped?: boolean };
-export type EditRequest = { canvasId: string; nodeId: string; op: EditOp; model?: ModelSpec; sourceUrl: string; maskDataUrl?: string; prompt?: string; params?: Record<string, unknown> };
+export type EditRequest = { canvasId: string; nodeId: string; op: EditOp; model?: ModelSpec; sourceUrl: string; maskDataUrl?: string; prompt?: string; /** 局部重绘 / 换品的新品参考图（挂上后只重绘遮罩内、遮罩外贴回原样） */ refUrl?: string; params?: Record<string, unknown> };
 
 /**
  * 后端持久任务的精简视图（图片 / 视频任务化生成用）：
@@ -125,6 +125,8 @@ export type CanvasAgentContext = {
   /** 本轮挂载的技能（名字 + 正文）：后端放进系统提示，不再塞进 goal 被截断 */
   skillName?: string;
   skillPrompt?: string;
+  /** 线程里给用户看的那句（带 @skill{…} 记号，面板按用户放的位置渲染行内胶囊）；不传 = 用 goal */
+  threadText?: string;
   /** 本轮 @ 点名的应用（工具）：后端要求方案里真的调用它们 */
   apps?: Array<{ name: string; title: string; description: string }>;
   /** 模型强度档位键（后端 model_caps.think 里的一档）；空 = 不传 = 默认 */

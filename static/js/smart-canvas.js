@@ -130,7 +130,6 @@ let mentionAssetCategoryId = '';
 let assetLibraryUpdatedAt = 0;
 let assetLibraryRefreshTimer = null;
 let activeAssetSmartClassId = '';
-const ASSET_SMART_CATEGORY_PREFIX = '__smart_class__::';
 const PROMPT_PRESETS_KEY = 'smart_canvas_prompt_presets_v1';
 const PROMPT_TEMPLATE_GROUPS_KEY = 'smart_canvas_prompt_template_groups_v1';
 const PROMPT_TEMPLATE_OVERRIDES_KEY = 'smart_canvas_prompt_template_overrides_v1';
@@ -13201,55 +13200,6 @@ function assetCategories(type='image'){
     const library = activeAssetLibrary();
     return (library?.categories || assetLibrary.categories || []).filter(cat => (cat.type || 'image') === type);
 }
-function assetSmartClassKey(entry){
-    if(!entry?.dimension || !entry?.tag) return '';
-    return `${String(entry.dimension)}::${String(entry.tag)}`;
-}
-function assetSmartClassOptionId(entry){
-    const key = assetSmartClassKey(entry);
-    return key ? `${ASSET_SMART_CATEGORY_PREFIX}${key}` : '';
-}
-function parseAssetSmartClassId(id=''){
-    const value = String(id || '');
-    if(!value.startsWith(ASSET_SMART_CATEGORY_PREFIX)) return null;
-    const raw = value.slice(ASSET_SMART_CATEGORY_PREFIX.length);
-    const index = raw.indexOf('::');
-    if(index < 0) return null;
-    return {dimension:raw.slice(0, index), tag:raw.slice(index + 2)};
-}
-function assetSmartClassEntries(){
-    const groups = new Map();
-    assetCategories('image').forEach(cat => {
-        (cat.items || []).forEach(item => {
-            const flat = Array.isArray(item?.classification?.flat) ? item.classification.flat : [];
-            flat.forEach(entry => {
-                const key = assetSmartClassKey(entry);
-                if(!key) return;
-                const prev = groups.get(key) || {
-                    id:assetSmartClassOptionId(entry),
-                    dimension:String(entry.dimension || ''),
-                    label:String(entry.label || entry.dimension || '分类'),
-                    tag:String(entry.tag || ''),
-                    count:0
-                };
-                prev.count += 1;
-                groups.set(key, prev);
-            });
-        });
-    });
-    return [...groups.values()].sort((a, b) => {
-        if(a.label !== b.label) return a.label.localeCompare(b.label, 'zh-CN');
-        return b.count - a.count || a.tag.localeCompare(b.tag, 'zh-CN');
-    });
-}
-function itemsForAssetSmartClass(optionId=''){
-    const parsed = parseAssetSmartClassId(optionId);
-    if(!parsed) return [];
-    return assetCategories('image').flatMap(cat => cat.items || []).filter(item => {
-        const flat = Array.isArray(item?.classification?.flat) ? item.classification.flat : [];
-        return flat.some(entry => String(entry.dimension || '') === parsed.dimension && String(entry.tag || '') === parsed.tag);
-    });
-}
 function workflowAssetCategories(){
     return assetCategories('workflow');
 }
@@ -13291,7 +13241,6 @@ function activeAssetLibrary(){
 }
 function activeAssetCategory(){
     const cats = assetCategories('image');
-    if(parseAssetSmartClassId(activeAssetCategoryId)) return null;
     if(!cats.length) return null;
     return cats.find(cat => cat.id === activeAssetCategoryId) || cats[0];
 }
@@ -13962,24 +13911,15 @@ function renderAssetLibrary(){
     workflowEmpty.style.display = 'none';
     if(!imageMode && !workflowMode){ refreshIcons(); return; }
     const baseCats = workflowMode ? workflowAssetCategories() : assetCategories('image');
-    const smartClassCats = imageMode && !localMode ? assetSmartClassEntries().map(entry => ({
-        ...entry,
-        id:entry.id,
-        name:`${entry.label} / ${entry.tag} (${entry.count})`,
-        type:'image',
-        smartClass:true,
-        items:[]
-    })) : [];
-    const cats = workflowMode ? baseCats : [...baseCats, ...smartClassCats];
+    const cats = baseCats;
     const activeCatId = workflowMode ? activeWorkflowAssetCategoryId : activeAssetCategoryId;
     if(workflowMode && !cats.some(cat => cat.id === activeWorkflowAssetCategoryId)) activeWorkflowAssetCategoryId = cats[0]?.id || '';
     if(imageMode && !cats.some(cat => cat.id === activeAssetCategoryId)) activeAssetCategoryId = cats[0]?.id || '';
     assetCategorySelect.innerHTML = cats.map(cat => `<option value="${escapeHtml(cat.id)}" ${cat.id === (workflowMode ? activeWorkflowAssetCategoryId : activeAssetCategoryId) ? 'selected' : ''}>${escapeHtml(cat.name || (workflowMode ? '工作流' : tr('smart.assetFolder')))}</option>`).join('');
     const cat = workflowMode ? activeWorkflowAssetCategory() : activeAssetCategory();
-    const smartClass = imageMode ? parseAssetSmartClassId(activeAssetCategoryId) : null;
-    const items = smartClass ? itemsForAssetSmartClass(activeAssetCategoryId) : (cat?.items || []);
-    if(assetAddCategoryBtn) assetAddCategoryBtn.disabled = Boolean(smartClass);
-    if(assetRenameCategoryBtn) assetRenameCategoryBtn.disabled = !cat || Boolean(smartClass) || (localMode && (cat.id === '__root__' || !cat.id));
+    const items = cat?.items || [];
+    if(assetAddCategoryBtn) assetAddCategoryBtn.disabled = false;
+    if(assetRenameCategoryBtn) assetRenameCategoryBtn.disabled = !cat || (localMode && (cat.id === '__root__' || !cat.id));
     assetGrid.innerHTML = items.length ? items.map(item => `
         <div class="asset-item ${workflowMode ? 'workflow-asset-item' : ''}" draggable="${workflowMode ? 'false' : 'true'}" data-asset-id="${escapeHtml(item.id)}" data-url="${escapeHtml(item.url)}" data-name="${escapeHtml(item.name || 'asset')}" data-kind="${escapeHtml(assetMediaKind(item))}">
             ${assetThumbHtml(item)}
@@ -13993,7 +13933,7 @@ function renderAssetLibrary(){
                        <button class="asset-mini-btn" type="button" data-delete-asset="${escapeHtml(item.id)}" title="${escapeHtml(tr('common.delete'))}"><i data-lucide="trash-2"></i></button>`}
             </div>
         </div>
-    `).join('') : `<div class="asset-empty">${escapeHtml(localMode ? '暂无本地素材，拖入图片即可保存' : (smartClass ? '这个智能分类下暂无素材' : (workflowMode ? '暂无工作流资产' : tr('smart.assetEmpty'))))}</div>`;
+    `).join('') : `<div class="asset-empty">${escapeHtml(localMode ? '暂无本地素材，拖入图片即可保存' : (workflowMode ? '暂无工作流资产' : tr('smart.assetEmpty')))}</div>`;
     if(workflowMode) bindWorkflowAssetItemEvents();
     else bindAssetItemEvents();
     bindSmartPreviewImageFallbacks(assetGrid);
@@ -14445,6 +14385,7 @@ async function loadCanvas(){
         lastSavedContentSig = (cleanedDetachedInputs || cleanedCompletedState || healedPromptRunning || resetBatchRuns || recoveredLoopOutputs || hiddenCompletedTimers || healedGroupFrames || seededNodeSettings)
             ? '' : canvasContentSignature(canvasForStorage());
         resumeSmartPendingTasks().catch(error => console.error('[smart-canvas] 待处理任务恢复入口失败', error));
+        resumeVideoUpscaleTasks().catch(error => console.error('[smart-canvas] 视频超分任务恢复入口失败', error));
         resumeJimengPendingNodes();
         startCanvasMetaPoll();
     } catch(e) { toast(tr('smart.toastCanvasFail')); }
@@ -19404,6 +19345,7 @@ function smartNodeToolbarHtml(node){
     if(kind === 'video'){
         return `<div class="smart-node-floating-menu smart-image-toolbar smart-video-toolbar" data-smart-image-menu="1">
         ${plainButton('preview', 'play', '预览 / 截帧', '放大预览，可逐帧查看并导出首帧 / 当前帧 / 尾帧', true)}
+        ${plainButton('video-upscale', 'maximize-2', videoUpscaleToolbarLabel(node.id), tr('smart.videoUpscaleTip'), true)}
         ${plainButton('video-relay', 'skip-forward', '尾帧接力', '取这段视频的最后一帧，作为下一段视频的首帧继续生成', true)}
         ${plainButton('video-first-frame', 'skip-back', '首帧成图', '取第一帧生成一张图片节点', true)}
         ${smartRerunInfo(node) ? plainButton('rerun', 'refresh-cw', '再来一条', '用同样的提示词、参考图和参数再生成一次，新结果放在旁边', true) : ''}
@@ -23516,6 +23458,7 @@ function runSmartNodeToolbarAction(nodeId, action){
     if(action === 'rerun'){ rerunSmartNode(node); return; }
     if(action === 'pick'){ openSmartPickViewer([node.id], index); return; }
     if(action === 'video-first-frame'){ frameImageFromVideoNode(node, index, 'first'); return; }
+    if(action === 'video-upscale'){ openVideoUpscalePanel(node, index); return; }
     if(action === 'matting'){
         mattingForSmartNode(node, index);
         return;
@@ -24287,6 +24230,884 @@ function finishHdRuntimeDownload(node, index, target){
     closeHdRuntimeDialog();
     toast(tr('smart.hdReady'));
     runHdUpscale(node, index, target);
+}
+// ===== 视频超分（本地 Real-ESRGAN，2K/4K；运行时复用高清放大那一套接口） =====
+/* 后端契约（固定）：POST /api/video/upscale -> {task_id}；GET /api/video/upscale/status?task_id=；
+   POST /api/video/upscale/cancel；运行时状态 / 下载复用 /api/image/upscale/runtime(/download)。
+   src_path 传这条素材的原始 URL：后端按 /assets//output/ 解析成本地文件（与 output_file_from_url 同口径）。 */
+const VIDEO_UPSCALE_TARGETS = [
+    {key:'2k', label:'2K'},
+    {key:'4k', label:'4K'}
+];
+const VIDEO_UPSCALE_MODELS = [
+    {key:'anime', labelKey:'smart.videoUpscaleModelAnime', tipKey:'smart.videoUpscaleModelAnimeTip'},
+    {key:'live', labelKey:'smart.videoUpscaleModelLive', tipKey:'smart.videoUpscaleModelLiveTip'}
+];
+const VIDEO_UPSCALE_POLL_BASE = 1500;
+const VIDEO_UPSCALE_POLL_MAX = 6000;
+const VIDEO_UPSCALE_POLL_HIDDEN_FACTOR = 4;
+const VIDEO_UPSCALE_POLL_FAIL_LIMIT = 6;
+const videoUpscaleJobs = new Map();
+const videoUpscaleMetaCache = new Map();
+/* 刷新后要显示「已中断」的最近任务：nodeId → /tasks 里的任务视图。
+   只放 interrupted（完成/失败不在这里假装恢复，done 的产物已随节点落盘）。 */
+const videoUpscaleInterruptedTasks = new Map();
+let videoUpscaleVisibilityBound = false;
+let videoUpscaleUnloadBound = false;
+function videoUpscaleJobFor(nodeId, create){
+    let job = videoUpscaleJobs.get(nodeId);
+    if(!job && create){
+        job = {
+            nodeId, taskId:'', sourceUrl:'', target:'2k', model:'anime',
+            state:'idle', progress:0, etaSec:null, processed:0, total:0,
+            outputPath:null, outputIndex:-1, meta:null,
+            error:'', errorRaw:'', writebackDone:false, cancelling:false,
+            timer:0, pollDelay:VIDEO_UPSCALE_POLL_BASE, pollFails:0,
+            runtime:{installed:null, downloading:false, progress:0, timer:0, error:'', fails:0}
+        };
+        videoUpscaleJobs.set(nodeId, job);
+    }
+    return job || null;
+}
+function videoUpscaleJobIsActive(job){
+    return !!job && (job.state === 'running' || job.state === 'queued' || job.state === 'starting');
+}
+/* 节点工具条上的「超分中 42%」标记：渲染时按 job 现算，轮询推进时再原地改文字，
+   这样拖动画布重绘工具条也不会把标记弄丢，又不用整张画布每秒重绘。 */
+function videoUpscaleToolbarLabel(nodeId){
+    const job = videoUpscaleJobs.get(nodeId);
+    if(!videoUpscaleJobIsActive(job)) return tr('smart.videoUpscale');
+    return tr('smart.videoUpscaleBadge').replace('{pct}', String(Math.max(0, Math.round(Number(job.progress) || 0))));
+}
+function paintVideoUpscaleNodeBadges(){
+    const buttons = document.querySelectorAll('.smart-node-floating-menu [data-smart-node-action="video-upscale"]');
+    buttons.forEach(btn => {
+        const nodeId = String(btn.dataset.nodeId || '');
+        const active = videoUpscaleJobIsActive(videoUpscaleJobs.get(nodeId));
+        const label = videoUpscaleToolbarLabel(nodeId);
+        const span = btn.querySelector('span');
+        if(span && span.textContent !== label) span.textContent = label;
+        btn.classList.toggle('is-vu-running', active);
+    });
+    /* 节点卡片上的「超分中 42%」小药丸：刷新后也靠它把状态摆在节点上（内容由 CSS ::after 读 data-vu-progress） */
+    document.querySelectorAll('.image-node').forEach(el => {
+        const job = videoUpscaleJobs.get(String(el.dataset.id || ''));
+        const active = videoUpscaleJobIsActive(job);
+        el.classList.toggle('is-vu-running', active);
+        if(!active){ el.removeAttribute('data-vu-progress'); return; }
+        const text = job.state === 'queued'
+            ? tr('smart.videoUpscaleQueuedBadge')
+            : tr('smart.videoUpscaleBadge').replace('{pct}', String(Math.max(0, Math.min(100, Math.round(Number(job.progress) || 0)))));
+        if(el.getAttribute('data-vu-progress') !== text) el.setAttribute('data-vu-progress', text);
+    });
+}
+function videoUpscalePanelEl(){
+    return document.querySelector('.smart-popover[data-smart-tool-panel="video-upscale"]');
+}
+function videoUpscalePanelFor(job){
+    const panel = videoUpscalePanelEl();
+    return panel && panel.dataset.smartToolNode === job.nodeId ? panel : null;
+}
+function videoUpscaleTargetLabel(key){
+    return (VIDEO_UPSCALE_TARGETS.find(item => item.key === key) || VIDEO_UPSCALE_TARGETS[0]).label;
+}
+function videoUpscaleModelLabel(key){
+    const model = VIDEO_UPSCALE_MODELS.find(item => item.key === key) || VIDEO_UPSCALE_MODELS[0];
+    return tr(model.labelKey);
+}
+/* 粗估：按 24fps 把时长折成帧数，再按「模型 x 档位」的单帧耗时算一个区间；只做参考，不承诺精度。 */
+function videoUpscaleFormatDuration(seconds){
+    const total = Math.max(1, Math.round(Number(seconds) || 0));
+    if(total < 60) return tr('smart.videoUpscaleDurSec').replace('{n}', String(total));
+    if(total < 3600){
+        const minutes = Math.floor(total / 60);
+        const rest = total % 60;
+        if(rest >= 15 && total < 600){
+            return tr('smart.videoUpscaleDurMinSec').replace('{m}', String(minutes)).replace('{s}', String(rest));
+        }
+        return tr('smart.videoUpscaleDurMin').replace('{n}', String(minutes));
+    }
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.round((total % 3600) / 60);
+    return tr('smart.videoUpscaleDurHour').replace('{h}', String(hours)).replace('{m}', String(minutes));
+}
+function videoUpscaleEstimateText(meta, job){
+    const duration = Math.max(0, Number(meta && meta.duration) || 0);
+    const basis = duration
+        ? tr('smart.videoUpscaleBasisDuration').replace('{duration}', videoUpscaleFormatDuration(duration))
+        : tr('smart.videoUpscaleBasisAssumed');
+    const seconds = duration > 0 ? Math.min(600, duration) : 5;
+    const frames = Math.max(1, Math.round(seconds * 24));
+    const perFrame = (job.model === 'live' ? 0.9 : 0.35) * (job.target === '4k' ? 3.2 : 1);
+    const total = frames * perFrame;
+    const low = Math.max(1, Math.round(total * 0.7));
+    const high = Math.max(low + 1, Math.round(total * 1.6));
+    const range = tr('smart.videoUpscaleDurRange')
+        .replace('{a}', videoUpscaleFormatDuration(low))
+        .replace('{b}', videoUpscaleFormatDuration(high));
+    return tr('smart.videoUpscaleEstimate').replace('{range}', range).replace('{basis}', basis);
+}
+/* 读时长 / 分辨率：用离屏 video 读元数据；读不到就退回「按 5 秒估算」，不阻塞面板。 */
+function probeVideoUpscaleMeta(url){
+    const key = String(url || '');
+    if(!key) return Promise.resolve(null);
+    if(videoUpscaleMetaCache.has(key)) return videoUpscaleMetaCache.get(key);
+    const task = new Promise(resolve => {
+        const original = smartOriginalMediaUrl(key);
+        const src = displayMediaUrl({url:original});
+        if(!src || /^data:/i.test(src) || /^blob:/i.test(src)){ resolve(null); return; }
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.muted = true;
+        let done = false;
+        let timer = 0;
+        const finish = meta => {
+            if(done) return;
+            done = true;
+            clearTimeout(timer);
+            try { video.removeAttribute('src'); video.load(); } catch(_) {}
+            resolve(meta);
+        };
+        timer = setTimeout(() => finish(null), 8000);
+        video.onloadedmetadata = () => finish({
+            duration: Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0,
+            width: video.videoWidth || 0,
+            height: video.videoHeight || 0
+        });
+        video.onerror = () => finish(null);
+        video.src = src;
+    }).catch(() => null);
+    videoUpscaleMetaCache.set(key, task);
+    return task;
+}
+function paintVideoUpscaleEta(panel, job){
+    if(!panel) return;
+    const etaEl = panel.querySelector('[data-vu-eta]');
+    if(etaEl) etaEl.textContent = job.meta ? videoUpscaleEstimateText(job.meta, job) : tr('smart.videoUpscaleEstimating');
+    const sourceEl = panel.querySelector('[data-vu-source]');
+    if(!sourceEl) return;
+    if(job.meta && job.meta.width > 0 && job.meta.height > 0){
+        const size = job.meta.width + '×' + job.meta.height;
+        sourceEl.textContent = job.meta.duration
+            ? tr('smart.videoUpscaleSourceLine').replace('{size}', size).replace('{duration}', videoUpscaleFormatDuration(job.meta.duration))
+            : tr('smart.videoUpscaleSourceNoDuration').replace('{size}', size);
+    } else {
+        sourceEl.textContent = '';
+    }
+}
+function loadVideoUpscaleMeta(panel, job){
+    paintVideoUpscaleEta(panel, job);
+    if(job.meta) return;
+    const url = job.sourceUrl;
+    probeVideoUpscaleMeta(url).then(meta => {
+        if(job.sourceUrl !== url) return;
+        job.meta = meta;
+        paintVideoUpscaleEta(panel, job);
+    });
+}
+async function fetchVideoUpscaleRuntime(){
+    const resp = await fetch('/api/image/upscale/runtime');
+    const data = await resp.json().catch(() => ({}));
+    if(!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+    return data;
+}
+function videoUpscaleRuntimeText(job){
+    const runtime = job.runtime;
+    if(runtime.error) return tr('smart.videoUpscaleRuntimeFailed').replace('{msg}', runtime.error);
+    if(runtime.downloading) return tr('smart.videoUpscaleRuntimeDownloading');
+    if(runtime.installed === true) return tr('smart.videoUpscaleRuntimeReady');
+    if(runtime.installed === false) return tr('smart.videoUpscaleRuntimeMissing');
+    return tr('smart.videoUpscaleRuntimeChecking');
+}
+function paintVideoUpscaleRuntime(panel, job){
+    if(!panel) return;
+    const textEl = panel.querySelector('[data-vu-runtime]');
+    if(textEl) textEl.textContent = videoUpscaleRuntimeText(job);
+    const start = panel.querySelector('[data-vu-start]');
+    if(!start) return;
+    const span = start.querySelector('span');
+    if(span){
+        span.textContent = job.runtime.installed === false
+            ? tr('smart.videoUpscaleStartDownload')
+            : tr('smart.videoUpscaleStart');
+    }
+}
+async function checkVideoUpscaleRuntime(panel, job){
+    if(job.runtime.downloading || job.runtime.installed === true || job.runtime.error) return;
+    let status;
+    try {
+        status = await fetchVideoUpscaleRuntime();
+    } catch(err) {
+        job.runtime.error = String(err && err.message || err);
+        paintVideoUpscaleRuntime(panel, job);
+        return;
+    }
+    job.runtime.installed = !!status.installed;
+    job.runtime.downloading = !!status.downloading;
+    job.runtime.progress = Math.max(0, Math.min(100, Number(status.progress) || 0));
+    paintVideoUpscaleRuntime(panel, job);
+    if(status.downloading && job.state === 'idle'){
+        job.state = 'downloading';
+        videoUpscaleRenderIfOpen(job);
+        pollVideoUpscaleRuntimeDownload(job);
+    }
+}
+async function startVideoUpscaleRuntimeDownload(panel, job){
+    job.runtime.error = '';
+    job.runtime.downloading = true;
+    job.runtime.progress = 0;
+    job.runtime.fails = 0;
+    job.state = 'downloading';
+    videoUpscaleRenderIfOpen(job);
+    try {
+        const resp = await fetch('/api/image/upscale/runtime/download', {method:'POST'});
+        const data = await resp.json().catch(() => ({}));
+        if(!resp.ok || data.ok === false) throw new Error(videoUpscaleRequestError(data, resp.status).message);
+        if(data.installed){ videoUpscaleFinishRuntimeDownload(job); return; }
+    } catch(err) {
+        videoUpscaleRuntimeDownloadFailed(job, err && err.message || String(err));
+        return;
+    }
+    pollVideoUpscaleRuntimeDownload(job);
+}
+function pollVideoUpscaleRuntimeDownload(job){
+    clearTimeout(job.runtime.timer);
+    job.runtime.timer = setTimeout(async () => {
+        job.runtime.timer = 0;
+        if(job.state !== 'downloading') return;
+        let status;
+        try {
+            status = await fetchVideoUpscaleRuntime();
+            job.runtime.fails = 0;
+        } catch(err) {
+            job.runtime.fails = (job.runtime.fails || 0) + 1;
+            if(job.runtime.fails < 5){ pollVideoUpscaleRuntimeDownload(job); return; }
+            videoUpscaleRuntimeDownloadFailed(job, err && err.message || String(err));
+            return;
+        }
+        if(status.installed){ videoUpscaleFinishRuntimeDownload(job); return; }
+        if(!status.downloading){
+            videoUpscaleRuntimeDownloadFailed(job, status.message || tr('smart.videoUpscaleErrUnknown'));
+            return;
+        }
+        job.runtime.downloading = true;
+        job.runtime.progress = Math.max(0, Math.min(100, Number(status.progress) || 0));
+        videoUpscaleRenderIfOpen(job);
+        pollVideoUpscaleRuntimeDownload(job);
+    }, 1000);
+}
+function videoUpscaleFinishRuntimeDownload(job){
+    clearTimeout(job.runtime.timer);
+    job.runtime.timer = 0;
+    job.runtime.fails = 0;
+    job.runtime.downloading = false;
+    job.runtime.progress = 100;
+    job.runtime.installed = true;
+    job.state = 'idle';
+    videoUpscaleRenderIfOpen(job);
+    toast(tr('smart.videoUpscaleRuntimeReadyStart'));
+    const panel = videoUpscalePanelFor(job);
+    const node = nodes.find(item => item.id === job.nodeId);
+    if(panel && node) startVideoUpscaleTask(panel, node, job);
+}
+function videoUpscaleRuntimeDownloadFailed(job, message){
+    clearTimeout(job.runtime.timer);
+    job.runtime.timer = 0;
+    job.runtime.downloading = false;
+    job.runtime.error = String(message || tr('smart.videoUpscaleErrUnknown'));
+    job.state = 'error';
+    job.errorRaw = '';
+    job.error = tr('smart.videoUpscaleRuntimeDownloadFailed').replace('{msg}', job.runtime.error);
+    videoUpscaleRenderIfOpen(job);
+    toast(job.error);
+}
+function resetVideoUpscaleJob(job){
+    videoUpscaleInterruptedTasks.delete(job.nodeId);
+    clearTimeout(job.timer);
+    job.timer = 0;
+    clearTimeout(job.runtime.timer);
+    job.runtime.timer = 0;
+    job.state = 'idle';
+    job.taskId = '';
+    job.progress = 0;
+    job.etaSec = null;
+    job.processed = 0;
+    job.total = 0;
+    job.outputPath = null;
+    job.outputIndex = -1;
+    job.error = '';
+    job.errorRaw = '';
+    job.writebackDone = false;
+    job.cancelling = false;
+    job.pollDelay = VIDEO_UPSCALE_POLL_BASE;
+    job.pollFails = 0;
+    job.runtime.downloading = false;
+    job.runtime.error = '';
+    job.runtime.fails = 0;
+    paintVideoUpscaleNodeBadges();
+}
+function videoUpscaleRequestError(data, status){
+    const detail = data && data.detail;
+    if(detail && typeof detail === 'object' && !Array.isArray(detail)){
+        return {
+            code: String(detail.code || ''),
+            message: String(detail.message || detail.msg || '') || ('HTTP ' + status)
+        };
+    }
+    const fallback = 'HTTP ' + status;
+    const hasBody = data && (data.detail != null || data.error != null || data.message != null);
+    const message = hasBody ? apiErrorMessage(data, fallback) : fallback;
+    return {code:'', message: message && message !== '{}' ? message : fallback};
+}
+function videoUpscaleErrorTextByCode(code, message){
+    switch(String(code || '')){
+        case 'duration_limit': return tr('smart.videoUpscaleErrDuration');
+        case 'resolution_limit': return tr('smart.videoUpscaleErrResolution');
+        case 'ffmpeg_missing': return tr('smart.videoUpscaleErrFfmpeg');
+        case 'source_missing': return tr('smart.videoUpscaleErrSource');
+        case 'probe_failed': return tr('smart.videoUpscaleErrProbe').replace('{msg}', String(message || ''));
+        case 'upscale_runtime_missing': return tr('smart.videoUpscaleErrRuntime');
+        case 'upscale_model_missing': return tr('smart.videoUpscaleErrModelMissing');
+        case 'invalid_target':
+        case 'invalid_model': return tr('smart.videoUpscaleErrInvalid').replace('{msg}', String(message || ''));
+        default: return videoUpscaleErrorText(message);
+    }
+}
+function videoUpscaleErrorText(raw){
+    const text = String(raw || '');
+    if(!text) return tr('smart.videoUpscaleErrUnknown');
+    if(/时长|too long|duration/i.test(text)) return tr('smart.videoUpscaleErrDuration');
+    if(/分辨率|resolution|过大|too large|尺寸/i.test(text)) return tr('smart.videoUpscaleErrResolution');
+    if(/ffmpeg exited|decoding stream|invalid data|encode|decode|编码|解码/i.test(text)) return tr('smart.videoUpscaleErrEncode');
+    if(/ffmpeg|ffprobe/i.test(text)) return tr('smart.videoUpscaleErrFfmpeg');
+    if(/缺少超分模型|缺少.*模型|model_missing/i.test(text)) return tr('smart.videoUpscaleErrModelMissing');
+    if(/文件不存在|source_missing|读取视频信息失败|probe/i.test(text)) return tr('smart.videoUpscaleErrSource');
+    if(/未安装|未下载|not installed|runtime|组件缺失/i.test(text)) return tr('smart.videoUpscaleErrRuntime');
+    if(/超时|timeout|timed out/i.test(text)) return tr('smart.videoUpscaleErrTimeout');
+    if(/failed to fetch|network|load failed|connection|后端/i.test(text)) return tr('smart.videoUpscaleErrNetwork').replace('{msg}', text);
+    return tr('smart.videoUpscaleErrTaskFailed');
+}
+function videoUpscaleFail(job, rawMessage, friendlyMessage){
+    clearTimeout(job.timer);
+    job.timer = 0;
+    job.state = 'error';
+    job.errorRaw = String(rawMessage || '');
+    job.error = friendlyMessage || videoUpscaleErrorText(rawMessage);
+    paintVideoUpscaleNodeBadges();
+    videoUpscaleRenderIfOpen(job);
+    toast(job.error);
+}
+function videoUpscaleOutputUrl(outputPath){
+    const raw = String(outputPath || '').trim();
+    if(!raw) return '';
+    if(/^(https?:\/\/|data:|blob:|\/)/i.test(raw)) return raw;
+    const normalized = raw.replace(/\\/g, '/');
+    const assetsAt = normalized.indexOf('/assets/');
+    if(assetsAt >= 0) return normalized.slice(assetsAt);
+    const outputAt = normalized.indexOf('/output/');
+    if(outputAt >= 0) return normalized.slice(outputAt);
+    const name = normalized.split('/').filter(Boolean).pop() || '';
+    return name ? '/output/' + name : '';
+}
+function videoUpscaleOutputName(job, url){
+    const ext = extensionForMediaItem({url, kind:'video'}) || '.mp4';
+    const base = tr('smart.videoUpscaleOutputBase').replace('{target}', videoUpscaleTargetLabel(job.target));
+    return base + ext;
+}
+function videoUpscaleChipsHtml(name, options, current){
+    return '<div class="stp-chips" data-vu-chips="' + escapeAttr(name) + '">' + options.map(option => {
+        const key = String(option.key);
+        const active = key === String(current);
+        const label = option.labelKey ? tr(option.labelKey) : option.label;
+        const tip = option.tipKey ? tr(option.tipKey) : (option.tip || label);
+        return '<button type="button" class="stp-chip' + (active ? ' is-active' : '') + '" data-vu-' + escapeAttr(name) + '="' + escapeAttr(key) + '" title="' + escapeAttr(tip) + '">' + escapeHtml(label) + '</button>';
+    }).join('') + '</div>';
+}
+function videoUpscaleCancelButtonHtml(job){
+    const label = job.cancelling ? tr('smart.videoUpscaleCancelling') : tr('smart.videoUpscaleCancel');
+    const disabled = !job.taskId || job.cancelling;
+    return '<button type="button" class="stp-btn" data-vu-cancel' + (disabled ? ' disabled' : '') + '>' + escapeHtml(label) + '</button>';
+}
+function videoUpscaleFootHtml(job, extra){
+    return '<div class="stp-foot"><span class="stp-spacer"></span>' + (extra || '')
+        + '<button type="button" class="stp-btn is-primary" data-vu-close>' + escapeHtml(tr('smart.videoUpscaleClose')) + '</button></div>';
+}
+function videoUpscaleFormHtml(job){
+    const startLabel = job.runtime.installed === false
+        ? tr('smart.videoUpscaleStartDownload')
+        : tr('smart.videoUpscaleStart');
+    return '<div class="stp-row"><div class="stp-label">' + escapeHtml(tr('smart.videoUpscaleTarget')) + '</div>'
+        + videoUpscaleChipsHtml('target', VIDEO_UPSCALE_TARGETS, job.target) + '</div>'
+        + '<div class="stp-row"><div class="stp-label">' + escapeHtml(tr('smart.videoUpscaleModel')) + '</div>'
+        + videoUpscaleChipsHtml('model', VIDEO_UPSCALE_MODELS, job.model) + '</div>'
+        + '<div class="vu-note" data-vu-eta>' + escapeHtml(tr('smart.videoUpscaleEstimating')) + '</div>'
+        + '<div class="vu-detail" data-vu-source></div>'
+        + '<div class="vu-note" data-vu-runtime>' + escapeHtml(videoUpscaleRuntimeText(job)) + '</div>'
+        + '<div class="stp-foot"><span class="stp-spacer"></span>'
+        + '<button type="button" class="stp-btn is-primary" data-vu-start><i data-lucide="maximize-2"></i><span>' + escapeHtml(startLabel) + '</span></button></div>';
+}
+function videoUpscaleProgressHtml(job){
+    const pct = Math.max(0, Math.min(100, Math.round(Number(job.progress) || 0)));
+    const frames = job.total > 0
+        ? tr('smart.videoUpscaleFrames').replace('{done}', String(job.processed)).replace('{total}', String(job.total))
+        : tr('smart.videoUpscaleFramesUnknown').replace('{done}', String(job.processed));
+    const eta = job.etaSec != null && job.etaSec > 0
+        ? tr('smart.videoUpscaleEtaLeft').replace('{eta}', videoUpscaleFormatDuration(job.etaSec))
+        : tr('smart.videoUpscaleEtaUnknown');
+    return '<div class="vu-headline">' + escapeHtml(tr('smart.videoUpscaleRunning')) + '</div>'
+        + '<div class="vu-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><i style="width:' + pct + '%"></i></div>'
+        + '<div class="vu-meta"><span>' + pct + '%</span><span>' + escapeHtml(frames) + '</span></div>'
+        + '<div class="vu-meta" data-vu-eta>' + escapeHtml(eta) + '</div>'
+        + '<div class="vu-note">' + escapeHtml(tr('smart.videoUpscaleKeepRunning')) + '</div>'
+        + '<div class="stp-foot"><span class="stp-spacer"></span>'
+        + videoUpscaleCancelButtonHtml(job)
+        + '<button type="button" class="stp-btn is-primary" data-vu-close>' + escapeHtml(tr('smart.videoUpscaleClose')) + '</button></div>';
+}
+/* 排队中：单 worker 串行，前面还有任务时前端显示这一屏（状态来自后端 queued）。 */
+function videoUpscaleQueuedHtml(job){
+    const frames = job.total > 0
+        ? tr('smart.videoUpscaleFrames').replace('{done}', String(job.processed)).replace('{total}', String(job.total))
+        : '';
+    return '<div class="vu-headline">' + escapeHtml(tr('smart.videoUpscaleQueuedTitle')) + '</div>'
+        + '<div class="vu-note">' + escapeHtml(tr('smart.videoUpscaleQueuedHint')) + '</div>'
+        + (frames ? '<div class="vu-meta"><span></span><span>' + escapeHtml(frames) + '</span></div>' : '')
+        + '<div class="stp-foot"><span class="stp-spacer"></span>'
+        + videoUpscaleCancelButtonHtml(job)
+        + '<button type="button" class="stp-btn is-primary" data-vu-close>' + escapeHtml(tr('smart.videoUpscaleClose')) + '</button></div>';
+}
+function videoUpscaleDownloadHtml(job){
+    const pct = Math.max(0, Math.min(100, Math.round(Number(job.runtime.progress) || 0)));
+    return '<div class="vu-headline">' + escapeHtml(tr('smart.videoUpscaleRuntimeDownloading')) + '</div>'
+        + '<div class="vu-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"><i style="width:' + pct + '%"></i></div>'
+        + '<div class="vu-meta"><span>' + pct + '%</span><span>' + escapeHtml(tr('smart.videoUpscaleDownloadAutoStart')) + '</span></div>'
+        + '<div class="vu-note">' + escapeHtml(tr('smart.videoUpscaleKeepRunning')) + '</div>'
+        + videoUpscaleFootHtml(job);
+}
+function videoUpscaleDoneHtml(job){
+    return '<div class="vu-headline">' + escapeHtml(tr('smart.videoUpscaleDoneTitle')) + '</div>'
+        + '<div class="vu-note">' + escapeHtml(tr('smart.videoUpscaleDoneHint')) + '</div>'
+        + '<div class="vu-detail">' + escapeHtml(videoUpscaleTargetLabel(job.target)) + ' · ' + escapeHtml(videoUpscaleModelLabel(job.model)) + '</div>'
+        + videoUpscaleFootHtml(job,
+            '<button type="button" class="stp-btn" data-vu-again>' + escapeHtml(tr('smart.videoUpscaleAgain')) + '</button>'
+            + (job.outputIndex >= 0 ? '<button type="button" class="stp-btn" data-vu-preview>' + escapeHtml(tr('smart.videoUpscalePreview')) + '</button>' : ''));
+}
+function videoUpscaleErrorHtml(job){
+    if(job.state === 'interrupted'){
+        // 中断不提供「继续」：视频超分分片跑完就删帧，没有可续的中途产物，只能重新发起
+        return '<div class="vu-headline vu-danger">' + escapeHtml(tr('smart.videoUpscaleInterruptedTitle')) + '</div>'
+            + '<div class="vu-note">' + escapeHtml(tr('smart.videoUpscaleInterruptedHint')) + '</div>'
+            + videoUpscaleFootHtml(job, '<button type="button" class="stp-btn" data-vu-again>' + escapeHtml(tr('smart.videoUpscaleRetry')) + '</button>');
+    }
+    if(job.state === 'cancelled'){
+        return '<div class="vu-headline">' + escapeHtml(tr('smart.videoUpscaleCancelled')) + '</div>'
+            + '<div class="vu-note">' + escapeHtml(tr('smart.videoUpscaleCancelledHint')) + '</div>'
+            + videoUpscaleFootHtml(job, '<button type="button" class="stp-btn" data-vu-again>' + escapeHtml(tr('smart.videoUpscaleAgain')) + '</button>');
+    }
+    const friendly = job.error || tr('smart.videoUpscaleErrUnknown');
+    return '<div class="vu-headline vu-danger">' + escapeHtml(tr('smart.videoUpscaleErrorTitle')) + '</div>'
+        + '<div class="vu-note">' + escapeHtml(friendly) + '</div>'
+        + (job.errorRaw ? '<details class="vu-details"><summary>' + escapeHtml(tr('smart.videoUpscaleDetails')) + '</summary><div class="vu-detail">' + escapeHtml(job.errorRaw) + '</div></details>' : '')
+        + '<div class="vu-note">' + escapeHtml(tr('smart.videoUpscaleErrorHint')) + '</div>'
+        + videoUpscaleFootHtml(job, '<button type="button" class="stp-btn" data-vu-again>' + escapeHtml(tr('smart.videoUpscaleAgain')) + '</button>');
+}
+function videoUpscaleRender(panel, node, job){
+    if(!panel || !panel.isConnected) return;
+    const body = panel.querySelector('[data-vu-body]');
+    if(!body) return;
+    if(job.state === 'running' || job.state === 'starting') body.innerHTML = videoUpscaleProgressHtml(job);
+    else if(job.state === 'queued') body.innerHTML = videoUpscaleQueuedHtml(job);
+    else if(job.state === 'downloading') body.innerHTML = videoUpscaleDownloadHtml(job);
+    else if(job.state === 'done') body.innerHTML = videoUpscaleDoneHtml(job);
+    else if(job.state === 'error' || job.state === 'cancelled' || job.state === 'interrupted') body.innerHTML = videoUpscaleErrorHtml(job);
+    else body.innerHTML = videoUpscaleFormHtml(job);
+    refreshIcons();
+    if(job.state === 'idle'){
+        loadVideoUpscaleMeta(panel, job);
+        paintVideoUpscaleRuntime(panel, job);
+        checkVideoUpscaleRuntime(panel, job);
+    }
+}
+function videoUpscaleRenderIfOpen(job){
+    if(!job) return;
+    const panel = videoUpscalePanelFor(job);
+    const node = nodes.find(item => item.id === job.nodeId);
+    if(panel && node) videoUpscaleRender(panel, node, job);
+}
+function scheduleVideoUpscalePoll(job, delay){
+    // queued 也要继续轮询：单 worker 串行，排队中的任务要能自己转成 running
+    if(!job || (job.state !== 'running' && job.state !== 'queued')) return;
+    clearTimeout(job.timer);
+    const base = delay != null ? delay : job.pollDelay;
+    const hidden = document.visibilityState === 'hidden';
+    const wait = Math.max(250, hidden ? base * VIDEO_UPSCALE_POLL_HIDDEN_FACTOR : base);
+    job.timer = setTimeout(() => {
+        job.timer = 0;
+        pollVideoUpscale(job);
+    }, wait);
+}
+function stopVideoUpscalePoll(job){
+    clearTimeout(job.timer);
+    job.timer = 0;
+}
+function applyVideoUpscaleStatus(job, data){
+    if(!data || typeof data !== 'object') return;
+    const state = String(data.state || '').toLowerCase();
+    job.progress = Math.max(0, Math.min(100, Number(data.progress) || 0));
+    job.etaSec = data.eta_sec == null ? null : Math.max(0, Math.round(Number(data.eta_sec) || 0));
+    job.processed = Math.max(0, Math.round(Number(data.processed_frames) || 0));
+    job.total = Math.max(0, Math.round(Number(data.total_frames) || 0));
+    job.outputPath = typeof data.output_path === 'string' && data.output_path ? data.output_path : null;
+    if(typeof data.error === 'string' && data.error) job.errorRaw = data.error;
+    if(state === 'done'){
+        job.state = 'done';
+        job.progress = 100;
+    } else if(state === 'error'){
+        job.state = 'error';
+        job.error = videoUpscaleErrorText(data.error || job.errorRaw || '');
+        job.cancelling = false;
+    } else if(state === 'cancelled'){
+        job.state = 'cancelled';
+        job.cancelling = false;
+    } else if(state === 'interrupted'){
+        job.state = 'interrupted';
+        job.cancelling = false;
+    } else if(state === 'queued'){
+        job.state = 'queued';
+    } else {
+        job.state = 'running';
+    }
+    paintVideoUpscaleNodeBadges();
+}
+async function pollVideoUpscale(job){
+    if(!job || (job.state !== 'running' && job.state !== 'queued')) return;
+    const node = nodes.find(item => item.id === job.nodeId);
+    if(!node){
+        stopVideoUpscalePoll(job);
+        videoUpscaleJobs.delete(job.nodeId);
+        return;
+    }
+    let data;
+    try {
+        const resp = await fetch('/api/video/upscale/status?task_id=' + encodeURIComponent(job.taskId));
+        data = await resp.json().catch(() => ({}));
+        if(!resp.ok) throw new Error(apiErrorMessage(data, 'HTTP ' + resp.status));
+        job.pollFails = 0;
+    } catch(err) {
+        job.pollFails += 1;
+        if(job.pollFails >= VIDEO_UPSCALE_POLL_FAIL_LIMIT){
+            const reason = String(err && err.message || err);
+            const friendly = /failed to fetch|network|load failed|connection/i.test(reason)
+                ? tr('smart.videoUpscaleErrNetwork').replace('{msg}', reason)
+                : tr('smart.videoUpscaleErrStatus').replace('{msg}', reason);
+            videoUpscaleFail(job, reason, friendly);
+            return;
+        }
+        job.pollDelay = Math.min(VIDEO_UPSCALE_POLL_MAX, Math.round(job.pollDelay * 1.6));
+        scheduleVideoUpscalePoll(job);
+        return;
+    }
+    applyVideoUpscaleStatus(job, data);
+    if(job.state === 'running' || job.state === 'queued'){
+        job.pollDelay = Math.min(VIDEO_UPSCALE_POLL_MAX, Math.round(job.pollDelay * 1.25));
+        scheduleVideoUpscalePoll(job);
+        videoUpscaleRenderIfOpen(job);
+        return;
+    }
+    stopVideoUpscalePoll(job);
+    if(job.state === 'done'){ videoUpscaleFinish(job); return; }
+    videoUpscaleRenderIfOpen(job);
+    if(job.state === 'error' && job.error) toast(job.error);
+}
+function videoUpscaleFinish(job){
+    if(!job.writebackDone){
+        const node = nodes.find(item => item.id === job.nodeId);
+        if(!node) return;
+        const url = videoUpscaleOutputUrl(job.outputPath);
+        if(!url){
+            videoUpscaleFail(job, job.outputPath || '', tr('smart.videoUpscaleErrNoOutput'));
+            return;
+        }
+        job.writebackDone = true;
+        job.cancelling = false;
+        const item = {url, name: videoUpscaleOutputName(job, url), kind:'video'};
+        const images = Array.isArray(node.images) ? node.images.slice() : [];
+        images.push(item);
+        node.images = images;
+        job.outputIndex = images.length - 1;
+        selectedId = node.id;
+        selectedIds = [];
+        selectedImage = {nodeId:node.id, index:job.outputIndex};
+        render();
+        scheduleSave();
+        toast(tr('smart.videoUpscaleDone'), '✓');
+    }
+    videoUpscaleRenderIfOpen(job);
+}
+async function videoUpscaleCancel(job){
+    if(!job || !job.taskId || job.cancelling) return;
+    if(job.state !== 'running' && job.state !== 'starting' && job.state !== 'queued') return;
+    job.cancelling = true;
+    videoUpscaleRenderIfOpen(job);
+    try {
+        const resp = await fetch('/api/video/upscale/cancel', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({task_id:job.taskId})
+        });
+        const data = await resp.json().catch(() => ({}));
+        if(!resp.ok) throw new Error(apiErrorMessage(data, 'HTTP ' + resp.status));
+        if(data.ok === false){
+            toast(tr('smart.videoUpscaleCancelAlreadyDone'));
+            scheduleVideoUpscalePoll(job, 0);
+            return;
+        }
+        toast(tr('smart.videoUpscaleCancelRequested'));
+        job.pollDelay = 1000;
+        scheduleVideoUpscalePoll(job, 600);
+    } catch(err) {
+        job.cancelling = false;
+        videoUpscaleRenderIfOpen(job);
+        toast(tr('smart.videoUpscaleCancelFailed').replace('{msg}', err && err.message || String(err)));
+    }
+}
+async function startVideoUpscaleTask(panel, node, job){
+    if(job.state === 'running' || job.state === 'starting') return;
+    const item = imageForDisplay(node && node.images ? node.images[smartNodeToolbarImageIndex(node)] : null);
+    if(!item || !item.url){ toast(tr('smart.videoUpscaleNoVideo')); return; }
+    job.sourceUrl = smartOriginalMediaUrl(item) || item.url;
+    job.state = 'starting';
+    job.progress = 0;
+    job.etaSec = null;
+    job.processed = 0;
+    job.total = 0;
+    job.outputPath = null;
+    job.outputIndex = -1;
+    job.error = '';
+    job.errorRaw = '';
+    job.writebackDone = false;
+    job.cancelling = false;
+    videoUpscaleRender(panel, node, job);
+    const payload = {src_path:job.sourceUrl, target:job.target, model:job.model};
+    if(canvasId) payload.canvas_id = canvasId;
+    payload.node_id = node.id;
+    let data;
+    try {
+        const resp = await fetch('/api/video/upscale', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify(payload)
+        });
+        data = await resp.json().catch(() => ({}));
+        if(!resp.ok){
+            const failure = videoUpscaleRequestError(data, resp.status);
+            if(failure.code === 'upscale_runtime_missing'){
+                job.runtime.installed = false;
+                job.runtime.error = '';
+                job.state = 'idle';
+                videoUpscaleRenderIfOpen(job);
+                toast(tr('smart.videoUpscaleErrRuntime'));
+                return;
+            }
+            if(failure.code === 'upscale_model_missing'){
+                videoUpscaleFail(job, failure.message, tr('smart.videoUpscaleErrModelMissing'));
+                return;
+            }
+            videoUpscaleFail(job, failure.message, videoUpscaleErrorTextByCode(failure.code, failure.message));
+            return;
+        }
+    } catch(err) {
+        videoUpscaleFail(job, err && err.message || String(err));
+        return;
+    }
+    if(!data || !data.task_id){
+        videoUpscaleFail(job, '', tr('smart.videoUpscaleErrNoTask'));
+        return;
+    }
+    job.taskId = String(data.task_id);
+    // 后端单 worker 串行：提交后可能先排队（queued），第一次轮询会校准真实状态
+    job.state = String(data.state || '').toLowerCase() === 'queued' ? 'queued' : 'running';
+    job.pollDelay = VIDEO_UPSCALE_POLL_BASE;
+    job.pollFails = 0;
+    videoUpscaleInterruptedTasks.delete(node.id);
+    videoUpscaleRenderIfOpen(job);
+    toast(tr('smart.videoUpscaleTaskStarted'));
+    scheduleVideoUpscalePoll(job, 800);
+}
+async function videoUpscaleStartFromPanel(panel, node, job){
+    if(job.state !== 'idle') return;
+    const start = panel.querySelector('[data-vu-start]');
+    if(start){
+        start.disabled = true;
+        const span = start.querySelector('span');
+        if(span) span.textContent = tr('smart.videoUpscaleChecking');
+    }
+    job.runtime.error = '';
+    let status;
+    try {
+        status = await fetchVideoUpscaleRuntime();
+    } catch(err) {
+        job.runtime.error = String(err && err.message || err);
+        videoUpscaleRender(panel, node, job);
+        toast(tr('smart.videoUpscaleRuntimeFailed').replace('{msg}', job.runtime.error));
+        return;
+    }
+    job.runtime.installed = !!status.installed;
+    job.runtime.downloading = !!status.downloading;
+    job.runtime.progress = Math.max(0, Math.min(100, Number(status.progress) || 0));
+    if(status.installed){ startVideoUpscaleTask(panel, node, job); return; }
+    if(status.downloading){
+        job.state = 'downloading';
+        videoUpscaleRenderIfOpen(job);
+        pollVideoUpscaleRuntimeDownload(job);
+        return;
+    }
+    startVideoUpscaleRuntimeDownload(panel, job);
+}
+function bindVideoUpscaleVisibility(){
+    if(videoUpscaleVisibilityBound) return;
+    videoUpscaleVisibilityBound = true;
+    bindVideoUpscaleUnloadGuard();
+    document.addEventListener('visibilitychange', () => {
+        videoUpscaleJobs.forEach(job => {
+            if(job.state !== 'running') return;
+            if(document.visibilityState === 'hidden') scheduleVideoUpscalePoll(job);
+            else scheduleVideoUpscalePoll(job, 0);
+        });
+    });
+}
+function openVideoUpscalePanel(node, index){
+    const item = imageForDisplay(node && node.images ? node.images[index] : null);
+    if(!item || !item.url){ toast(tr('smart.videoUpscaleNoVideo')); return null; }
+    const job = videoUpscaleJobFor(node.id, true);
+    job.sourceUrl = smartOriginalMediaUrl(item) || item.url;
+    job.meta = null;
+    /* 刷新后这个节点上次被中断过：面板直接显示「已中断 + 重新超分」。
+       只在没有活跃任务时套用，绝不把中断伪装成"还能续上"。 */
+    const interrupted = videoUpscaleInterruptedTasks.get(node.id);
+    if(interrupted && job.state === 'idle' && !job.taskId){
+        job.target = interrupted.target === '4k' ? '4k' : '2k';
+        job.model = interrupted.model === 'live' ? 'live' : 'anime';
+        job.state = 'interrupted';
+        job.errorRaw = String(interrupted.error || '');
+    }
+    return openSmartToolPanel({
+        id:'video-upscale',
+        nodeId:node.id,
+        anchor:'video-upscale',
+        icon:'maximize-2',
+        title:tr('smart.videoUpscaleTitle'),
+        body:'<div class="vu-body" data-vu-body></div>',
+        onClose:() => {
+            clearTimeout(job.runtime.timer);
+            job.runtime.timer = 0;
+        },
+        mount:panel => {
+            bindVideoUpscaleVisibility();
+            panel.addEventListener('click', event => {
+                const targetChip = event.target.closest && event.target.closest('[data-vu-target]');
+                if(targetChip){
+                    job.target = targetChip.dataset.vuTarget === '4k' ? '4k' : '2k';
+                    videoUpscaleRender(panel, node, job);
+                    return;
+                }
+                const modelChip = event.target.closest && event.target.closest('[data-vu-model]');
+                if(modelChip){
+                    job.model = modelChip.dataset.vuModel === 'live' ? 'live' : 'anime';
+                    videoUpscaleRender(panel, node, job);
+                    return;
+                }
+                if(event.target.closest && event.target.closest('[data-vu-start]')){ videoUpscaleStartFromPanel(panel, node, job); return; }
+                if(event.target.closest && event.target.closest('[data-vu-cancel]')){ videoUpscaleCancel(job); return; }
+                if(event.target.closest && event.target.closest('[data-vu-close]')){ closeSmartToolPanel(); return; }
+                if(event.target.closest && event.target.closest('[data-vu-preview]')){
+                    const outputIndex = job.outputIndex;
+                    closeSmartToolPanel();
+                    if(outputIndex >= 0) openImagePreview(node.id, outputIndex);
+                    return;
+                }
+                if(event.target.closest && event.target.closest('[data-vu-again]')){
+                    resetVideoUpscaleJob(job);
+                    job.meta = null;
+                    videoUpscaleRender(panel, node, job);
+                    return;
+                }
+            });
+            videoUpscaleRender(panel, node, job);
+            if((job.state === 'running' || job.state === 'queued') && !job.timer) scheduleVideoUpscalePoll(job, 0);
+            if(job.state === 'downloading' && !job.runtime.timer) pollVideoUpscaleRuntimeDownload(job);
+        }
+    });
+}
+/* ── 刷新恢复 + 退出提示 ───────────────────────────────────────
+   页面加载时拉一次 /api/video/upscale/tasks：
+   * 活跃任务（queued/running）→ 把 job 状态和进度接回来，继续走现有 pollVideoUpscale / 面板渲染；
+   * /tasks 与 /status 字段同形，状态解析仍用 applyVideoUpscaleStatus，不新写一套。
+   为什么只认当前画布的 node_id：同一后端可能挂着多个画布，别的画布的任务不该在这张画布上长出来。 */
+async function fetchVideoUpscaleTasks(){
+    const resp = await fetch('/api/video/upscale/tasks');
+    const data = await resp.json().catch(() => ({}));
+    if(!resp.ok) throw new Error(apiErrorMessage(data, 'HTTP ' + resp.status));
+    return data || {};
+}
+async function resumeVideoUpscaleTasks(){
+    if(!canvasId) return;
+    let data;
+    try { data = await fetchVideoUpscaleTasks(); }
+    catch(err) { return; }   // 恢复是尽力而为：后端没就绪也不该把画布加载拖垮
+    const active = Array.isArray(data.active) ? data.active : [];
+    const recent = Array.isArray(data.recent) ? data.recent : [];
+    // 最近被中断的任务记到节点上：重新打开面板时显示「已中断 + 重新超分」
+    recent.forEach(task => {
+        if(!task || String(task.state || '') !== 'interrupted') return;
+        if(String(task.canvas_id || '') !== String(canvasId)) return;
+        const nodeId = String(task.node_id || '');
+        if(!nodeId) return;
+        const prev = videoUpscaleInterruptedTasks.get(nodeId);
+        if(!prev || Number(task.finished_at || 0) >= Number(prev.finished_at || 0)) videoUpscaleInterruptedTasks.set(nodeId, task);
+    });
+    if(!active.length) return;
+    bindVideoUpscaleUnloadGuard();
+    active.forEach(task => {
+        const taskId = String((task && task.id) || '');
+        const nodeId = String((task && task.node_id) || '');
+        if(!taskId || !nodeId) return;
+        if(String(task.canvas_id || '') !== String(canvasId)) return;
+        const node = nodes.find(item => item.id === nodeId);
+        if(!node) return;
+        const job = videoUpscaleJobFor(nodeId, true);
+        // 页面上已经有这个节点更新的任务在跑（比如恢复前刚提交）：不拿旧任务覆盖
+        if(job.taskId && job.taskId !== taskId && videoUpscaleJobIsActive(job)) return;
+        job.taskId = taskId;
+        job.sourceUrl = String(task.source_url || job.sourceUrl || '');
+        job.target = task.target === '4k' ? '4k' : '2k';
+        job.model = task.model === 'live' ? 'live' : 'anime';
+        job.error = '';
+        job.errorRaw = '';
+        job.writebackDone = false;
+        job.cancelling = false;
+        job.pollFails = 0;
+        job.pollDelay = VIDEO_UPSCALE_POLL_BASE;
+        applyVideoUpscaleStatus(job, task);
+        if(job.state === 'running' || job.state === 'queued') scheduleVideoUpscalePoll(job, 0);
+        videoUpscaleRenderIfOpen(job);
+    });
+    paintVideoUpscaleNodeBadges();
+}
+function videoUpscaleActiveJobs(){
+    const active = [];
+    videoUpscaleJobs.forEach(job => { if(videoUpscaleJobIsActive(job)) active.push(job); });
+    return active;
+}
+function bindVideoUpscaleUnloadGuard(){
+    if(videoUpscaleUnloadBound) return;
+    videoUpscaleUnloadBound = true;
+    // 浏览器只用自己的弹窗文案：设 returnValue 才是「拦截」的必要条件，具体文案见 i18n
+    window.addEventListener('beforeunload', event => {
+        if(!videoUpscaleActiveJobs().length) return;
+        event.preventDefault();
+        event.returnValue = tr('smart.videoUpscaleLeaveWarn');
+        return event.returnValue;
+    });
 }
 // 智能分组顶部小菜单：一键运行 / 整理排列 / 预览（整组左右切换）/ 宫格拼接 / 批量下载 / 解散分组。
 // 与多图节点的 smart-node-floating-menu 同款样式与定位（选中分组时浮在卡片上方）。
@@ -40311,644 +41132,6 @@ function ensureTableApi(){
     setTimeout(sync, 1200);
     refreshIcons();
 })();
-/* ── 画布左侧 rail：MCP 接入（插头 icon 在「…」之上，卡片向左开） ── */
-(function mountMcpConnect(){
-    if(document.getElementById('novaiMcpLaunch')) return;
-    var info = null;
-    var infoPromise = null;
-    var activeAgent = 'claude';
-    var installedAgents = {};
-    var installedPromise = null;
-    var installTarget = '';
-    var panelAnchor = null;
-    var openedFromMenu = false;
-    var AGENT_LOGOS = {
-        claude: '<span class="nv-brand-mark is-claude" role="img" aria-label="Claude"></span>',
-        chatgpt: '<span class="nv-brand-mark is-openai" role="img" aria-label="ChatGPT"></span>',
-        codex: '<span class="nv-brand-mark is-openai" role="img" aria-label="Codex"></span>',
-        workbuddy: '<img class="nv-brand-img is-workbuddy" src="/static/images/brands/workbuddy.svg" alt="WorkBuddy" width="16" height="16">',
-        novai: '<img class="nv-mcp-brand-logo" src="/static/images/logo.svg" alt="NOVAI" width="20" height="20">',
-        more: '<svg data-icon="grid" class="nv-i nv-i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-label="更多 Agent" role="img"><rect x="4" y="4" width="6" height="6" rx="1.2"/><rect x="14" y="4" width="6" height="6" rx="1.2"/><rect x="4" y="14" width="6" height="6" rx="1.2"/><rect x="14" y="14" width="6" height="6" rx="1.2"/></svg>'
-    };
-    function logoOf(agent){ return AGENT_LOGOS[agent] || AGENT_LOGOS.more; }
-    var agents = {
-        claude: { name: 'Claude', icon: '✳', title: '在 Claude 里继续这个项目', desc: '打开 Claude 并预填一段提示词，通过 MCP 把它连到 NOVAI 并交接当前项目。首次使用时 Claude 会引导你添加连接器。' },
-        chatgpt: { name: 'ChatGPT', icon: '◉', title: '在 ChatGPT 里继续这个项目', desc: 'ChatGPT 的连接器需要公网 HTTPS 地址，本机 127.0.0.1 不可达。请复制 HTTP 地址后在支持公网连接器的环境中添加。' },
-        workbuddy: { name: 'WorkBuddy', icon: 'W', title: '在 WorkBuddy 里继续这个项目', desc: '复制 NOVAI MCP 配置，粘贴到 WorkBuddy 的 MCP 设置中即可使用画布工具。' },
-        more: { name: '更多 Agent', icon: '⌘', title: '在其他 Agent 里继续这个项目', desc: '复制 NOVAI MCP 配置，粘贴到任意支持 MCP 的 Agent 中即可使用画布工具。' }
-    };
-
-    var launch = document.createElement('button');
-    launch.id = 'novaiMcpLaunch';
-    launch.className = 'canvas-anchored-item nv-mcp-menu-item';
-    launch.type = 'button';
-    launch.setAttribute('role', 'menuitem');
-    launch.title = '在 Agent 中打开';
-    launch.setAttribute('aria-label', '在 Agent 中打开');
-    launch.innerHTML = '<svg data-icon="sprout" class="nv-i nv-i-sprout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a6 6 0 0 1-12 0z"/></svg><span>在 Agent 中打开</span><span class="nv-mcp-menu-state" hidden></span>';
-    var morePanel = document.getElementById('canvasLeftMorePanel');
-    var moreHead = morePanel ? morePanel.querySelector('.canvas-more-head') : null;
-    if(morePanel) morePanel.insertBefore(launch, moreHead ? moreHead.nextSibling : morePanel.firstChild);
-    else document.body.appendChild(launch);
-    var launchFallback = document.createElement('button');
-    launchFallback.id = 'novaiMcpLaunchFallback';
-    launchFallback.className = 'nv-mcp-launch-fallback';
-    launchFallback.type = 'button';
-    launchFallback.title = '在 Agent 中打开';
-    launchFallback.setAttribute('aria-label', '在 Agent 中打开');
-    launchFallback.innerHTML = '<svg data-icon="sprout" class="nv-i nv-i-sprout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22v-5"/><path d="M9 7V2"/><path d="M15 7V2"/><path d="M6 13V8h12v5a6 6 0 0 1-12 0z"/></svg>';
-    document.body.appendChild(launchFallback);
-
-    var panel = document.createElement('section');
-    panel.id = 'novaiMcpPanel';
-    panel.className = 'nv-mcp-panel';
-    panel.hidden = true;
-    panel.setAttribute('aria-label', 'MCP 接入');
-    panel.innerHTML =
-        '<div class="nv-mcp-panel-head">' +
-            '<div class="nv-mcp-panel-heading"><span class="nv-mcp-kicker">MCP · 开放接入</span>' +
-            '<div class="nv-mcp-title-row"><img class="nv-mcp-brand-logo" src="/static/images/logo.svg" alt="NOVAI" width="20" height="20"><h3>让你的 Agent 直接调用 NOVAI 创作</h3></div>' +
-            '<p>连接 NOVAI 的 MCP，让你的 Agent 直接使用画布工具。</p>' +
-            '<p class="nv-mcp-status-line" id="nvMcpStatusLine">正在读取连接状态…</p></div>' +
-            '<button type="button" class="nv-mcp-panel-close" aria-label="关闭" title="关闭">×</button>' +
-        '</div>' +
-        '<div class="nv-mcp-agent-buttons">' +
-            '<div class="nv-mcp-agent-wrap" data-agent-wrap="claude"><button type="button" class="nv-mcp-agent-btn" data-panel-agent="claude"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.claude + '</span><span class="nv-mcp-agent-label">添加到 Claude</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button><button type="button" class="nv-mcp-agent-secondary" data-panel-open="claude" hidden>打开 Claude</button><span class="nv-mcp-stale-note" hidden></span></div>' +
-            '<div class="nv-mcp-agent-wrap" data-agent-wrap="codex"><button type="button" class="nv-mcp-agent-btn" data-panel-agent="codex"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.codex + '</span><span class="nv-mcp-agent-label">添加到 Codex</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button><button type="button" class="nv-mcp-agent-secondary" data-panel-open="codex" hidden>打开 Codex</button><span class="nv-mcp-stale-note" hidden></span></div>' +
-            '<div class="nv-mcp-agent-wrap" data-agent-wrap="workbuddy"><button type="button" class="nv-mcp-agent-btn" data-panel-agent="workbuddy"><span class="nv-mcp-agent-ico">' + AGENT_LOGOS.workbuddy + '</span><span class="nv-mcp-agent-label">添加到 WorkBuddy</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button><button type="button" class="nv-mcp-agent-secondary" data-panel-open="workbuddy" hidden>打开 WorkBuddy</button><span class="nv-mcp-stale-note" hidden></span></div>' +
-        '</div>' +
-        '<div class="nv-mcp-panel-foot">' +
-            '<div class="nv-mcp-foot-row"><span>在其他 Agent 中使用 NOVAI MCP</span><a class="nv-mcp-link" href="/static/help/mcp.html" target="_blank" rel="noopener">MCP 文档</a></div>' +
-            '<div class="nv-mcp-server-row"><code class="nv-mcp-server-summary"></code><button type="button" class="nv-mcp-copy-btn" data-panel-copy>复制</button></div>' +
-        '</div>';
-    document.body.appendChild(panel);
-
-    var modal = document.createElement('div');
-    modal.id = 'novaiMcpModal';
-    modal.className = 'nv-mcp-modal-root';
-    modal.hidden = true;
-    modal.innerHTML =
-        '<div class="nv-mcp-modal-scrim" data-modal-close></div>' +
-        '<div class="nv-mcp-modal" role="dialog" aria-modal="true" aria-labelledby="nvMcpModalTitle">' +
-            '<aside class="nv-mcp-modal-list">' +
-                '<h3>在 Agent 中打开</h3>' +
-                '<button type="button" data-modal-agent="claude"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.claude + '</span><span class="nv-mcp-list-label">Claude</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
-                '<button type="button" data-modal-agent="chatgpt"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.chatgpt + '</span><span class="nv-mcp-list-label">ChatGPT</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
-                '<button type="button" data-modal-agent="workbuddy"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.workbuddy + '</span><span class="nv-mcp-list-label">WorkBuddy</span><span class="nv-mcp-installed-badge" hidden>已安装</span></button>' +
-                '<button type="button" data-modal-agent="more"><span class="nv-mcp-list-ico">' + AGENT_LOGOS.more + '</span><span class="nv-mcp-list-label">更多 Agent</span></button>' +
-            '</aside>' +
-            '<section class="nv-mcp-modal-main">' +
-                '<button type="button" class="nv-mcp-modal-close" aria-label="关闭" title="关闭" data-modal-close>×</button>' +
-                '<div class="nv-mcp-modal-hero"><span class="nv-mcp-avatar is-novai"><img class="nv-mcp-brand-logo" src="/static/images/logo.svg" alt="NOVAI" width="52" height="52"></span><span class="nv-mcp-hero-arrow">↔</span><span class="nv-mcp-avatar" id="nvMcpAgentAvatar">' + AGENT_LOGOS.claude + '</span></div>' +
-                '<h3 id="nvMcpModalTitle">在 Claude 里继续这个项目</h3>' +
-                '<p id="nvMcpModalDesc"></p>' +
-                '<p class="nv-mcp-stale-note" id="nvMcpModalStale" hidden></p>' +
-                '<pre class="nv-mcp-prompt" id="nvMcpPrompt" hidden></pre>' +
-                '<div class="nv-mcp-modal-actions" id="nvMcpModalActions"></div>' +
-            '</section>' +
-        '</div>';
-    document.body.appendChild(modal);
-
-    var docs = document.createElement('div');
-    docs.className = 'nv-mcp-doc-root';
-    docs.hidden = true;
-    docs.innerHTML =
-        '<div class="nv-mcp-doc-scrim" data-doc-close></div>' +
-        '<div class="nv-mcp-doc" role="dialog" aria-modal="true" aria-labelledby="nvMcpDocTitle">' +
-            '<div class="nv-mcp-doc-head"><h3 id="nvMcpDocTitle">在 Agent 里接入 NOVAI MCP</h3><button type="button" class="nv-mcp-doc-close" aria-label="关闭" data-doc-close>×</button></div>' +
-            '<div class="nv-mcp-doc-body">' +
-                '<div class="nv-mcp-doc-label">stdio 配置 <button type="button" class="nv-mcp-doc-copy" data-doc-copy>复制</button></div>' +
-                '<pre class="nv-mcp-doc-pre" id="nvMcpDocJson"></pre>' +
-                '<div class="nv-mcp-doc-label">Codex 命令</div>' +
-                '<pre class="nv-mcp-doc-pre" id="nvMcpDocCodex"></pre>' +
-                '<div class="nv-mcp-doc-label">HTTP 地址</div>' +
-                '<div class="nv-mcp-doc-url" id="nvMcpDocUrl"></div>' +
-                '<p class="nv-mcp-doc-warn">该 MCP 服务会以你的系统权限在本机运行外部进程，请确认来源可信。</p>' +
-                '<div class="nv-mcp-doc-label">文档路径</div>' +
-                '<div class="nv-mcp-doc-path" id="nvMcpDocPath"></div>' +
-                '<p class="nv-mcp-doc-hint">若复制按钮无效，可手动选中上面文本复制</p>' +
-            '</div>' +
-        '</div>';
-    document.body.appendChild(docs);
-
-    var installRoot = document.createElement('div');
-    installRoot.className = 'nv-mcp-install-root';
-    installRoot.hidden = true;
-    installRoot.innerHTML =
-        '<div class="nv-mcp-install-scrim" data-install-close></div>' +
-        '<div class="nv-mcp-install" role="dialog" aria-modal="true" aria-labelledby="nvMcpInstallTitle">' +
-            '<h3 id="nvMcpInstallTitle">写入 Claude 配置？</h3>' +
-            '<p class="nv-mcp-install-sub">将修改以下文件：</p>' +
-            '<pre class="nv-mcp-install-path" id="nvMcpInstallPath"></pre>' +
-            '<p class="nv-mcp-install-hint" id="nvMcpInstallHint">会先备份原文件，重启 Claude 后生效。</p>' +
-            '<div class="nv-mcp-install-actions"><button type="button" class="nv-mcp-action-ghost" data-install-close>取消</button><button type="button" class="nv-mcp-action-primary" id="nvMcpInstallConfirm">确认写入</button></div>' +
-        '</div>';
-    document.body.appendChild(installRoot);
-
-    function toastCopy(text, icon){ try { toast(text, icon || 'check'); } catch(e) {} }
-    function copyFallback(text){
-        try {
-            var area = document.createElement('textarea');
-            area.value = text;
-            area.setAttribute('readonly', 'readonly');
-            area.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
-            document.body.appendChild(area);
-            area.select();
-            var ok = document.execCommand('copy');
-            area.remove();
-            return !!ok;
-        } catch(e) { return false; }
-    }
-    function selectText(el){
-        if(!el) return;
-        try {
-            var range = document.createRange();
-            range.selectNodeContents(el);
-            var sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-        } catch(e) {}
-    }
-    function flashButton(btn, ok){
-        if(!btn || !btn.classList) return;
-        if(btn.__copyFlashTimer) clearTimeout(btn.__copyFlashTimer);
-        if(!btn.__copyFlashHtml) btn.__copyFlashHtml = btn.innerHTML;
-        btn.classList.remove('is-copied', 'is-copy-fail');
-        btn.classList.add(ok ? 'is-copied' : 'is-copy-fail');
-        btn.innerHTML = ok ? '✓ 已复制' : '复制失败';
-        var delay = ok ? 1600 : 900;
-        btn.__copyFlashTimer = setTimeout(function(){
-            if(btn.__copyFlashHtml != null) btn.innerHTML = btn.__copyFlashHtml;
-            btn.classList.remove('is-copied', 'is-copy-fail');
-            btn.__copyFlashHtml = null;
-            btn.__copyFlashTimer = null;
-        }, delay);
-    }
-    function writeClipboard(text){
-        return new Promise(function(resolve){
-            if(navigator.clipboard && navigator.clipboard.writeText){
-                navigator.clipboard.writeText(text).then(function(){ resolve(true); }, function(){ resolve(copyFallback(text)); });
-            } else resolve(copyFallback(text));
-        });
-    }
-    function copyText(text, successText, fallbackEl, button, quiet){
-        if(!text){ toastCopy('没有可复制的内容', 'alert'); flashButton(button, false); return Promise.resolve(false); }
-        return writeClipboard(text).then(function(ok){
-            flashButton(button, ok);
-            if(ok){ if(!quiet) toastCopy(successText, 'check'); return true; }
-            if(fallbackEl){ selectText(fallbackEl); toastCopy('已选中文本，按 ⌘C 复制', 'check'); }
-            else toastCopy('复制失败，请手动选择', 'alert');
-            return false;
-        });
-    }
-    function stdioJson(){ return JSON.stringify((info && info.mcp_servers_json) || {}, null, 2); }
-    function serverSummary(){
-        var entry = (info && info.server_entry) || {};
-        var command = [entry.command || ''].concat(entry.args || []).filter(Boolean).join(' ');
-        return 'novai-canvas · stdio · ' + (command || '配置未生成');
-    }
-    function promptText(){
-        var entry = (info && info.server_entry) || {};
-        var command = [entry.command || ''].concat(entry.args || []).filter(Boolean).join(' ');
-        return '请通过 MCP 连接 NOVAI 画布，继续当前项目。\n' +
-            '服务器名：novai-canvas\n' +
-            'stdio 命令：' + command + '\n' +
-            'base_url：' + ((info && info.base_url) || '') + '\n' +
-            '要求：先列出可用的画布工具再动手，确认可用工具后把当前项目接到 NOVAI 继续创作。';
-    }
-    function loadInfo(){
-        if(info) return Promise.resolve(info);
-        if(infoPromise) return infoPromise;
-        infoPromise = fetch('/api/mcp/connect-info', { headers: { Accept: 'application/json' } })
-            .then(function(res){ if(!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
-            .then(function(data){ info = data || null; if(info) { var summary = panel.querySelector('.nv-mcp-server-summary'); if(summary) summary.textContent = serverSummary(); } return info; })
-            .catch(function(){ info = null; return null; })
-            .then(function(data){ infoPromise = null; return data; });
-        return infoPromise;
-    }
-    function agentName(id){
-        if(String(id || '').toLowerCase() === 'codex') return 'Codex';
-        var data = agents[id];
-        return data ? data.name : id;
-    }
-    function loadInstalledAgents(){
-        if(installedPromise) return installedPromise;
-        installedPromise = fetch('/api/mcp/installed-agents', { headers: { Accept: 'application/json' } })
-            .then(function(res){ if(!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
-            .then(function(data){
-                var list = (data && (data.agents || data.installed_agents || data.installed || data.items)) || [];
-                var next = {};
-                if(Array.isArray(list)){
-                    list.forEach(function(item){
-                        if(typeof item === 'string'){ next[item] = { installed: true, configured: false }; return; }
-                        if(item && typeof item === 'object'){
-                            var id = String(item.id || item.name || '').toLowerCase();
-                            if(!id) return;
-                            next[id] = {
-                                installed: item.installed !== false,
-                                configured: item.configured === true,
-                                configuredBaseUrl: String(item.configured_base_url || item.configuredBaseUrl || ''),
-                                path: String(item.path || item.command || ''),
-                                configPath: String(item.config_path || item.configPath || item.file || item.config || item.target || ''),
-                                kind: String(item.kind || '')
-                            };
-                        }
-                    });
-                }
-                installedAgents = next;
-                return installedAgents;
-            })
-            .catch(function(){ installedAgents = {}; return installedAgents; })
-            .then(function(list){ installedPromise = null; return list; });
-        return installedPromise;
-    }
-    function agentState(id){ return installedAgents[String(id || '').toLowerCase()] || null; }
-    function isInstalled(id){ var st = agentState(id); return !!(st && st.installed); }
-    function isConfigured(id){ var st = agentState(id); return !!(st && st.installed && st.configured); }
-    function isStaleConfig(id){
-        var st = agentState(id);
-        if(!st || !st.installed || !st.configured || !st.configuredBaseUrl) return false;
-        var current = String((info && info.base_url) || '').replace(/\/$/, '');
-        return !!current && String(st.configuredBaseUrl).replace(/\/$/, '') !== current;
-    }
-    function canInstall(id){ var key = String(id || '').toLowerCase(); return key === 'claude' || key === 'codex'; }
-    function agentConfigPath(id){
-        var key = String(id || '').toLowerCase();
-        var st = agentState(id);
-        if(st && st.configPath) return String(st.configPath);
-        if(key === 'claude') return /Mac/i.test(navigator.platform) ? '~/Library/Application Support/Claude/claude_desktop_config.json' : '%APPDATA%\\Claude\\claude_desktop_config.json';
-        if(key === 'codex') return '~/.codex/config.toml';
-        return '客户端默认配置文件（后端自动定位）';
-    }
-    function renderInstalledUi(){
-        Array.prototype.forEach.call(panel.querySelectorAll('[data-agent-wrap]'), function(wrap){
-            var id = wrap.getAttribute('data-agent-wrap');
-            var installed = isInstalled(id);
-            var configured = isConfigured(id);
-            var main = wrap.querySelector('[data-panel-agent]');
-            var open = wrap.querySelector('[data-panel-open]');
-            var label = main && main.querySelector('.nv-mcp-agent-label');
-            var badge = main && main.querySelector('.nv-mcp-installed-badge');
-            var stale = isStaleConfig(id);
-            var offerInstall = installed && (!configured || stale) && canInstall(id);
-            if(label) label.textContent = !installed ? '添加到 ' + agentName(id) : (offerInstall ? (stale ? '一键接入 ' + agentName(id) + '（更新）' : '一键接入 ' + agentName(id)) : '打开 ' + agentName(id));
-            if(badge){ badge.hidden = !installed; badge.textContent = configured ? '已接入' : '已安装'; }
-            if(main) main.classList.toggle('is-configured', configured);
-            if(open){ open.hidden = !(installed && offerInstall); open.textContent = '打开 ' + agentName(id); }
-            var staleEl = wrap.querySelector('.nv-mcp-stale-note');
-            if(staleEl){
-                staleEl.hidden = !stale;
-                staleEl.textContent = stale ? '配置指向旧地址 ' + (agentState(id).configuredBaseUrl || '') + '，建议重新接入' : '';
-            }
-        });
-        Array.prototype.forEach.call(modal.querySelectorAll('[data-modal-agent]'), function(btn){
-            var id = btn.getAttribute('data-modal-agent');
-            var badge = btn.querySelector('.nv-mcp-installed-badge');
-            var installed = isInstalled(id);
-            var configured = isConfigured(id);
-            if(badge){ badge.hidden = !installed; badge.textContent = configured ? '已接入' : '已安装'; }
-            btn.classList.toggle('is-installed', installed);
-        });
-    }
-    function openInstallConfirm(id){
-        installTarget = id;
-        var name = agentName(id);
-        document.getElementById('nvMcpInstallTitle').textContent = '写入 ' + name + ' 配置？';
-        document.getElementById('nvMcpInstallPath').textContent = agentConfigPath(id);
-        var st = agentState(id);
-        document.getElementById('nvMcpInstallHint').textContent = (st && st.kind === 'cli') ? '会先备份原文件，重启终端后生效。' : '会先备份原文件，重启 ' + name + ' 后生效。';
-        installRoot.hidden = false;
-        var btn = document.getElementById('nvMcpInstallConfirm');
-        btn.disabled = false;
-        btn.textContent = '确认写入';
-    }
-    function closeInstallConfirm(){
-        installRoot.hidden = true;
-        installTarget = '';
-    }
-    function installAgent(){
-        var id = installTarget;
-        if(!id) return;
-        var btn = document.getElementById('nvMcpInstallConfirm');
-        if(btn){ btn.disabled = true; btn.textContent = '写入中…'; }
-        fetch('/api/mcp/install-agent', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-            body: JSON.stringify({ id: id, confirm: true })
-        }).then(function(res){
-            return res.json().catch(function(){ return {}; }).then(function(data){
-                if(!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
-                var st = installedAgents[id] || { installed: true, configured: false };
-                st.installed = true;
-                st.configured = true;
-                if(data.path) st.configPath = String(data.path);
-                installedAgents[id] = st;
-                closeInstallConfirm();
-                renderInstalledUi();
-                refreshMenuState();
-                if(!modal.hidden) renderAgent(activeAgent);
-                var name = agentName(id);
-                if(data.already){
-                    toastCopy('之前已接入过', 'check');
-                } else if(data.action === 'command'){
-                    toastCopy('已执行 ' + name + ' mcp add，重启终端生效', 'check');
-                } else {
-                    toastCopy('已写入配置，重启 ' + name + ' 生效', 'check');
-                }
-            });
-        }).catch(function(e){
-            if(btn){ btn.disabled = false; btn.textContent = '确认写入'; }
-            toastCopy((e && e.message) || '写入失败', 'alert');
-        });
-    }
-    function openInstalledAgent(id, content, button, fallbackEl, copySuccess){
-        var label = agentName(id);
-        return copyText(content, copySuccess || '已复制', fallbackEl, button, true).then(function(){
-            return fetch('/api/mcp/open-agent', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                body: JSON.stringify({ id: id })
-            }).then(function(res){
-                return res.json().catch(function(){ return {}; }).then(function(data){
-                    if(!res.ok) throw new Error(data.detail || ('HTTP ' + res.status));
-                    if(data.action === 'opened'){
-                        var text = id === 'workbuddy' ? '已复制配置并打开 WorkBuddy，粘到对话框后发送' : '已复制提示词并打开 ' + label + '，粘到对话框后发送';
-                        toastCopy(text, 'check');
-                    } else if(data.action === 'command'){
-                        toastCopy('已复制命令，在终端运行后粘贴提示词', 'check');
-                    } else {
-                        toastCopy('已复制配置，请手动打开 ' + label, 'check');
-                    }
-                });
-            });
-        }).catch(function(e){ toastCopy((e && e.message) || '打开失败', 'alert'); });
-    }
-    function loadMcpStatus(){
-        var line = document.getElementById('nvMcpStatusLine');
-        if(!line) return;
-        fetch('/api/mcp/servers', { headers: { Accept: 'application/json' } }).then(function(res){
-            if(!res.ok) throw new Error('HTTP ' + res.status);
-            return res.json();
-        }).then(function(data){
-            var enabled = !!(data && data.enabled);
-            var servers = (data && Array.isArray(data.servers)) ? data.servers : [];
-            var tools = servers.reduce(function(sum, server){
-                var n = Number(server && server.tool_count);
-                if(!isFinite(n)) n = (server && Array.isArray(server.tools)) ? server.tools.length : 0;
-                return sum + (isFinite(n) ? n : 0);
-            }, 0);
-            line.classList.toggle('is-off', !enabled);
-            line.textContent = enabled ? ('MCP 已开启 · ' + servers.length + ' 个服务 · ' + tools + ' 个工具') : 'MCP 未开启';
-        }).catch(function(){
-            line.classList.add('is-off');
-            line.textContent = 'MCP 状态未知';
-        });
-    }
-    function positionPanel(anchor){
-        if(panel.hidden) return;
-        var a = (anchor || launch).getBoundingClientRect();
-        var p = panel.getBoundingClientRect();
-        var left, top;
-        if(anchor === launchFallback){
-            left = a.right - p.width;
-            top = a.bottom + 8;
-        } else {
-            var rail = document.getElementById('canvasRail');
-            var railRect = rail ? rail.getBoundingClientRect() : a;
-            left = railRect.right + 8;
-            top = a.top + a.height / 2 - p.height / 2;
-        }
-        left = Math.max(12, Math.min(left, window.innerWidth - p.width - 12));
-        top = Math.max(12, Math.min(top, window.innerHeight - p.height - 12));
-        panel.style.left = left + 'px';
-        panel.style.top = top + 'px';
-        panel.style.right = 'auto';
-    }
-    function syncLaunchFallback(){
-        var rail = document.getElementById('canvasRail');
-        var visible = !!(rail && getComputedStyle(rail).display !== 'none' && rail.getBoundingClientRect().width > 0);
-        launchFallback.style.display = visible ? 'none' : 'inline-flex';
-    }
-    function closeMoreMenu(){
-        var more = document.getElementById('canvasLeftMorePanel');
-        var btn = document.getElementById('canvasRailMore');
-        if(more) more.hidden = true;
-        if(btn){ btn.setAttribute('aria-expanded', 'false'); btn.classList.remove('is-open'); }
-    }
-    function refreshMenuState(){
-        Promise.all([
-            fetch('/api/mcp/servers', { headers: { Accept: 'application/json' } }).then(function(res){ return res.ok ? res.json() : null; }).catch(function(){ return null; }),
-            loadInstalledAgents()
-        ]).then(function(results){
-            var state = launch.querySelector('.nv-mcp-menu-state');
-            if(!state) return;
-            var servers = results[0] || {};
-            var enabled = results[0] ? !!servers.enabled : false;
-            var configured = Object.keys(installedAgents).filter(function(id){ return installedAgents[id] && installedAgents[id].configured; }).length;
-            if(configured > 0){
-                state.hidden = false;
-                state.textContent = '已接入 ' + configured;
-            } else if(enabled){
-                state.hidden = false;
-                state.textContent = 'MCP 已开启';
-            } else {
-                state.hidden = true;
-                state.textContent = '';
-            }
-        });
-    }
-    function openPanel(anchor){
-        Promise.all([loadInfo(), loadInstalledAgents()]).then(function(results){
-            var data = results[0];
-            if(!data){ toastCopy('MCP 配置暂不可用', 'alert'); return; }
-            renderInstalledUi();
-            loadMcpStatus();
-            panelAnchor = anchor || launch;
-            panel.hidden = false;
-            panel.classList.add('open');
-            requestAnimationFrame(function(){ positionPanel(panelAnchor); });
-        });
-    }
-    function closePanel(){
-        panel.hidden = true;
-        panel.classList.remove('open');
-        if(openedFromMenu){
-            openedFromMenu = false;
-            var moreBtn = document.getElementById('canvasRailMore');
-            if(moreBtn) moreBtn.focus();
-        }
-    }
-    function togglePanel(anchor){ if(panel.hidden) openPanel(anchor); else closePanel(); }
-
-    function docsOpen(){
-        if(!info) return;
-        document.getElementById('nvMcpDocJson').textContent = stdioJson();
-        document.getElementById('nvMcpDocCodex').textContent = info.codex_command || '未提供 Codex 命令';
-        document.getElementById('nvMcpDocUrl').textContent = info.http_url || '未启用 HTTP 服务';
-        document.getElementById('nvMcpDocPath').textContent = info.docs_path || '未提供文档路径';
-        docs.hidden = false;
-    }
-    function docsClose(){ docs.hidden = true; }
-
-    function renderAgent(agent){
-        activeAgent = agent;
-        var data = agents[agent] || agents.claude;
-        Array.prototype.forEach.call(modal.querySelectorAll('[data-modal-agent]'), function(el){
-            el.classList.toggle('is-on', el.getAttribute('data-modal-agent') === agent);
-        });
-        var avatar = document.getElementById('nvMcpAgentAvatar');
-        avatar.innerHTML = logoOf(agent);
-        avatar.className = 'nv-mcp-avatar is-' + agent;
-        document.getElementById('nvMcpModalTitle').textContent = data.title;
-        document.getElementById('nvMcpModalDesc').textContent = data.desc;
-        var prompt = document.getElementById('nvMcpPrompt');
-        var actions = document.getElementById('nvMcpModalActions');
-        prompt.hidden = agent !== 'claude';
-        prompt.textContent = agent === 'claude' ? promptText() : '';
-        var modalStale = document.getElementById('nvMcpModalStale');
-        if(modalStale){
-            var staleNow = isStaleConfig(agent);
-            modalStale.hidden = !staleNow;
-            modalStale.textContent = staleNow ? '配置指向旧地址 ' + (agentState(agent).configuredBaseUrl || '') + '，建议重新接入' : '';
-        }
-        if(agent === 'claude'){
-            if(isInstalled('claude') && (!isConfigured('claude') || isStaleConfig('claude'))){
-                actions.innerHTML = '<button type="button" class="nv-mcp-action-primary" data-install-agent="claude">一键接入 Claude' + (isStaleConfig('claude') ? '（更新）' : '') + '</button>' +
-                    '<button type="button" class="nv-mcp-action-ghost" data-open-installed="claude">打开 Claude</button>';
-            } else {
-                actions.innerHTML = '<button type="button" class="nv-mcp-action-ghost" data-prompt-copy>没有打开？复制提示词</button>' +
-                    '<button type="button" class="nv-mcp-action-primary" data-claude-open>' + (isConfigured('claude') ? '打开 Claude' : '在 Claude 打开') + '</button>';
-            }
-        } else if(agent === 'chatgpt'){
-            var hasUrl = !!(info && String(info.http_url || '').trim());
-            actions.innerHTML = '<button type="button" class="nv-mcp-action-primary" data-http-copy' + (hasUrl ? '' : ' disabled') + ' title="' + (hasUrl ? '复制 HTTP 地址' : '未配置 HTTP 服务') + '">复制 HTTP 地址</button>';
-        } else if(agent === 'workbuddy' && isInstalled('workbuddy')){
-            actions.innerHTML = '<button type="button" class="nv-mcp-action-ghost" data-generic-copy>复制配置</button>' +
-                '<button type="button" class="nv-mcp-action-primary" data-workbuddy-open>打开 WorkBuddy</button>';
-        } else {
-            actions.innerHTML = '<button type="button" class="nv-mcp-action-ghost" data-generic-copy>复制配置</button>' +
-                '<a class="nv-mcp-action-primary" href="/static/help/mcp.html" target="_blank" rel="noopener">MCP 文档</a>';
-        }
-        renderInstalledUi();
-    }
-    function openModal(agent){
-        Promise.all([loadInfo(), loadInstalledAgents()]).then(function(results){
-            if(!results[0]) return;
-            renderAgent(agent || 'claude');
-            modal.hidden = false;
-        });
-    }
-    function closeModal(){ modal.hidden = true; }
-
-    launch.addEventListener('click', function(e){
-        e.preventDefault();
-        e.stopPropagation();
-        closeMoreMenu();
-        openedFromMenu = true;
-        togglePanel(document.getElementById('canvasRailMore'));
-    });
-    launchFallback.addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); openedFromMenu = false; togglePanel(launchFallback); });
-    window.addEventListener('resize', function(){ syncLaunchFallback(); if(!panel.hidden) positionPanel(panelAnchor); });
-    panel.addEventListener('click', function(e){
-        e.stopPropagation();
-        var panelOpen = e.target && e.target.closest ? e.target.closest('[data-panel-open]') : null;
-        if(panelOpen){
-            e.preventDefault();
-            var openId = panelOpen.getAttribute('data-panel-open');
-            if(openId === 'claude') openInstalledAgent('claude', promptText(), panelOpen, document.getElementById('nvMcpPrompt'), '已复制提示词');
-            else if(openId === 'codex') openInstalledAgent('codex', info && info.codex_command, panelOpen, null, '已复制命令');
-            else openInstalledAgent(openId, stdioJson(), panelOpen, panel.querySelector('.nv-mcp-server-summary'), '已复制配置');
-            return;
-        }
-        var target = e.target && e.target.closest ? e.target.closest('[data-panel-agent],[data-panel-copy]') : null;
-        if(!target) return;
-        e.preventDefault();
-        if(target.hasAttribute('data-panel-agent')){
-            var agent = target.getAttribute('data-panel-agent');
-            if(isInstalled(agent)){
-                if(canInstall(agent) && (!isConfigured(agent) || isStaleConfig(agent))){ openInstallConfirm(agent); return; }
-                if(agent === 'claude') { openInstalledAgent('claude', promptText(), target, document.getElementById('nvMcpPrompt'), '已复制提示词'); return; }
-                if(agent === 'codex') { openInstalledAgent('codex', info && info.codex_command, target, null, '已复制命令'); return; }
-                if(agent === 'workbuddy') { openInstalledAgent('workbuddy', stdioJson(), target, panel.querySelector('.nv-mcp-server-summary'), '已复制配置'); return; }
-            }
-            if(agent === 'codex'){ copyText(info && info.codex_command, '已复制命令', null, target); return; }
-            openModal(agent);
-        } else if(target.hasAttribute('data-panel-copy')) copyText(stdioJson(), '已复制 MCP 配置', panel.querySelector('.nv-mcp-server-summary'), target);
-    });
-    panel.querySelector('.nv-mcp-panel-close').addEventListener('click', function(e){ e.preventDefault(); e.stopPropagation(); closePanel(); });
-    installRoot.addEventListener('click', function(e){
-        e.stopPropagation();
-        if(e.target.closest && e.target.closest('[data-install-close]')){ e.preventDefault(); closeInstallConfirm(); return; }
-        if(e.target.closest && e.target.closest('#nvMcpInstallConfirm')){ e.preventDefault(); installAgent(); }
-    });
-    modal.addEventListener('click', function(e){
-        e.stopPropagation();
-        var close = e.target.closest && e.target.closest('[data-modal-close]');
-        if(close){ e.preventDefault(); closeModal(); return; }
-        var agentEl = e.target.closest && e.target.closest('[data-modal-agent]');
-        if(agentEl){ e.preventDefault(); renderAgent(agentEl.getAttribute('data-modal-agent')); return; }
-        var installEl = e.target.closest && e.target.closest('[data-install-agent]');
-        if(installEl){ e.preventDefault(); openInstallConfirm(installEl.getAttribute('data-install-agent')); return; }
-        var openInstalledEl = e.target.closest && e.target.closest('[data-open-installed]');
-        if(openInstalledEl){
-            e.preventDefault();
-            var oid = openInstalledEl.getAttribute('data-open-installed');
-            if(oid === 'claude') openInstalledAgent('claude', promptText(), openInstalledEl, document.getElementById('nvMcpPrompt'), '已复制提示词');
-            else if(oid === 'chatgpt') openInstalledAgent('chatgpt', info && info.http_url, openInstalledEl, null, '已复制 HTTP 地址');
-            else openInstalledAgent(oid, stdioJson(), openInstalledEl, document.getElementById('nvMcpPrompt'), '已复制配置');
-            return;
-        }
-        if(e.target.closest && e.target.closest('[data-prompt-copy]')){
-            e.preventDefault(); copyText(promptText(), '已复制提示词', document.getElementById('nvMcpPrompt'), e.target.closest('[data-prompt-copy]')); return;
-        }
-        if(e.target.closest && e.target.closest('[data-claude-open]')){
-            e.preventDefault();
-            var claudeBtn = e.target.closest('[data-claude-open]');
-            if(isInstalled('claude')){ openInstalledAgent('claude', promptText(), claudeBtn, document.getElementById('nvMcpPrompt'), '已复制提示词'); return; }
-            copyText(promptText(), '已复制提示词', document.getElementById('nvMcpPrompt'), claudeBtn);
-            try { var link = document.createElement('a'); link.href = 'claude://'; link.rel = 'noopener'; link.style.display = 'none'; document.body.appendChild(link); link.click(); link.remove(); } catch(err) {}
-            return;
-        }
-        if(e.target.closest && e.target.closest('[data-chatgpt-open]')){
-            e.preventDefault(); openInstalledAgent('chatgpt', info && info.http_url, e.target.closest('[data-chatgpt-open]'), null, '已复制 HTTP 地址'); return;
-        }
-        if(e.target.closest && e.target.closest('[data-http-copy]')){
-            e.preventDefault(); copyText(info && info.http_url, '已复制 HTTP 地址', document.getElementById('nvMcpDocUrl'), e.target.closest('[data-http-copy]')); return;
-        }
-        if(e.target.closest && e.target.closest('[data-generic-copy]')){
-            e.preventDefault(); copyText(stdioJson(), '已复制 MCP 配置', document.getElementById('nvMcpPrompt'), e.target.closest('[data-generic-copy]')); return;
-        }
-        if(e.target.closest && e.target.closest('[data-workbuddy-open]')){
-            e.preventDefault(); openInstalledAgent('workbuddy', stdioJson(), e.target.closest('[data-workbuddy-open]'), null, '已复制配置'); return;
-        }
-    });
-    docs.addEventListener('click', function(e){
-        if(e.target.closest && e.target.closest('[data-doc-close]')){ e.preventDefault(); docsClose(); return; }
-        if(e.target.closest && e.target.closest('[data-doc-copy]')){ e.preventDefault(); copyText(stdioJson(), '已复制 MCP 配置', document.getElementById('nvMcpDocJson'), e.target.closest('[data-doc-copy]')); }
-        e.stopPropagation();
-    });
-    document.addEventListener('click', function(e){
-        if(panel.hidden) return;
-        if(e.target.closest && (e.target.closest('#novaiMcpPanel') || e.target.closest('#novaiMcpLaunch') || e.target.closest('#novaiMcpLaunchFallback') || e.target.closest('#novaiMcpModal') || e.target.closest('.nv-mcp-doc-root'))) return;
-        closePanel();
-    });
-    document.addEventListener('keydown', function(e){
-        if(e.key !== 'Escape') return;
-        if(!installRoot.hidden){ closeInstallConfirm(); return; }
-        if(!docs.hidden){ docsClose(); return; }
-        if(!modal.hidden){ closeModal(); return; }
-        if(!panel.hidden) closePanel();
-    });
-    syncLaunchFallback();
-    var railEl = document.getElementById('canvasRail');
-    if(railEl && window.MutationObserver){
-        new MutationObserver(syncLaunchFallback).observe(railEl, { attributes: true, attributeFilter: ['class', 'style'] });
-    }
-    refreshMenuState();
-    refreshIcons();
-})();
-
-
 /* ═══ 第 7 轮：视频后期 —— 尾帧接力 / 首帧成图 / 拼接选中视频 ═══ */
 function smartVideoItemOfNode(node){
     if(!node || !isSmartMediaNode(node)) return null;

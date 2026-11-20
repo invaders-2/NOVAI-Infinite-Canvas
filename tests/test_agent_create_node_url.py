@@ -44,7 +44,7 @@ class CreateNodeUrlTests(unittest.TestCase):
 
     def test_resolver_falls_back_to_bare_key(self):
         text = source()
-        self.assertIn("裸键兜底", text)
+        self.assertIn("没带步骤号的", text)   # {first_frame_url} 这种裸键按最近一步同名字段兜底
 
     def test_both_branches_read_params_url(self):
         """classic 与 BEAT 都从 params.url 建节点，顶层 url 收进 params 后才两条分支都能用。"""

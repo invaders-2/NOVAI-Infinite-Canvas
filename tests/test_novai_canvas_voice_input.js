@@ -24,6 +24,8 @@ const voice = load('novai-canvas-ui/src/canvas/canvas-next/voiceInput.ts');
 const { downsample, encodeWav, transcribeVoice, voiceErrorText, startVoiceCapture } = voice;
 
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
+const builtJs = read('static/novai-canvas/canvas.js');
+const builtCss = read('static/novai-canvas/canvas.css');
 const panelSrc = read('novai-canvas-ui/src/canvas/tapnow/AgentPanel.tsx');
 const genSrc = read('novai-canvas-ui/src/canvas/canvas-next/ui/GenPanel.tsx');
 const panelCss = read('novai-canvas-ui/src/canvas/tapnow/agent-panel-v2.css');
@@ -127,8 +129,8 @@ async function main() {
     const broken = await transcribeVoice(new Blob([new Uint8Array([1])], { type: 'audio/wav' }));
     assert.strictEqual(broken.code, 'ASR_PROVIDER_ERROR', '非 JSON 的非 2xx 也归一');
 
-    /* ── 源码字面量：两个入口都改走新模块，不再碰 Web Speech API ───────── */
-    for (const [name, src] of [['AgentPanel.tsx', panelSrc], ['GenPanel.tsx', genSrc]]) {
+    /* ── 源码字面量：画布助手入口改走新模块，不再碰 Web Speech API ───────── */
+    for (const [name, src] of [['AgentPanel.tsx', panelSrc]]) {
         assert.ok(!src.includes('SpeechRecognition'), name + ' 不能再用 SpeechRecognition');
         assert.ok(src.includes('startVoiceCapture'), name + ' 必须用 startVoiceCapture');
         assert.ok(src.includes('transcribeVoice'), name + ' 必须用 transcribeVoice');
@@ -136,6 +138,16 @@ async function main() {
         assert.ok(src.includes('data-voice-phase'), name + ' 按钮要带 data-voice-phase');
         assert.ok(src.includes('maxSeconds: 90'), name + ' 录音上限 90 秒');
     }
+
+    // GenPanel（节点编辑器）：语音按钮已整条移除，不能再有入口或残留依赖
+    assert.ok(!genSrc.includes('data-p="mic"'), 'GenPanel 不能再有 data-p="mic" 语音按钮');
+    assert.ok(!genSrc.includes('voiceInput'), 'GenPanel 不能 import voiceInput');
+    assert.ok(!genSrc.includes('voicePhase'), 'GenPanel 不能残留 voicePhase 状态');
+    assert.ok(!genSrc.includes('startVoiceCapture'), 'GenPanel 不再调 startVoiceCapture');
+    assert.ok(!genSrc.includes('transcribeVoice'), 'GenPanel 不再调 transcribeVoice');
+    assert.ok(!genSrc.includes('voiceErrorText'), 'GenPanel 不再用 voiceErrorText');
+    assert.ok(!genSrc.includes('data-voice-phase'), 'GenPanel 不再带 data-voice-phase');
+    assert.ok(!/"data-p"\s*:\s*"mic"/.test(builtJs), '构建产物 canvas.js 里不能再有 data-p:"mic"');
 
     // AgentPanel：删掉旧 micInput 与横条，改成底栏 #aMic 原位变身（方案 3）
     assert.ok(!panelSrc.includes('micInput'), 'AgentPanel 旧的 micInput 必须删掉');
@@ -177,14 +189,16 @@ async function main() {
     const footAt = panelSrc.indexOf('className="foot ap2-foot"');
     const micAt = panelSrc.indexOf('id="aMic"');
     assert.ok(composerAt >= 0 && composerAt < inputAt && inputAt < footAt && footAt < micAt, '#aMic 仍在 composer 底栏内、输入框之后');
+    assert.ok(panelSrc.includes('id="aMic"'), 'AgentPanel 的 #aMic 语音入口仍在');
 
     // 快捷键 V 仍是点 #aMic，不改 shortcut 逻辑
     assert.ok(shortcutsSrc.includes('getElementById("aMic")'), 'V 快捷键仍点 #aMic');
 
-    // GenPanel：沿用 cur ? cur + '，' : '' 的拼接并 commitPrompt
-    assert.ok(genSrc.includes('(cur ? cur + "，" : "") + text'), 'GenPanel 沿用逗号拼接');
-    assert.ok(genSrc.includes('commitPrompt(next)'), 'GenPanel 回填后 commitPrompt');
-    assert.ok(genSrc.includes('voicePhase === "recording" ? " rec"'), 'GenPanel 录音态加 rec 类');
+    // GenPanel：动作行只剩 预设 / 优化 / 预计耗时 / 发送
+    assert.ok(genSrc.includes('className="gp-act"'), 'GenPanel 动作行 .gp-act 仍在');
+    assert.ok(genSrc.includes('data-p="presets"'), '预设提示词按钮仍在');
+    assert.ok(genSrc.includes('<OptimizeButton'), '优化按钮仍在');
+    assert.ok(genSrc.includes('data-p="send"'), '发送按钮仍在');
 
     /* ── 样式：胶囊变身 / 让位 / 无描边 / 动画尊重 reduce motion ───────── */
     const cssStart = panelCss.indexOf('/* ── 语音输入（方案 7）');
@@ -205,11 +219,13 @@ async function main() {
     assert.ok(!/border:\s*1px/.test(voiceCss), '胶囊样式不允许 1px 描边');
     assert.ok(!/inset 0 0 0 1px/.test(voiceCss), '胶囊样式不允许 inset 发丝线');
     assert.ok(/@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.ap2-vdot/.test(panelCss), 'reduce motion 下停红点脉冲');
-    assert.ok(canvasCss.includes('.cn-root .gp-act .mic.rec'), 'GenPanel 沿用 canvas-next.css 的 .mic.rec');
+    assert.ok(canvasCss.includes('.cn-root .gp-act .mic{'), '预设 / 优化仍在用 .gp-act .mic 基础样式');
+    assert.ok(!canvasCss.includes('.mic.rec'), 'canvas-next.css 不能再有录音态 .mic.rec');
+    assert.ok(!builtCss.includes('.mic.rec'), '构建产物 canvas.css 里不能再有 .mic.rec');
 }
 
 main().then(() => {
-    console.log('test_novai_canvas_voice_input: 全部断言通过（downsample / encodeWav / voiceErrorText / 转写契约 / 两个入口 / 样式）');
+    console.log('test_novai_canvas_voice_input: 全部断言通过（downsample / encodeWav / voiceErrorText / 转写契约 / AgentPanel 入口 / GenPanel 无语音按钮 / 样式）');
 }).catch((error) => {
     console.error(error && error.stack ? error.stack : error);
     process.exit(1);

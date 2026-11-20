@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""画布助手 use_asset 检索：所有资产库、AI 标签 / 摘要、本地上传、跟随存储设置的上传目录。"""
+"""画布助手 use_asset 检索：所有资产库、名称 / 说明 / 文件夹、本地上传、跟随存储设置的上传目录。
+
+历史 classification 数据仍留在条目里，但已不参与检索 / 排序。
+"""
 import os
 import shutil
 import sys
@@ -79,13 +82,14 @@ class UseAssetSearchTest(unittest.TestCase):
     def urls(self, result):
         return [hit["url"] for hit in result["items"]]
 
-    def test_matches_ai_tags_inside_unspaced_chinese_query(self):
-        result = self.run_tool(query="白色运动鞋")
-        self.assertEqual(self.urls(result)[0], "/assets/library/lib_1_IMG_2033.jpg")
-        hit = result["items"][0]
-        self.assertEqual(hit["summary"], "白色运动鞋棚拍正面")
-        self.assertIn("运动鞋", hit["tags"])
+    def test_classification_no_longer_matches_or_leaks_into_hits(self):
+        # 条目上仍有历史 classification，但它既不参与检索，也不出现在返回字段里
+        self.assertEqual(self.run_tool(query="白色运动鞋")["items"], [])
+        hit = self.run_tool(query="IMG_2033")["items"][0]
+        self.assertEqual(hit["url"], "/assets/library/lib_1_IMG_2033.jpg")
         self.assertEqual(hit["library"], "默认资产库")
+        self.assertNotIn("tags", hit)
+        self.assertNotIn("summary", hit)
 
     def test_searches_every_library_not_just_active(self):
         result = self.run_tool(query="手提包")
@@ -96,7 +100,7 @@ class UseAssetSearchTest(unittest.TestCase):
     def test_category_name_matches(self):
         self.assertIn("/assets/library/lib_3_walk.mp4", self.urls(self.run_tool(query="源视频")))
 
-    def test_local_uploads_searchable_by_caption_and_tags(self):
+    def test_local_uploads_searchable_by_caption(self):
         result = self.run_tool(query="女模特 全身")
         self.assertEqual(self.urls(result)[0], "/assets/uploads/model/girl.png")
         self.assertEqual(result["items"][0]["source"], "local")

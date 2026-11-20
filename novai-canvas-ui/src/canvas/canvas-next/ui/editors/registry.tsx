@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } fr
 import type { CanvasNode } from "../../../react-canvas/reactCanvasStore";
 import { relit } from "../../backend/mockEdit";
 import { GenError, type EditOp, type MattingModelStatus, type UpscaleRuntimeStatus } from "../../backend/types";
+import { maskedStructureScore } from "../../whitemodelScore.js";
 import { clamp, clampTrim, genOf, outOf, uid, withGen, type GenOutput, type ModelSpec } from "../../model";
 import { fitMediaBox } from "../../mediaFit";
 import type { CanvasStore } from "../../store";
@@ -27,6 +28,7 @@ import { ComboMenu } from "../combo";
 // 扩图框 / 笔刷圆圈的样式：独立小块，写进 canvas-next.css 会和另一路（textdoc 段）冲突。
 // 在这里 import 一次即可 —— registry 随画布常驻，笔刷圆圈不用等扩图框打开才加载样式。
 import "./editors.css";
+import { openSplitEditor } from "./SplitEditor";
 
 /** 画笔大小范围（px）：圆圈直径 = 实际笔迹直径 = 这个值 */
 const BRUSH_MIN = 4; const BRUSH_MAX = 120;
@@ -62,12 +64,19 @@ const setEd = (v: EdState) => { ed = v; ls.forEach((l) => l()); };
 export const useEditorState = () => useSyncExternalStore((l) => { ls.add(l); return () => { ls.delete(l); }; }, () => ed);
 
 const loadImg = (src: string) => new Promise<HTMLImageElement>((res, rej) => { const im = new Image(); im.crossOrigin = "anonymous"; im.onload = () => res(im); im.onerror = () => rej(new Error("图片读取失败")); im.src = src; });
+/** 白膜三档：人台（服装展示）、白模（商品未上色石膏粗模）、清场（商品连同接触投影一起移除）。 */
+export type WhiteTier = "mannequin" | "blockout" | "clear";
 /**
- * 白膜结果的自动审查：空白（整图一个颜色）和彩色残留（衣服 / 背景没变全白）都不写进版本。
- * 惨痛教训：Qwen 一类的模型会把画面生成成空白或原样保留穿搭，不拦下来就是一张废图占着版本历史。
- * 返回空串 = 通过。
+ * 白膜结果的自动审查，两档待遇不同：
+ *   空白图（整幅一个颜色 / 读不出图）→ block：真废图，拦下不写版本，换更强模型重试；
+ *   其余按档位各查，只 warn，结果照常写进版本 ——
+ *   人台：结构大体要对得上，且不许有彩色残留（衣服 / 背景没变全白）；
+ *   白模：结构大体要对得上（只能去掉细节、不能换个东西），背景保留原色所以不查彩色；
+ *   清场：结果本来就要保留原背景颜色，所以不查彩色残留，改查「和输入几乎没变化」（商品没被移除）。
+ * 只提示不拦：用户是花钱生成的，误判一次就把结果丢掉比多一张废图更糟（人台档在忙背景的图上误杀过）。
+ * 返回 {} = 通过。
  */
-async function whiteModelIssue(src: string) {
+async function whiteModelIssue(src: string, tier: WhiteTier = "mannequin", from = ""): Promise<{ block?: string; warn?: string }> {
   const im = await loadImg(src);
   const w = 96, h = Math.max(1, Math.round((96 * im.naturalHeight) / Math.max(1, im.naturalWidth)));
   const c = cv(w, h); const g = c.getContext("2d")!; g.drawImage(im, 0, 0, w, h);
@@ -79,15 +88,158 @@ async function whiteModelIssue(src: string) {
     // 纯白 / 中性灰的 R−G−B 差很小；原图砖墙、皮肤、彩色鞋子会明显超阈值
     if (Math.max(r, gg, b) - Math.min(r, gg, b) > 12 && l < 248) colored++;
   }
-  if (!n) return "模型返回的图片读不出来，换一个图片模型再试";
+  if (!n) return { block: "模型返回的图片读不出来，换一个图片模型再试" };
   const mean = s / n;
   const std = Math.sqrt(Math.max(0, s2 / n - mean * mean));
-  if (std < 6) return "模型把画面生成成空白了：换一个更强的图片模型（nano banana / GPT Image）再试一次";
-  if (colored / n > 0.02) return "结果里还残留原图的颜色（衣服或背景没变全白），已拦下不写版本；换更强的图片模型再试一次";
-  return "";
+  // 干净的棚拍场景（无缝米色背景）清掉商品后本来就接近一片纯色（实测 std 3.9），用 3 会误杀，
+  // 清场阈值放宽到 1.5；人台 / 白模仍用 6，只拦「整块一个色」的空白图。
+  if (std < (tier === "clear" ? 1.5 : 6)) return { block: "模型把画面生成成空白了，已拦下不写版本；换一个更强的图片模型（nano banana / GPT Image）再试一次" };
+  // 人台 / 白模：颜色和亮度本来就会整体改变（人台全白、白模石膏灰），比颜色必误杀；改比轮廓（见 structureScore）。
+  // 分数只作提示，不过就不再往版本历史上丢图。
+  if (tier !== "clear") {
+    if (!from) return {};
+    const score = await structureScore(src, from).catch(() => 0);
+    if (score < STRUCT_MIN) return { warn: tier === "blockout"
+      ? "结果和原商品的轮廓对不上：产品档只该去掉细节、不该换外形。这次已经照常写入版本，不满意可以撤销后换个模型再试"
+      : "结果和原图的轮廓对不上：人台档要求原图里有人物，并且要保住原来的姿态和机位（商品图请改用「产品」档）。这次已经照常写入版本，不满意可以撤销后换个模型再试" };
+  }
+  if (tier === "blockout") return {};
+  if (tier === "clear") {
+    if (!from) return {};
+    // 清场档：按亮度逐点对比输入图；商品该占掉的那块没动 = 模型原样返回 / 没清掉。
+    // 两条都「几乎为零」才判失败（小商品本来就只占画面很小一块，单看均值会误杀）
+    const im0 = await loadImg(from);
+    const c0 = cv(w, h); const g0 = c0.getContext("2d")!; g0.drawImage(im0, 0, 0, w, h);
+    const d0 = g0.getImageData(0, 0, w, h).data; let diff = 0, moved = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const dl = Math.abs((d[i] * .299 + d[i + 1] * .587 + d[i + 2] * .114) - (d0[i] * .299 + d0[i + 1] * .587 + d0[i + 2] * .114));
+      diff += dl; if (dl > 8) moved++;
+    }
+    if (diff / n < 2 && moved / n < .01) return { warn: "结果和原图几乎没有变化，商品好像没被拿掉。这次已经照常写入版本，不满意可以撤销后换个模型再试" };
+    return {};
+  }
+  if (colored / n > 0.02) return { warn: "结果里还残留原图的颜色（衣服或背景没变全白）。这次已经照常写入版本，不满意可以撤销后换个模型再试" };
+  return {};
 }
 const cv = (w: number, h: number) => { const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; };
 async function srcData(store: CanvasStore, url: string) { return isAssetRef(url) ? (await store.backend.resolveAsset(url)) || "" : url; }
+/** 结构相似度阈值（96px 灰度梯度余弦，已剔除结果里被抹成纯白的背景）：
+ *  真图人台正例 0.64 / 0.70；忙背景原图对正常的人台结果 0.54（旧算法 0.45，会被误杀）；主体平移 20% 0.49；
+ *  换一张完全不同的图 0.68 —— 这两类分不开，所以分数只用来提示、不拦结果，阈值取 0.45 只拦明显对不上的。 */
+const STRUCT_MIN = 0.45;
+/**
+ * 只比轮廓 / 构图：96px 灰度 → Sobel 梯度图 → 余弦相似度（结果被抹成纯白的背景不计，见 whitemodelScore.js）。
+ * 颜色、整体亮度、白平衡的改变都会被梯度抵消，适合「人台整体变白 / 白模变石膏灰」之后仍要判断主体有没有跑偏。
+ */
+async function structureScore(a: string, b: string) {
+  const im = await loadImg(a);
+  const w = 96, h = Math.max(1, Math.round((96 * im.naturalHeight) / Math.max(1, im.naturalWidth)));
+  const lum = async (src: string) => {
+    const c = cv(w, h); const g = c.getContext("2d")!; g.drawImage(await loadImg(src), 0, 0, w, h);
+    const d = g.getImageData(0, 0, w, h).data; const v = new Float32Array(w * h);
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) v[p] = d[i] * .299 + d[i + 1] * .587 + d[i + 2] * .114;
+    return v;
+  };
+  return maskedStructureScore(await lum(a), await lum(b), w, h).score;
+}
+/**
+ * 白模档的本地白平衡兜底（不靠模型）：生成模型经常给奶白 / 米白 / 浅灰底，达不到「纯白」。
+ * target 默认 250（产品档）；人物档传 252（形体靠明暗，不能上平场，只把白点再抬一点）。
+ * 96px 缩略图统计三通道各自的 99 分位（避开极少数噪点高光），每通道乘一个系数把那分位拉到 250
+ * （不是 255，留余量防死白），系数夹在 [1,1.6] 且已经 >=250 的通道不动；再整张图按系数重画。
+ * 只对白模档生效；人台 / 清场要保持原照片的颜色，不能动。
+ */
+async function pureWhite(src: string, target = 250) {
+  const im = await loadImg(src);
+  const w = Math.max(1, Math.min(96, im.naturalWidth));
+  const h = Math.max(1, Math.round((w * im.naturalHeight) / Math.max(1, im.naturalWidth)));
+  const t = cv(w, h); const tg = t.getContext("2d")!; tg.drawImage(im, 0, 0, w, h);
+  const d = tg.getImageData(0, 0, w, h).data;
+  // 三个通道的直方图（用 96px 缩略图统计，别拿整图噪点算分位）
+  const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  for (let i = 0; i < d.length; i += 4) { hist[0][d[i]]++; hist[1][d[i + 1]]++; hist[2][d[i + 2]]++; }
+  // 99 分位：从亮往暗累加，累计到 1% 像素时落在哪个亮度
+  const need = Math.max(1, Math.round(w * h * 0.01));
+  const p99 = (hh: Uint32Array) => { let acc = 0; for (let v = 255; v >= 0; v--) { acc += hh[v]; if (acc >= need) return v; } return 0; };
+  const gain = [0, 1, 2].map((k) => { const p = p99(hist[k]); return p >= 250 ? 1 : Math.min(1.6, Math.max(1, target / Math.max(1, p))); });
+  if (gain.every((g) => g === 1)) return src;
+  const out = cv(im.naturalWidth, im.naturalHeight); const g2 = out.getContext("2d")!;
+  g2.drawImage(im, 0, 0);
+  const big = g2.getImageData(0, 0, out.width, out.height); const bd = big.data;
+  for (let i = 0; i < bd.length; i += 4) {
+    bd[i] = Math.min(255, bd[i] * gain[0]);
+    bd[i + 1] = Math.min(255, bd[i + 1] * gain[1]);
+    bd[i + 2] = Math.min(255, bd[i + 2] * gain[2]);
+  }
+  g2.putImageData(big, 0, 0);
+  return out.toDataURL("image/png");
+}
+/**
+ * 背景平场（只对白模档，跟在 pureWhite 之后）：白平衡只能把亮部拉白，模型给的四角暗角 / 渐变还在。
+ * 在长边 ≤512 的缩略图上估背景平滑明暗场（亮部遮罩 + 大半径模糊），把背景归一化到 250；
+ * 只对「像素≈背景场」的地方生效（投影、商品边缘差值大，保持原样），系数夹在 [0.9,1.4] 避免放大噪点。
+ */
+async function flatField(src: string) {
+  const im = await loadImg(src);
+  const s = Math.min(1, 512 / Math.max(1, Math.max(im.naturalWidth, im.naturalHeight)));
+  const w = Math.max(1, Math.round(im.naturalWidth * s)), h = Math.max(1, Math.round(im.naturalHeight * s));
+  const t = cv(w, h); const tg = t.getContext("2d")!; tg.drawImage(im, 0, 0, w, h);
+  const d = tg.getImageData(0, 0, w, h).data;
+  const L = new Float32Array(w * h);
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) L[p] = d[i] * .299 + d[i + 1] * .587 + d[i + 2] * .114;
+  // 亮部 99 分位 → 0.85× 作遮罩阈值：只让背景（和本来就该白的商品亮部）参与背景场估计
+  const p99 = Float32Array.from(L).sort()[Math.max(0, Math.min(L.length - 1, Math.round(L.length * .99) - 1))];
+  const cutAt = .85 * p99;
+  const mask = new Float32Array(w * h); const num = new Float32Array(w * h);
+  for (let i = 0; i < L.length; i++) { const m = L[i] >= cutAt ? 1 : 0; mask[i] = m; num[i] = L[i] * m; }
+  const rad = Math.max(1, Math.round(Math.min(w, h) / 8));
+  const blur = (a: Float32Array) => {
+    const once = (src: Float32Array, horiz: boolean) => {
+      const out = new Float32Array(src.length);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        let sum = 0, cnt = 0;
+        for (let k = -rad; k <= rad; k++) {
+          const xx = horiz ? x + k : x, yy = horiz ? y : y + k;
+          if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+          sum += src[yy * w + xx]; cnt++;
+        }
+        out[y * w + x] = sum / cnt;
+      }
+      return out;
+    };
+    let a1 = a; for (let pass = 0; pass < 3; pass++) a1 = once(once(a1, true), false);
+    return a1;
+  };
+  const bn = blur(num), bd = blur(mask);
+  const gains = new Float32Array(w * h);
+  for (let i = 0; i < L.length; i++) {
+    const field = bd[i] > 1e-3 ? bn[i] / bd[i] : L[i];
+    const diff = Math.abs(L[i] - field);
+    // 差值 4 以内视为背景、原样应用；到 14 完全不动（投影 / 商品边缘）
+    const e = Math.min(1, Math.max(0, (diff - 4) / 10));
+    const wgt = 1 - e * e * (3 - 2 * e);
+    const g = Math.min(1.4, Math.max(.9, 250 / Math.max(1, field)));
+    gains[i] = 1 + (g - 1) * wgt;
+  }
+  // gain map 编码成灰度图放大回原尺寸（canvas 双线性插值），再逐像素乘
+  const gc = cv(w, h); const gctx = gc.getContext("2d")!; const gi = gctx.createImageData(w, h);
+  for (let i = 0, p = 0; i < gains.length; i++, p += 4) {
+    const v = Math.round((gains[i] - .9) / .5 * 255);
+    gi.data[p] = gi.data[p + 1] = gi.data[p + 2] = v; gi.data[p + 3] = 255;
+  }
+  gctx.putImageData(gi, 0, 0);
+  const big = cv(im.naturalWidth, im.naturalHeight); const bg = big.getContext("2d")!;
+  bg.imageSmoothingQuality = "high"; bg.drawImage(gc, 0, 0, big.width, big.height);
+  const out = cv(im.naturalWidth, im.naturalHeight); const og = out.getContext("2d")!; og.drawImage(im, 0, 0);
+  const px = og.getImageData(0, 0, out.width, out.height); const gd = bg.getImageData(0, 0, out.width, out.height).data;
+  for (let i = 0, p = 0; i < px.data.length; i += 4, p += 4) {
+    const k = .9 + (gd[p] / 255) * .5;
+    px.data[i] = Math.min(255, px.data[i] * k); px.data[i + 1] = Math.min(255, px.data[i + 1] * k); px.data[i + 2] = Math.min(255, px.data[i + 2] * k);
+  }
+  og.putImageData(px, 0, 0);
+  return out.toDataURL("image/png");
+}
+
 
 /** 新版本写回节点（data URL 先进资源库） */
 async function applyVariant(store: CanvasStore, id: string, out: GenOutput, label: string, quiet = false) {
@@ -121,6 +273,67 @@ async function transformImage(store: CanvasStore, id: string, op: "cw" | "ccw" |
 }
 
 /**
+ * 人台档的输入预处理：本地 RMBG 把人物抠出来贴到纯白，再交给模型。
+ * 原图里的椅子、包、道具会跟着进结果（真图实测：光靠提示词说「背景换成无缝纯白」保不住，模型照样留着），
+ * 抠图是本地跑的、不花钱；抠不出来（没下模型 / 老后端）就返回空串，调用方照旧用原图，不影响出图。
+ */
+async function subjectOnWhite(store: CanvasStore, req: { canvasId: string; nodeId: string; model?: ModelSpec; sourceUrl: string }, signal: AbortSignal) {
+  let cut: GenOutput | null = null;
+  try {
+    cut = await store.backend.editImage({ canvasId: req.canvasId, nodeId: req.nodeId, op: "cutout", model: req.model, sourceUrl: req.sourceUrl }, () => {}, signal);
+  } catch { return ""; }
+  if (!cut?.url) return "";
+  const im = await loadImg(await srcData(store, cut.url)).catch(() => null);
+  if (!im) return "";
+  const c = cv(im.naturalWidth, im.naturalHeight); const g = c.getContext("2d")!;
+  g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0);
+  return c.toDataURL("image/png");
+}
+
+/**
+ * 白模档的收边：模型经常把商品重画变形（鞋头被捏掉、整体缩小 / 挪位），
+ * 生成完按原商品的抠图轮廓裁一遍 —— 轮廓、比例、位置强制跟原图一致，只留下模型做的石膏质感。
+ * 轮廓先向外扩一点（长边 0.4% 画幅），避免把模型的柔和投影和边缘高光切掉。
+ */
+async function clipToSilhouette(store: CanvasStore, resultUrl: string, sourceUrl: string, signal: AbortSignal) {
+  let cut: GenOutput | null = null;
+  try {
+    cut = await store.backend.editImage({ canvasId: store.state.canvasId, nodeId: "", op: "cutout", sourceUrl }, () => {}, signal);
+  } catch { return ""; }
+  if (!cut?.url) return "";
+  const [im, mask] = await Promise.all([loadImg(await srcData(store, resultUrl)).catch(() => null), loadImg(await srcData(store, cut.url)).catch(() => null)]);
+  if (!im || !mask) return "";
+  const W = im.naturalWidth, H = im.naturalHeight;
+  // 轮廓膨胀在 240px 缩略图上做（便宜），再放大当遮罩用
+  const s = 240 / Math.max(W, H);
+  const sw = Math.max(1, Math.round(W * s)), sh2 = Math.max(1, Math.round(H * s));
+  const small = cv(sw, sh2); const sg = small.getContext("2d")!;
+  sg.fillStyle = "#000"; sg.fillRect(0, 0, sw, sh2); sg.drawImage(mask, 0, 0, sw, sh2);
+  const sd = sg.getImageData(0, 0, sw, sh2); const a = new Float32Array(sw * sh2);
+  for (let i = 0, p = 0; i < sd.data.length; i += 4, p++) a[p] = sd.data[i];
+  const rad = Math.max(1, Math.round(Math.max(sw, sh2) * 0.004)); // ≈ 长边的 0.4%，只把边线放宽一点点
+  const dil = new Float32Array(a.length);
+  for (let y = 0; y < sh2; y++) for (let x = 0; x < sw; x++) {
+    let m = 0;
+    for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) {
+      const xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= sw || yy >= sh2) continue;
+      const v = a[yy * sw + xx]; if (v > m) m = v;
+    }
+    dil[y * sw + x] = m;
+  }
+  const mcanvas = cv(sw, sh2); const mg = mcanvas.getContext("2d")!; const mi = mg.createImageData(sw, sh2);
+  for (let i = 0, p = 0; p < dil.length; i += 4, p++) { mi.data[i] = mi.data[i + 1] = mi.data[i + 2] = 255; mi.data[i + 3] = dil[p]; }
+  mg.putImageData(mi, 0, 0);
+  const maskFull = cv(W, H); const mfg = maskFull.getContext("2d")!;
+  mfg.imageSmoothingQuality = "high"; mfg.drawImage(mcanvas, 0, 0, W, H);
+  const out = cv(W, H); const g = out.getContext("2d")!;
+  g.drawImage(im, 0, 0);
+  g.globalCompositeOperation = "destination-in"; g.drawImage(maskFull, 0, 0);
+  g.globalCompositeOperation = "destination-over"; g.fillStyle = "#fff"; g.fillRect(0, 0, W, H);
+  return out.toDataURL("image/png");
+}
+
+/**
  * 走模型的编辑：目标节点进入生成态（同一套加载动效），可停止。
  * 用哪个模型？统一跟节点当前选中的生图模型（节点底栏那颗模型按钮），编辑不再自己挑模型。
  */
@@ -131,34 +344,72 @@ async function runEdit(store: CanvasStore, id: string, op: EditOp, label: string
   // extra.model：少数编辑会指定更适合的模型（白膜选人台理解更好的），其余仍跟节点当前模型
   const model = extra.model || store.modelOf(dst) || store.modelOf(n) || store.defaultModel("image");
   store.setRun(tid, { status: "running", progress: .02, abort, startedAt: Date.now() });
+  let warn = "";
   try {
     // 扩图会自己合成「原图 + 透明扩展」再传进来（extra.sourceUrl）；其余编辑仍用节点当前结果
     const { sourceUrl: prepadded, ...rest } = extra;
     const sourceUrl = prepadded || (store.backend.kind === "mock" ? await srcData(store, src) : src);
-    const req = { canvasId: store.state.canvasId, nodeId: tid, op, model, sourceUrl, ...rest };
+    // 白膜三档：档位决定自检规则（人台查结构 + 彩色残留，白模查结构，清场查「商品没被移除」）
+    const wantTier = (rest.params as { tier?: string } | undefined)?.tier;
+    const whiteTier: WhiteTier | null = op !== "whitemodel" ? null
+      : wantTier === "clear" ? "clear" : wantTier === "blockout" ? "blockout" : "mannequin";
+    let req = { canvasId: store.state.canvasId, nodeId: tid, op, model, sourceUrl, ...rest };
+    // 本地预处理（只有带本地抠图的后端才做，模型没下载 / 老后端一律跳过、照旧走模型）：
+    //   人台 → 先把人物抠到纯白再送模型（原图里的椅子、包、道具会跟着进结果，提示词挡不住）；
+    //   白模 → 送原图（模型看原图才能做出石膏的明暗体块），生成完再按原轮廓收边（见 clipToSilhouette）。
+    const canMatte = typeof store.backend.mattingModelStatus === "function"
+      && !!(await store.backend.mattingModelStatus().catch(() => null))?.downloaded;
+    if (whiteTier === "mannequin" && canMatte) {
+      const prepped = await subjectOnWhite(store, req, abort.signal).catch(() => "");
+      if (prepped) req = { ...req, sourceUrl: prepped };
+    }
     const onEvent = (e: { type: string; progress?: number }) => { if (e.type === "progress") store.patchRun(tid, { progress: clamp(Number(e.progress) || .02, .02, 1) }); };
     let out = await store.backend.editImage(req, onEvent, abort.signal);
     if (op === "whitemodel") {
-      let issue = out.url ? await whiteModelIssue(await srcData(store, out.url)).catch(() => "") : "";
-      // 第一张没过审查（空白 / 还带原图颜色）时自动换一个更强的模型再试一次，仍不过才报错
-      if (issue) {
-        // 优先 APIMART 上的 Gemini / GPT Image（人台最稳），再退到 lovart 的 nano banana；每个只试一次
+      const tier: WhiteTier = whiteTier || "mannequin";
+      // 结构自检要跟模型实际拿到的那张图比（人台档是抠到纯白后的输入），两档都读一遍
+      const before = await srcData(store, req.sourceUrl).catch(() => "");
+      // 产品档：本地白平衡 + 背景平场（鞋体积大、有灰面，平场是好事）；
+      // 人物档：只做白平衡（目标 252），不做平场 —— 平场会把白色人台和背景抹成一片、杀掉形体；
+      // 清空商品：都不做（要保持原场景颜色）。
+      const balanceOut = async (o: GenOutput) => {
+        if ((tier !== "blockout" && tier !== "mannequin") || !o.url) return o;
+        const fixed = await pureWhite(await srcData(store, o.url), tier === "mannequin" ? 252 : 250).catch(() => "");
+        if (!fixed || tier === "mannequin") return fixed ? { ...o, url: fixed } : o;
+        const flat = await flatField(fixed).catch(() => "");
+        return { ...o, url: flat || fixed };
+      };
+      out = await balanceOut(out);
+      // 白模档收边：模型容易把商品重画变形，用原图轮廓裁一遍，形状 / 位置 / 比例锁定在原商品上
+      if (tier === "blockout" && canMatte && out.url) {
+        const clipped = await clipToSilhouette(store, out.url, sourceUrl, abort.signal).catch(() => "");
+        if (clipped) out = { ...out, url: clipped };
+      }
+      let verdict: { block?: string; warn?: string } = out.url
+        ? await whiteModelIssue(await srcData(store, out.url), tier, before).catch(() => ({} as { block?: string; warn?: string }))
+        : { block: "模型没有返回图片，换一个更强的图片模型再试一次" };
+      // 只有真废图（空白 / 读不出图）才自动换一个更强的模型重试、仍不行才拦下；
+      // 结构 / 颜色类问题只提示，结果照常写进版本 —— 用户花钱生成的图不能因为一次误判被丢掉。
+      if (verdict.block) {
         const images = store.state.models.filter((m) => m.kind === "image" && m.id !== model?.id);
+        // 优先 APIMART 上的 Gemini / GPT Image（主体理解最稳），再退到 nano banana；每个只试一次。
         const ranked = [
           /gemini-nano-banana-2\.1/i, /gpt-image-2\.6/i, /gemini-3-pro-image-preview/i, /nano[._-]?banana/i, /gpt-image-2\.[56]/i,
         ].flatMap((re) => images.filter((m) => re.test(m.id))).slice(0, 2);
         for (const alt of ranked) {
           store.patchRun(tid, { progress: .05 });
-          const retry = await store.backend.editImage({ ...req, model: alt }, onEvent, abort.signal).catch(() => null);
-          if (!retry?.url) continue;
-          const retryIssue = await whiteModelIssue(await srcData(store, retry.url)).catch(() => "");
-          if (!retryIssue) { out = retry; issue = ""; break; }
-          issue = retryIssue;
+          const retryRaw = await store.backend.editImage({ ...req, model: alt }, onEvent, abort.signal).catch(() => null);
+          if (!retryRaw?.url) continue;
+          const retry = await balanceOut(retryRaw);
+          verdict = await whiteModelIssue(await srcData(store, retry.url || ""), tier, before).catch(() => ({} as { block?: string; warn?: string }));
+          if (!verdict.block) { out = retry; break; }
         }
+        if (verdict.block) throw new Error(verdict.block);
       }
-      if (issue) throw new Error(issue);
+      warn = verdict.warn || "";
     }
     store.setRun(tid, null); await applyVariant(store, tid, out, label);
+    if (warn) store.toast(warn, 6000);
     store.logRun({ node: tid, title: genOf(store.node(tid)!).title, type: "image", model: label, status: "done", secs: 0 });
   } catch (err) {
     store.setRun(tid, null);
@@ -392,7 +643,7 @@ export function openEditor(ctl: Ctl, kind: string, id: string, anchor?: Element)
 }
 
 /* ---------- 「更多」菜单里的子浮层（旋转 / 快速切分 / 增强共用） ---------- */
-type FlyKey = "rotate" | "split" | "enhance";
+type FlyKey = "rotate" | "split" | "enhance" | "layersplit";
 
 /**
  * 子浮层的开合与定位（旋转 / 快速切分 / 增强共用，避免两份 measure）：
@@ -466,6 +717,10 @@ function MoreMenu({ ctl, id, n, close }: { ctl: Ctl; id: string; n: CanvasNode; 
     <button className="mi" data-k="open-outpaint" onClick={() => { close(); setEd({ type: "outpaint", id }); }}><Icon name="outpaint" size="s" />扩图</button>
     <button className="mi" onClick={() => { close(); setEd({ type: "mask", id, mode: "erase" }); }}><Icon name="eraser" size="s" />擦除</button>
     <button className="mi" onClick={() => { close(); setEd({ type: "mask", id, mode: "annot" }); }}><Icon name="annot" size="s" />标注</button>
+    {/* 低频 AI 特效：与条上按钮同一条 openEditor 路由，功能不变 */}
+    <button className="mi" data-k="angle" onClick={() => { close(); openEditor(ctl, "angle", id); }}><Icon name="cube" size="s" />多角度</button>
+    <button className="mi" data-k="relight" onClick={() => { close(); openEditor(ctl, "relight", id); }}><Icon name="sun" size="s" />重打光</button>
+    <button className="mi" data-k="whitemodel" onClick={() => { close(); openEditor(ctl, "whitemodel", id); }}><Icon name="user" size="s" />白膜处理</button>
     <div className={"mi enhance-menu" + (fly.key === "enhance" ? " on" : "")} role="button" tabIndex={0} data-k="enhance-menu" aria-expanded={fly.key === "enhance"}
       onPointerEnter={(e) => fly.open("enhance", e.currentTarget)} onPointerLeave={fly.hideSoon}
       onFocus={(e) => fly.open("enhance", e.currentTarget)} onClick={(e) => fly.open("enhance", e.currentTarget)}
@@ -489,6 +744,13 @@ function MoreMenu({ ctl, id, n, close }: { ctl: Ctl; id: string; n: CanvasNode; 
       <Icon name="grid" size="s" />快速切分
       <Icon name="right" size="s" className="chev" />
     </div>
+    <div className={"mi layersplit-menu" + (fly.key === "layersplit" ? " on" : "")} role="button" tabIndex={0} data-k="layersplit-menu" aria-expanded={fly.key === "layersplit"}
+      onPointerEnter={(e) => fly.open("layersplit", e.currentTarget)} onPointerLeave={fly.hideSoon}
+      onFocus={(e) => fly.open("layersplit", e.currentTarget)} onClick={(e) => fly.open("layersplit", e.currentTarget)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fly.open("layersplit", e.currentTarget); } }}>
+      <Icon name="layers" size="s" />拆分图层
+      <Icon name="right" size="s" className="chev" />
+    </div>
     {fly.key === "rotate" ? <div ref={fly.flyEl} className="rotate-flyout" data-k="rotate-flyout"
       onPointerEnter={fly.clearHide} onPointerLeave={fly.hideSoon} style={flyStyle}>
       {([["ccw", "左旋 90°", "rotate-ccw"], ["cw", "右旋 90°", "rotate-cw"], ["fh", "水平翻转", "rotate-fh"], ["fv", "垂直翻转", "rotate-fv"]] as const).map(([op, label, k]) => (
@@ -498,6 +760,11 @@ function MoreMenu({ ctl, id, n, close }: { ctl: Ctl; id: string; n: CanvasNode; 
     {fly.key === "split" ? <div ref={fly.flyEl} className="split-flyout" data-k="split-grid" data-testid="split-flyout"
       onPointerEnter={fly.clearHide} onPointerLeave={fly.hideSoon} style={flyStyle}>
       <SplitGrid ctl={ctl} id={id} close={close} />
+    </div> : null}
+    {fly.key === "layersplit" ? <div ref={fly.flyEl} className="rotate-flyout" data-k="layersplit-flyout"
+      onPointerEnter={fly.clearHide} onPointerLeave={fly.hideSoon} style={flyStyle}>
+      <button className="mi" data-split-mode="auto" title="自动识别图层和文字，先出结果再调" onClick={() => { close(); openSplitEditor(id, "auto"); }}>自动拆分</button>
+      <button className="mi" data-split-mode="custom" title="框选区域并描述，只拆你圈出的部分" onClick={() => { close(); openSplitEditor(id, "custom"); }}>自定义拆分</button>
     </div> : null}
     {fly.key === "enhance" ? <div ref={fly.flyEl} className="rotate-flyout" data-k="enhance-flyout"
       onPointerEnter={fly.clearHide} onPointerLeave={fly.hideSoon} style={flyStyle}>
@@ -605,6 +872,16 @@ function Crop({ ctl, n, rect }: { ctl: Ctl; n: CanvasNode; rect: Rect }) {
 function Mask({ ctl, n, rect, mode }: { ctl: Ctl; n: CanvasNode; rect: Rect; mode: "redraw" | "erase" | "annot" }) {
   const cvsRef = useRef<HTMLCanvasElement>(null); const strokes = useRef<Array<{ t: string; size: number; p: Array<{ x: number; y: number }> }>>([]); const undone = useRef<typeof strokes.current>([]);
   const [tool, setTool] = useState("brush"); const [size, setSize] = useState(28); const [prompt, setPrompt] = useState(""); const [, force] = useState(0);
+  // 遮罩内换品：挂一张新品图，运行时作为第三张参考图发（novai 适配器 / 桌面桥接都按 refUrl 走换品提示词）
+  const [ref, setRef] = useState<{ url: string; name: string } | null>(null);
+  const refInput = useRef<HTMLInputElement>(null);
+  const onRefFile = async (f: File | undefined) => {
+    if (!f) return;
+    try {
+      const url = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result || "")); r.onerror = () => rej(new Error("读取失败")); r.readAsDataURL(f); });
+      setRef({ url, name: f.name }); ctl.store.toast("已带上新品参考");
+    } catch (e) { ctl.store.toast(e instanceof Error ? e.message : "读取失败"); }
+  };
   // 圆圈光标：直径 = 笔刷 size（半径 = size/2），只在画布内、只对鼠标 / 触控笔显示
   const [ring, setRing] = useState<{ x: number; y: number; ptype: string } | null>(null);
   const ringShown = ring ? ringVisible(tool, ring.ptype, true) : false;
@@ -635,7 +912,12 @@ function Mask({ ctl, n, rect, mode }: { ctl: Ctl; n: CanvasNode; rect: Rect; mod
       : mode === "erase"
         ? `把遮罩标记区域里的内容完整移除，用周围画面自然补全背景、纹理和光影，不要留下痕迹${text ? `（补充：${text}）` : ""}`
         : `按红色标注的位置修改这张图：${text || "按标注处理"}；改完输出完整图片，不要保留红色笔迹，标注以外的地方保持不变`;
-    setEd(null); await runEdit(ctl.store, n.id, mode === "annot" ? "annotate" : mode, title, { maskDataUrl: mask.toDataURL("image/png"), prompt: `${body}。${mode === "annot" ? ANNOT_NOTE : MASK_NOTE}` });
+    setEd(null);
+    await runEdit(ctl.store, n.id, mode === "annot" ? "annotate" : mode, ref && mode === "redraw" ? "换品" : title, {
+      maskDataUrl: mask.toDataURL("image/png"),
+      prompt: `${body}。${mode === "annot" ? ANNOT_NOTE : MASK_NOTE}`,
+      ...(ref && mode === "redraw" ? { refUrl: ref!.url } : {}),
+    });
   };
   const stage = ctl.rect(); const H = stage.height; const cx = rect.left + rect.width / 2;
   const tb = useEdBar(cx, stage.width); const pb = useEdBar(cx, stage.width);
@@ -661,10 +943,16 @@ function Mask({ ctl, n, rect, mode }: { ctl: Ctl; n: CanvasNode; rect: Rect; mod
       <button className="ib" data-tip="撤销一笔（⌘Z）" onClick={() => { const s = strokes.current.pop(); if (s) undone.current.push(s); paint(); force((x) => x + 1); }}><Icon name="undo" /></button>
       <button className="ib" data-tip="重做（⇧⌘Z）" disabled={!undone.current.length} onClick={() => { const s = undone.current.pop(); if (s) strokes.current.push(s); paint(); force((x) => x + 1); }}><Icon name="redo" /></button>
       <button className="ib" data-tip="清空" disabled={!strokes.current.length} onClick={() => { undone.current = [...strokes.current].reverse(); strokes.current = []; paint(); force((x) => x + 1); }}><Icon name="trash" /></button>
+      {mode === "redraw" ? <>
+        <span className="vsep" />
+        <input ref={refInput} type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => void onRefFile(e.target.files?.[0])} />
+        <button className="pill" data-k="mask-ref" data-tip="挂一张新品图：遮罩区域里的商品会换成它" onClick={() => refInput.current?.click()}><Icon name="image" size="s" /><span>参考图</span></button>
+        {ref ? <span className="pill" data-k="mask-ref-chip" style={{ gap: 6 }}><img src={ref.url} alt="" style={{ width: 18, height: 18, borderRadius: 4, objectFit: "cover" }} /><button className="ib" data-tip="移除参考图" onClick={() => setRef(null)}><Icon name="x" size="xs" /></button></span> : null}
+      </> : null}
     </div>
     <div className="edprompt" ref={pb.ref} style={{ left: pb.left, top: pbTop, transform: "translateX(-50%)" }} onPointerDown={(e) => e.stopPropagation()}>
       <input value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") void go(); }} placeholder={mode === "erase" ? "可选：说明要擦掉什么（例如：去掉挂绳）" : mode === "annot" ? "描述标注要做的修改，例如：箭头处的 Logo 放大" : "描述你想改变什么…"} />
-      <div className="gp-foot"><span className="est">{mode === "erase" ? "涂抹要擦除的区域" : mode === "annot" ? "在图上圈出要改的位置" : "绘制蒙版以重绘"}</span><span className="sp" /><button className="send" data-k="go" onClick={() => void go()}><Icon name="send" size="s" /></button></div>
+      <div className="gp-foot"><span className="est">{ref && mode === "redraw" ? "已带上新品参考 · 开始换品" : mode === "erase" ? "涂抹要擦除的区域" : mode === "annot" ? "在图上圈出要改的位置" : "绘制蒙版以重绘"}</span><span className="sp" /><button className="send" data-k="go" onClick={() => void go()}><Icon name="send" size="s" /></button></div>
     </div>
   </>;
 }
@@ -716,17 +1004,31 @@ function RelightModal({ ctl, id }: { ctl: Ctl; id: string }) {
  * 白膜处理：和「涂鸦」一样叠在节点上操作 —— 底下一条浮动工具条选模型 / 开始，不再弹居中对话框（取消、Esc 关掉）。
  * 模型理解力弱的会把穿搭留下来或生成空白，所以默认优先 APIMART 的 Gemini，并在生成后自检。
  */
+/**
+ * 白膜处理：和「涂鸦」一样叠在节点上操作 —— 底下一条浮动工具条选档位 / 模型 / 开始，不再弹居中对话框。
+ * 三档：产品（商品未上色石膏粗模，默认）、人物（白色人台）、清空商品（商品移除，只留干净场景）。
+ * 模型理解力弱的会把穿搭留下来、生成空白或换错主体，所以生成后还会自检。
+ */
+const WHITE_TIERS: Array<{ id: WhiteTier; label: string; tip: string }> = [
+  { id: "blockout", label: "产品", tip: "把商品做成白色模型：保留外形、机位和投影，抹掉 logo、缝线、装饰和反光，纯白底" },
+  { id: "mannequin", label: "人物", tip: "把人物变成白色人台：脱掉衣服，保留姿态和构图，纯白底" },
+  { id: "clear", label: "清空商品", tip: "把商品连它的影子一起拿掉，只留干净场景" },
+];
+const tierIcon = (t: WhiteTier) => t === "clear" ? "eraser" : t === "blockout" ? "cube" : "user";
 function WhiteModelEditor({ ctl, n, rect, onClose }: { ctl: Ctl; n: CanvasNode; rect: Rect; onClose: () => void }) {
   const store = ctl.store; const src = useAssetUrl(outOf(n)?.url || "");
   const all = store.state.models.filter((m) => m.kind === "image");
   const nodeModel = store.modelOf(n);
-  const best = all.find((m) => /gemini-3-pro-image-preview/i.test(m.id))
+  const mannequinBest = all.find((m) => /gemini-3-pro-image-preview/i.test(m.id))
     || all.find((m) => /gemini-nano-banana-2\.1/i.test(m.id))
     || all.find((m) => /nano[._-]?banana/i.test(m.id))
     || all.find((m) => /gpt-image-2\.[56]/i.test(m.id))
     || nodeModel;
-  const [modelId, setModelId] = useState(best?.id || nodeModel?.id || "");
-  const model = all.find((m) => m.id === modelId) || nodeModel || best;
+  const [tier, setTier] = useState<WhiteTier>("blockout");
+  const bestFor = () => mannequinBest;
+  const pickTier = (t: WhiteTier) => { setTier(t); setModelId(bestFor()?.id || ""); };
+  const [modelId, setModelId] = useState(bestFor()?.id || nodeModel?.id || "");
+  const model = all.find((m) => m.id === modelId) || bestFor() || nodeModel;
   const shortName = (m: ModelSpec) => /gemini-3-pro-image-preview/i.test(m.id) ? "Gemini 3 Pro"
     : /gemini-nano-banana-2\.1/i.test(m.id) ? "Nano Banana 2.1"
     : /gpt-image-2\.6/i.test(m.id) ? "GPT Image 2.6"
@@ -734,7 +1036,7 @@ function WhiteModelEditor({ ctl, n, rect, onClose }: { ctl: Ctl; n: CanvasNode; 
     : /gpt-image-2\.5/i.test(m.id) ? "GPT Image 2.5"
     : (m.name || m.id);
   const stage = ctl.rect(); const bar = useEdBar(rect.left + rect.width / 2, stage.width);
-  const run = () => { onClose(); void runEdit(store, n.id, "whitemodel", "白膜", model ? { model } : {}, undefined, (err) => store.toast(err.message)); };
+  const run = () => { onClose(); void runEdit(store, n.id, "whitemodel", "白膜", { model, params: { tier } }, undefined, (err) => store.toast(err.message)); };
   // 模型选择跟参数浮层同一套：先选供应商，再选这个供应商下的模型（ComboMenu 两级 + 搜索）
   const vendorOf = (m: ModelSpec) => (m.vendor || "").trim() || "未命名供应商";
   const currentVendor = model ? vendorOf(model) : "";
@@ -743,12 +1045,16 @@ function WhiteModelEditor({ ctl, n, rect, onClose }: { ctl: Ctl; n: CanvasNode; 
   // 编辑器的模型菜单怎么选，这里就怎么选：先弹「供应商」列表，点进去换成这家供应商的模型列表（顶部可返回），
   // 每次只有一层列表、各自一个浮层，不做成一整块带背景的双栏。
   // 菜单自己贴住编辑条上方 8px（和编辑器里的参数菜单同一个距离）：底边锚定，列表再长也往上长，不会压住浮条
-  const [pick, setPick] = useState<{ left: number; bottom: number; vendor?: string } | null>(null);
-  const openPicker = (fallback: Element) => {
-    const anchor = (bar.ref.current as Element) || fallback;
-    const r = anchor.getBoundingClientRect();
-    setPick({ left: Math.max(8, Math.min(r.left, innerWidth - 308)), bottom: innerHeight - r.top + 8 });
+  // 档位和模型共用同一个浮层容器：都是「一颗 pill + 点开一层磨砂菜单」，贴着编辑条上沿
+  const [pick, setPick] = useState<{ left: number; bottom: number; vendor?: string; tier?: boolean } | null>(null);
+  const openMenu = (fallback: Element, extra?: { tier?: boolean }) => {
+    // 以被点的那颗 pill 为准水平居中（.wm-pick-menu 宽 300）；底边仍贴住编辑条上沿 8px
+    const r = fallback.getBoundingClientRect();
+    const barRect = (bar.ref.current as Element | null)?.getBoundingClientRect();
+    const top = barRect ? barRect.top : r.top;
+    setPick({ left: Math.max(8, Math.min(r.left + r.width / 2 - 150, innerWidth - 308)), bottom: innerHeight - top + 8, ...extra });
   };
+  const openPicker = (fallback: Element) => openMenu(fallback);
   return <>
     <div className="edov" data-ed="whitemodel" style={rect} onPointerDown={(e) => e.stopPropagation()}>
       {src ? <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
@@ -759,12 +1065,19 @@ function WhiteModelEditor({ ctl, n, rect, onClose }: { ctl: Ctl; n: CanvasNode; 
       <span className="wm-hint">白膜</span>
       <button className="pill" data-k="whitemodel-model" aria-haspopup="menu" onClick={(e) => openPicker(e.currentTarget)}><Icon name="user" size="s" /><span>{model ? shortName(model) : "模型"}</span><Icon name="right" size="xs" /></button>
       <span className="vsep" />
-      <button className="pill" data-k="whitemodel-run" style={{ background: "var(--solid)", color: "var(--on-solid)" }} onClick={run}><Icon name="check" size="s" />开始白膜</button>
+      <button className="pill" data-k="whitemodel-tier" data-tier={tier} aria-haspopup="menu" aria-label="白膜档位" onClick={(e) => openMenu(e.currentTarget, { tier: true })}><Icon name={tierIcon(tier)} size="s" /><span>{WHITE_TIERS.find((t) => t.id === tier)?.label}</span><Icon name="right" size="xs" /></button>
+      <span className="vsep" />
+      <button className="pill" data-k="whitemodel-run" style={{ background: "var(--solid)", color: "var(--on-solid)" }} onClick={run}><Icon name="check" size="s" />{tier === "clear" ? "开始清空" : "开始白模"}</button>
     </div>
     {pick ? <>
       <div className="wm-pick-back" onPointerDown={() => setPick(null)} />
-      <div className="wm-pick-menu" style={{ left: pick.left, bottom: pick.bottom }} onPointerDown={(e) => e.stopPropagation()}>
-        {pick.vendor ? <ComboMenu
+      <div className="wm-pick-menu" role={pick.tier ? "menu" : undefined} aria-label={pick.tier ? "白膜档位" : undefined} style={{ left: pick.left, bottom: pick.bottom }} onPointerDown={(e) => e.stopPropagation()}>
+        {pick.tier ? WHITE_TIERS.map((t) => (
+          <button key={t.id} className={"mi" + (tier === t.id ? " on" : "")} data-tier={t.id} role="menuitemradio" aria-checked={tier === t.id} onClick={() => { pickTier(t.id); setPick(null); }}>
+            <Icon name={tierIcon(t.id)} size="s" />
+            <span style={{ flex: 1 }}>{t.label}<span className="d">{t.tip}</span></span>
+          </button>
+        )) : pick.vendor ? <ComboMenu
           autoFocus searchable searchPlaceholder="搜索模型" onEscape={() => setPick(null)}
           empty={<span>这个供应商还没有图片模型</span>}
           header={<button className="mi" data-model-back aria-label="返回供应商列表" onClick={() => setPick({ ...pick, vendor: undefined })}><Icon name="left" size="s" /><span style={{ flex: 1 }}>{pick.vendor}<span className="d">返回供应商列表</span></span></button>}

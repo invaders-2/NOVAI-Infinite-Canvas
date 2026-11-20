@@ -350,18 +350,37 @@ function saveDisabledSkills(ids: Set<string>) {
 /** 技能正文缓存：列表接口不返回 SKILL.md，正文要逐条去 export 拿；key 只用 id，reload / save 时整体作废 */
 const skillBodyCache = new Map<string, string>();
 const SKILL_FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n?/;
+/** 单条正文最多等这么久：正文拉不动不能拖住整张技能表（超时由 description 兜底） */
+const SKILL_BODY_TIMEOUT_MS = 2500;
+
+/** 技能变更通知：面板订阅它重拉列表（别的页面 / 应用市场装的技能跨窗口拿不到事件，靠面板 focus 兜底） */
+const skillListeners = new Set<(event: Row) => void>();
+function emitSkillEvent(command: string) {
+  for (const listener of [...skillListeners]) { try { listener({ payload: { command } }); } catch { /* 单个订阅者出错不影响其它人 */ } }
+}
 
 /** 正文（去掉 YAML frontmatter）才是提示词；取不到返回空串，由调用方退回 description */
 async function skillInstructions(id: string): Promise<string> {
   const hit = skillBodyCache.get(id);
   if (hit !== undefined) return hit;
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = window.setTimeout(() => controller?.abort(), SKILL_BODY_TIMEOUT_MS);
   try {
-    const response = await fetch(`/api/skills/${encodeURIComponent(id)}/export`);
+    const response = await fetch(`/api/skills/${encodeURIComponent(id)}/export`, controller ? { signal: controller.signal } : undefined);
     if (!response.ok) return "";
     const body = (await response.text()).replace(SKILL_FRONTMATTER, "").trim();
     if (body) skillBodyCache.set(id, body);
     return body;
   } catch { return ""; }
+  finally { window.clearTimeout(timer); }
+}
+
+/** 补正文：只拉还没缓存过的，回来之后广播一次（已缓存的正文不动）；超时 / 失败直接跳过 */
+async function prefetchSkillBodies(rows: Row[]): Promise<boolean> {
+  const missing = rows.filter((skill) => !skillBodyCache.has(String(skill.id || "")));
+  if (!missing.length) return false;
+  const bodies = await mapLimit(missing, 4, (skill: Row) => skillInstructions(String(skill.id || "")));
+  return bodies.some((body) => !!body);
 }
 
 /** 并发上限：技能多时别串行把 / 菜单拖到几秒（结果顺序与入参一致） */
@@ -384,8 +403,10 @@ async function skillCommand(input: Row): Promise<Row> {
     // 内置技能包（skill_type=system）也是真技能：以前按类型过滤掉，/ 菜单就空了
     // 官方技能要先去应用市场「添加到助手」（后端据此置 enabled）；未添加的不列进画布技能中心
     const rows: Row[] = (Array.isArray(data.skills) ? data.skills : []).filter((skill: Row) => !(skill.skill_type === "system" && skill.enabled === false));
-    const bodies = await mapLimit(rows, 4, (skill: Row) => skillInstructions(String(skill.id || "")));
-    return { ok: true, value: { items: rows.map((skill: Row, index: number) => {
+    // 列表先回：正文用缓存，没缓存的先退回 description，后台补齐后再广播一次（export 挂住也不挡 / 菜单）
+    const missing = rows.filter((skill: Row) => !skillBodyCache.has(String(skill.id || "")));
+    if (missing.length) void prefetchSkillBodies(missing).then((filled) => { if (filled) emitSkillEvent("skill/bodies"); });
+    return { ok: true, value: { items: rows.map((skill: Row) => {
       const id = String(skill.id || "");
       const official = skill.skill_type === "system";
       const description = String(skill.description || "");
@@ -393,7 +414,7 @@ async function skillCommand(input: Row): Promise<Row> {
         id, name: String(skill.name || id), description,
         enabled: skill.enabled !== false && !disabled.has(id),
         builtin: official, origin: official ? "official" : "custom", visibleInApp: true,
-        source: { format: "skill.md", instructions: bodies[index] || description },
+        source: { format: "skill.md", instructions: skillBodyCache.get(id) || description },
       };
     }).filter((skill: Row) => !!skill.id) } };
   }
@@ -519,6 +540,7 @@ async function taskCommand(input: Row): Promise<Row> {
     const response = await fetch("/api/agent/run", json({
       canvas_id: String(context.canvasId || ""),
       instruction: String(payload.goal || ""),
+      thread_text: String(context.threadText || ""),
       provider,
       model,
       ms_model: provider === "modelscope" ? model : "",
@@ -639,7 +661,19 @@ export function installNovaiBridge() {
     ...previous,
     canvas: { command: (input: Row) => call(canvasCommand, input) },
     model: { command: (input: Row) => call(modelCommand, input) },
-    skill: { command: (input: Row) => call(skillCommand, input) },
+    skill: {
+      command: async (input: Row) => {
+        const result = await call(skillCommand, input);
+        // 面板里的保存 / 启停 / 导入成功后广播：订阅方（AgentPanel）立刻重拉，不只改本地一份
+        if (result?.ok && /^skill\/(?:save|enable|disable|import|reload)/.test(String(input.command || ""))) emitSkillEvent(String(input.command || ""));
+        return result;
+      },
+      /** 技能变更订阅：只在画布内生效（同一页面的桥），跨页面 / 应用市场安装靠面板 focus 刷新兜底 */
+      onEvent: (listener: (event: Row) => void) => {
+        skillListeners.add(listener);
+        return () => { skillListeners.delete(listener); };
+      },
+    },
     resource: { command: (input: Row) => call(resourceCommand, input) },
     task: { command: (input: Row) => call(taskCommand, input) },
     // 剪辑时间线导出 MP4：NOVAI 后端用 ffmpeg 按时间线渲染（片段位置 / 变速 / 音量 / 淡入淡出 / 转场 / 字幕）

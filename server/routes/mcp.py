@@ -31,12 +31,14 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-from typing import Any, Dict, List
+import urllib.parse
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -223,15 +225,31 @@ def mcp_connect_info() -> Dict[str, Any]:
     return _connect_info()
 
 
+def _mcp_entry_args() -> List[str]:
+    """MCP 客户端要 spawn 的参数：源码跑 main.py --mcp；打包后主程序自己认 --mcp。
+
+    安装版没打包 novai_mcp_server.py，sys.executable 就是应用主程序，args 必须带 --mcp，
+    否则客户端一调用就再起一个 NOVAI 后端（端口冲突，且根本不是 MCP 协议）。
+    """
+    if getattr(sys, "frozen", False):
+        return ["--mcp"]
+    main_py = os.path.join(_REPO_ROOT, "main.py")
+    return [main_py, "--mcp"] if os.path.isfile(main_py) else []
+
+
+def _shell_join(argv: List[str]) -> str:
+    """给人复制的 shell 命令：逐段引用，空参数丢掉（避免拼出空参数）。"""
+    return " ".join(shlex.quote(str(part)) for part in argv if str(part))
+
+
 def _connect_info() -> Dict[str, Any]:
     port = _server_port()
     base_url = "http://127.0.0.1:%d" % port
     server_py = os.path.join(_REPO_ROOT, _SERVER_PY_NAME)
     server_py = server_py if os.path.isfile(server_py) else ""
-    command = sys.executable or "python3"
     server_entry = {
-        "command": command,
-        "args": [server_py] if server_py else [],
+        "command": sys.executable or "python3",
+        "args": _mcp_entry_args(),
         "env": {"NOVAI_BASE_URL": base_url},
     }
     http_url = ""
@@ -243,8 +261,9 @@ def _connect_info() -> Dict[str, Any]:
                 break
     except Exception:
         http_url = ""
-    codex_command = "codex mcp add novai-canvas --env NOVAI_BASE_URL=%s -- %s %s" % (
-        base_url, command, server_py)
+    codex_command = _shell_join(["codex", "mcp", "add", "novai-canvas",
+                                 "--env", "NOVAI_BASE_URL=%s" % base_url, "--",
+                                 server_entry["command"]] + list(server_entry["args"]))
     return {
         "enabled": registry.enabled(),
         "server_entry": server_entry,
@@ -263,13 +282,18 @@ _DESKTOP_AGENTS = (
     {"id": "claude", "name": "Claude", "app": "Claude"},
     {"id": "chatgpt", "name": "ChatGPT", "app": "ChatGPT"},
     {"id": "workbuddy", "name": "WorkBuddy", "app": "WorkBuddy"},
+    {"id": "kimi", "name": "Kimi Code", "app": "Kimi Code"},
+    {"id": "dsh", "name": "DeepSeek Harness", "app": "DeepSeek Harness"},
 )
 _CLI_AGENTS = (
     {"id": "codex", "name": "Codex CLI", "command": "codex"},
     {"id": "claude-cli", "name": "Claude CLI", "command": "claude"},
+    {"id": "hermes", "name": "Hermes CLI", "command": "hermes"},
 )
 _OPEN_AGENT_IDS = tuple(item["id"] for item in _DESKTOP_AGENTS) + tuple(item["id"] for item in _CLI_AGENTS)
 _OPEN_AGENT_TIMEOUT = 10
+
+_AGENT_LABELS = {item["id"]: item["name"] for item in _DESKTOP_AGENTS + _CLI_AGENTS}
 
 
 def _desktop_agent_path(app: str) -> str:
@@ -295,20 +319,58 @@ def _codex_config_path() -> str:
     return os.path.join(_home_dir(), ".codex", "config.toml")
 
 
+def _workbuddy_config_path() -> str:
+    return os.path.join(_home_dir(), ".workbuddy", "mcp.json")
+
+
+def _kimi_config_path() -> str:
+    return os.path.join(_home_dir(), ".kimi-code", "mcp.json")
+
+
+def _claude_cli_config_path() -> str:
+    return os.path.join(_home_dir(), ".claude.json")
+
+
+def _hermes_config_path() -> str:
+    return os.path.join(_home_dir(), ".hermes", "config.yaml")
+
+
+_AGENT_CONFIG_PATHS = {
+    "claude": _claude_config_path,
+    "workbuddy": _workbuddy_config_path,
+    "kimi": _kimi_config_path,
+    "codex": _codex_config_path,
+    "claude-cli": _claude_cli_config_path,
+    "hermes": _hermes_config_path,
+}
+
+# 能一键写入的 id（按配置形态分派）；chatgpt / dsh 只能手动接，install-agent 返回 400 + 原因
+_INSTALLABLE_AGENT_IDS = ("claude", "codex", "claude-cli", "workbuddy", "kimi", "hermes")
+_MANUAL_AGENT_REASONS = {
+    "chatgpt": "不支持自动写入配置",
+    "dsh": "需要在 profile / Agent 预设里手动接入 MCP（不支持自动写入）",
+}
+
+
+def _agent_config_path(agent_id: str) -> str:
+    getter = _AGENT_CONFIG_PATHS.get(agent_id)
+    return getter() if getter else ""
+
+
 def _read_text(path: str) -> str:
     with open(path, "r", encoding="utf-8") as fh:
         return fh.read()
 
 
-def _claude_configured() -> Dict[str, Any]:
-    path = _claude_config_path()
+def _json_configured(path: str, label: str) -> Dict[str, Any]:
+    """mcpServers 形态的 JSON（Claude / WorkBuddy / Kimi）配置检测。"""
     try:
         if not os.path.isfile(path):
             return {"configured": False, "configured_base_url": ""}
         payload = json.loads(_read_text(path))
     except Exception as exc:
         return {"configured": False, "configured_base_url": "",
-                "reason": "读取 Claude 配置失败：%s" % exc}
+                "reason": "读取 %s 配置失败：%s" % (label, exc)}
     servers = payload.get("mcpServers") if isinstance(payload, dict) else None
     entry = servers.get("novai-canvas") if isinstance(servers, dict) else None
     base_url = ""
@@ -318,6 +380,10 @@ def _claude_configured() -> Dict[str, Any]:
             base_url = str(env.get("NOVAI_BASE_URL") or "").strip()
     return {"configured": isinstance(servers, dict) and "novai-canvas" in servers,
             "configured_base_url": base_url}
+
+
+def _claude_configured() -> Dict[str, Any]:
+    return _json_configured(_claude_config_path(), "Claude")
 
 
 _CODEX_CONNECTION_RE = re.compile(
@@ -341,42 +407,121 @@ def _codex_configured() -> Dict[str, Any]:
             "configured_base_url": str(match.group(1) or "").strip() if match else ""}
 
 
-_UNSUPPORTED_WRITE_REASON = "不支持自动写入配置"
+# CLI 侧配置检测：claude mcp get / hermes mcp list。单次 3s 超时 + 30s 缓存，
+# 总预算 4.5s（两个 CLI 都超时也不会把 /installed-agents 拖过 5s）。
+_CLI_DETECT_TTL = 30.0
+_CLI_DETECT_TIMEOUT = 3.0
+_CLI_DETECT_BUDGET = 4.5
+_CLI_DETECT_CACHE: Dict[str, Any] = {}
+_BASE_URL_TEXT_RE = re.compile(r'NOVAI_BASE_URL\s*[=:]\s*["\']?([^"\'\s,}]+)')
+
+
+def _reset_cli_detect_cache() -> None:
+    _CLI_DETECT_CACHE.clear()
+
+
+def _cli_configured(agent_id: str, command: str, probe_args: List[str],
+                    deadline: float) -> Dict[str, Any]:
+    if not command:
+        return {"configured": False, "configured_base_url": ""}
+    key = "%s|%s" % (agent_id, command)
+    now = time.monotonic()
+    cached = _CLI_DETECT_CACHE.get(key)
+    if cached and now - cached[0] < _CLI_DETECT_TTL:
+        return dict(cached[1])
+    remaining = deadline - now
+    if remaining <= 0:
+        return {"configured": False, "configured_base_url": ""}
+    try:
+        result = subprocess.run([command] + list(probe_args), capture_output=True, text=True,
+                                timeout=min(_CLI_DETECT_TIMEOUT, remaining))
+        text = ((result.stdout or "") + (result.stderr or "")).strip()
+        configured = result.returncode == 0 and "novai-canvas" in text
+        match = _BASE_URL_TEXT_RE.search(text)
+        outcome = {"configured": bool(configured),
+                   "configured_base_url": str(match.group(1) or "").strip() if (configured and match) else ""}
+    except Exception:
+        outcome = {"configured": False, "configured_base_url": ""}
+    _CLI_DETECT_CACHE[key] = (time.monotonic(), dict(outcome))
+    return outcome
+
+
+def _agent_configured(agent_id: str, command: str, deadline: float) -> Dict[str, Any]:
+    if agent_id == "claude":
+        return _claude_configured()
+    if agent_id == "codex":
+        return _codex_configured()
+    if agent_id == "workbuddy":
+        return _json_configured(_workbuddy_config_path(), "WorkBuddy")
+    if agent_id == "kimi":
+        return _json_configured(_kimi_config_path(), "Kimi Code")
+    if agent_id == "claude-cli":
+        return _cli_configured(agent_id, command, ["mcp", "get", "novai-canvas"], deadline)
+    if agent_id == "hermes":
+        return _cli_configured(agent_id, command, ["mcp", "list"], deadline)
+    return {"configured": False, "configured_base_url": "",
+            "reason": _MANUAL_AGENT_REASONS.get(agent_id, "不支持自动写入配置")}
 
 
 def _installed_agents() -> List[Dict[str, Any]]:
     agents: List[Dict[str, Any]] = []
+    deadline = time.monotonic() + _CLI_DETECT_BUDGET
     for item in _DESKTOP_AGENTS:
         path = _desktop_agent_path(item["app"])
+        installed = bool(path)
+        if not installed and item["id"] == "kimi":
+            installed = bool(_cli_agent_command("kimi"))
         entry = {"id": item["id"], "name": item["name"], "kind": "desktop",
-                 "installed": bool(path), "path": path}
-        if item["id"] == "claude":
-            entry.update(_claude_configured())
-        else:
-            entry.update({"configured": False, "configured_base_url": "",
-                          "reason": _UNSUPPORTED_WRITE_REASON})
+                 "installed": installed, "path": path,
+                 "installable": item["id"] in _INSTALLABLE_AGENT_IDS,
+                 "launchable": True,
+                 "config_path": _agent_config_path(item["id"])}
+        entry.update(_agent_configured(item["id"], "", deadline))
         agents.append(entry)
     for item in _CLI_AGENTS:
         command = _cli_agent_command(item["command"])
         entry = {"id": item["id"], "name": item["name"], "kind": "cli",
-                 "installed": bool(command), "command": command}
-        if item["id"] == "codex":
-            entry.update(_codex_configured())
-        else:
-            entry.update({"configured": False, "configured_base_url": "",
-                          "reason": _UNSUPPORTED_WRITE_REASON})
+                 "installed": bool(command), "command": command,
+                 "installable": item["id"] in _INSTALLABLE_AGENT_IDS,
+                 "launchable": False,
+                 "config_path": _agent_config_path(item["id"])}
+        entry.update(_agent_configured(item["id"], command, deadline))
         agents.append(entry)
     return agents
 
 
 class OpenAgentRequest(BaseModel):
     id: str = Field("", max_length=64)
+    # Claude 官方深链的预填提示词；其它 Agent 忽略
+    prompt: str = Field("", max_length=8000)
 
 
 @router.get("/installed-agents")
 def mcp_installed_agents() -> Dict[str, Any]:
-    """本机检测到的 Agent（只读：不启动任何进程）。"""
+    """本机检测到的 Agent（只读：桌面端不启动进程；CLI 只跑配置查询命令）。"""
     return {"agents": _installed_agents()}
+
+
+def _claude_deep_link(prompt: str) -> str:
+    """Claude Desktop 官方深链：新对话 + 预填输入框。提示词只进 q 查询参数，不拼 shell。"""
+    return "claude://claude.ai/new?q=" + urllib.parse.quote(prompt, safe="")
+
+
+def _open_url(url: str) -> bool:
+    """用系统默认方式打开 URL；失败返回 False（调用方回退到 open -a）。"""
+    try:
+        if sys.platform == "darwin":
+            result = subprocess.run(["open", url], capture_output=True, text=True,
+                                    timeout=_OPEN_AGENT_TIMEOUT)
+            return result.returncode == 0
+        if sys.platform.startswith("win"):
+            os.startfile(url)  # type: ignore[attr-defined]
+            return True
+        result = subprocess.run(["xdg-open", url], capture_output=True, text=True,
+                                timeout=_OPEN_AGENT_TIMEOUT)
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 @router.post("/open-agent")
@@ -384,10 +529,17 @@ def mcp_open_agent(payload: OpenAgentRequest) -> Dict[str, Any]:
     """跳到本机已安装的 Agent：桌面端用 open -a 打开；CLI 只返回命令，不启动进程。
 
     安全：先做白名单校验（不拼接任何用户字符串），桌面端用 argv 调 subprocess，绝不 shell=True。
+    Claude 带 prompt 时优先走官方深链把提示词预填进输入框；深链不可用再回退 open -a。
     """
     agent_id = str(payload.id or "").strip()
     if agent_id not in _OPEN_AGENT_IDS:
         raise HTTPException(status_code=400, detail="不支持的 Agent：%s" % (agent_id or "<空>"))
+    prompt = str(payload.prompt or "")
+    if not prompt.strip():
+        prompt = ""
+    if agent_id == "claude" and prompt:
+        if _open_url(_claude_deep_link(prompt)):
+            return {"ok": True, "action": "deep_link", "app": "Claude"}
     for item in _DESKTOP_AGENTS:
         if item["id"] != agent_id:
             continue
@@ -413,10 +565,9 @@ def mcp_open_agent(payload: OpenAgentRequest) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 一键写入 Agent 配置（只允许 claude / codex；路径写死，不接收任何路径参数）
+# 一键写入 Agent 配置（路径全部写死，不接收任何路径参数）
 # ---------------------------------------------------------------------------
 
-_INSTALLABLE_AGENT_IDS = ("claude", "codex")
 _INSTALL_TIMEOUT = 20
 
 
@@ -444,48 +595,100 @@ def _atomic_write_text(path: str, text: str) -> None:
         raise
 
 
-def _install_claude() -> Dict[str, Any]:
-    if not _desktop_agent_path("Claude"):
-        raise HTTPException(status_code=400, detail="未检测到本机安装：Claude")
-    path = _claude_config_path()
-    exists = os.path.isfile(path)
+def _write_json_mcp_config(path: str, label: str) -> Dict[str, Any]:
+    """把 novai-canvas 合并进 mcpServers：先备份、坏 JSON 不动原文件、原子写、幂等。"""
+    entry = _connect_info()["server_entry"]
     backup = ""
-    if exists:
+    if os.path.isfile(path):
         try:
             backup = "%s.bak.%d" % (path, int(time.time()))
             shutil.copyfile(path, backup)
         except Exception as exc:
-            raise HTTPException(status_code=500, detail="备份 Claude 配置失败（原文件未改动）：%s" % exc)
+            raise HTTPException(status_code=500,
+                                detail="备份 %s 配置失败（原文件未改动）：%s" % (label, exc))
         try:
             raw = _read_text(path)
         except Exception as exc:
-            raise HTTPException(status_code=400, detail="读取 Claude 配置失败（原文件未改动）：%s" % exc)
+            raise HTTPException(status_code=400,
+                                detail="读取 %s 配置失败（原文件未改动）：%s" % (label, exc))
         try:
             payload = json.loads(raw)
         except Exception as exc:
             raise HTTPException(status_code=400,
-                                detail="Claude 配置不是合法 JSON（原文件未改动）：%s" % exc)
+                                detail="%s 配置不是合法 JSON（原文件未改动）：%s" % (label, exc))
         if not isinstance(payload, dict):
-            raise HTTPException(status_code=400, detail="Claude 配置顶层必须是对象（原文件未改动）")
+            raise HTTPException(status_code=400,
+                                detail="%s 配置顶层必须是对象（原文件未改动）" % label)
     else:
         payload = {}
     servers = payload.get("mcpServers")
     if servers is None:
         servers = {}
     if not isinstance(servers, dict):
-        raise HTTPException(status_code=400, detail="Claude 配置里的 mcpServers 必须是对象（原文件未改动）")
-    if "novai-canvas" in servers:
+        raise HTTPException(status_code=400,
+                            detail="%s 配置里的 mcpServers 必须是对象（原文件未改动）" % label)
+    existing = servers.get("novai-canvas")
+    if (isinstance(existing, dict)
+            and existing.get("command") == entry["command"]
+            and existing.get("args") == entry["args"]
+            and existing.get("env") == entry["env"]
+            and existing.get("disabled") is not True):
         return {"ok": True, "action": "written", "path": path, "backup": backup,
                 "already": True, "needs_restart": True}
-    servers["novai-canvas"] = _connect_info()["server_entry"]
+    # 旧配置（旧端口 / disabled:true / 命令不对）要真的覆盖掉；entry 本身不带 disabled
+    servers["novai-canvas"] = entry
     payload["mcpServers"] = servers
     text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     try:
         _atomic_write_text(path, text)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="写入 Claude 配置失败（原文件未改动）：%s" % exc)
+        raise HTTPException(status_code=500,
+                            detail="写入 %s 配置失败（原文件未改动）：%s" % (label, exc))
     return {"ok": True, "action": "written", "path": path, "backup": backup,
             "already": False, "needs_restart": True}
+
+
+def _agent_installed(agent_id: str) -> bool:
+    for item in _DESKTOP_AGENTS:
+        if item["id"] != agent_id:
+            continue
+        if _desktop_agent_path(item["app"]):
+            return True
+        return agent_id == "kimi" and bool(_cli_agent_command("kimi"))
+    for item in _CLI_AGENTS:
+        if item["id"] == agent_id:
+            return bool(_cli_agent_command(item["command"]))
+    return False
+
+
+def _install_claude() -> Dict[str, Any]:
+    if not _desktop_agent_path("Claude"):
+        raise HTTPException(status_code=400, detail="未检测到本机安装：Claude")
+    return _write_json_mcp_config(_claude_config_path(), "Claude")
+
+
+def _install_json_agent(agent_id: str) -> Dict[str, Any]:
+    label = _AGENT_LABELS[agent_id]
+    if not _agent_installed(agent_id):
+        raise HTTPException(status_code=400, detail="未检测到本机安装：%s" % label)
+    return _write_json_mcp_config(_agent_config_path(agent_id), label)
+
+
+def _run_agent_cli(label: str, argv: List[str], stdin_text: Optional[str] = None) -> Dict[str, Any]:
+    kwargs: Dict[str, Any] = {}
+    if stdin_text is not None:
+        kwargs["input"] = stdin_text
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=_INSTALL_TIMEOUT,
+                                **kwargs)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="写入 %s 配置失败：%s: %s" % (
+            label, type(exc).__name__, exc))
+    output = ((result.stdout or "") + (result.stderr or "")).strip()
+    if result.returncode != 0:
+        raise HTTPException(status_code=500,
+                            detail="写入 %s 配置失败：%s" % (label, output[:200] or "命令返回非 0"))
+    return {"ok": True, "action": "command", "output": output[:2000], "needs_restart": True}
 
 
 def _install_codex() -> Dict[str, Any]:
@@ -493,36 +696,74 @@ def _install_codex() -> Dict[str, Any]:
     if not codex:
         raise HTTPException(status_code=400, detail="未检测到本机安装：Codex CLI")
     info = _connect_info()
-    base_url = info["base_url"]
-    server_py = info.get("server_py") or ""
-    if not server_py:
-        raise HTTPException(status_code=400, detail="仓库里找不到 novai_mcp_server.py，无法写入 Codex 配置")
+    command = info["server_entry"]["command"]
+    args = list(info["server_entry"]["args"])
+    if not args:
+        raise HTTPException(status_code=400,
+                            detail="仓库里找不到 main.py，无法生成 MCP 启动参数，未写入 Codex 配置")
     argv = [codex, "mcp", "add", "novai-canvas",
-            "--env", "NOVAI_BASE_URL=%s" % base_url,
-            "--", info["server_entry"]["command"], server_py]
-    try:
-        result = subprocess.run(argv, capture_output=True, text=True, timeout=_INSTALL_TIMEOUT)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail="写入 Codex 配置失败：%s: %s" % (
-            type(exc).__name__, exc))
-    output = ((result.stdout or "") + (result.stderr or "")).strip()
-    if result.returncode != 0:
-        raise HTTPException(status_code=500,
-                            detail="写入 Codex 配置失败：%s" % (output[:200] or "codex 返回非 0"))
-    return {"ok": True, "action": "command", "output": output[:2000], "needs_restart": True}
+            "--env", "NOVAI_BASE_URL=%s" % info["base_url"],
+            "--", command] + args
+    return _run_agent_cli("Codex", argv)
+
+
+def _install_claude_cli() -> Dict[str, Any]:
+    claude = _cli_agent_command("claude")
+    if not claude:
+        raise HTTPException(status_code=400, detail="未检测到本机安装：Claude CLI")
+    info = _connect_info()
+    command = info["server_entry"]["command"]
+    args = list(info["server_entry"]["args"])
+    if not args:
+        raise HTTPException(status_code=400,
+                            detail="仓库里找不到 main.py，无法生成 MCP 启动参数，未写入 Claude CLI 配置")
+    argv = [claude, "mcp", "add", "-s", "user", "novai-canvas",
+            "-e", "NOVAI_BASE_URL=%s" % info["base_url"],
+            "--", command] + args
+    result = _run_agent_cli("Claude CLI", argv)
+    _reset_cli_detect_cache()
+    return result
+
+
+def _install_hermes() -> Dict[str, Any]:
+    hermes = _cli_agent_command("hermes")
+    if not hermes:
+        raise HTTPException(status_code=400, detail="未检测到本机安装：Hermes CLI")
+    info = _connect_info()
+    command = info["server_entry"]["command"]
+    args = list(info["server_entry"]["args"])
+    if not args:
+        raise HTTPException(status_code=400,
+                            detail="仓库里找不到 main.py，无法生成 MCP 启动参数，未写入 Hermes 配置")
+    argv = [hermes, "mcp", "add", "novai-canvas", "--command", command,
+            "--env", "NOVAI_BASE_URL=%s" % info["base_url"], "--args"] + args
+    # hermes mcp add 是交互式的：连上之后会问「Enable all N tools?」，自动化要直接把 Y 喂进去
+    result = _run_agent_cli("Hermes", argv, stdin_text="y\n")
+    _reset_cli_detect_cache()
+    return result
 
 
 @router.post("/install-agent")
 def mcp_install_agent(payload: InstallAgentRequest) -> Dict[str, Any]:
-    """一键把 novai-canvas 写进本机 Agent 配置（Claude 写 JSON、Codex 走 CLI）。"""
+    """一键把 novai-canvas 写进本机 Agent 配置（JSON 类直接写，CLI 类走官方命令）。"""
     agent_id = str(payload.id or "").strip()
     if agent_id not in _INSTALLABLE_AGENT_IDS:
+        reason = _MANUAL_AGENT_REASONS.get(agent_id)
+        if reason:
+            raise HTTPException(status_code=400, detail="%s：%s" % (
+                _AGENT_LABELS.get(agent_id, agent_id), reason))
         raise HTTPException(status_code=400, detail="不支持的 Agent：%s" % (agent_id or "<空>"))
     if not payload.confirm:
         raise HTTPException(status_code=400, detail="需要 confirm: true 才会写入 Agent 配置")
     if agent_id == "claude":
         return _install_claude()
-    return _install_codex()
+    if agent_id == "codex":
+        return _install_codex()
+    if agent_id == "claude-cli":
+        return _install_claude_cli()
+    if agent_id == "hermes":
+        return _install_hermes()
+    return _install_json_agent(agent_id)
 
 
 @router.post("/reload")

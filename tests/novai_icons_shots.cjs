@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 'use strict';
 /*
- * 图标观感验收（task-6）：图片节点工具条「无损改图」= layers（图层）、「更多 → 增强」= sparkle（✨）、
- * 「更多 → 擦除」= eraser（橡皮）——三者在同一屏里形状互不相同。
+ * 图标观感验收（task-6）：图片节点工具条只留 局部重绘 / 调色 / 无损改图 / 更多；
+ * 裁剪 / 涂鸦 / 拆分图层 / 多角度 / 重打光 / 白膜收进「更多」菜单，增强 = sparkle（✨）、擦除 = eraser（橡皮）。
  *
  *   NOVAI_PORT=3921 NOVAI_DATA_DIR=/tmp/novai-icons-verify python3 main.py &
  *   node tests/novai_icons_shots.cjs
  *
  * 截图落 tests/artifacts/icons/（deviceScaleFactor=2，元素区域裁切，方便肉眼看 14px 图标的形状）：
- *   01-toolbar-lossless.png          工具条（无损改图 = layers 图层）
+ *   01-toolbar-lossless.png          工具条（无损改图 = edit / square-pen）
  *   02-more-menu-enhance.png         更多菜单 + 增强浮层（增强 = sparkle；擦除 = eraser；浮层仍三项）
- *   03-compare-lossless-vs-eraser.png 工具条 + 菜单同框（无损 图层 / 擦除 橡皮，去重后的对照）
+ *   03-compare-lossless-vs-eraser.png 工具条 + 菜单同框（无损 edit / 擦除 eraser，去重后的对照）
  */
 const fs = require('fs');
 const path = require('path');
@@ -45,7 +45,7 @@ async function clipAround(page, selectors, pad = 14) {
 }
 
 (async () => {
-    const c = H.checker('图标观感：无损改图=layers / 增强=sparkle / 擦除=eraser（去重）');
+    const c = H.checker('图标观感：无损改图=edit / 增强=sparkle / 擦除=eraser（去重）');
     fs.mkdirSync(ICON_ART, { recursive: true });
     const api = await request.newContext({ baseURL: H.BASE });
     let canvasId = '';
@@ -59,12 +59,14 @@ async function clipAround(page, selectors, pad = 14) {
         c.check('S2 svg.i 的样式是 fill:none + stroke:currentColor + stroke-width（线性）',
             /svg\.i\{[^}]*fill:none/.test(iconCss) && /svg\.i\{[^}]*stroke:currentColor/.test(iconCss) && /svg\.i\{[^}]*stroke-width:/.test(iconCss));
         const genPanel = read(SRC + '/GenPanel.tsx');
-        c.check('S3 工具条「无损改图」用 layers', genPanel.indexOf('B("lossless", "layers", "无损改图")') >= 0);
+        c.check('S3 工具条「无损改图」用 edit（square-pen，放在调色旁边）', genPanel.indexOf('B("lossless", "edit", "无损改图")') >= 0);
         const lossless = read(SRC + '/editors/LosslessEdit.tsx');
         c.check('S4 无损改图加载态同步用 layers（没留旧图标）', lossless.indexOf('name={stalled ? "alert" : "layers"}') >= 0);
         const registry = read(SRC + '/editors/registry.tsx');
         c.check('S5 更多菜单「增强」用 sparkle', registry.indexOf('<Icon name="sparkle" size="s" />增强') >= 0);
         c.check('S6 更多菜单「擦除」仍是 eraser', registry.indexOf('<Icon name="eraser" size="s" />擦除') >= 0);
+        c.check('S6b 更多菜单有「裁剪 / 涂鸦 / 拆分图层」行（工具条收进来的）', registry.indexOf('<Icon name="crop" size="s" />裁剪') >= 0
+            && registry.indexOf('<Icon name="pencil" size="s" />涂鸦') >= 0 && registry.indexOf('<Icon name="layers" size="s" />拆分图层') >= 0);
         c.check('S7 更多菜单里不再出现 zoomin（旧增强图标）', registry.indexOf('name="zoomin"') < 0);
         const iconDataMtime = fs.statSync(path.join(__dirname, '..', SRC + '/iconData.ts')).mtimeMs;
         const canonicalMtime = fs.statSync(path.join(__dirname, '..', 'tools/icons/canonical.json')).mtimeMs;
@@ -91,12 +93,15 @@ async function clipAround(page, selectors, pad = 14) {
         const toolbar = page.locator('#ntb').first();
         await toolbar.waitFor({ state: 'visible', timeout: 15000 });
 
-        /* ---------- 工具条：无损改图 = layers ---------- */
+        /* ---------- 工具条：只留 局部重绘 / 调色 / 无损改图 / 更多 ---------- */
         const losslessBtn = page.locator('#ntb [data-tb="lossless"]').first();
-        c.check('T1 工具条上有「无损改图」按钮', await losslessBtn.isVisible());
+        c.check('T1 工具条上有「无损改图」（放在调色旁边）', await losslessBtn.isVisible());
         const losslessIcon = await losslessBtn.locator('svg').first().getAttribute('data-icon').catch(() => null);
-        c.check('T2 无损改图的图标是 layers（图层），不再是 eraser', losslessIcon === 'layers', { dataIcon: losslessIcon });
-        c.check('T3 工具条里没有任何 eraser（橡皮）图标', await page.locator('#ntb [data-icon="eraser"]').count() === 0);
+        c.check('T2 无损改图的图标是 edit（square-pen 线性）', losslessIcon === 'edit', { dataIcon: losslessIcon });
+        c.check('T3 裁剪 / 涂鸦 / 拆分图层 / 多角度 / 重打光 / 白膜都不在条上（收进「更多」）',
+            await page.locator('#ntb [data-tb="crop"]').count() === 0 && await page.locator('#ntb [data-tb="markup"]').count() === 0
+            && await page.locator('#ntb [data-tb="split"]').count() === 0 && await page.locator('#ntb [data-tb="angle"]').count() === 0
+            && await page.locator('#ntb [data-tb="relight"]').count() === 0 && await page.locator('#ntb [data-tb="whitemodel"]').count() === 0);
         const clip1 = await clipAround(page, ['#ntb'], 16);
         await page.screenshot({ path: path.join(ICON_ART, '01-toolbar-lossless.png'), clip: clip1 });
         c.results.shots['01-toolbar-lossless'] = path.join(ICON_ART, '01-toolbar-lossless.png');
@@ -108,6 +113,11 @@ async function clipAround(page, selectors, pad = 14) {
         c.check('M1 更多菜单里有「擦除」行', await eraseRow.isVisible());
         const eraseIcon = await eraseRow.locator('svg').first().getAttribute('data-icon').catch(() => null);
         c.check('M2 「擦除」仍是 eraser（橡皮）', eraseIcon === 'eraser', { dataIcon: eraseIcon });
+        c.check('M2b 更多菜单里有「裁剪 / 涂鸦」行', await page.locator('#pop .mi[data-k="crop"]').isVisible()
+            && await page.locator('#pop .mi[data-k="markup"]').isVisible());
+        c.check('M2c 更多菜单里有「拆分图层 ▸」行', await page.locator('#pop .mi[data-k="layersplit-menu"]').isVisible());
+        c.check('M2d 多角度 / 重打光 / 白膜也在「更多」菜单里', await page.locator('#pop .mi[data-k="angle"]').isVisible()
+            && await page.locator('#pop .mi[data-k="relight"]').isVisible() && await page.locator('#pop .mi[data-k="whitemodel"]').isVisible());
         const enhanceIcon = await page.locator('[data-k="enhance-menu"] svg').first().getAttribute('data-icon').catch(() => null);
         c.check('M3 「增强」是 sparkle（和视频「高清」同一颗 ✨）', enhanceIcon === 'sparkle', { dataIcon: enhanceIcon });
         c.check('M4 「增强」行里没有 zoomin 旧图标', await page.locator('[data-k="enhance-menu"] [data-icon="zoomin"]').count() === 0);
@@ -123,7 +133,7 @@ async function clipAround(page, selectors, pad = 14) {
         c.results.shots['02-more-menu-enhance'] = path.join(ICON_ART, '02-more-menu-enhance.png');
         console.log('SHOT  ' + c.results.shots['02-more-menu-enhance']);
 
-        /* ---------- 同屏对照：工具条 无损(layers) + 菜单 擦除(eraser) ---------- */
+        /* ---------- 同屏对照：工具条 无损(edit) + 菜单 擦除(eraser) ---------- */
         await page.locator('#pop .mi').first().hover(); // 移出「增强」行 → 浮层收起，菜单保持展开
         await page.waitForTimeout(400);
         c.check('P1 移出「增强」后浮层收起、菜单仍在（对照图能同时看到工具条和菜单）',
@@ -143,10 +153,10 @@ async function clipAround(page, selectors, pad = 14) {
             return { toolbar: collect(box), menu: collect(pop) };
         });
         const visible = icons.toolbar.concat(icons.menu);
-        c.check('D1 同屏里 无损工具条图标 = layers、菜单擦除 = eraser、增强 = sparkle',
-            icons.toolbar.indexOf('layers') >= 0 && icons.menu.indexOf('eraser') >= 0 && icons.toolbar.indexOf('eraser') < 0,
+        c.check('D1 同屏里 无损工具条图标 = edit、菜单擦除 = eraser、工具条上没有 eraser',
+            icons.toolbar.indexOf('edit') >= 0 && icons.menu.indexOf('eraser') >= 0 && icons.toolbar.indexOf('eraser') < 0,
             { toolbar: icons.toolbar, menu: icons.menu });
-        const trio = ['layers', 'eraser', 'sparkle'];
+        const trio = ['edit', 'eraser', 'sparkle'];
         c.check('D2 三者形状互不相同（three distinct data-icon）', new Set(trio).size === 3);
         const dup = trio.map((name) => ({ name, count: visible.filter((item) => item === name).length }));
         c.check('D3 三个图标在同一屏各出现 1 次（没有两个同形图标并排）', dup.every((row) => row.count === 1), dup);

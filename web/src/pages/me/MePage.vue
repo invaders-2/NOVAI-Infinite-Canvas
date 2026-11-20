@@ -7,6 +7,7 @@ import MeProfileDialog from './MeProfileDialog.vue';
 import { closeCommunityAuthor, openCommunityDetail, openCommunityPublish, state, toast } from '../../lib/store.js';
 import { ago, coverUrl as itemCover, communityApi, fmtCount, kindMeta } from '../../lib/community.js';
 import { broadcast, frameEl, navigate, openCanvasUrl } from '../../lib/bridge.js';
+import { diagnosticsText, loadDiagnostics, ownIps, probeState, summarize, summarizeText } from '../../lib/lanDiagnostics.js';
 
 const readonly = computed(() => !!state.communityAuthor);
 const AUTHOR = { canvas: 'canvas', skill: 'skill', prompt: 'prompt' };
@@ -140,6 +141,106 @@ const addCode = ref('');
 const addBusy = ref(false);
 const inviteCopied = ref(false);
 
+/* ───────── 网络诊断（按需请求：只有好友浮层里有离线好友、或用户主动打开时才算） ───────── */
+const diagOpen = ref(false);
+const diag = ref(null);        // /api/lan/diagnostics 的 data
+const diagStatus = ref(0);     // 0 = 还没请求过；404 = 后端还没有这个接口
+const diagError = ref('');
+const diagBusy = ref(false);
+const diagCopied = ref(false);
+let diagCopyTimer = 0;
+
+const diagSummary = computed(() => summarize(diag.value));
+const diagLead = computed(() => summarizeText(diagSummary.value));
+const diagPeers = computed(() => (diag.value && Array.isArray(diag.value.probe) ? diag.value.probe : []));
+const diagMissing = computed(() => !diagBusy.value && !diag.value && diagStatus.value === 404);
+const selfPort = computed(() => String((diag.value && diag.value.self && diag.value.self.port) || '3000'));
+
+async function ensureDiagnostics(force) {
+    diagBusy.value = true;
+    try {
+        const result = await loadDiagnostics({ force: !!force });
+        diag.value = result.data;
+        diagStatus.value = result.status;
+        diagError.value = result.error || '';
+    } finally {
+        diagBusy.value = false;
+    }
+}
+function openDiagnostics() {
+    friendsOpen.value = false;
+    diagCopied.value = false;
+    diagOpen.value = true;
+    ensureDiagnostics(true);
+}
+function isLocalPeer(peer) {
+    return ownIps(diag.value).has(String((peer && peer.ip) || ''));
+}
+// probe 里可能没有昵称（契约只保证 code / ip / port），回 discovery.peers 里按码补
+function peerName(peer) {
+    if (peer && peer.nickname) return String(peer.nickname);
+    const peers = (diag.value && diag.value.discovery && Array.isArray(diag.value.discovery.peers))
+        ? diag.value.discovery.peers : [];
+    const code = String((peer && peer.code) || '');
+    const found = code ? peers.find(item => item && String(item.code || '') === code) : null;
+    return String((found && found.nickname) || '局域网用户');
+}
+// probe.error 细分（timeout / refused / http_<code> / no-address）：原因不同，给的动作也不同
+const PROBE_HINTS = {
+    refused: '对方端口没监听：让他确认 NOVAI 开着、防火墙放行 TCP',
+    timeout: '对方没在 3 秒内回应：可能卡住或网络抖，点右上角重试',
+    http_401: '对方局域网口令不一致，让他重新发一次直连好友码',
+    http_404: '对方 NOVAI 版本过旧（没有社区/分享接口），升级后再试',
+    'no-address': '没拿到对方地址，等他重新广播',
+};
+function peerHint(peer) {
+    if (!peer || peer.reachable !== false) return '';
+    const error = String(peer.error || '');
+    if (PROBE_HINTS[error]) return PROBE_HINTS[error];
+    // 拿不到细分：本机实例别甩锅防火墙，远端保留兜底那句
+    if (isLocalPeer(peer)) return '本机另一个实例，这个端口没起来（换端口或等它启动）';
+    return '对方防火墙可能拦了 ' + (peer.port || selfPort.value) + ' 端口，让对方在 系统设置→隐私与安全性→本地网络 里允许 NOVAI';
+}
+function peerDot(peer) {
+    const state = probeState(peer);
+    return state === 'online' ? 'ok' : state === 'offline' ? 'no' : 'wait';
+}
+function peerStateText(peer) {
+    const state = probeState(peer);
+    if (state === 'online') {
+        const ms = Number(peer && peer.latency_ms) || 0;
+        return ms > 0 ? '能连 · ' + ms + 'ms' : '能连';
+    }
+    return state === 'offline' ? '连不上' : '未探测';
+}
+function peerKey(peer) {
+    return [peer && peer.code, peer && peer.ip, peer && peer.port].join('|');
+}
+async function copyDiagnostics() {
+    try {
+        await navigator.clipboard.writeText(diagnosticsText(diag.value));
+        diagCopied.value = true;
+        toast('诊断信息已复制');
+        clearTimeout(diagCopyTimer);
+        diagCopyTimer = setTimeout(() => { diagCopied.value = false; }, 2400);
+    } catch (e) {
+        toast('复制失败，请手动截图', { danger: true });
+    }
+}
+function probeForFriend(friend) {
+    const probes = diagPeers.value;
+    if (!probes.length) return null;
+    const code = String((friend && friend.code) || '');
+    const byCode = code ? probes.find(entry => entry && String(entry.code || '') === code) : null;
+    if (byCode) return byCode;
+    const base = String((friend && friend.base_url) || '').replace('http://', '').replace('https://', '');
+    if (!base) return null;
+    const cut = base.indexOf(':');
+    const ip = cut === -1 ? base : base.slice(0, cut);
+    const port = cut === -1 ? '' : base.slice(cut + 1).split('/')[0];
+    return probes.find(entry => entry && String(entry.ip || '') === ip && (!port || String(entry.port || '') === port)) || null;
+}
+
 async function loadFriends() {
     try {
         const response = await fetch('/api/lan/friends', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
@@ -157,7 +258,13 @@ async function loadFriendWorks() {
         } catch (e) { friendWorks[friend.id] = null; }
     }));
 }
-function toggleFriends() { friendsOpen.value = !friendsOpen.value; if (friendsOpen.value) loadFriendWorks(); }
+function toggleFriends() {
+    friendsOpen.value = !friendsOpen.value;
+    if (!friendsOpen.value) return;
+    loadFriendWorks();
+    // 只有存在离线好友时才去探测：没有离线好友就完全不请求诊断接口
+    if (friends.value.some(friend => friend && !friend.online)) ensureDiagnostics(false);
+}
 function friendAvatarImg(friend) {
     const avatar = String((friend && friend.avatar) || '');
     return avatar.startsWith('data:') ? avatar : '';
@@ -172,7 +279,16 @@ function friendStateText(friend) {
         const count = friendWorks[friend.id];
         return '在线' + (count === null || count === undefined ? '' : ' · ' + count + ' 件作品');
     }
+    const probe = probeForFriend(friend);
     const stamp = Number(friend && friend.last_seen) || 0;
+    // 好友离线、但探测到「端口连不上」：这不是单纯的离线，按细分原因说清楚
+    // （行高只够一行，这里不再接「几分钟前在线」，那是普通离线才需要的信息）
+    if (probe && probe.reachable === false) {
+        const error = String(probe.error || '');
+        if (error === 'refused') return '连不上（端口没监听）';
+        if (error === 'timeout') return '连不上（超时）';
+        return '连不上（可能被防火墙拦）';
+    }
     if (!stamp) return '离线';
     return '离线 · ' + (ago(stamp) || '刚刚') + '在线';
 }
@@ -439,6 +555,7 @@ function onKey(event) {
     friendsOpen.value = false;
     openMenu.value = '';
     shareOpen.value = false;
+    diagOpen.value = false;
 }
 // 在别处点赞 / 收藏 / 克隆后，列表和数量都要重拉（列表懒加载，清空后按当前 Tab 重取）
 watch(() => state.communityRefresh, () => {
@@ -461,6 +578,7 @@ onMounted(() => {
     document.addEventListener('keydown', onKey);
 });
 onBeforeUnmount(() => {
+    clearTimeout(diagCopyTimer);
     window.removeEventListener('novai-page-focus', onFocusPage);
     document.removeEventListener('mousedown', onDocDown, true);
     document.removeEventListener('keydown', onKey);
@@ -531,7 +649,10 @@ onBeforeUnmount(() => {
                         <div v-if="friendsOpen" class="mp-friends" role="dialog" aria-label="好友">
                             <div class="mp-fh">
                                 <b>好友 <span class="mono">{{ friends.length }}</span></b>
-                                <button type="button" class="nv-btn sm" @click="addOpen = !addOpen"><NvIcon name="plus" />添加好友</button>
+                                <span class="mp-fhacts">
+                                    <button type="button" class="nv-btn sm" @click="openDiagnostics"><NvIcon name="wifi" />网络诊断</button>
+                                    <button type="button" class="nv-btn sm" @click="addOpen = !addOpen"><NvIcon name="plus" />添加好友</button>
+                                </span>
                             </div>
                             <div v-if="addOpen" class="mp-add">
                                 <input v-model="addCode" class="nv-field mp-inp" placeholder="粘贴好友码，例如 NOVAI-483920" @keydown.enter="addFriend" />
@@ -647,6 +768,62 @@ onBeforeUnmount(() => {
                     </button>
                 </div>
             </div>
+
+            <!-- 网络诊断：结论 + 每台一句 + 复制整段 -->
+            <Transition name="mp-diag">
+                <div v-if="diagOpen" class="mp-scrim" @click="diagOpen = false"></div>
+            </Transition>
+            <Transition name="mp-diag">
+                <div v-if="diagOpen" class="mp-sheet mp-diag" role="dialog" aria-modal="true" aria-label="网络诊断">
+                    <div class="mp-sh">
+                        <b>网络诊断</b>
+                        <span class="mp-diagacts">
+                            <button type="button" class="mp-x" aria-label="重新诊断" :disabled="diagBusy" @click="ensureDiagnostics(true)"><NvIcon name="refresh" /></button>
+                            <button type="button" class="mp-x" aria-label="关闭" @click="diagOpen = false"><NvIcon name="x" /></button>
+                        </span>
+                    </div>
+
+                    <div v-if="diagBusy && !diag" class="mp-diagskel">
+                        <div class="nv-skel lead"></div>
+                        <div class="nv-skel row"></div>
+                        <div class="nv-skel row"></div>
+                        <div class="nv-skel row"></div>
+                    </div>
+                    <div v-else-if="diagMissing" class="mp-diagfail">
+                        <b>诊断接口未就绪</b>
+                        <span>后端还没提供 /api/lan/diagnostics，等它上线或升级到最新版本后再试</span>
+                        <button type="button" class="nv-btn sm" @click="ensureDiagnostics(true)">重试</button>
+                    </div>
+                    <div v-else-if="!diag" class="mp-diagfail">
+                        <b>诊断没跑起来</b>
+                        <span>{{ diagError || '请确认 NOVAI 服务正在运行' }}</span>
+                        <button type="button" class="nv-btn sm" @click="ensureDiagnostics(true)">重试</button>
+                    </div>
+                    <template v-else>
+                        <p class="mp-diaglead">{{ diagLead }}<em v-if="diagBusy">正在重新探测…</em></p>
+                        <div class="mp-diaglist">
+                            <div v-for="peer in diagPeers" :key="peerKey(peer)" class="mp-diagrow">
+                                <i class="d" :class="peerDot(peer)" aria-hidden="true"></i>
+                                <span class="fx">
+                                    <b>
+                                        {{ peerName(peer) }}
+                                        <em class="mono">{{ peer.code || '———' }}</em>
+                                        <span v-if="isLocalPeer(peer)" class="tag">本机其他实例</span>
+                                    </b>
+                                    <small class="mono">{{ peer.ip ? peer.ip + ':' + (peer.port || '—') : '地址未知' }}</small>
+                                    <small v-if="peerHint(peer)" class="hint">{{ peerHint(peer) }}</small>
+                                </span>
+                                <span class="st">{{ peerStateText(peer) }}</span>
+                            </div>
+                            <div v-if="!diagPeers.length" class="mp-fempty">没发现别的机器：确认两边连的是同一个 Wi-Fi / 交换机</div>
+                        </div>
+                        <div class="mp-shf">
+                            <button type="button" class="nv-btn" @click="diagOpen = false">关闭</button>
+                            <button type="button" class="nv-btn primary" @click="copyDiagnostics">{{ diagCopied ? '已复制' : '复制诊断信息' }}</button>
+                        </div>
+                    </template>
+                </div>
+            </Transition>
         </Teleport>
 
         <MeProfileDialog v-if="editOpen" :me="lanMe || {}" @close="editOpen = false" @saved="next => { if (next) lanMe = next; loadProfile(); broadcast({ type: 'novai:profile' }); }" />
@@ -704,8 +881,9 @@ onBeforeUnmount(() => {
 .mp-frbtn { flex-direction: row; align-items: baseline; gap: 6px; cursor: pointer; }
 .mp-frbtn.open { background: var(--fill-2); }
 .mp-frbtn .mp-frchev { width: 12px; height: 12px; color: var(--ink-3); align-self: center; }
-.mp-friends { position: absolute; left: 0; top: calc(100% + 8px); z-index: 7; width: 340px; padding: 12px; border-radius: 16px; background: color-mix(in srgb, var(--solid) 88%, transparent); backdrop-filter: blur(44px) saturate(190%); -webkit-backdrop-filter: blur(44px) saturate(190%); box-shadow: var(--shadow-pop); }
+.mp-friends { position: absolute; left: 0; top: calc(100% + 8px); z-index: 7; width: 372px; padding: 12px; border-radius: 16px; background: color-mix(in srgb, var(--solid) 88%, transparent); backdrop-filter: blur(44px) saturate(190%); -webkit-backdrop-filter: blur(44px) saturate(190%); box-shadow: var(--shadow-pop); }
 .mp-fh { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 2px 8px; font: 600 13px/18px var(--font-sans); }
+.mp-fhacts { display: flex; align-items: center; gap: 6px; }
 .mp-add { display: flex; gap: 6px; padding-bottom: 8px; }
 .mp-inp { flex: 1; min-width: 0; border: 0; }
 .mp-fempty { padding: 14px 2px; text-align: center; color: var(--ink-4); font: 400 12px/18px var(--font-sans); }
@@ -799,6 +977,42 @@ onBeforeUnmount(() => {
 .mp-assetgrid button { border: 0; padding: 0; border-radius: 10px; overflow: hidden; background: var(--fill-1); aspect-ratio: 16 / 10; cursor: pointer; }
 .mp-assetgrid img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .mp-assetgrid button:hover { box-shadow: var(--shadow-lift); }
+
+/* 网络诊断：沿用 .mp-sheet 的磨砂玻璃底 + 柔和投影；状态只用圆点表达，不画边框 */
+.mp-diag { width: min(600px, calc(100vw - 32px)); max-height: min(78vh, 760px); display: flex; flex-direction: column; }
+.mp-diagacts { display: flex; align-items: center; gap: 2px; }
+.mp-diaglead { margin: 0 0 10px; font: 400 12.5px/19px var(--font-sans); color: var(--ink-2); }
+.mp-diaglead em { display: block; margin-top: 3px; font-style: normal; font: 400 11.5px/16px var(--font-sans); color: var(--ink-3); }
+.mp-diaglist { flex: 1; min-height: 0; overflow-y: auto; margin: 0 -4px; padding: 0 4px; display: flex; flex-direction: column; gap: 2px; }
+.mp-diagrow { display: flex; align-items: flex-start; gap: 10px; padding: 9px 8px; border-radius: 12px; transition: background var(--duration-fast) var(--ease-out); }
+@media (hover: hover) and (pointer: fine) { .mp-diagrow:hover { background: var(--fill-1); } }
+.mp-diagrow .d { width: 8px; height: 8px; flex: none; margin-top: 6px; border-radius: 50%; }
+.mp-diagrow .d.ok { background: var(--success); }
+.mp-diagrow .d.no { background: var(--ink-4); }
+.mp-diagrow .d.wait { background: #d7a13a; }
+.mp-diagrow .fx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mp-diagrow b { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; font: 500 13px/18px var(--font-sans); }
+.mp-diagrow b em { font-style: normal; font: 400 11px/1 var(--font-mono); letter-spacing: .03em; color: var(--ink-3); }
+.mp-diagrow .tag { height: 16px; padding: 0 6px; border-radius: 8px; background: var(--fill-2); color: var(--ink-3); font: 400 10px/16px var(--font-sans); }
+.mp-diagrow small { font: 400 11.5px/17px var(--font-mono); color: var(--ink-3); }
+.mp-diagrow .hint { margin-top: 3px; font: 400 11.5px/18px var(--font-sans); color: var(--ink-2); }
+.mp-diagrow .st { flex: none; margin-top: 1px; font: 500 12px/18px var(--font-sans); color: var(--ink-2); }
+.mp-diagskel { display: flex; flex-direction: column; gap: 10px; }
+.mp-diagskel .lead { height: 34px; border-radius: 10px; }
+.mp-diagskel .row { height: 54px; border-radius: 12px; }
+.mp-diagfail { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 34px 0 24px; text-align: center; color: var(--ink-3); font: 400 12.5px/19px var(--font-sans); }
+.mp-diagfail b { font: 500 15px/21px var(--font-sans); color: var(--ink); }
+.mp-diagfail .nv-btn { margin-top: 8px; }
+/* 进出只动 opacity + 极小缩放；弹层是模态，起点保持屏幕中心（Emil：modal 不用触发器原点），退比进快 */
+.mp-diag-enter-active, .mp-diag-leave-active { transition: opacity 200ms var(--ease-out); }
+.mp-sheet.mp-diag.mp-diag-enter-active, .mp-sheet.mp-diag.mp-diag-leave-active { transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out); }
+.mp-diag-leave-active, .mp-sheet.mp-diag.mp-diag-leave-active { transition-duration: 140ms; }
+.mp-diag-enter-from, .mp-diag-leave-to { opacity: 0; }
+.mp-sheet.mp-diag.mp-diag-enter-from, .mp-sheet.mp-diag.mp-diag-leave-to { transform: translate(-50%, -50%) scale(.98); }
+@media (prefers-reduced-motion: reduce) {
+    .mp-diag-enter-active, .mp-diag-leave-active, .mp-sheet.mp-diag.mp-diag-enter-active, .mp-sheet.mp-diag.mp-diag-leave-active { transition: opacity 120ms linear; }
+    .mp-sheet.mp-diag.mp-diag-enter-from, .mp-sheet.mp-diag.mp-diag-leave-to { transform: translate(-50%, -50%); }
+}
 
 /* 焦点：输入框不出现光圈（设计硬规则）；按钮只在键盘操作时给墨色描边，点完不留蓝框 */
 .mp input:focus, .mp select:focus, .mp button:focus { outline: none; box-shadow: none; }

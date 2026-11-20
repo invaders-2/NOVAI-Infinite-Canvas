@@ -14,3 +14,15 @@ body.agent-resizing{cursor:col-resize;user-select:none;-webkit-user-select:none}
 body:has(#pop) .agent-resize-handle,
 body:has(.model-flyout) .agent-resize-handle,
 body:has(.nv-gen-select) .agent-resize-handle { pointer-events: none; }
+
+/* 全屏查看图片 / 视频（灯箱）、全屏文本、弹窗、角色详情等整屏层打开时，把手不显示：
+   它挂在 body 上、z-index 66，比画布根里的整屏层（75 / 80 …）所在的层叠上下文更靠上，会直接浮在全屏图上 */
+body:has(.lightbox) .agent-resize-handle,
+body:has(.textdoc) .agent-resize-handle,
+body:has(.modal-bg) .agent-resize-handle,
+body:has(.md-lb) .agent-resize-handle,
+body:has(.style-mask) .agent-resize-handle,
+body:has(.ie-scrim) .agent-resize-handle,
+body:has(.lan-preview) .agent-resize-handle,
+body:has(.chview) .agent-resize-handle,
+body:has(.tplpv-scrim) .agent-resize-handle { display: none !important; }

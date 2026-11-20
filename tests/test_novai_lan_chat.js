@@ -127,8 +127,16 @@ function testTimeAndStatus(lan) {
     assert.equal(lan.lanErrorMessage(400, '好友码格式不对'), '好友码格式不对');
     assert.ok(lan.lanErrorMessage(400).includes('好友码'));
     assert.ok(lan.lanErrorMessage(403).includes('凭据'));
-    assert.equal(lan.lanErrorMessage(502, '对方离线或端口不通，消息已保存，可以稍后重发'), '对方离线或端口不通，消息已保存，可以稍后重发');
+    assert.equal(lan.lanErrorMessage(502, '对方离线或暂时没响应，消息已保存，对方恢复在线后会自动补发'),
+        '对方离线或暂时没响应，消息已保存，对方恢复在线后会自动补发');
+    assert.ok(lan.lanErrorMessage(502).includes('自动补发'));
     assert.ok(lan.lanErrorMessage(500).includes('稍后'));
+
+    // 待补发消息的气泡提示：只有 pending 说话，正常消息不打扰
+    assert.equal(lan.messageDeliveryLabel('pending'), '未送达 · 对方上线后自动补发');
+    assert.equal(lan.messageDeliveryLabel('sent'), '');
+    assert.equal(lan.messageDeliveryLabel('failed'), '');
+    assert.equal(lan.messageDeliveryLabel(undefined), '');
     assert.ok(lan.lanErrorMessage(418).length > 0);
 
     assert.equal(lan.shareTokenOf('http://192.168.1.8:3000/static/canvas.html?share=' + TOKEN_A), TOKEN_A);
@@ -184,14 +192,16 @@ function testBackend() {
         console.log('[lan-backend] 跳过：没有能 import fastapi 的 python（venv/bin/python 或 python3）');
         return;
     }
-    const result = spawnSync(python, [path.join(__dirname, 'test_lan_account_store.py')], {
-        cwd: root,
-        encoding: 'utf8',
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-    });
-    const output = (result.stdout || '') + (result.stderr || '');
-    console.log(output.trim());
-    assert.equal(result.status, 0, '后端好友单测退出码 ' + result.status);
+    for (const file of ['test_lan_account_store.py', 'test_lan_account_owner.py']) {
+        const result = spawnSync(python, [path.join(__dirname, file)], {
+            cwd: root,
+            encoding: 'utf8',
+            env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        });
+        const output = (result.stdout || '') + (result.stderr || '');
+        console.log(output.trim());
+        assert.equal(result.status, 0, file + ' 退出码 ' + result.status);
+    }
 }
 
 const lan = loadTs('novai-canvas-ui/src/canvas/canvas-next/ui/lanDoc.ts');

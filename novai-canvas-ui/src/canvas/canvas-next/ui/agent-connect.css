@@ -1,0 +1,502 @@
+/* 「在 Agent 中打开」弹窗：左侧 Agent 列表 + 右侧 hero / 文案 / 操作。
+   层级只靠留白、软底和投影，不画描边；容器沿用 .modal 的磨砂玻璃底，这里只改宽度与内边距。 */
+
+.cn-root #modal .modal.agent-connect-modal {
+  width: min(900px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  overflow: hidden;
+  border-radius: 18px;
+}
+
+.cn-root .ac-wrap {
+  position: relative;
+  display: grid;
+  grid-template-columns: 228px minmax(0, 1fr);
+  min-height: 0;
+  max-height: calc(100vh - 48px);
+}
+
+/* 左栏：标题 + 纵向列表 */
+.cn-root .ac-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 18px 12px;
+  background: color-mix(in srgb, var(--fg) 4%, var(--modal));
+}
+.cn-root .ac-list h3 {
+  flex: none;
+  margin: 2px 8px 10px;
+  color: var(--fg);
+  font: 600 14px/20px var(--font);
+  letter-spacing: -0.01em;
+}
+.cn-root .ac-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+.cn-root .ac-items::-webkit-scrollbar { display: none; }
+
+.cn-root .ac-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  height: 38px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--fg) 4%, var(--modal));
+  color: var(--fg2);
+  font: 400 12.5px/1 var(--font);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--d-feedback) var(--e-std), color var(--d-feedback) var(--e-std);
+}
+.cn-root .ac-item:hover {
+  background: color-mix(in srgb, var(--fg) 8%, var(--modal));
+  color: var(--fg);
+}
+.cn-root .ac-item.is-on {
+  background: color-mix(in srgb, var(--fg) 11%, var(--modal));
+  color: var(--fg);
+  font-weight: 600;
+}
+.cn-root .ac-item-ico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+.cn-root .ac-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cn-root .ac-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 8%, var(--modal));
+  color: var(--fg2);
+  font: 500 9.5px/1 var(--font);
+  white-space: nowrap;
+}
+.cn-root .ac-badge.is-linked {
+  background: color-mix(in srgb, var(--fg) 11%, var(--modal));
+  color: var(--fg);
+}
+.cn-root .ac-item.is-on .ac-badge {
+  background: color-mix(in srgb, var(--fg) 13%, var(--modal));
+}
+.cn-root .ac-item.is-on .ac-badge.is-linked {
+  background: color-mix(in srgb, var(--fg) 15%, var(--modal));
+}
+
+/* 右栏 */
+.cn-root .ac-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 52px 24px 24px;
+}
+
+.cn-root .ac-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--fg2);
+  cursor: pointer;
+  transition: background-color var(--d-feedback) var(--e-std), color var(--d-feedback) var(--e-std);
+}
+.cn-root .ac-close:hover {
+  background: color-mix(in srgb, var(--fg) 9%, var(--modal));
+  color: var(--fg);
+}
+.cn-root .ac-close .i { width: 16px; height: 16px; }
+
+/* hero：NOVAI logo ↔ Agent 标 */
+.cn-root .ac-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  flex: none;
+  min-height: 150px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--fg) 4%, var(--modal));
+}
+.cn-root .ac-novai {
+  display: block;
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+}
+.cn-root[data-theme="dark"] .ac-novai { filter: invert(1); }
+.cn-root .ac-arrow { display: inline-flex; align-items: center; color: var(--fg2); }
+.cn-root .ac-agent-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+}
+
+/* 品牌标：本地 SVG 作为 mask 着色，字母徽标给没有矢量标的 CLI */
+.cn-root .ac-mark {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  background: currentColor;
+  -webkit-mask: var(--ac-brand) center / contain no-repeat;
+  mask: var(--ac-brand) center / contain no-repeat;
+}
+.cn-root .ac-mark-claude { --ac-brand: url("/static/images/brands/claude.svg"); background: #d97757; }
+.cn-root .ac-mark-openai { --ac-brand: url("/static/images/brands/openai.svg"); background: var(--fg); }
+.cn-root .ac-mark-img {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 50%;
+  object-fit: contain;
+}
+.cn-root .ac-mark-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--fg) 8%, var(--modal));
+  color: var(--fg);
+  -webkit-mask: none;
+  mask: none;
+}
+.cn-root .ac-mark-more .i { width: 13px; height: 13px; }
+
+.cn-root .ac-letter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 5px;
+  color: #fff;
+  font: 700 9.5px/1 var(--font);
+  letter-spacing: -0.02em;
+}
+.cn-root .ac-letter-kimi { background: #141414; }
+.cn-root .ac-letter-hermes { background: #f4541f; }
+.cn-root[data-theme="dark"] .ac-letter-kimi { background: #f0f0f0; color: #0a0a0a; }
+
+/* hero 里的标放大 */
+.cn-root .ac-agent-mark .ac-mark {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+}
+.cn-root .ac-agent-mark .ac-mark-img {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+}
+.cn-root .ac-agent-mark .ac-mark-more { border-radius: 15px; }
+.cn-root .ac-agent-mark .ac-mark-more .i { width: 34px; height: 34px; }
+.cn-root .ac-agent-mark .ac-letter {
+  width: 52px;
+  height: 52px;
+  flex: 0 0 52px;
+  border-radius: 15px;
+  font-size: 25px;
+}
+
+/* 「更多 Agent」hero：一排 App 图标（中间 NOVAI 最大最亮，两侧略小、轻微旋转并上下错位）。
+   层级只靠尺寸 / 亮度 / 柔和投影表达，不描边。 */
+.cn-root .ac-hero.is-lineup {
+  min-height: 170px;
+  padding: 22px 12px;
+}
+.cn-root .ac-lineup {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+.cn-root .ac-app {
+  display: grid;
+  place-items: center;
+  flex: none;
+  background: var(--card);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.1);
+  transform: rotate(var(--ac-tilt, 0deg)) translateY(var(--ac-dy, 0px));
+  transition: transform var(--d-std) var(--e-std), box-shadow var(--d-std) var(--e-std);
+}
+.cn-root .ac-app:hover {
+  transform: rotate(var(--ac-tilt, 0deg)) translateY(calc(var(--ac-dy, 0px) - 3px));
+}
+.cn-root .ac-app.is-center {
+  background: var(--card-hi);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.22), 0 4px 10px rgba(0, 0, 0, 0.12);
+}
+.cn-root[data-theme="light"] .ac-app {
+  background: var(--card-hi);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.09), 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+.cn-root[data-theme="light"] .ac-app.is-center {
+  background: var(--card);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.13), 0 4px 10px rgba(0, 0, 0, 0.06);
+}
+.cn-root .ac-app-logo { display: block; object-fit: contain; }
+
+/* 文案 */
+.cn-root .ac-title {
+  margin: 20px 0 0;
+  color: var(--fg);
+  font: 600 18px/26px var(--font);
+  letter-spacing: -0.01em;
+}
+.cn-root .ac-desc {
+  margin: 8px 0 0;
+  color: var(--fg2);
+  font: 400 12.5px/20px var(--font);
+}
+.cn-root .ac-stale {
+  margin: 10px 0 0;
+  color: var(--warn-fg);
+  font: 400 11.5px/18px var(--font);
+}
+.cn-root .ac-reason {
+  margin: 10px 0 0;
+  color: var(--fg2);
+  font: 400 11.5px/18px var(--font);
+}
+
+/* Claude 的提示词块：提示词完整展示（不截成滚动区），内容变高由 .ac-main 整体滚动 */
+.cn-root .ac-prompt {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fg) 4%, var(--modal));
+}
+.cn-root .ac-prompt-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+  color: var(--fg3);
+  font: 500 10px/14px var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.cn-root .ac-prompt pre {
+  margin: 0;
+  color: var(--fg2);
+  font: 400 10.5px/16px var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 一键接入的确认条（弹窗内，不再叠一层 dialog） */
+.cn-root .ac-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--fg) 6%, var(--modal));
+}
+.cn-root .ac-confirm-title {
+  margin: 0;
+  color: var(--fg);
+  font: 600 12.5px/18px var(--font);
+}
+.cn-root .ac-confirm-sub,
+.cn-root .ac-confirm-hint {
+  margin: 0;
+  color: var(--fg2);
+  font: 400 11px/16px var(--font);
+}
+.cn-root .ac-confirm-hint { color: var(--fg3); }
+.cn-root .ac-confirm-path {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--fg) 4%, var(--modal));
+  color: var(--fg);
+  font: 400 10.5px/16px var(--mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.cn-root .ac-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* 底部操作 */
+.cn-root .ac-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 20px;
+}
+.cn-root .ac-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 9px;
+  font: 500 12px/1 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color var(--d-feedback) var(--e-std), opacity var(--d-feedback) var(--e-std);
+}
+.cn-root .ac-btn.ghost {
+  background: color-mix(in srgb, var(--fg) 7%, var(--modal));
+  color: var(--fg);
+}
+.cn-root .ac-btn.ghost:hover {
+  background: color-mix(in srgb, var(--fg) 12%, var(--modal));
+}
+.cn-root .ac-btn.primary {
+  background: var(--solid);
+  color: var(--on-solid);
+}
+.cn-root .ac-btn.primary:hover:not(:disabled) { opacity: 0.86; }
+.cn-root .ac-btn:disabled { opacity: 0.45; cursor: default; }
+
+.cn-root .ac-mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 8%, var(--modal));
+  color: var(--fg);
+  font: 500 10.5px/1 var(--font);
+  cursor: pointer;
+}
+.cn-root .ac-mini:hover { background: color-mix(in srgb, var(--fg) 13%, var(--modal)); }
+
+/* 加载 / 错误 / 读取失败提示 */
+.cn-root .ac-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  min-height: 260px;
+  color: var(--fg2);
+  font: 400 12.5px/20px var(--font);
+}
+.cn-root .ac-state b {
+  color: var(--fg);
+  font: 600 14px/20px var(--font);
+}
+.cn-root .ac-state p { margin: 0; }
+.cn-root .ac-state .ac-hint { color: var(--fg3); font-size: 11.5px; }
+.cn-root .ac-state .ac-btn { margin-top: 6px; }
+.cn-root .ac-loading {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  min-height: 260px;
+}
+.cn-root .ac-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg2);
+  animation: acPulse 1s ease-in-out infinite;
+}
+.cn-root .ac-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bad) 10%, var(--modal));
+  color: var(--fg);
+  font: 400 11.5px/17px var(--font);
+}
+.cn-root .ac-banner .ac-mini { margin-left: auto; flex: none; }
+
+@keyframes acPulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+@media (max-width: 760px) {
+  .cn-root #modal .modal.agent-connect-modal {
+    width: min(620px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+  }
+  .cn-root .ac-wrap {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    max-height: calc(100vh - 24px);
+  }
+  .cn-root .ac-list {
+    padding: 14px 12px 8px;
+    overflow: visible;
+  }
+  .cn-root .ac-list h3 { margin: 0 4px 8px; }
+  .cn-root .ac-items {
+    flex-direction: row;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .cn-root .ac-item {
+    width: auto;
+    flex: none;
+    height: 34px;
+  }
+  .cn-root .ac-main { padding: 46px 18px 18px; }
+  .cn-root .ac-hero { min-height: 110px; }
+  .cn-root .ac-hero.is-lineup { min-height: 140px; }
+  .cn-root .ac-lineup { gap: 8px; }
+  .cn-root .ac-app { transform: rotate(var(--ac-tilt, 0deg)) translateY(var(--ac-dy, 0px)) scale(0.82); }
+  .cn-root .ac-app:hover { transform: rotate(var(--ac-tilt, 0deg)) translateY(calc(var(--ac-dy, 0px) - 3px)) scale(0.82); }
+  .cn-root .ac-close { top: 10px; right: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cn-root .ac-dot { animation: none; opacity: 0.7; }
+}

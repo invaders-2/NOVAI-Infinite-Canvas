@@ -1,30 +1,23 @@
 # 应用市场「最新上线」封面来源
 
-六张封面全部是**真实素材**：官方模型示例图（5 张）+ 真实产品截图（1 张）。由 `tools/market-art/build.cjs` 一键复现（下载 → 按 crop 裁 16:9 → 覆盖式缩放到 1600×900 → JPG q90）。
+2026-11-19 第五轮：按用户要求，轮播只放当前最新的 7 个模型，封面用各家官网 / 官方文档的示例图。由 `tools/market-art/build.cjs` 一键复现（下载 → 按 crop 裁 16:9 → 覆盖式缩放到 1600×900 → JPG q90）。
 
-> 说明：模型示例图来自厂商官方文档/官网，仅在产品内展示用；**对外发布前需确认授权**。
+> 说明：模型示例图来自厂商官方网站/文档，仅在产品内展示该模型用；**对外发布前需确认授权**。
 
-| 文件 | 用途 | 来源 | 裁切（源图像素） |
+| 文件 | 模型 | 来源 | 裁切（源图像素） |
 |---|---|---|---|
-| `showcase-seedream.jpg` | 「Seedream 5.0」卡封面 | 火山方舟官方示例图 <https://arkdocs.tos-cn-beijing.volces.com/images/image-generation/Seedream50_layer_0.jpeg>（2048×2048，雨后雨林苔藓树枝） | `[0, 620, 2048, 1152]`：保留中部那根长满苔藓的树枝，向下让出卡片底部叠字区 |
-| `showcase-seedance.jpg` | 「Seedance 2.5」卡封面 | 火山方舟官方示例图 <https://arkdocs.tos-cn-beijing.volces.com/images/video-generation/i2v_4k.png>（1280×714，越野摩托实拍） | 不裁，等比放大到覆盖 1600×900 后居中裁 6px |
-| `showcase-gemini.jpg` | 「Gemini 3 Pro」卡封面 | Google 官方博客头图 <https://storage.googleapis.com/gweb-uniblog-publish-prod/images/gemini-3_model-blog_header-dark.width-1600.format-webp.webp>（1600×902，官方 Gemini 3 品牌视觉） | `[133, 76, 1333, 750]`：整体放大 1.2× 居中，logo + 星形约占画面 1/2 |
-| `showcase-minimax.jpg` | 「MiniMax H3」卡封面 | MiniMax 官方示例图 <https://filecdn.minimax.chat/public/h3-en-v2-image-000-1785473644038.png>（2488×1408，咖啡街景视频画面） | `[560, 60, 1928, 1084]`：人物居中，避开左下角「CAFÉ」挂牌与顶部边角碎片，底部让出叠字区 |
-| `showcase-gpt26.jpg` | 「GPT-Image 2.6」卡封面 | **不是官网图**：我们自己的 APIMart（apib.ai）调 `gpt-image-2.6-ext` 于 2026-11-06 生成的示例图（1024×1024，水晶体蜂鸟），源文件 `tools/market-art/sources/gpt-image-2.6.png`（跟生成器一起留在仓库里）。prompt：`A cinematic close-up of a translucent glass hummingbird perched on a dark branch, dramatic rim light, shallow depth of field, ultra detailed, dark studio background`（n=1，无尺寸参数）→ **自制可商用** | `[0, 40, 1024, 576]`：从 1024×1024 里取 16:9 居中偏上，保住翅膀与主体，底部落在深色枝干/背景上让出叠字区 |
-| `showcase-fashion.jpg` | 「服装大片 · 胶片暗房」技能卡封面 | **不是官网图**：我们用 APIMart（apib.ai）`seedream-5-0-pro` 于 2026-11-06 生成的时尚编辑样片（2048×1152），源文件 `tools/market-art/sources/fashion-editorial.jpg`。prompt：`A fashion editorial photograph shot on 35mm analog film, hand-enlarged silver gelatin print, young woman in a cream linen slip dress leaning against a Mediterranean white stucco wall, soft natural window light with long cast shadows and dappled leaf shadows, muted low-saturation palette with milky cream tones, Kodak Portra 400 color signature, fine analog film grain, matte non-glossy surface, subtle gentle vignette, intimate quiet composition, honest skin texture, horizontal widescreen composition, no text, no logo, no watermark`（size=2048x1152，n=1）→ **自制可商用** | 不裁（源图正好 16:9），直接缩到 1600×900；主体在上半部，底部白墙 + 米色连衣裙承载叠字 |
+| `showcase-gpt26.jpg` | GPT Image 2.6 | OpenAI 官网发布页没有可下载的示例图，沿用我们用 APIMart `gpt-image-2.6-ext` 生成的玻璃蜂鸟（`tools/market-art/sources/gpt-image-2.6.png`，自制可商用） | `[0, 40, 1024, 576]` |
+| `showcase-seedream.jpg` | Seedream 5.5 | 字节 Seed 官网示例图 <https://lf3-static.bytednsdoc.com/obj/eden-cn/bdeh7uhpsuht/sd55-006-22d1692c-l.webp>（2512×1664，酒吧吧台白猫） | `[0, 125, 2512, 1413]` |
+| `showcase-minimax.jpg` | MiniMax H3-Image | MiniMax 官网发布头图 <https://file.cdn.minimax.io/public/h3-image-cover-1794323228475.jpg>（1280×545，水母 + 官方字标） | `[155, 0, 969, 545]` |
+| `showcase-nanobanana.jpg` | Nano Banana 2.1 | Google DeepMind Gemini Image（Nano Banana）官网示例图 <https://lh3.googleusercontent.com/IQrKmeotvku7oU92ImkQ4h74TbS7A695HU4Zq633YsuNW0hvjZlndcmzyhh5-CqxFntzW6K9J1pgaTUayRTYgK93laVGdPBp2uDAdJASSm4CZprKE3Q=w1920-h1080-n-nu>（1920×1080，黄昏草地人像） | 不裁 |
+| `showcase-seedance.jpg` | Seedance 2.5 | 火山方舟官方示例图 <https://arkdocs.tos-cn-beijing.volces.com/images/video-generation/i2v_4k.png>（1280×714，越野摩托） | 不裁 |
+| `showcase-kling.jpg` | Kling 4.0 | 可灵官方 Kling 4.0 发布说明示例关键帧 <https://klingai.com/release-note/release-notes/Kling_4>（2720×1536，风暴船头弹钢琴） | 不裁 |
+| `showcase-gemini.jpg` | Gemini Omni 1.2 Flash | Google 官方博客头图 <https://storage.googleapis.com/gweb-uniblog-publish-prod/images/gemini-omni-1.2_FZLql41.width-1300.png>（1300×731，官方字标） | 不裁 |
 
-约束与结论：
-- 输出统一 1600×900 JPG（质量 90；Seedream 细节多单张 266KB，其余 56–244KB）。
-- 六张图都不含第三方水印/角标文案；Seedream 官方图那种右下角带「AI生成」水印的版本没有采用。
-- Gemini 那张自带官方「Gemini 3」字标，按需求保留（不是第三方水印）；GPT-Image 2.6 那张是我们自己用 APIMart 生成的示例图，没有第三方水印。
-- 主体都避开了卡片左下角的叠字区（卡片底部 34% 起是渐变，标题/说明在底部 ~21%）。
-- 2026-11-06 第二轮：按用户意见去掉两张产品截图卡（智能画布BEAT / 素材库），对应 `showcase-beat.jpg`、`showcase-assets.jpg` 已删除；新增 MiniMax H3、Qwen-Image 3 两张模型示例图。
-- 2026-11-06 第三轮：Qwen-Image 3 卡换成 **GPT-Image 2.6**（封面换成我们自己用 APIMart 生成的玻璃蜂鸟），`showcase-qwen.jpg` 已删除。
-- 2026-11-06 第四轮：「我的技能」卡换成我们自己技能「服装大片 · 胶片暗房」（封面用 APIMart seedream-5-0-pro 生成的时尚编辑样片），`showcase-skills.jpg` 已删除。卡片顺序：Seedream 5.0 → Seedance 2.5 → Gemini 3 Pro → MiniMax H3 → GPT-Image 2.6 → 服装大片 · 胶片暗房。
-
-复现：
-```bash
-node tools/market-art/build.cjs      # 需要本机 Chrome（Playwright channel:'chrome'）+ python3 + Pillow
-```
-- 官方示例图会按表里的 URL 现下到 `_tmp/market-art/src/`（中间产物，可随时删）。
-- 常驻仓库的源文件在 `tools/market-art/sources/`：`gpt-image-2.6.png`、`fashion-editorial.jpg`（都是我们自己生成的图，没有公开 URL 可依赖）。跑生成器只需要 python3 + Pillow（不再需要 Chrome / 本地服务）。
+- 有官方视频的三个模型改用官方示例视频（`bash tools/market-art/videos.sh`：静音、1280×720、H.264 CRF 26、约 10 秒，同时取第 4 秒画面做 `showcase-<id>.jpg`）：
+  - `showcase-seedance.mp4`：Seedance 2.5 官方项目页 <https://seed.bytedance.com/seedance2_5> 首屏视频（火焰前的红裙舞者），取 2.2s 起 10 秒。
+  - `showcase-kling.mp4`：Kling 4.0 发布说明「关键帧 → 生成结果」示例视频 <https://v4-kling.kechuangai.com/bs2/upload-ylab-stunt/kling-userdoc/file/79118979d9da8918cb88b44b9b53fd2c03388b47cf92b5838cb8f5c2caa33359.mp4>，取 2s 起 12 秒。
+  - `showcase-gemini.mp4`：Gemini Omni 1.2 Flash 官方博客 <https://blog.google/innovation-and-ai/technology/developers-tools/introducing-gemini-omni-1-2-flash/> 的 Castaway Crash Zoom Out 示例 <https://storage.googleapis.com/gweb-uniblog-publish-prod/original_videos/Castaway_Crash_Zoom_Out_Demo.mp4>，跳过开头 4.3 秒的提示词界面。
+  - 上表里这三张的静态图因此由视频帧替代。
+- 旧的 `showcase-fashion.jpg`、`showcase-hypit.jpg` 不再出现在轮播里（技能仍在「精选技能」里）。
+- 部分官方 CDN 在国内直连会超时：`ART_PROXY=http://127.0.0.1:7897 node tools/market-art/build.cjs`。已下载的源图缓存在 `_tmp/market-art/src/`，不会重复下载。

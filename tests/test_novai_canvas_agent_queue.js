@@ -102,9 +102,11 @@ const editAt = at('aria-label="编辑排队消息"');
 const sendAt = at('aria-label="立即发送"');
 const deleteAt = at('aria-label="删除排队消息"');
 assert.ok(editAt < sendAt && sendAt < deleteAt, '三个动作顺序：编辑 / 立即发送 / 删除');
-for (const icon of ['name="pencil"', 'name="send"', 'name="x"']) {
+for (const icon of ['name="pencil"', 'name="x"']) {
     assert.ok(panel.includes(icon), '队列按钮缺少线性图标：' + icon);
 }
+// 「立即发送」换成会动的发送箭头（Hugeicons Animated arrow-up-02 的 WAAPI 复刻）
+assert.ok(panel.slice(sendAt, deleteAt).includes('<AnimatedSendIcon size={16} />'), '队列「立即发送」用 AnimatedSendIcon');
 assert.ok(panel.includes('title={item.label}'), '文本 title 显示全文');
 
 // 上限 + 不丢输入

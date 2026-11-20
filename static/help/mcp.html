@@ -51,10 +51,14 @@ pre { margin: 0; padding: 13px 14px; border: 0; border-radius: var(--radius-md);
 .table .row:nth-child(4n+1) { background: transparent; }
 .table .tool { color: var(--ink); font-family: var(--font-mono); font-size: 11px; }
 .list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); font: 400 12.5px/20px var(--font-sans); }
-.install-line { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; }
-.install-line p { margin: 0; color: var(--ink); font: 500 12.5px/18px var(--font-sans); }
-.install-line .copy-btn { height: 30px; padding: 0 12px; background: var(--accent); color: var(--on-accent); }
-.install-line .copy-btn:hover:not(:disabled) { opacity: .86; background: var(--accent); color: var(--on-accent); }
+.install-list { display: flex; flex-direction: column; gap: 8px; }
+.install-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 0; border-radius: 10px; background: var(--fill-1); }
+.install-row p { margin: 0; color: var(--ink); font: 500 12.5px/18px var(--font-sans); }
+.install-row .hint { margin-top: 3px; }
+.install-row .copy-btn { height: 30px; padding: 0 12px; background: var(--accent); color: var(--on-accent); white-space: nowrap; }
+.install-row .copy-btn:hover:not(:disabled) { opacity: .86; background: var(--accent); color: var(--on-accent); }
+.install-status { margin-top: 2px; }
+.install-status.is-error { color: var(--danger); }
 .install-modal { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .install-modal[hidden] { display: none; }
 .install-scrim { position: absolute; inset: 0; background: color-mix(in srgb, var(--ink) 28%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
@@ -79,19 +83,22 @@ h3 { margin: 0; color: var(--ink); font: 600 13px/20px var(--font-sans); }
         <img src="/static/images/logo.svg" alt="NOVAI">
         <div>
             <h1>NOVAI MCP 文档</h1>
-            <p>让 Claude、Codex、WorkBuddy 等外部 Agent 通过 MCP 调用 NOVAI 的画布工具。</p>
+            <p>让 Claude、Codex、WorkBuddy、Kimi Code、Hermes、DSH 等外部 Agent 通过 MCP 调用 NOVAI 的画布工具。</p>
         </div>
         <button type="button" class="theme-btn" id="themeBtn">切换主题</button>
     </header>
 
-    <section class="card install-line" id="installLine" hidden>
-        <p>已安装的客户端可以一键接入</p>
-        <button type="button" class="copy-btn" id="installAgentBtn">一键接入 Claude</button>
+    <section class="card" id="installLine" hidden>
+        <h2>已安装的客户端可以一键接入</h2>
+        <p class="muted">检测到本机已安装的客户端后，点一下就能写入 NOVAI MCP 配置，重启客户端生效。</p>
+        <div class="install-list" id="installList"></div>
+        <p class="hint">DSH 目前只支持复制配置；未列出的客户端可复制下方的 stdio 配置手动接入。</p>
+        <p class="hint install-status" id="installStatus" hidden></p>
     </section>
 
     <section class="card">
         <h2>这是什么</h2>
-        <p>NOVAI 提供一个 MCP Server（入口 <span class="inline-code">novai_mcp_server.py</span>），外部 Agent 通过 stdio 或 Streamable HTTP 连接它，就能列出画布、新建/更新/删除节点、触发生图。</p>
+        <p>NOVAI 提供一个 MCP Server（源码版入口 <span class="inline-code">novai_mcp_server.py</span>；安装版由主程序 <span class="inline-code">--mcp</span> 模式直接提供），外部 Agent 通过 stdio 或 Streamable HTTP 连接它，就能列出画布、新建/更新/删除节点、触发生图。</p>
         <p class="muted">方向是「外部 Agent → NOVAI」。反向的「NOVAI 调用外部 MCP 工具」在设置页的 MCP 区块配置，两者互不影响。</p>
     </section>
 
@@ -149,7 +156,7 @@ h3 { margin: 0; color: var(--ink); font: 600 13px/20px var(--font-sans); }
     <section class="card">
         <h2>两个方向的区别</h2>
         <div class="grid2">
-            <div><h3>MCP Server（本页）</h3><p>外部 Agent → NOVAI。入口 <span class="inline-code">novai_mcp_server.py</span>，NOVAI 是被调用方。</p></div>
+            <div><h3>MCP Server（本页）</h3><p>外部 Agent → NOVAI。入口是 <span class="inline-code">novai_mcp_server.py</span>（源码版）或主程序 <span class="inline-code">--mcp</span>（安装版），NOVAI 是被调用方。</p></div>
             <div><h3>MCP Client（设置页）</h3><p>NOVAI → 外部工具。配置在 <span class="inline-code">data/mcp_servers.json</span>，需要 <span class="inline-code">NOVAI_MCP_ENABLED=1</span>，把外部工具并进画布助手。</p></div>
         </div>
     </section>
@@ -161,7 +168,7 @@ h3 { margin: 0; color: var(--ink); font: 600 13px/20px var(--font-sans); }
         <h3 id="installTitle">写入 Claude 配置？</h3>
         <p>将修改以下文件：</p>
         <pre id="installPath"></pre>
-        <p>会先备份原文件，重启 Claude 后生效。</p>
+        <p id="installHint">会先备份原文件，重启 Claude 后生效。</p>
         <div class="install-actions"><button type="button" class="ghost" data-install-cancel>取消</button><button type="button" class="primary" id="installConfirm">确认写入</button></div>
     </div>
 </div>
@@ -183,17 +190,19 @@ h3 { margin: 0; color: var(--ink); font: 600 13px/20px var(--font-sans); }
     }
     function fallback(text){ try { var a=document.createElement('textarea'); a.value=text; a.style.cssText='position:fixed;left:-9999px'; document.body.appendChild(a); a.select(); var ok=document.execCommand('copy'); a.remove(); return ok; } catch(e){ return false; } }
     function copy(text, button){ if(!text) return; var done=function(ok){ flash(button, ok); if(!ok){ var pre=document.querySelector('#stdioConfig'); if(pre && window.getSelection){ var r=document.createRange(); r.selectNodeContents(pre); var s=window.getSelection(); s.removeAllRanges(); s.addRange(r); } } }; if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(text).then(function(){done(true);}, function(){done(fallback(text));}); } else done(fallback(text)); }
+
     var info = null;
-    fetch('/api/mcp/connect-info', {headers:{Accept:'application/json'}}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(data){
+    var copyConfig = document.getElementById('copyConfig');
+    var copyHttp = document.getElementById('copyHttp');
+    if(copyConfig) copyConfig.addEventListener('click', function(){ copy((info && JSON.stringify(info.mcp_servers_json || {}, null, 2)) || '', this); });
+    if(copyHttp) copyHttp.addEventListener('click', function(){ if(info && info.http_url) copy(info.http_url, this); });
+
+    var infoReady = fetch('/api/mcp/connect-info', {headers:{Accept:'application/json'}}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(data){
         info = data || {};
-        var config = JSON.stringify(info.mcp_servers_json || {}, null, 2);
-        document.getElementById('stdioConfig').textContent = config;
+        document.getElementById('stdioConfig').textContent = JSON.stringify(info.mcp_servers_json || {}, null, 2);
         document.getElementById('httpUrl').textContent = info.http_url || '未启用 HTTP 服务';
         document.getElementById('docsPath').textContent = info.docs_path ? '文档路径：' + info.docs_path : '';
-        var httpCopy = document.getElementById('copyHttp');
-        if(!info.http_url){ httpCopy.disabled = true; httpCopy.title = '未启用 HTTP 服务'; }
-        else httpCopy.addEventListener('click', function(){ copy(info.http_url || '', this); });
-        document.getElementById('copyConfig').addEventListener('click', function(){ copy(config, this); });
+        if(!info.http_url && copyHttp){ copyHttp.disabled = true; copyHttp.title = '未启用 HTTP 服务'; }
     }).catch(function(e){
         document.getElementById('stdioConfig').textContent = '无法读取本机 MCP 配置：' + (e && e.message || '网络错误');
         document.getElementById('httpUrl').textContent = '无法读取本机 MCP 配置';
@@ -201,46 +210,138 @@ h3 { margin: 0; color: var(--ink); font: 600 13px/20px var(--font-sans); }
     });
 
     var installLine = document.getElementById('installLine');
-    var installBtn = document.getElementById('installAgentBtn');
+    var installList = document.getElementById('installList');
+    var installStatus = document.getElementById('installStatus');
     var installModal = document.getElementById('installModal');
+    var installTitle = document.getElementById('installTitle');
     var installPath = document.getElementById('installPath');
+    var installHint = document.getElementById('installHint');
     var installConfirm = document.getElementById('installConfirm');
-    var claudeAgent = null;
-    function closeInstall(){ installModal.hidden = true; }
-    function setInstalledStatus(text){
-        installLine.querySelector('p').textContent = text;
-        installBtn.hidden = true;
+    var installNames = { claude: 'Claude', codex: 'Codex', workbuddy: 'WorkBuddy', kimi: 'Kimi Code', hermes: 'Hermes' };
+    var installAgents = {};
+    var installTarget = '';
+
+    function setStatus(text, isError){
+        if(!installStatus) return;
+        installStatus.hidden = !text;
+        installStatus.textContent = text || '';
+        installStatus.classList.toggle('is-error', !!isError);
     }
-    fetch('/api/mcp/installed-agents', { headers: { Accept: 'application/json' } })
-        .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-        .then(function(data){
-            var list = (data && data.agents) || [];
-            claudeAgent = list.find(function(item){ return item && item.id === 'claude'; }) || null;
-            if(!claudeAgent || !claudeAgent.installed) return;
-            installLine.hidden = false;
-            if(claudeAgent.configured){ setInstalledStatus('Claude 已接入 NOVAI MCP'); return; }
-            installBtn.addEventListener('click', function(){
-                installPath.textContent = claudeAgent.config_path || (/Mac/i.test(navigator.platform) ? '~/Library/Application Support/Claude/claude_desktop_config.json' : '%APPDATA%\\Claude\\claude_desktop_config.json');
-                installModal.hidden = false;
-                installConfirm.disabled = false;
-                installConfirm.textContent = '确认写入';
+    function closeInstall(){ installModal.hidden = true; installTarget = ''; }
+    function installableOf(id, item){
+        if(item && typeof item.installable === 'boolean') return item.installable;
+        return !!installNames[id];
+    }
+    function configPathOf(item){
+        if(item && (item.config_path || item.configPath)) return item.config_path || item.configPath;
+        var id = String(item && item.id || '');
+        if(id === 'claude') return /Mac/i.test(navigator.platform) ? '~/Library/Application Support/Claude/claude_desktop_config.json' : '%APPDATA%\\Claude\\claude_desktop_config.json';
+        if(id === 'codex') return '~/.codex/config.toml';
+        if(id === 'workbuddy') return '~/.workbuddy/mcp.json';
+        return '客户端默认配置文件（后端自动定位）';
+    }
+    function isStale(item){
+        if(!item || item.configured !== true) return false;
+        var got = String(item.configured_base_url || '').replace(/\/$/, '');
+        var want = String((info && info.base_url) || '').replace(/\/$/, '');
+        return !!got && !!want && got !== want;
+    }
+    function openInstall(item){
+        var id = String(item.id || '').toLowerCase();
+        installTarget = id;
+        var name = installNames[id] || item.name || id;
+        installTitle.textContent = '写入 ' + name + ' 配置？';
+        installPath.textContent = configPathOf(item);
+        installHint.textContent = item.kind === 'cli' ? '会先备份原文件，重启终端后生效。' : '会先备份原文件，重启 ' + name + ' 后生效。';
+        installModal.hidden = false;
+        installConfirm.disabled = false;
+        installConfirm.textContent = '确认写入';
+    }
+    function renderInstallRows(){
+        installList.innerHTML = '';
+        var shown = 0;
+        Object.keys(installAgents).forEach(function(id){
+            var item = installAgents[id];
+            if(!item || item.installed !== true) return;
+            if(!installNames[id] || !installableOf(id, item)) return;
+            shown += 1;
+            var name = installNames[id];
+            var stale = isStale(item);
+            var done = item.configured === true && !stale;
+            var row = document.createElement('div');
+            row.className = 'install-row';
+            var text = document.createElement('div');
+            var title = document.createElement('p');
+            title.textContent = name;
+            var hint = document.createElement('p');
+            hint.className = 'hint';
+            hint.textContent = done
+                ? '已接入 NOVAI MCP'
+                : (stale ? '配置指向旧地址 ' + (item.configured_base_url || '') + '，建议更新' : (item.kind === 'cli' ? '写入后重启终端生效' : '写入后重启客户端生效'));
+            text.appendChild(title);
+            text.appendChild(hint);
+            var action = document.createElement('button');
+            action.type = 'button';
+            action.className = 'copy-btn';
+            if(done){
+                action.textContent = '已接入';
+                action.disabled = true;
+            } else {
+                action.textContent = '一键接入 ' + name + (stale ? '（更新）' : '');
+                action.addEventListener('click', function(){ openInstall(item); });
+            }
+            row.appendChild(text);
+            row.appendChild(action);
+            installList.appendChild(row);
+        });
+        installLine.hidden = shown === 0;
+        if(shown > 0) setStatus('', false);
+    }
+    function loadInstalled(){
+        return fetch('/api/mcp/installed-agents', { headers: { Accept: 'application/json' } })
+            .then(function(r){ if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+            .then(function(data){
+                installAgents = {};
+                var list = (data && (data.agents || data.installed_agents || data.installed || data.items)) || [];
+                if(Array.isArray(list)){
+                    list.forEach(function(item){
+                        if(typeof item === 'string'){ installAgents[String(item).toLowerCase()] = { id: item, installed: true, configured: false }; return; }
+                        if(item && item.id) installAgents[String(item.id).toLowerCase()] = item;
+                    });
+                }
+                renderInstallRows();
+            })
+            .catch(function(e){
+                installLine.hidden = false;
+                installList.innerHTML = '';
+                setStatus('读取本机客户端失败：' + ((e && e.message) || '网络错误') + '，可复制下面的配置手动接入。', true);
             });
-        })
-        .catch(function(){});
+    }
+    infoReady.then(loadInstalled);
+
     installModal.addEventListener('click', function(e){
         if(e.target.closest && e.target.closest('[data-install-cancel]')){ e.preventDefault(); closeInstall(); return; }
         if(e.target.closest && e.target.closest('#installConfirm')){
             e.preventDefault();
-            if(!claudeAgent) return;
+            if(!installTarget) return;
+            var id = installTarget;
+            var item = installAgents[id] || {};
+            var name = installNames[id] || item.name || id;
             installConfirm.disabled = true;
             installConfirm.textContent = '写入中…';
-            fetch('/api/mcp/install-agent', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ id: 'claude', confirm: true }) })
+            fetch('/api/mcp/install-agent', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ id: id, confirm: true }) })
                 .then(function(r){ return r.json().catch(function(){ return {}; }).then(function(data){ if(!r.ok) throw new Error(data.detail || ('HTTP ' + r.status)); return data; }); })
                 .then(function(data){
                     closeInstall();
-                    setInstalledStatus(data.already ? 'Claude 之前已接入过' : 'Claude 已接入 NOVAI MCP，重启 Claude 后生效');
+                    return loadInstalled().then(function(){
+                        setStatus(data.already ? (name + ' 之前已接入过') : ('已写入配置，重启 ' + name + ' 生效'), false);
+                    });
                 })
-                .catch(function(err){ installConfirm.disabled = false; installConfirm.textContent = '确认写入'; alert((err && err.message) || '写入失败'); });
+                .catch(function(err){
+                    installConfirm.disabled = false;
+                    installConfirm.textContent = '确认写入';
+                    setStatus('写入失败：' + ((err && err.message) || '网络错误'), true);
+                });
         }
     });
 })();

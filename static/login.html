@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登录 · NOVAI</title>
     <link rel="icon" href="/static/images/logo.png" type="image/png">
-    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.07.1793785603">
+    <link rel="stylesheet" href="/static/css/marvis-shared.css?v=2.0.08.1793785603">
     <script>
         (function () {
             try {
@@ -142,6 +142,13 @@
             color: var(--text-2);
         }
 
+        .field>span em {
+            font-style: normal;
+            margin-left: 6px;
+            font-weight: var(--font-weight-regular);
+            color: var(--text-3);
+        }
+
         .field input {
             width: 100%;
             height: 42px;
@@ -256,7 +263,7 @@
         <div class="brand">
             <img src="/static/images/logo.png" alt="NOVAI">
             <span class="brand-name">NOVAI</span>
-            <span class="brand-tag">邀请内测</span>
+            <span class="brand-tag">局域网版</span>
         </div>
 
         <main class="card">
@@ -286,10 +293,10 @@
                 </div>
 
                 <label class="field" id="invite-field" hidden>
-                    <span>邀请码</span>
+                    <span>邀请码<em id="invite-optional">选填</em></span>
                     <input id="invite-code" name="invite_code" type="text" inputmode="numeric"
-                        autocomplete="one-time-code" placeholder="6 位数字" maxlength="32" required>
-                    <span class="hint">由管理员发放；旧格式 NOVAI-XXXX-XXXX-XXXX 也可以直接粘贴。</span>
+                        autocomplete="off" placeholder="有的话填上，可获得对应权限" maxlength="32">
+                    <span class="hint" id="invite-hint">选填：有邀请码可以填，没有也能注册。</span>
                 </label>
 
                 <div class="alert" id="alert" role="alert" hidden></div>
@@ -297,7 +304,7 @@
                 <button class="primary" id="submit" type="submit">登录</button>
             </form>
 
-            <div class="footer">邀请制内测 · 没有邀请码请联系管理员</div>
+            <div class="footer">局域网内可自由注册 · 有邀请码可以填</div>
         </main>
 
         <div class="meta">NOVAI · 登录后回到你刚才访问的页面</div>
@@ -312,6 +319,8 @@
             var passwordInput = document.getElementById('password');
             var inviteField = document.getElementById('invite-field');
             var inviteInput = document.getElementById('invite-code');
+            var inviteHint = document.getElementById('invite-hint');
+            var inviteOptional = document.getElementById('invite-optional');
             var alertBox = document.getElementById('alert');
             var submitBtn = document.getElementById('submit');
             var title = document.getElementById('card-title');
@@ -320,6 +329,10 @@
             var forgotRow = document.getElementById('forgot-row');
             var mode = 'login';
             var authAvailable = true;
+            // 注册默认开放（2026-11）：只有管理员显式打开「需要邀请码」才必填；
+            // 还没有任何账号时（第一个注册的是管理员）不显示邀请码。
+            var inviteRequired = false;
+            var hasUsers = true;
             var nextTarget = sanitizeNext(new URLSearchParams(location.search).get('next'));
 
             function sanitizeNext(raw) {
@@ -341,6 +354,21 @@
                 alertBox.textContent = '';
             }
 
+            // 邀请码字段：登录时隐藏；注册时默认选填（另有账号时），管理员打开必填才 required
+            function applyInviteField(isRegister) {
+                var fieldMode = !isRegister ? 'hidden' : (!hasUsers ? 'none' : (inviteRequired ? 'required' : 'optional'));
+                inviteField.hidden = fieldMode === 'hidden' || fieldMode === 'none';
+                inviteInput.required = fieldMode === 'required';
+                inviteOptional.textContent = fieldMode === 'required' ? '必填' : '选填';
+                if (fieldMode === 'required') {
+                    inviteInput.placeholder = '向管理员索取 6 位邀请码';
+                    inviteHint.textContent = '管理员开启了凭邀请码注册，请向管理员索取。';
+                } else {
+                    inviteInput.placeholder = '有的话填上，可获得对应权限';
+                    inviteHint.textContent = '选填：有邀请码可以填，没有也能注册。';
+                }
+            }
+
             function setMode(nextMode) {
                 mode = nextMode === 'register' ? 'register' : 'login';
                 var isRegister = mode === 'register';
@@ -349,14 +377,17 @@
                 });
                 title.textContent = isRegister ? '注册' : '登录';
                 sub.textContent = isRegister
-                    ? '填写邀请码创建账号，注册成功后会直接登录。'
+                    ? '填好用户名和密码就能注册，注册成功后会直接登录。'
                     : '使用账号密码登录，进入你的创作工作台。';
-                inviteField.hidden = !isRegister;
-                inviteInput.required = isRegister;
-                forgotRow.hidden = isRegister || !authAvailable;
+                applyInviteField(isRegister);
+                forgetRowHidden(isRegister);
                 passwordInput.setAttribute('autocomplete', isRegister ? 'new-password' : 'current-password');
                 submitBtn.textContent = isRegister ? '注册并登录' : '登录';
                 clearAlert();
+            }
+
+            function forgetRowHidden(isRegister) {
+                forgotRow.hidden = isRegister || !authAvailable;
             }
 
             tabs.forEach(function (tab) {
@@ -388,8 +419,8 @@
                     showAlert('请填写用户名和密码。');
                     return;
                 }
-                if (mode === 'register' && !inviteInput.value.trim()) {
-                    showAlert('注册需要邀请码。');
+                if (mode === 'register' && inviteInput.required && !inviteInput.value.trim()) {
+                    showAlert('管理员开启了邀请码注册，请填写邀请码。');
                     return;
                 }
 
@@ -435,6 +466,17 @@
                         return;
                     }
                     if (data.username) location.replace(nextTarget || '/');
+                })
+                .catch(function () { });
+
+            // 注册要不要邀请码由后端决定（默认不需要）；读不到就按开放注册处理，不让页面卡住
+            fetch('/api/auth/config', { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+                .then(function (response) { return response.json(); })
+                .then(function (data) {
+                    if (!data) return;
+                    inviteRequired = data.invite_required === true;
+                    hasUsers = data.has_users !== false;
+                    applyInviteField(mode === 'register');
                 })
                 .catch(function () { });
 

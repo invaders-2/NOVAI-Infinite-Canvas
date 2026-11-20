@@ -5,18 +5,10 @@ export type LibraryItem = {
   natural_w?: number; natural_h?: number; prompt?: string; source?: string; canvas_title?: string; folder?: string;
   /** 资产库条目才有：条目 id / 用途 / 所属产品档案（放到画布时写进节点 gen.asset） */
   assetId?: string; use?: string; productId?: string;
-  /** AI 分类结果：一句话描述 + 标签，抽屉搜索会一起匹配 */
+  /** 可选：一句话描述 + 标签；目前没有来源填充，字段保留给其它来源 */
   summary?: string; tags?: string[];
 };
 
-/** 从资产库条目的 classification 里取标签（flat[].tag + tags[]，去重保序） */
-export function classificationTags(cls: any, limit = 12): string[] {
-  if (!cls || typeof cls !== "object") return [];
-  const out: string[] = [];
-  for (const e of Array.isArray(cls.flat) ? cls.flat : []) { const t = String(e?.tag || "").trim(); if (t && !out.includes(t)) out.push(t); }
-  for (const raw of Array.isArray(cls.tags) ? cls.tags : []) { const t = String(raw || "").trim(); if (t && !out.includes(t)) out.push(t); }
-  return out.slice(0, limit);
-}
 export type LibraryCategory = { id: string; name: string; count: number; kind: string };
 export type LibraryData = { items: LibraryItem[]; categories: LibraryCategory[] };
 
@@ -44,8 +36,6 @@ export function mergeAssetSources(canvasData: any, localData: any, assetData: an
       // 同一个文件既在画布里又在资产库里：补上资产库的条目信息
       if (raw.assetId && !old.assetId) {
         old.assetId = String(raw.assetId); if (raw.use) old.use = String(raw.use); if (raw.product_id) old.productId = String(raw.product_id);
-        const tags = classificationTags(raw.classification); if (tags.length) old.tags = tags;
-        if (raw.classification?.summary) old.summary = String(raw.classification.summary);
       }
       old.natural_w = old.natural_w || Number(raw.natural_w || raw.width) || 0;
       old.natural_h = old.natural_h || Number(raw.natural_h || raw.height) || 0;
@@ -54,8 +44,6 @@ export function mergeAssetSources(canvasData: any, localData: any, assetData: an
     const item: LibraryItem = {
       id: String(raw.id || url), name: String(raw.name || raw.title || "素材"), url, kind, categoryIds: [...new Set(categoryIds)],
       ...(raw.assetId ? { assetId: String(raw.assetId) } : {}), ...(raw.use ? { use: String(raw.use) } : {}), ...(raw.product_id ? { productId: String(raw.product_id) } : {}),
-      ...(raw.classification?.summary ? { summary: String(raw.classification.summary) } : {}),
-      ...(classificationTags(raw.classification).length ? { tags: classificationTags(raw.classification) } : {}),
       natural_w: Number(raw.natural_w || raw.width) || 0, natural_h: Number(raw.natural_h || raw.height) || 0,
       prompt: String(raw.prompt || ""), source: String(raw.source || ""),
       canvas_title: String(raw.canvas_title || ""), folder: String(raw.folder || ""),

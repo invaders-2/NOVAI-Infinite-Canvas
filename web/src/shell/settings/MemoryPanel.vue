@@ -2,7 +2,7 @@
 // 记忆：长期记忆库（/api/memories）的列表、批量启停与新增。
 // 与 GPT 对话页记忆库同一套数据与作用域口径（全局 / 本对话），样式沿用设置页现有卡片/行/开关。
 // 后端没有「总开关」字段：批量启停逐条 PATCH 每条的 enabled，不新造字段。
-import { ref, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import SetCard from './SetCard.vue';
 import SetRow from './SetRow.vue';
 import NvSwitch from '../../components/NvSwitch.vue';
@@ -22,7 +22,30 @@ const listDesc = computed(() => {
     return `共 ${L.memories.length} 条 · ${enabledCount.value} 条已启用`;
 });
 
-onMounted(loadMemories);
+onMounted(() => { loadMemories(); refreshSmartMemory(); });
+
+/* 画布助手智能记忆：自动摘要 / 项目档案 / 记忆候选卡片 / 跨画布检索的总开关（默认关，存后端 settings.json）。
+   「记住……」这类手动记忆不受影响，一直可用。locked = 被环境变量固定，设置页只读。 */
+const smartMemory = reactive({ enabled: false, locked: false, available: true, ready: false });
+async function refreshSmartMemory() {
+    try {
+        const r = await fetch('/api/agent/smart-memory');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        Object.assign(smartMemory, { enabled: Boolean(d.enabled), locked: Boolean(d.locked), available: d.available !== false, ready: true });
+    } catch (e) { Object.assign(smartMemory, { enabled: false, ready: false }); }
+}
+async function saveSmartMemory(value) {
+    try {
+        const r = await fetch('/api/agent/smart-memory', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: value }) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        smartMemory.enabled = Boolean(d.enabled);
+        toast(value ? '已开启画布助手智能记忆' : '已关闭画布助手智能记忆', { icon: 'check' });
+    } catch (e) { toast('保存智能记忆设置失败', { danger: true, icon: 'alert' }); }
+    refreshSmartMemory();
+}
+
 
 async function setAll(enabled) {
     if (busy.value || !L.memories.length) return;
@@ -74,6 +97,12 @@ async function remove(item) {
                     <span class="nv-field grow"><input v-model="text" type="text" placeholder="例如：回答用中文、少用术语" maxlength="1000" aria-label="新增记忆内容" @keydown.enter="submit" /></span>
                     <button type="button" class="nv-btn sm primary" :disabled="L.adding || !text.trim()" @click="submit">添加</button>
                 </div>
+            </SetRow>
+        </SetCard>
+        <SetCard title="画布助手智能记忆" desc="默认关闭。手动让助手「记住……」一直可用；开启后助手还会自动整理对话、提炼你的偏好。">
+            <SetRow label="开启智能记忆" desc="每次对话结束后在后台整理摘要和项目档案，新对话自动接上进度；从聊天里提炼偏好弹卡片让你勾选；可参考其他画布记过的内容。每次对话会在后台多调用一次模型">
+                <NvSwitch :model-value="smartMemory.enabled" label="开启画布助手智能记忆" :disabled="!smartMemory.ready || smartMemory.locked || !smartMemory.available" @update:model-value="saveSmartMemory" />
+                <span v-if="smartMemory.locked" class="wp-hint">已由环境变量固定</span>
             </SetRow>
         </SetCard>
     </div>

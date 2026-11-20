@@ -14,16 +14,17 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 
 const ui = 'novai-canvas-ui/src/canvas/canvas-next/ui';
 
-/* ---------- 工具条入口：重打光 → 调色 → 无损改图 → 更多 ---------- */
+/* ---------- 工具条入口：局部重绘 → 调色 → 无损改图 → 更多（重打光收进「更多」） ---------- */
 const gen = read(ui + '/GenPanel.tsx');
-const imgRow = gen.split('\n').find((l) => l.includes('B("crop"') && l.includes('B("more"'));
+const imgRow = gen.split('\n').find((l) => l.includes('B("mask"') && l.includes('B("more"'));
 assert(imgRow, '找到图片节点工具条那一行');
 assert(imgRow.includes('B("adjust", "palette", "调色")'), '工具条有「调色」按钮（palette 线性图标）');
-assert(imgRow.indexOf('"relight"') < imgRow.indexOf('"adjust"'), '调色排在「重打光」之后');
-assert(imgRow.indexOf('"adjust"') < imgRow.indexOf('"lossless"'), '调色排在「无损改图」之前');
+assert(!imgRow.includes('"relight"'), '重打光不在条上（已收进「更多」菜单）');
+assert(imgRow.indexOf('"adjust"') < imgRow.indexOf('"lossless"'), '无损改图排在「调色」旁边（之后）');
 
 /* ---------- registry / Editors 接线 ---------- */
 const reg = read(ui + '/editors/registry.tsx');
+assert(reg.includes('data-k="relight"') && reg.includes('<Icon name="sun" size="s" />重打光'), '「更多」菜单里有「重打光」行');
 assert(reg.includes('from "./ColorAdjust"'), 'registry 引入 ColorAdjust');
 assert(reg.includes('if (kind === "adjust") return openColorAdjust(id);'), 'cn:editor 的 adjust 路由到 openColorAdjust');
 const route = reg.slice(reg.indexOf('kind === "adjust"'), reg.indexOf('kind === "adjust"') + 120);

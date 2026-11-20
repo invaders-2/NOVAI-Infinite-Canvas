@@ -100,9 +100,12 @@ export function createBridgeBackend(): CanvasBackend {
   let modelOff: (() => void) | null = null;
   let modelFocusBound = false;
   let modelFocusKick: (() => void) | null = null;
-  function invalidateModels() {
+  function invalidateModels(opts?: { silent?: boolean }) {
     if (disposed) return;
     modelCache = null;
+    // silent：只作废缓存、下回取模型时重拉，不主动通知订阅方。窗口焦点 / 可见性回到前台时用这条 ——
+    // 否则每次切走再切回来都会让画布整体重拉模型、整棵树重渲一遍，画面会闪。
+    if (opts && opts.silent) return;
     for (const cb of [...modelSubs]) { try { cb(); } catch { /* 单个订阅方失败不影响其它 */ } }
   }
   function ensureModelInvalidation() {
@@ -116,7 +119,15 @@ export function createBridgeBackend(): CanvasBackend {
     }
     if (!modelFocusBound && typeof window !== "undefined" && typeof window.addEventListener === "function") {
       modelFocusBound = true;
-      modelFocusKick = () => { if (typeof document !== "undefined" && document.visibilityState === "hidden") return; invalidateModels(); };
+      let lastFocusKick = 0;
+      modelFocusKick = () => {
+        if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+        // focus / visibilitychange（还有父窗口那条）会连着触发好几次，去重后再静默作废，避免连着整树重渲
+        const now = Date.now();
+        if (now - lastFocusKick < 2000) return;
+        lastFocusKick = now;
+        invalidateModels({ silent: true });
+      };
       window.addEventListener("focus", modelFocusKick);
       window.addEventListener("visibilitychange", modelFocusKick);
       // ReactIsland 与外壳同域运行；外壳重新获得焦点时也失效模型缓存，父窗口可访问时一并订阅
@@ -508,7 +519,15 @@ export function createBridgeBackend(): CanvasBackend {
   async function buildEdit(req: EditRequest, source: string): Promise<{ mode: string; prompt: string; source: string; inputs: string[] }> {
     const p = (req.params || {}) as Record<string, any>; const extra = req.prompt ? "。补充要求：" + req.prompt : "";
     switch (req.op) {
-      case "redraw": if (!req.maskDataUrl) throw new GenError("INVALID_INPUT", "先涂抹需要重绘的区域"); return { mode: "redraw", prompt: req.prompt || "自然地重绘这块区域", source: await holeOf(source, req.maskDataUrl), inputs: [] };
+      case "redraw": {
+        if (!req.maskDataUrl) throw new GenError("INVALID_INPUT", "先涂抹需要重绘的区域");
+        // 遮罩内换品：只重绘遮罩内，参考图单独作为第二张附件发（源图仍是挖成透明的 holeOf）
+        if (req.refUrl) {
+          const ref = isAssetRef(req.refUrl) ? await toDataUrl(req.refUrl) : req.refUrl;
+          return { mode: "redraw", prompt: "参考图说明：第一张是原图；第二张是涂抹遮罩（透明底上的笔迹标出要处理的部分）。把遮罩区域里的商品替换成第三张参考图里的新品：新品的形状、比例、配色、材质、细节和 logo 100% 以参考图为准；新品在原画面里的位置、朝向、倾斜角度和前后遮挡关系必须与原来那只商品完全一致，不要重新构图、不要移动画面里的其它东西；遮罩区域里如果有多件商品，每一件都必须替换，不能只换其中一件；每件仍然保持各自的位置、朝向、倾斜角度和前后遮挡关系。遮罩以外的区域一模一样，不要改动。" + extra, source: await holeOf(source, req.maskDataUrl), inputs: [ref] };
+        }
+        return { mode: "redraw", prompt: req.prompt || "自然地重绘这块区域", source: await holeOf(source, req.maskDataUrl), inputs: [] };
+      }
       case "erase": if (!req.maskDataUrl) throw new GenError("INVALID_INPUT", "先涂抹需要擦除的区域"); return { mode: "erase", prompt: req.prompt || "", source: await holeOf(source, req.maskDataUrl), inputs: [] };
       case "outpaint": return { mode: "outpaint", prompt: req.prompt || "", source: needsOutpaintPadding(p) ? await padded(source) : source, inputs: [] };
       case "annotate": if (!req.maskDataUrl) throw new GenError("INVALID_INPUT", "先在图上画出要改的位置"); return { mode: "prompt", prompt: `按图中红色标注的位置修改这张图：${req.prompt || "按标注处理"}。输出修改后的完整图片，不要保留红色标注笔迹，其余部分保持不变。`, source: await annotated(source, req.maskDataUrl), inputs: [] };
@@ -517,8 +536,16 @@ export function createBridgeBackend(): CanvasBackend {
       case "enhance": return { mode: "prompt", prompt: `把这张图高清增强为 2 倍分辨率：提升清晰度和细节，去除噪点和压缩痕迹，内容、构图、颜色完全不变${extra}`, source, inputs: [] };
       // 生成模型大多输不出透明通道（会画一张假棋盘格）：让它换成纯绿背景，回来后本地抠成真透明
       case "cutout": return { mode: "prompt", prompt: `把画面主体完整保留、原样不动，背景全部换成纯绿色（#00FF00），绿色均匀平整，没有渐变、阴影、倒影和纹理，主体边缘干净清晰${extra}`, source, inputs: [] };
-      // 白膜：人物 + 场景统一转成白色石膏雕塑（提示词和 NOVAI 适配器保持同一套要求）
-      case "whitemodel": return { mode: "prompt", prompt: "把照片里的人物变成纯白色的服装店人台模特：像人体模特一样身上没有衣服，保持原来的姿势、动作、镜头角度和构图，全身哑光纯白、不偏黄（不要米白或奶白），浅灰白摄影棚背景，柔和的棚拍光和淡淡阴影，不要删除人物，不要文字、水印、边框" + extra, source, inputs: [] };
+      // 白膜三档（提示词和 NOVAI 适配器 novaiBackend.ts 逐字一致）：
+      //   人台 —— 人物 + 场景统一转成白色石膏人台（服装展示）；
+      //   白模 —— 商品保留外形与机位，抹掉细节和颜色，做成未上色的石膏粗模（商品白膜）；
+      //   清场 —— 商品连同它的接触投影一起移除，补全背景，只留干净场景（商品图换品前用）。
+      case "whitemodel": {
+        const mannequin = "把照片里的人物变成纯白色的服装店人台模特：像人体模特一样身上没有衣服，保持原来的姿势、动作、镜头角度和构图，全身哑光纯白、不偏黄（不要米白或奶白）；背景换成无缝纯白，没有纹理、渐变和杂物，不要浅灰底；商品和人物脚下留淡淡的地面投影；画面里除了人物和脚下的淡投影之外不要出现任何东西 —— 原图里的椅子、沙发、床、包、台面、家具、道具、布景、墙饰全部去掉，不要把它们也变成白色留在画面里；不要删除人物，不要文字、水印、边框";
+        const blockout = "把画面里的商品做成纯白色的石膏粗模，背景也换成纯白：商品和背景都是纯白（#FFFFFF），不偏黄、不偏米、不偏灰、不带任何色温；保留原商品的整体轮廓、比例、摆放角度、机位、构图和它与台面的接触投影；去掉所有细节 —— 缝线、鞋带结构、鞋底花纹、logo、印花、图案、装饰、材质纹理和反光全部抹掉；表面平滑哑光、纯白、只有大的体块起伏；背景是无缝纯白、没有任何纹理、渐变、暗角和杂物；商品和背景之间只靠柔和的浅灰投影与极淡的轮廓暗部区分，除此之外整张画面只有白色和中性灰；外形必须和原商品完全一致 —— 轮廓、比例、摆放角度、机位一个都不改，不要捏软、不要变形、不要重新设计，只做「抹掉细节」这一件事；画面里除了这件商品和它的接触投影之外不要出现任何东西（不要台面、道具、布景、包装、标签）；不要出现第二个影子，不要新增物体，不要文字、水印、边框";
+        const clear = "把画面里的商品完整移除，并且连它压在台面或地面上的接触投影一起去掉：只移除商品和它的接触投影，不要留下任何商品残影、半透明轮廓、抠图毛边或边缘描边；商品原来挡住的背景要按周围的纹理、颜色和透视自然补全，补出来的台面、墙面和光影要跟原画面完全接得上；保留原来的机位、构图、布光和整体氛围，背景颜色保持原样（不要换成纯白或其它颜色），画面里其余物体的位置、比例和光影都不要动；输出一张没有商品的干净场景图：不要出现第二个影子，不要凭空生成新物体，不要新增道具或装饰，不要文字、水印、边框";
+        return { mode: "prompt", prompt: (p.tier === "clear" ? clear : p.tier === "blockout" ? blockout : mannequin) + extra, source, inputs: [] };
+      }
       default: return { mode: "prompt", prompt: req.prompt || "", source, inputs: [] };
     }
   }

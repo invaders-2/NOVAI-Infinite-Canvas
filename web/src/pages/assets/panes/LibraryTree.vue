@@ -1,9 +1,9 @@
 <script setup>
-// 资产库左栏：资产库 → 图片分组 → 智能分类；库 / 分组的操作条（新分组 / 重命名 / 删除，删除需再点一次确认）与树内编辑
+// 资产库左栏：资产库 → 图片分组；库 / 分组的操作条（新分组 / 重命名 / 删除，删除需再点一次确认）与树内编辑
 import NvIcon from '../../../components/NvIcon.vue';
 import TreeEdit from '../parts/TreeEdit.vue';
-import SmartClassTree from '../parts/SmartClassTree.vue';
 import { run } from '../lib/state.js';
+import { auth } from '../../../lib/auth.js';
 import * as A from '../lib/library.js';
 
 const L = A.L;
@@ -11,7 +11,7 @@ const libEditKinds = ['library-rename', 'category-new'];
 const catEditKinds = ['category-new', 'category-rename'];
 function save(name, done) { run(A.saveTreeEdit(name)).finally(done); }
 function isLibOn(lib) { return lib.id === A.libId(); }
-function catOn(cat) { return cat.id === A.catId() && L.focus === 'category' && !A.activeClassEntry(); }
+function catOn(cat) { return cat.id === A.catId() && L.focus === 'category'; }
 </script>
 
 <template>
@@ -19,7 +19,7 @@ function catOn(cat) { return cat.id === A.catId() && L.focus === 'category' && !
         <div class="am-ph">
             <TreeEdit v-if="L.treeEdit && L.treeEdit.placement === 'head'" head :value="L.treeEdit.value" :placeholder="L.treeEdit.label" @save="save" @cancel="L.treeEdit = null" />
             <template v-else>
-                <div class="pt"><b>资产层级</b><span>先选库，再选分组</span></div>
+                <div class="pt"><b>资产层级</b><span>{{ auth.loggedIn ? '只显示自己的素材库' : '先选库，再选分组' }}</span></div>
                 <div class="pa"><button type="button" class="am-ib" title="新建资产库" @click="A.startTreeEdit('library-new')"><NvIcon name="plus" /></button></div>
             </template>
         </div>
@@ -54,8 +54,6 @@ function catOn(cat) { return cat.id === A.catId() && L.focus === 'category' && !
                     </template>
                 </template>
                 <div v-if="!A.imageCats(lib).length" class="am-temp">暂无分组</div>
-                <SmartClassTree :entries="A.classEntries(lib)" :active-key="L.classFilter" :open-group="L.openGroup"
-                                @root="A.classRoot(lib.id)" @group="A.toggleGroup" @filter="k => A.toggleClassFilter(k, lib.id)" />
                 <div class="am-navsep"></div>
             </template>
         </template>

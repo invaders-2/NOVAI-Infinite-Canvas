@@ -482,7 +482,7 @@ const runToTable = async (docIn, output, replies = [tableJson]) => {
     /* ---------- [10] 表格缩略图走 media-preview（不再挂 <video>） ---------- */
     console.log('[10] media-preview 缩略图');
     eq(table.previewThumbUrl('/assets/input/a.jpg', 96), '/api/media-preview?w=96&url=%2Fassets%2Finput%2Fa.jpg', '本地素材拼 media-preview');
-    eq(table.previewThumbUrl('/output/ai/b.mp4', 192), '/api/media-preview?w=192&url=%2Foutput%2Fai%2Fb.mp4', '视频同样走 media-preview（后端抽帧当封面）');
+    eq(table.previewThumbUrl('/output/ai/b.mp4', 192), '/api/media-preview?w=192&url=%2Foutput%2Fai%2Fb.mp4&vf=2', '视频同样走 media-preview（后端抽帧当封面）');
     eq(table.previewThumbUrl('https://x/y.png', 96), 'https://x/y.png', 'http 地址原样');
     eq(table.previewThumbUrl('openarc-asset:abc', 96), 'openarc-asset:abc', 'openarc-asset 引用原样');
     eq(table.previewThumbUrl('data:image/png;base64,xx', 96), 'data:image/png;base64,xx', 'data URL 原样');

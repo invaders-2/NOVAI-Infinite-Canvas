@@ -8,7 +8,24 @@
    - 只用填充 / 柔影 / 间距表达层级，不画 border / hairline。
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* ── 面板壳：浮起玻璃卡（margin 12 + 18 圆角 + 双层柔影） ─────────────── */
+/* ── 面板壳：浮起玻璃卡（margin 12 + 18 圆角 + 四层柔影） ─────────────── */
+/* 面板直接压在浅色画布上，原来那种单层大影会在边缘压出一圈灰带（242 被吃到 214），
+   所以拆成四层：近层只负责边缘几级灰度，远层把衰减拖到 100px 开外，看不出断层。
+   Chromium 的阴影模糊半径到 ~125px 就封顶，长尾只能靠远层这一条拉出来。 */
+.cn-root {
+  --ap2-shell-shadow:
+      0 3px 10px rgba(0, 0, 0, .014),
+      0 10px 34px rgba(0, 0, 0, .012),
+      0 24px 80px rgba(0, 0, 0, .010),
+      0 42px 140px rgba(0, 0, 0, .090);
+}
+.cn-root[data-theme=dark] {
+  --ap2-shell-shadow:
+      0 3px 10px rgba(0, 0, 0, .012),
+      0 10px 34px rgba(0, 0, 0, .010),
+      0 24px 80px rgba(0, 0, 0, .009),
+      0 42px 140px rgba(0, 0, 0, .075);
+}
 .cn-root #agent.ap2-agent {
   margin: 12px 0 12px 12px;
   border-radius: 18px;
@@ -16,7 +33,7 @@
   background: var(--glass-bg);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-shadow);
+  box-shadow: var(--ap2-shell-shadow);
   overflow: hidden;
 }
 .cn-root #agent.ap2-agent[data-busy] {
@@ -518,6 +535,26 @@
 .cn-root #agent.ap2-agent .ap2-queue-btn[aria-label="立即发送"] { color: var(--fg); }
 
 .cn-root #agent.ap2-agent .ap2-ctxrow { gap: 5px; padding: 2px 2px 0; }
+/* 以图搜图：Boss 不要外面那层白色圆角胶囊底（.ap2-ctxrow 的卡片底），改成输入区里的一行纯文字 / 图标按钮。
+   无底色、无边框、无胶囊，hover 只变字色；只在选中图片节点时出现，空态不占一行。 */
+.cn-root #agent.ap2-agent .ap2-revlink {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 0 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--fg2);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  transition: color var(--d-quick) var(--e-std);
+}
+.cn-root #agent.ap2-agent .ap2-revlink:hover { color: var(--hi); }
+.cn-root #agent.ap2-agent .ap2-revlink svg { width: 12px; height: 12px; opacity: 0.85; }
 .cn-root #agent.ap2-agent .ap2-input {
   border: 0;
   border-radius: 18px;
@@ -802,7 +839,7 @@
 /* ── T8 补丁：主题级覆盖（canvas-next.css 的 [data-theme=light] #agent 同特异性但更靠后） ── */
 .cn-root[data-theme=light] #agent.ap2-agent,
 .cn-root[data-theme=dark] #agent.ap2-agent {
-  box-shadow: var(--glass-shadow);
+  box-shadow: var(--ap2-shell-shadow);
 }
 .cn-root[data-theme=dark] #agent.ap2-agent {
   /* 深色面板比画布略亮一档，避免和 #000 画布糊成一块硬边 */
@@ -2104,3 +2141,388 @@
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
 }
 .cn-root #agent.ap2-agent .ap2-composer-float .ap2-ctxrow:empty { display: none; }
+
+/* ── 技能胶囊配色（正式默认 A teal：不带参数就是青绿；?skillTone=neutral 才回到中性灰）
+   验收口：?skillTone=teal|teal-icon|amber|mist|forest|terracotta|cocoa|graphite|purple|dot|badge-only|neutral
+   只作用于输入区里的技能记号（data-mk=skill）：素材 / 节点 / 应用胶囊仍走中性灰。
+   胶囊的高度 / 圆角 / 间距 / 结构不动，只换底色与字色；不描边、不发光、不加渐变。
+   底色用 color-mix(色 10%/16%, transparent) 叠在输入框底上，深浅两套值分开给。 ── */
+.cn-root {
+  --skill-chip-bg: color-mix(in srgb, #0F7A6C 10%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #0F7A6C 16%, transparent);
+  --skill-chip-fg: #0F7A6C;
+  --skill-chip-icon: #0F7A6C;
+  --skill-chip-badge: #0F7A6C;
+}
+.cn-root[data-theme=dark] {
+  --skill-chip-bg: color-mix(in srgb, #7ED9C8 16%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #7ED9C8 24%, transparent);
+  --skill-chip-fg: #7ED9C8;
+  --skill-chip-icon: #7ED9C8;
+  --skill-chip-badge: #7ED9C8;
+}
+/* E neutral：只有显式 ?skillTone=neutral 才回到改前的中性灰 */
+.cn-root[data-skill-tone=neutral] {
+  --skill-chip-bg: rgba(var(--ink), .09);
+  --skill-chip-bg-hover: rgba(var(--ink), .16);
+  --skill-chip-fg: var(--fg);
+  --skill-chip-icon: var(--fg2);
+  --skill-chip-badge: var(--fg3);
+}
+/* A teal：低饱和青绿（正式默认；显式传参时与默认值完全一致） */
+.cn-root[data-skill-tone=teal] {
+  --skill-chip-bg: color-mix(in srgb, #0F7A6C 10%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #0F7A6C 16%, transparent);
+  --skill-chip-fg: #0F7A6C;
+  --skill-chip-icon: #0F7A6C;
+  --skill-chip-badge: #0F7A6C;
+}
+.cn-root[data-theme=dark][data-skill-tone=teal] {
+  --skill-chip-bg: color-mix(in srgb, #7ED9C8 16%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #7ED9C8 24%, transparent);
+  --skill-chip-fg: #7ED9C8;
+  --skill-chip-icon: #7ED9C8;
+  --skill-chip-badge: #7ED9C8;
+}
+/* B teal-icon：不加色底，只把 sparkle 染青绿，文字退回 ink-2（底 / hover / 角标显式钉回中性灰，
+   因为默认值已经是 teal，不能靠继承） */
+.cn-root[data-skill-tone=teal-icon] {
+  --skill-chip-bg: rgba(var(--ink), .09);
+  --skill-chip-bg-hover: rgba(var(--ink), .16);
+  --skill-chip-fg: var(--fg2);
+  --skill-chip-icon: #0F7A6C;
+  --skill-chip-badge: var(--fg3);
+}
+.cn-root[data-theme=dark][data-skill-tone=teal-icon] {
+  --skill-chip-icon: #7ED9C8;
+}
+/* C amber：暖金 / 琥珀，不做促销黄 */
+.cn-root[data-skill-tone=amber] {
+  --skill-chip-bg: color-mix(in srgb, #8A5A12 10%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #8A5A12 16%, transparent);
+  --skill-chip-fg: #8A5A12;
+  --skill-chip-icon: #8A5A12;
+  --skill-chip-badge: #8A5A12;
+}
+.cn-root[data-theme=dark][data-skill-tone=amber] {
+  --skill-chip-bg: color-mix(in srgb, #E8C07A 16%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #E8C07A 24%, transparent);
+  --skill-chip-fg: #E8C07A;
+  --skill-chip-icon: #E8C07A;
+  --skill-chip-badge: #E8C07A;
+}
+/* D mist：雾蓝 / 青灰蓝，压住饱和度，和选中蓝拉开距离 */
+.cn-root[data-skill-tone=mist] {
+  --skill-chip-bg: color-mix(in srgb, #2F5FA8 10%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #2F5FA8 16%, transparent);
+  --skill-chip-fg: #2F5FA8;
+  --skill-chip-icon: #2F5FA8;
+  --skill-chip-badge: #2F5FA8;
+}
+.cn-root[data-theme=dark][data-skill-tone=mist] {
+  --skill-chip-bg: color-mix(in srgb, #9DB8E8 16%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #9DB8E8 24%, transparent);
+  --skill-chip-fg: #9DB8E8;
+  --skill-chip-icon: #9DB8E8;
+  --skill-chip-badge: #9DB8E8;
+}
+/* 默认（teal）与显式 neutral 的变量都写在文件顶部，这里只负责把变量接进胶囊皮肤 */
+.cn-root #agent.ap2-agent .ap2-md .pm-chip[data-mk=skill] {
+  background: var(--skill-chip-bg);
+  color: var(--skill-chip-fg);
+}
+.cn-root #agent.ap2-agent .ap2-md .pm-chip[data-mk=skill]:hover {
+  background: var(--skill-chip-bg-hover);
+}
+.cn-root #agent.ap2-agent .ap2-md .pm-chip[data-mk=skill] .pm-th {
+  color: var(--skill-chip-icon);
+}
+.cn-root #agent.ap2-agent .ap2-md .pm-chip[data-mk=skill] .pm-n {
+  color: var(--skill-chip-badge);
+}
+/* 换色的胶囊去掉中性灰底继承来的 inset 1px 描边（设计约束：不画发丝线）；
+   B teal-icon / J dot / K badge-only 不改底色，保持现状的胶囊皮肤，只染图标 / 角标 / 加点。
+   默认就是 teal，所以不带 data-skill-tone 属性的根节点也走这条（:not 对缺省属性成立）。 */
+.cn-root:not([data-skill-tone=neutral]):not([data-skill-tone=teal-icon]):not([data-skill-tone=dot]):not([data-skill-tone=badge-only]) #agent.ap2-agent .ap2-md .pm-chip[data-mk=skill] {
+  box-shadow: none;
+}
+.cn-root:not([data-skill-tone=neutral]):not([data-skill-tone=dot]):not([data-skill-tone=badge-only]) #agent.ap2-agent .ap2-md .pm-chip[data-mk=skill]:hover {
+  box-shadow: none;
+}
+/* ── 第 2 批（Boss 追加）：F forest / G terracotta / H cocoa / I graphite 换色，
+   J dot / K badge-only 换表达。底仍是中性灰的那两个方案不动皮肤，也不改胶囊尺寸。 ── */
+/* F forest：墨绿，偏专业 */
+.cn-root[data-skill-tone=forest] {
+  --skill-chip-bg: color-mix(in srgb, #2F6B4F 10%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #2F6B4F 16%, transparent);
+  --skill-chip-fg: #2F6B4F;
+  --skill-chip-icon: #2F6B4F;
+  --skill-chip-badge: #2F6B4F;
+}
+.cn-root[data-theme=dark][data-skill-tone=forest] {
+  --skill-chip-bg: color-mix(in srgb, #8BD3AE 16%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #8BD3AE 24%, transparent);
+  --skill-chip-fg: #8BD3AE;
+  --skill-chip-icon: #8BD3AE;
+  --skill-chip-badge: #8BD3AE;
+}
+/* G terracotta：砖红，编辑感 */
+.cn-root[data-skill-tone=terracotta] {
+  --skill-chip-bg: color-mix(in srgb, #A23E2A 10%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #A23E2A 16%, transparent);
+  --skill-chip-fg: #A23E2A;
+  --skill-chip-icon: #A23E2A;
+  --skill-chip-badge: #A23E2A;
+}
+.cn-root[data-theme=dark][data-skill-tone=terracotta] {
+  --skill-chip-bg: color-mix(in srgb, #F0A08C 16%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #F0A08C 24%, transparent);
+  --skill-chip-fg: #F0A08C;
+  --skill-chip-icon: #F0A08C;
+  --skill-chip-badge: #F0A08C;
+}
+/* H cocoa：咖啡 / 棕，暖中性 */
+.cn-root[data-skill-tone=cocoa] {
+  --skill-chip-bg: color-mix(in srgb, #6B4A2F 10%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #6B4A2F 16%, transparent);
+  --skill-chip-fg: #6B4A2F;
+  --skill-chip-icon: #6B4A2F;
+  --skill-chip-badge: #6B4A2F;
+}
+.cn-root[data-theme=dark][data-skill-tone=cocoa] {
+  --skill-chip-bg: color-mix(in srgb, #D9B48A 16%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #D9B48A 24%, transparent);
+  --skill-chip-fg: #D9B48A;
+  --skill-chip-icon: #D9B48A;
+  --skill-chip-badge: #D9B48A;
+}
+/* I graphite：石墨蓝灰，最安全的「有一点点色」 */
+.cn-root[data-skill-tone=graphite] {
+  --skill-chip-bg: color-mix(in srgb, #4A5A6B 10%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #4A5A6B 16%, transparent);
+  --skill-chip-fg: #4A5A6B;
+  --skill-chip-icon: #4A5A6B;
+  --skill-chip-badge: #4A5A6B;
+}
+.cn-root[data-theme=dark][data-skill-tone=graphite] {
+  --skill-chip-bg: color-mix(in srgb, #A9BACB 16%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #A9BACB 24%, transparent);
+  --skill-chip-fg: #A9BACB;
+  --skill-chip-icon: #A9BACB;
+  --skill-chip-badge: #A9BACB;
+}
+/* J dot：底、字、图标、角标都不动，只在胶囊最左侧补一颗 6px 圆点（浅色 #0F7A6C / 深色 #7ED9C8）。
+   圆点走绝对定位而不是 flex 子项：flex 子项会改掉 inline-flex 的基线，胶囊会整体下移约 2.5px；
+   这里把圆点占的 6px + 一个 gap 让给左内边距，胶囊宽度只多这一截，纵向位置和基线都不动。 */
+.cn-root[data-skill-tone=dot] {
+  --skill-chip-bg: rgba(var(--ink), .09);
+  --skill-chip-bg-hover: rgba(var(--ink), .16);
+  --skill-chip-fg: var(--fg);
+  --skill-chip-icon: var(--fg2);
+  --skill-chip-badge: var(--fg3);
+  --skill-chip-dot: #0F7A6C;
+}
+.cn-root[data-theme=dark][data-skill-tone=dot] { --skill-chip-dot: #7ED9C8; }
+.cn-root[data-skill-tone=dot] #agent.ap2-agent .ap2-md .pm-chip[data-mk=skill] {
+  position: relative;
+  padding-left: calc(.14em + 9.25px);
+}
+.cn-root[data-skill-tone=dot] #agent.ap2-agent .ap2-md .pm-chip[data-mk=skill]::before {
+  content: "";
+  position: absolute;
+  left: .14em;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--skill-chip-dot);
+}
+/* K badge-only：底 / 字 / 图标都不动，只把右侧「技能」小角标染青绿 */
+.cn-root[data-skill-tone=badge-only] {
+  --skill-chip-bg: rgba(var(--ink), .09);
+  --skill-chip-bg-hover: rgba(var(--ink), .16);
+  --skill-chip-fg: var(--fg);
+  --skill-chip-icon: var(--fg2);
+  --skill-chip-badge: #0F7A6C;
+}
+.cn-root[data-theme=dark][data-skill-tone=badge-only] { --skill-chip-badge: #7ED9C8; }
+/* L purple：低饱和紫，配方和 A teal 同款（浅色 10% 底 + 同族深一档字色，深色 16% 底 + 亮一档字色）。
+   紫本身色相靠蓝，刻意压低饱和（不要荧光紫 / 洋红）；不描边、不发光、不加渐变。 */
+.cn-root[data-skill-tone=purple] {
+  --skill-chip-bg: color-mix(in srgb, #6B4BD6 10%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #6B4BD6 16%, transparent);
+  --skill-chip-fg: #5B45C9;
+  --skill-chip-icon: #5B45C9;
+  --skill-chip-badge: #5B45C9;
+}
+.cn-root[data-theme=dark][data-skill-tone=purple] {
+  --skill-chip-bg: color-mix(in srgb, #B9A8FF 16%, transparent);
+  --skill-chip-bg-hover: color-mix(in srgb, #B9A8FF 24%, transparent);
+  --skill-chip-fg: #C9BCFF;
+  --skill-chip-icon: #C9BCFF;
+  --skill-chip-badge: #C9BCFF;
+}
+/* ── 第 4 批（Boss 追加）：消息气泡里的技能标 ─────────────────────────
+   位置跟输入区一致：技能胶囊插在正文里用户放的那个位置（行内），不再单独占一行。
+   颜色只吃技能胶囊那套变量（--skill-chip-*）：
+   浅色主题（气泡是深色底）→ 不透明淡青底 + 技能胶囊的深青字；
+   深色主题（气泡是白底）→ 底仍是淡青，字按同色相压深，保证小字对比度；
+   角标同色相更淡一点（用字色降低不透明度）。不描边、不发光、不加渐变；
+   名字最多露 2 个字（≈2em），超出部分用尾部 mask 渐变淡出、不用省略号（和输入区技能胶囊完全一致，.trunc 由 ChipLabel 量完再加）；
+   全名留在 title 里，不撑破气泡。上一版「深青底 + 亮青字」只作为对比备选，不进源码。 */
+.cn-root #agent.ap2-agent .msg.u .ap2-bub-skill {
+  --bs-fg: var(--skill-chip-fg);
+  --bs-icon: var(--skill-chip-icon);
+  --bs-bg: color-mix(in srgb, var(--skill-chip-fg) 10%, #fff);
+  display: inline-flex;
+  align-items: center;
+  gap: .32em;
+  min-width: 0;
+  max-width: 100%;
+  height: 1.5em;
+  margin: 0 .12em;
+  padding: 0 .45em;
+  border-radius: .5em;
+  vertical-align: -.15em;
+  background: var(--bs-bg);
+  color: var(--bs-fg);
+  font-size: .95em;
+  line-height: 1;
+}
+.cn-root[data-theme=dark] #agent.ap2-agent .msg.u .ap2-bub-skill {
+  --bs-fg: color-mix(in srgb, var(--skill-chip-fg) 35%, #0A3B33);
+  --bs-icon: color-mix(in srgb, var(--skill-chip-icon) 35%, #0A3B33);
+  --bs-bg: color-mix(in srgb, var(--skill-chip-fg) 26%, #fff);
+}
+.cn-root #agent.ap2-agent .msg.u .ap2-bub-skill .th {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--bs-icon);
+}
+.cn-root #agent.ap2-agent .msg.u .ap2-bub-skill .nm {
+  min-width: 0;
+  max-width: 2em;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.cn-root #agent.ap2-agent .msg.u .ap2-bub-skill .nm.trunc {
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 6px), transparent 100%);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 6px), transparent 100%);
+}
+.cn-root #agent.ap2-agent .msg.u .ap2-bub-skill .nb {
+  flex: none;
+  font-size: 10px;
+  opacity: .72;
+}
+
+
+/* 消息气泡里的技能胶囊：有封面时显示封面缩略图（和 ✨ 同一格），圆角小方图 */
+.cn-root #agent.ap2-agent .msg.u .ap2-bub-skill .th .ap2-bub-skill-cover { width: 1.15em; height: 1.15em; border-radius: .3em; object-fit: cover; display: block; }
+
+/* 输入列（#aIns）：复用节点生成面板的 .gp-in / .sq / .chip-in，正方形 40px；放进输入卡片里，左右跟输入文字对齐 */
+.cn-root #agent.ap2-agent .ap2-composer .ap2-in { padding: 2px 2px 8px; gap: 6px; }
+.cn-root #agent.ap2-agent .ap2-composer .ap2-in .chip-in { cursor: default; }
+
+/* 全屏模式的画布预览小窗：原来贴右下角，会压住居中的输入框（窗口不够宽时）。改到右上角标题栏下面，
+   宽度按内容列两侧的留白算，最小 200px */
+.cn-root #agent.ap2-agent.full .aprev { top: 64px; bottom: auto; right: 16px; width: max(200px, min(300px, calc((100% - 760px) / 2 - 32px))); }
+
+/* 结束后的「模型推理原文」：默认收起的一行，和步骤同级的灰字；展开后才是原文 */
+.cn-root #agent.ap2-agent .ap2-reason-fold { margin: 2px 0 6px; }
+.cn-root #agent.ap2-agent .ap2-reason-fold > summary { display: inline-flex; align-items: center; gap: 5px; list-style: none; cursor: pointer; font-size: 12px; color: var(--fg3); }
+.cn-root #agent.ap2-agent .ap2-reason-fold > summary::-webkit-details-marker { display: none; }
+.cn-root #agent.ap2-agent .ap2-reason-fold > summary:hover { color: var(--fg2); }
+.cn-root #agent.ap2-agent .ap2-reason-fold > summary .nv-i:last-child { transition: transform var(--d-quick, 160ms) ease; }
+.cn-root #agent.ap2-agent .ap2-reason-fold[open] > summary .nv-i:last-child { transform: rotate(90deg); }
+.cn-root #agent.ap2-agent .ap2-reason-fold > .ap2-think-reason { margin-top: 6px; }
+
+/* 老线程生成结果消息补的结果缩略图：一行小方图 */
+.cn-root #agent.ap2-agent .ap2-results { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; margin-top: 4px; }
+.cn-root #agent.ap2-agent .ap2-results .rcard .rt { font-size: 10px; padding: 4px 6px; }
+
+/* 助手面板浮在画布上，而不是把画布挤出一条边：
+   原来 #stage（画布）和 #agent（面板）是并排两列，画布在面板左边 12px 的留白处被硬切掉，露出一条灰带，
+   面板四周和磨砂玻璃背后也看不到画布。现在让画布底板 #vp 往右延伸到面板下面（面板打开、非全屏、非窄屏时），
+   #stage 不再裁切，面板抬到画布 UI 之上。居中 / 适配等「可用区域」仍按面板左缘算（见 ctx.rect）。 */
+.cn-root:not([data-w=narrow]) #app:has(> #agent.ap2-agent:not(.closed):not(.full)) > #stage { overflow: visible; }
+.cn-root:not([data-w=narrow]) #app:has(> #agent.ap2-agent:not(.closed):not(.full)) > #stage > #vp { right: calc(-1 * (var(--agent-w, 380px) + 12px)); }
+.cn-root:not([data-w=narrow]) #agent.ap2-agent:not(.full) { z-index: 50; }
+
+/* @ 面板：分组 / 堆叠行尾的「展开成员」按钮（默认收起），展开后成员缩进列在下面 */
+.cn-root #pop .ap2-mp-expand { display: grid; place-items: center; flex: 0 0 24px; width: 24px; height: 24px; margin-left: -2px; border-radius: 7px; color: var(--fg3); cursor: pointer; }
+.cn-root #pop .ap2-mp-expand:hover { background: var(--sunken); color: var(--fg); }
+.cn-root #pop .ap2-mp-expand svg { width: 13px; height: 13px; transition: transform 160ms var(--ease, ease); }
+.cn-root #pop .ap2-mp-expand.on svg { transform: rotate(90deg); }
+.cn-root #pop .ap2-mp-item.is-member .ap2-mp-th { width: 30px; height: 30px; flex-basis: 30px; border-radius: 8px; }
+.cn-root #pop .ap2-mp-item.is-member .ap2-mp-name { font-size: 12px; color: var(--fg2); }
+/* 分组 / 堆叠用成员图当封面时，右下角一个小图层标，和单张图区分开 */
+.cn-root #pop .ap2-mp-th.is-group { position: relative; }
+.cn-root #pop .ap2-mp-stackmark { position: absolute; right: 2px; bottom: 2px; display: grid; place-items: center; width: 14px; height: 14px; border-radius: 4px; background: rgba(0, 0, 0, .55); color: #fff; }
+.cn-root #pop .ap2-mp-stackmark svg { width: 9px; height: 9px; }
+
+/* 消息正文里 @ 的分组 / 堆叠：缩略图右下角同样的小图层标 */
+.cn-root #agent.ap2-agent .m-ment { position: relative; }
+.cn-root #agent.ap2-agent .m-ment .m-ment-stack { position: absolute; right: 0; bottom: 0; display: grid; place-items: center; width: 9px; height: 9px; border-radius: 3px; background: rgba(0, 0, 0, .6); color: #fff; line-height: 0; }
+.cn-root #agent.ap2-agent .m-ment .m-ment-stack svg { width: 7px; height: 7px; }
+
+/* ── 推理可见：收起态的推理窥视窗 + 「模型在后台思考」提示 ─────────────── */
+.cn-root #agent.ap2-agent .ap2-reason-peek {
+  max-height: 58px;
+  overflow: hidden;
+  margin: 4px 0 2px 22px;
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* 只露最后三行，顶部渐隐，看得出是在滚动的长文 */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 22px);
+}
+.cn-root #agent.ap2-agent .ap2-reason-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 2px 22px;
+  color: var(--fg3);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+.cn-root #agent.ap2-agent .ap2-reason-hint svg { flex: none; opacity: .7; }
+
+/* ── 步骤的「代码」区：参数 / 返回 / 脚本输出用代码块显示 ─────────────── */
+.cn-root #agent.ap2-agent .ap2-step-code-btn {
+  flex: none;
+  align-self: flex-start;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg3);
+  cursor: pointer;
+  opacity: .55;
+  transition: opacity .15s, background .15s;
+}
+.cn-root #agent.ap2-agent .ap2-step:hover .ap2-step-code-btn,
+.cn-root #agent.ap2-agent .ap2-step-code-btn:focus-visible,
+.cn-root #agent.ap2-agent .ap2-step-code-btn.on { opacity: 1; }
+.cn-root #agent.ap2-agent .ap2-step-code-btn:hover,
+.cn-root #agent.ap2-agent .ap2-step-code-btn.on { background: color-mix(in srgb, var(--ink, currentColor) 7%, transparent); color: var(--fg); }
+.cn-root #agent.ap2-agent .ap2-step-code {
+  margin-top: 6px;
+  min-width: 0;
+  font-size: 11.5px;
+}
+.cn-root #agent.ap2-agent .ap2-step-code .md { font-size: 11.5px; line-height: 1.55; }
+.cn-root #agent.ap2-agent .ap2-step-code .md p { margin: 6px 0 4px; color: var(--fg3); font-size: 11px; }
+.cn-root #agent.ap2-agent .ap2-step-code .md p strong { font-weight: 500; }
+.cn-root #agent.ap2-agent .ap2-step-code pre { max-height: 240px; overflow: auto; font-size: 11px; }
+/* 参数里常有很长的提示词：代码块里自动换行，不用横向拖 */
+.cn-root #agent.ap2-agent .ap2-step-code pre,
+.cn-root #agent.ap2-agent .ap2-step-code pre code { white-space: pre-wrap; word-break: break-word; }

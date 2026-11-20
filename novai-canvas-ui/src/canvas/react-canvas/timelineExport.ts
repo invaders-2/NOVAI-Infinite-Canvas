@@ -164,7 +164,8 @@ export function downloadTimelineBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = fileName.endsWith(".webm") ? fileName : fileName + ".webm";
+  // 已经带扩展名（.mp4 / .zip / .webm …）就照用；没有才按 WebM 补
+  a.download = /\.[a-z0-9]{2,5}$/i.test(fileName) ? fileName : fileName + ".webm";
   document.body.appendChild(a);
   a.click();
   a.remove();

@@ -19,43 +19,31 @@ const TMP = path.join(ROOT, '_tmp', 'market-art', 'src');
 const W = 1600, H = 900, Q = 90;
 
 // crop = [x, y, w, h]（源图像素）；null 表示不裁、整张用
+// Seedance / Kling / Gemini Omni 有官方视频：由 tools/market-art/videos.sh 出 mp4 + 封面帧
 const SHOTS = [
-    {
-        id: 'minimax',
-        source: { kind: 'url', file: 'minimax_h3.png', url: 'https://filecdn.minimax.chat/public/h3-en-v2-image-000-1785473644038.png' },
-        crop: [560, 60, 1928, 1084],
-        note: 'MiniMax H3 官方示例图：咖啡街景视频画面，人物居中偏右，避开左下角「CAFÉ」挂牌与叠字区',
-    },
     {
         id: 'gpt26',
         source: { kind: 'local', file: 'tools/market-art/sources/gpt-image-2.6.png' },
         crop: [0, 40, 1024, 576],
-        note: 'GPT-Image 2.6 示例图：我们用 APIMart gpt-image-2.6-ext 生成的玻璃蜂鸟（1024×1024），取 16:9 居中偏上，保住翅膀与主体、底部落在深色枝干',
-    },
-    {
-        id: 'fashion',
-        source: { kind: 'local', file: 'tools/market-art/sources/fashion-editorial.jpg' },
-        crop: null,
-        note: '服装大片 · 胶片暗房技能样片：我们用 APIMart seedream-5-0-pro 生成的时尚编辑图（2048×1152，正好 16:9），不裁直接缩，底部白墙与米色连衣裙承载叠字',
+        note: 'GPT Image 2.6：OpenAI 官网未提供可下载示例图，用我们经 APIMart gpt-image-2.6 生成的玻璃蜂鸟',
     },
     {
         id: 'seedream',
-        source: { kind: 'url', file: 'seedream_0.jpeg', url: 'https://arkdocs.tos-cn-beijing.volces.com/images/image-generation/Seedream50_layer_0.jpeg' },
-        crop: [0, 620, 2048, 1152],
-        quality: 88,
-        note: 'Seedream 5.0 官方示例图（火山方舟文档）：雨后雨林与苔藓树枝',
+        source: { kind: 'url', file: 'sd55-006-22d1692c.webp', url: 'https://lf3-static.bytednsdoc.com/obj/eden-cn/bdeh7uhpsuht/sd55-006-22d1692c-l.webp' },
+        crop: [0, 125, 2512, 1413],
+        note: 'Seedream 5.5 官网示例图（字节 Seed）：夜晚酒吧吧台上的白猫',
     },
     {
-        id: 'seedance',
-        source: { kind: 'url', file: 'seedance.png', url: 'https://arkdocs.tos-cn-beijing.volces.com/images/video-generation/i2v_4k.png' },
+        id: 'minimax',
+        source: { kind: 'url', file: 'minimax_h3img.jpg', url: 'https://file.cdn.minimax.io/public/h3-image-cover-1794323228475.jpg' },
+        crop: [155, 0, 969, 545],
+        note: 'MiniMax H3-Image 官网发布头图：水母 + 品牌字',
+    },
+    {
+        id: 'nanobanana',
+        source: { kind: 'url', file: 'nanobanana.jpg', url: 'https://lh3.googleusercontent.com/IQrKmeotvku7oU92ImkQ4h74TbS7A695HU4Zq633YsuNW0hvjZlndcmzyhh5-CqxFntzW6K9J1pgaTUayRTYgK93laVGdPBp2uDAdJASSm4CZprKE3Q=w1920-h1080-n-nu' },
         crop: null,
-        note: 'Seedance 2.5 官方示例图（火山方舟文档）：越野摩托实拍',
-    },
-    {
-        id: 'gemini',
-        source: { kind: 'url', file: 'gemini1600.webp', url: 'https://storage.googleapis.com/gweb-uniblog-publish-prod/images/gemini-3_model-blog_header-dark.width-1600.format-webp.webp' },
-        crop: [133, 76, 1333, 750],
-        note: 'Gemini 3 官方博客头图（Google Blog）：深色品牌视觉',
+        note: 'Nano Banana 官网示例图（Google DeepMind Gemini Image 页）：黄昏草地人像',
     },
 ];
 
@@ -67,7 +55,7 @@ async function source(shot) {
     const dest = path.join(TMP, s.file);
     if (!exists(dest)) {
         console.log('[fetch] ' + s.url);
-        execFileSync('curl', ['-fsSL', '-o', dest, s.url]);
+        execFileSync('curl', ['-fsSL', '-A', 'Mozilla/5.0'].concat(process.env.ART_PROXY ? ['-x', process.env.ART_PROXY] : []).concat(['-o', dest, s.url]));
     }
     return dest;
 }

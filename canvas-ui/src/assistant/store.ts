@@ -25,7 +25,7 @@ import {
 	switchThreadViaLegacy,
 } from "./api"
 import { isLocalImageUrl, referenceSourceRows } from "./reference"
-import { applyEvent, createSession, isTerminal, workMs } from "./session"
+import { applyEvent, createSession, finishStreaming, isTerminal, workMs } from "./session"
 
 export interface QueueItem {
 	id: string
@@ -140,6 +140,21 @@ const messageFromHistory = (item: Record<string, unknown>, createdAt = Date.now(
 	const role = String(item.role || "assistant")
 	const text = String(item.content ?? item.text ?? "")
 	const message = historyMessage(role, text, createdAt)
+	/* 历史消息里如果带了思考正文（thinking / reasoning），按已结束的 thinking part 显示 */
+	if (message.role === "assistant") {
+		const thinking = typeof item.thinking === "string" ? item.thinking : typeof item.reasoning === "string" ? item.reasoning : ""
+		if (thinking.trim()) {
+			message.parts.unshift({
+				type: "thinking",
+				id: uid("part"),
+				text: thinking,
+				totalDurationMs: Number(item.thinking_duration_ms ?? item.thinking_duration ?? item.thinking_ms) || 0,
+				streaming: false,
+				endedAt: createdAt,
+				durationLocked: true,
+			})
+		}
+	}
 	if (item.run_id) message.runId = String(item.run_id)
 	if (item.rating === "up" || item.rating === "down") message.rating = item.rating
 	const steps = Array.isArray(item.steps) ? item.steps : []
@@ -403,6 +418,7 @@ export const createAssistant = (api: CanvasAssistantHostApi): { store: Assistant
 			try {
 				api.abort()
 			} finally {
+				finishStreaming(state)
 				env.running = false
 				env.streamState = "stopped"
 				state.streamState = "stopped"

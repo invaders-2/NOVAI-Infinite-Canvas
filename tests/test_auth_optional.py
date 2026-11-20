@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """可选登录（2026-11-07）：默认模式下不登录照常用；能注册 / 登录 / 退出；
-注册方式由管理员在「需要邀请码 / 开放注册」之间切换；第一个账号是管理员。
+注册默认开放（不需要邀请码），管理员可切换成「需要邀请码」；第一个账号是管理员。
 
 跑法：venv/bin/python -m pytest -q tests/test_auth_optional.py
 """
@@ -77,11 +77,12 @@ class A_OptionalModeTest(unittest.TestCase):
         self.assertEqual(me["auth_mode"], "optional")
         self.assertFalse(me["auth_enabled"])
         self.assertFalse(me["logged_in"])
+        self.assertFalse(service.invite_required())    # 默认开放注册，不需要邀请码
 
     def test_2_first_account_is_admin_without_invite(self):
         cfg = client().get("/api/auth/config").json()
         self.assertEqual(cfg["auth_mode"], "optional")
-        self.assertTrue(cfg["invite_required"])        # 默认仍需要邀请码
+        self.assertFalse(cfg["invite_required"])       # 新库首启默认开放注册
         self.assertFalse(cfg["has_users"])
         c = client()
         r = c.post("/api/auth/register", json={"username": "owner1", "password": PASS})
@@ -93,15 +94,25 @@ class A_OptionalModeTest(unittest.TestCase):
         self.assertFalse(me["auth_enabled"])            # 可选登录：不触发前端的管理员门禁
         self.assertTrue(client().get("/api/auth/config").json()["has_users"])
 
-    def test_3_second_account_needs_invite_by_default(self):
+    def test_3_second_account_registers_without_invite(self):
+        """已有账号、但没有 invite_required 设置的老库：升级后仍然是开放注册。"""
         r = client().post("/api/auth/register", json={"username": uname(), "password": PASS})
-        self.assertEqual(r.status_code, 400)
-        self.assertEqual(r.json()["code"], "invite_required")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["user"]["role"], "user")
 
-    def test_4_admin_switches_to_open_registration(self):
+    def test_4_admin_switches_registration_mode(self):
         admin = client()
         self.assertEqual(admin.post("/api/auth/login", json={"username": "owner1", "password": PASS}).status_code, 200)
-        self.assertTrue(admin.get("/api/admin/auth-settings").json()["invite_required"])
+        self.assertFalse(admin.get("/api/admin/auth-settings").json()["invite_required"])
+        # 管理员打开「需要邀请码」：新注册立刻被拦
+        r = admin.put("/api/admin/auth-settings", json={"invite_required": True})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["invite_required"])
+        self.assertTrue(client().get("/api/auth/config").json()["invite_required"])
+        blocked = client().post("/api/auth/register", json={"username": uname(), "password": PASS})
+        self.assertEqual(blocked.status_code, 400)
+        self.assertEqual(blocked.json()["code"], "invite_required")
+        # 再关掉：恢复默认的开放注册
         r = admin.put("/api/admin/auth-settings", json={"invite_required": False})
         self.assertEqual(r.status_code, 200, r.text)
         self.assertFalse(r.json()["invite_required"])
@@ -147,6 +158,8 @@ class A_OptionalModeTest(unittest.TestCase):
         self.assertTrue(admin.put("/api/admin/auth-settings", json={"invite_required": True}).json()["invite_required"])
         r = client().post("/api/auth/register", json={"username": uname(), "password": PASS})
         self.assertEqual(r.json()["code"], "invite_required")
+        # 收尾恢复默认（开放注册），避免给后续用例留下「需要邀请码」的库
+        self.assertFalse(admin.put("/api/admin/auth-settings", json={"invite_required": False}).json()["invite_required"])
 
 
 class B_ModeSwitchTest(unittest.TestCase):

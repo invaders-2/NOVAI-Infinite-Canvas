@@ -307,13 +307,16 @@ class ProtocolUpdatesTests(unittest.TestCase):
         updates = self._updates_payload()["updates"]
         expected = updates[0]
         latest = updates[-1]
-        # 未应用的版本会一起合并：新模型期望要跨版本聚合（v1 的 4 图 1 视频 + v3 的 1 图）
+        # 未应用的版本会一起合并：新模型期望要跨版本聚合（v1 的 4 图 1 视频 + v3 的 1 图 + v5 的文本/视频）
+        # provider 里已经有的模型不会重复追加（fixture 的 chat_models 自带 gpt-5.5），期望值同步去重
+        seeded = apimart_provider()
         expected_models = {"chat": [], "image": [], "video": [], "audio": []}
         expected_changes = []
         for update in updates:
             for kind in expected_models:
+                existing = seeded.get("%s_models" % kind) or []
                 for name in update["new_models"][kind]:
-                    if name not in expected_models[kind]:
+                    if name not in expected_models[kind] and name not in existing:
                         expected_models[kind].append(name)
             # 未应用的版本会一起合并：协议变更同样跨版本按版本顺序累加（v4 又加了 8 条）
             expected_changes.extend(update.get("protocol_changes") or [])
@@ -344,8 +347,8 @@ class ProtocolUpdatesTests(unittest.TestCase):
         self.assertEqual(provider["base_url"], "https://api.apimart.ai")
         self.assertEqual(provider["protocol"], "apimart")
         self.assertIn("chat_completions_stream_default", provider.get("protocol_fields") or {})
-        # 文本类新增为 0；音频本次也必须是 0（TTS/转写/Lyria 走不了画布音乐接口）
-        self.assertEqual(body["applied"]["added_models"]["chat"], [])
+        # v5（2026-11-18）起文本侧也有新增；音频仍必须是 0（TTS/转写/Lyria 走不了画布音乐接口）
+        self.assertEqual(body["applied"]["added_models"]["chat"], expected_models["chat"])
         self.assertEqual(body["applied"]["added_models"]["audio"], [])
         self.assertEqual(sum(len(v) for v in body["applied"]["added_models"].values()),
                          sum(len(v) for v in expected_models.values()))
@@ -640,7 +643,8 @@ class ModelCapsAndAudioTests(unittest.TestCase):
         self.assertEqual((caps["max_long_edge"], caps["max_pixels"], caps["min_pixels"]),
                          (3840, 8294400, 655360))
         self.assertEqual(main.apimart_image_resolution_for_model("gpt-image-2.6-flare", "4K"), "4K")
-        self.assertEqual(main.direct_image_request_count(self.provider, "gpt-image-2.6-flare", 4), 4)
+        # n_max=4：4 张一次请求就够（直接数「请求次数」= 1；每批 4 张由 batches 的 sum/首项表达）
+        self.assertEqual(main.direct_image_request_count(self.provider, "gpt-image-2.6-flare", 4), 1)
         self.assertIs(main.apimart_image_model_caps("gpt-image-2.6-sunburst"),
                       main.APIMART_IMAGE_MODEL_CAPS["gpt-image-2-6-sunburst"])
 
@@ -689,8 +693,14 @@ class ModelCapsAndAudioTests(unittest.TestCase):
         self.assertEqual(item["new_models"]["video"], ["muse-video-ext", "apimart-zoe", "kling-v4",
                                                       "kling-v4-flash", "gemini-omni-1.2-flash",
                                                       "gemini-omni-1.2-flash-ext", "veo3.1-fast",
-                                                      "veo3.1-quality", "veo3.1-lite"])
-        self.assertEqual(item["new_models"]["chat"], [])
+                                                      "veo3.1-quality", "veo3.1-lite",
+                                                      "seedance-2-5-flash"])
+        # v5（2026-11-18）起文本侧也有增量：文档在 SVG 作者模型表/集成页模型表里给出的新 ID
+        self.assertEqual(item["new_models"]["chat"], ["gpt-5.2", "gpt-5.3-codex", "gpt-5.4",
+                                                      "gpt-5.4-mini", "gpt-5.5", "gpt-5.6-sol",
+                                                      "gpt-5.6-luna", "gpt-6-astra", "gpt-6-luna",
+                                                      "gpt-6.1-sol", "claude-opus-5",
+                                                      "claude-opus-5-thinking"])
 
 
     def test_ext_quality_documented_six_levels(self) -> None:
@@ -715,7 +725,8 @@ class ModelCapsAndAudioTests(unittest.TestCase):
     def test_extra_caps_fields_seedance_mj_muse_h3(self) -> None:
         items = {i["model"]: i for i in fresh_client().get("/api/model-caps").json()["items"]}
         seedance = items["seedance-2.5"]
-        self.assertEqual(seedance["resolutions"], ["480p", "720p", "1080p"])
+        # 2026-11-18 文档：Resolution 支持 480p / 720p / 1080p / 4k（2k/2160p 仍不支持，L46265–L46266）
+        self.assertEqual(seedance["resolutions"], ["480p", "720p", "1080p", "4k"])
         self.assertIn("adaptive", seedance["ratios"])
         self.assertIn(-1, seedance["durations"])
         self.assertEqual(seedance["ref_max"], 30)

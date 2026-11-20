@@ -255,3 +255,91 @@ async def transcribe_audio(raw_bytes: bytes, filename: str = "", lang: str = "zh
     except Exception as exc:
         return _failure("ASR_PROVIDER_ERROR",
                         "语音转写失败：%s: %s" % (type(exc).__name__, exc), settings)
+
+
+# ── 剪辑时间线：自动字幕（带时间的逐句转写）──
+
+_SUBTITLE_PROMPT = (
+    "请把这段音频里的人声逐句转写成字幕，并给出每句在音频里的起止时间。\n"
+    "严格每行一句，格式：[开始秒数-结束秒数] 字幕文字，例如：\n"
+    "[0.0-2.4] 大家好，今天给大家介绍一双新鞋\n"
+    "[2.6-5.1] 鞋面用的是透气网布\n"
+    "要求：秒数从音频开头算起、保留一位小数；每句不超过 18 个字，长句按语义断开；"
+    "照原话转写，不翻译、不润色、不加标点以外的内容；没有人声时只输出「无」。"
+)
+_SUB_LINE = re.compile(r"\[\s*(\d+(?::\d+(?:\.\d+)?|\.\d+|)(?:\.\d+)?)\s*[-–~至]\s*(\d+(?::\d+(?:\.\d+)?|\.\d+|)(?:\.\d+)?)\s*\]\s*(.+)")
+
+
+def _sub_seconds(value: str) -> float:
+    text = str(value or "").strip()
+    if ":" in text:
+        parts = [float(p) for p in text.split(":")]
+        sec = 0.0
+        for part in parts:
+            sec = sec * 60 + part
+        return sec
+    return float(text)
+
+
+def parse_subtitle_lines(text: str, total: float = 0.0):
+    """模型输出 → [{start, end, text}]；时间倒退 / 越界的行修正或丢掉。"""
+    out = []
+    for raw in str(text or "").splitlines():
+        m = _SUB_LINE.search(raw.strip())
+        if not m:
+            continue
+        try:
+            start, end = _sub_seconds(m.group(1)), _sub_seconds(m.group(2))
+        except ValueError:
+            continue
+        words = m.group(3).strip().strip("「」\"' ")
+        if not words or words in ("无", "（无）"):
+            continue
+        if end <= start:
+            end = start + max(0.8, min(4.0, len(words) * 0.22))
+        if total and start >= total:
+            continue
+        if total:
+            end = min(end, total)
+        if out and start < out[-1]["end"]:
+            start = out[-1]["end"]
+            if end <= start:
+                continue
+        out.append({"start": round(start, 2), "end": round(end, 2), "text": words})
+    return out
+
+
+async def transcribe_segments(raw_bytes: bytes, filename: str = "", lang: str = "zh", total: float = 0.0) -> Dict[str, Any]:
+    """整条时间线的混音 → 带时间的字幕段。本地命令只给纯文本，没法对时间，所以只走模型通道。"""
+    if not raw_bytes:
+        return _failure("ASR_AUDIO_INVALID", "时间线里没有声音，生成不了字幕。")
+    if len(raw_bytes) > MAX_AUDIO_BYTES:
+        return _failure("ASR_AUDIO_INVALID", "时间线声音太长（超过 20MB，约 10 分钟）：请分段生成字幕。")
+    suffix = _audio_suffix(filename) or ".wav"
+    settings = resolve_asr_settings()
+    if not (settings["provider"] and settings["model"]):
+        return _failure("ASR_NOT_CONFIGURED", _not_configured_message(), settings)
+    prompt = _SUBTITLE_PROMPT if not str(lang or "").lower().startswith("en") else (
+        "Transcribe the speech line by line as subtitles with start/end times in seconds from the start of the audio. "
+        "One line per subtitle, format: [start-end] text, e.g. [0.0-2.4] Hello everyone. Keep one decimal. "
+        "Do not translate. Output only 'none' if there is no speech.")
+    try:
+        with tempfile.TemporaryDirectory(prefix="novai-sub-") as workdir:
+            audio_path = os.path.join(workdir, "audio" + suffix)
+            with open(audio_path, "wb") as handle:
+                handle.write(raw_bytes)
+            ok, message = _resolve_provider(settings["provider"], settings["model"])
+            if not ok:
+                return _failure("ASR_PROVIDER_ERROR", message, settings)
+            result = await video_sources._provider_transcript(audio_path, settings["provider"], settings["model"], prompt=prompt)
+            if not result.get("ok"):
+                raw_error = str(result.get("error") or "")
+                code = _classify_provider_error(raw_error)
+                return _failure(code, _provider_error_text(code, raw_error), settings)
+            segments = parse_subtitle_lines(str(result.get("text") or ""), total)
+            if not segments:
+                return _failure("ASR_EMPTY", "没听出人声，或者模型没按时间格式返回：换一个支持音频的模型再试。", settings)
+            return {"ok": True, "segments": segments, "provider": settings["provider"],
+                    "model": str(result.get("model") or settings["model"])}
+    except Exception as exc:
+        return _failure("ASR_PROVIDER_ERROR", "生成字幕失败：%s: %s" % (type(exc).__name__, exc), settings)

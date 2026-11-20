@@ -85,7 +85,8 @@ class AgentInstallSkillTests(unittest.TestCase):
         self.assertIn("该地址返回的不是合法 SKILL.md", result["error"])
 
     @mock.patch("server.routes.agents.github_install.fetch_skill_markdown", return_value=FETCHED)
-    def test_agent_installs_and_activates(self, fetch):
+    def test_agent_installs_but_does_not_activate_by_default(self, fetch):
+        """导入默认不启用：装完不自动激活，回包里明确告诉模型要用户先开开关。"""
         async def go():
             return await main.agent_execute_step("install_skill", {
                 "url": "https://github.com/acme/tools/tree/main/SKILL.md",
@@ -96,10 +97,26 @@ class AgentInstallSkillTests(unittest.TestCase):
         payload = result["result"]
         self.assertEqual(payload["repository"], "acme/tools")
         self.assertEqual(payload["skill"]["id"], "github-test-skill")
-        self.assertEqual(payload["activation"]["name"], "github-test-skill")
-        self.assertIn("只回答测试内容", payload["activation"]["text"])
-        self.assertFalse(payload["activation"]["already_loaded"])
+        self.assertFalse(payload["enabled"])
+        self.assertIsNone(payload["activation"])
+        self.assertIn("未启用", payload["note"])
+        self.assertIn("设置", payload["note"])
         fetch.assert_called_once()
+
+    @mock.patch("server.routes.agents.github_install.fetch_skill_markdown", return_value=dict(
+        FETCHED, markdown=MARKDOWN.replace("  display_name: GitHub 测试技能", "  display_name: GitHub 测试技能\n  enabled: true")))
+    def test_explicit_enabled_metadata_still_activates(self, _fetch):
+        async def go():
+            return await main.agent_execute_step("install_skill", {
+                "url": "https://github.com/acme/tools/tree/main/SKILL.md",
+                "overwrite": True,
+            })
+        result = asyncio.run(go())
+        self.assertTrue(result["ok"], result)
+        payload = result["result"]
+        self.assertTrue(payload["enabled"])
+        self.assertEqual(payload["activation"]["name"], "github-test-skill")
+        self.assertNotIn("note", payload)
 
 
 if __name__ == "__main__":

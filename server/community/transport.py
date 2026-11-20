@@ -15,10 +15,12 @@ Python 3.9 约束：注解用 Optional/Dict/List，禁止 X | Y。
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import os
 import shutil
 import time
+import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -50,6 +52,22 @@ def _http_hook():
     return hook if callable(hook) else None
 
 
+def _is_lan_url(url: str) -> bool:
+    """局域网地址强制直连：httpx 的 trust_env 会把请求交给系统代理。"""
+    try:
+        host = urllib.parse.urlsplit(str(url or "")).hostname or ""
+    except ValueError:
+        return False
+    value = str(host or "").strip().lower()
+    if value in ("localhost", "0.0.0.0", "::1") or value.endswith(".local"):
+        return True
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return bool(address.is_private or address.is_loopback or address.is_link_local)
+
+
 async def _fetch_bytes(method: str, url: str, token: str = "",
                        body: Optional[Dict[str, Any]] = None,
                        timeout: float = NODE_TIMEOUT) -> Tuple[int, bytes]:
@@ -72,7 +90,8 @@ async def _fetch_bytes(method: str, url: str, token: str = "",
         except Exception:
             return 0, b""
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=timeout), follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=timeout),
+                                     follow_redirects=True, trust_env=not _is_lan_url(url)) as client:
             response = await client.request(method, url, headers=headers, content=raw)
             return int(response.status_code), response.content
     except Exception:
@@ -179,6 +198,9 @@ class CommunityTransport:
     async def download_media(self, item_id: str, filename: str) -> Optional[bytes]:
         raise NotImplementedError
 
+    async def download_cover(self, item_id: str) -> Optional[bytes]:
+        raise NotImplementedError
+
     async def post_event(self, item_id: str, payload: Dict[str, Any]) -> bool:
         raise NotImplementedError
 
@@ -208,10 +230,11 @@ class LanTransport(CommunityTransport):
         seen = set()
         for node, result in zip(nodes, results):
             if isinstance(result, Exception) or result is None:
+                # 发现到但拉不到：节点照样进列表并标 offline，前端才能显示「发现到但连不上」
+                reachable.append({**node, "item_count": 0, "online": False})
                 continue
             node_items = result
-            node_online = bool(node_items) or node.get("online", True)
-            reachable.append({**node, "item_count": len(node_items), "online": node_online})
+            reachable.append({**node, "item_count": len(node_items), "online": True})
             for raw in node_items:
                 if not isinstance(raw, dict):
                     continue
@@ -227,7 +250,7 @@ class LanTransport(CommunityTransport):
         data = {
             "items": items,
             "nodes": reachable,
-            "creators_online": len(reachable),
+            "creators_online": sum(1 for node in reachable if node.get("online")),
             "at": stamp,
         }
         self._feed_cache = {"at": stamp, "data": data}
@@ -299,6 +322,19 @@ class LanTransport(CommunityTransport):
         if len(content) > MEDIA_MAX_FILE_BYTES:
             return None
         return content
+
+    async def download_cover(self, item_id: str) -> Optional[bytes]:
+        """封面在发布包根目录，/public/media 只服务 media/ 子目录，得走专门的封面路由。"""
+        node = self._node_for_item(item_id)
+        if not node:
+            return None
+        url = str(node["base"]) + "/api/community/public/items/" + item_id + "/cover"
+        status, content = await _fetch_bytes("GET", url, str(node.get("token") or ""),
+                                             timeout=MEDIA_TIMEOUT)
+        if status == 200 and content and len(content) <= MEDIA_MAX_FILE_BYTES:
+            return content
+        # 老版本节点没有封面路由：退回 media 目录再试一次
+        return await self.download_media(item_id, "cover.webp")
 
     async def post_event(self, item_id: str, payload: Dict[str, Any]) -> bool:
         node = self._node_for_item(item_id)

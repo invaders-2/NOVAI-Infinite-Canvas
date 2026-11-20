@@ -133,8 +133,6 @@ class ImportUrlsEndpointTests(unittest.TestCase):
             "_local_upload_kind_ext": main._local_upload_kind_ext,
             "_sniff_image_ext_bytes": main._sniff_image_ext_bytes,
             "_local_upload_item": self._fake_item,
-            "classify_asset_image_best_effort": self._noop_async,
-            "_write_local_upload_classification": lambda rel, data: None,
             "_write_local_upload_generation": lambda rel, data: None,
             "generation_meta_for_url": lambda url: None,
             "_SSL_CONTEXT": True,
@@ -157,10 +155,6 @@ class ImportUrlsEndpointTests(unittest.TestCase):
             "url": "/assets/uploads/" + rel,
             "kind": "image",
         }
-
-    @staticmethod
-    async def _noop_async(*args, **kwargs):
-        return None
 
     def _run(self, items):
         payload = assets_routes.LocalAssetUrlImportRequest(

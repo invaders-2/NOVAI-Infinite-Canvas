@@ -1,0 +1,18 @@
+/* 发送箭头（Hugeicons Animated arrow-up-02）：只给 WAAPI 的 <g> 提供变换基准，不参与按钮布局。
+   stroke-width 写在 <g> 上：.cn-root .send svg{stroke-width:2.2} 改的是 svg，会作为继承值传下来，
+   <g> 自己的声明优先，保证官方 1.5 的线性描边不被按钮样式放大。 */
+.nv-send-ic {
+  display: block;
+  flex: none;
+  overflow: visible;
+}
+
+.nv-send-ic > g {
+  transform-box: view-box;
+  transform-origin: center;
+  stroke-width: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nv-send-ic > g { animation: none !important; }
+}

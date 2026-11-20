@@ -446,12 +446,18 @@ html:not(.theme-dark) .nvca-user-icon:hover { background: rgba(0, 0, 0, 0.06); }
 }
 .nvca-run-body { display: flex; flex-direction: column; gap: 8px; }
 
-/* ── 思考（Reasoning） ── */
-.nvca-reasoning { margin: 0; }
-.nvca-reasoning-trigger {
+/* ── 思考（Thinking / 流式逐词） ── */
+.nvca-thinking {
+  --nvca-thinking-ink: color-mix(in srgb, var(--nvca-ink) 66%, var(--nvca-ink-2));
+  --nvca-thinking-ink-dim: color-mix(in srgb, var(--nvca-ink) 30%, var(--nvca-ink-3));
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.nvca-thinking-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
   min-height: 26px;
   padding: 0;
@@ -459,18 +465,38 @@ html:not(.theme-dark) .nvca-user-icon:hover { background: rgba(0, 0, 0, 0.06); }
   font-size: 13px;
   line-height: 20px;
   color: var(--nvca-ink-3);
+  text-align: left;
   transition: color 0.16s var(--nvca-ease);
 }
-.nvca-reasoning-trigger:hover { color: var(--nvca-ink); background: transparent; }
-.nvca-reasoning-trigger > svg:last-child { margin-left: auto; }
-.nvca-reasoning-content {
-  margin-top: 2px;
-  padding: 0 0 4px 20px;
-  background: transparent;
-  font-size: 12px;
-  line-height: 1.65;
-  color: var(--nvca-ink-3);
+.nvca-thinking-head:hover { color: var(--nvca-ink-2); background: transparent; }
+.nvca-thinking-brain { width: 16px; height: 16px; flex: 0 0 auto; }
+.nvca-thinking-shimmer { flex: 0 0 auto; }
+.nvca-thinking-label { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.nvca-thinking-caret {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  stroke-width: 1.8;
+  transition: transform 0.22s var(--nvca-ease);
 }
+.nvca-thinking-caret.is-open { transform: rotate(180deg); }
+/* 收起时把正文行高与 7px 间距一起收掉，只剩标题那一行 */
+.nvca-thinking-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  margin-top: 7px;
+  transition: grid-template-rows 0.3s var(--nvca-ease), margin-top 0.3s var(--nvca-ease);
+}
+.nvca-thinking[data-open="false"] .nvca-thinking-body { grid-template-rows: 0fr; margin-top: 0; }
+.nvca-thinking-body-inner { overflow: hidden; min-height: 0; }
+/* 思考正文没有底色 / 圆角 / 内边距盒子：流式中比答复略淡，结束后再降一档 */
+.nvca-thinking .nvca-sr { color: var(--nvca-thinking-ink); transition: color 0.2s var(--nvca-ease); }
+.nvca-thinking[data-status="done"] .nvca-sr,
+.nvca-thinking[data-status="stopped"] .nvca-sr { color: var(--nvca-thinking-ink-dim); }
+/* 思考正文 → 答复之间 20px：run-body 自己 gap 8px，这里补 12px */
+.nvca-run-body > .nvca-thinking { margin-bottom: 12px; }
+/* 答复保持满墨 */
+.nvca-root .nvca-thread-bubble-assistant .nvca-thread-bubble-body { color: var(--nvca-ink); }
 
 /* ── 执行清单（Task） ── */
 .nvca-steps { margin: 0; }
@@ -2242,19 +2268,7 @@ html:not(.theme-dark) .nvca-tool-code { background: rgba(220, 38, 38, 0.1); colo
 html:not(.theme-dark) .nvca-tool-pre { background: rgba(0, 0, 0, 0.03); }
 .nvca-tool-trunc { margin-top: 2px; font-size: 10.5px; color: var(--tn-arrow); }
 
-/* ── 思考折叠 ── */
-.nvca-reasoning { margin: 0; padding: 0; background: transparent; }
-.nvca-reasoning-trigger { min-height: 26px; padding: 2px 0; background: transparent; font-size: 13px; line-height: 1.65; color: var(--tn-desc); }
-.nvca-reasoning-trigger:hover { color: var(--tn-text); background: transparent; }
-.nvca-reasoning-content {
-  margin-top: 2px;
-  padding: 0 0 4px 20px;
-  border-radius: 0;
-  background: transparent;
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--tn-desc);
-}
+/* ── 思考折叠：样式统一在上面 .nvca-thinking（--nvca-* 令牌），这里不再重复 ── */
 
 .nvca-tap-mention {
   position: absolute;

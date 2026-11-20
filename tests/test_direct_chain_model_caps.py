@@ -70,11 +70,12 @@ class ApimartImageDirectTests(unittest.TestCase):
         self.assertEqual(main.direct_image_size_caps(APIMART, "gpt-image-2.5-flare", "1600x1200"), ("1600x1200", ""))
         self.assertTrue(main.apimart_image_model_caps("gpt-image-2.5-ext") is not None)
 
-    def test_count_is_capped_by_model_n_max(self):
-        self.assertEqual(main.direct_image_request_count(APIMART, "gpt-image-2", 9), 4)
-        self.assertEqual(main.direct_image_request_count(APIMART, "gpt-image-1", 9), 4)
-        self.assertEqual(main.direct_image_request_count(APIMART, "gpt-image-2", 2), 2)
-        self.assertEqual(main.direct_image_request_count(APIMART, "midjourney", 9), 8)   # 无 caps：只受全局 8 张
+    def test_count_is_request_count_not_per_batch(self):
+        # 数的是「请求次数」：n=9 先被全局收口成 8 张，gpt-image-2 / gpt-image-1 的 n_max=4 → [4,4] 两次
+        self.assertEqual(main.direct_image_request_count(APIMART, "gpt-image-2", 9), 2)
+        self.assertEqual(main.direct_image_request_count(APIMART, "gpt-image-1", 9), 2)
+        self.assertEqual(main.direct_image_request_count(APIMART, "gpt-image-2", 2), 1)
+        self.assertEqual(main.direct_image_request_count(APIMART, "midjourney", 9), 8)   # 无 n_max：逐张，8 次
 
 
 class AgnesImageDirectTests(unittest.TestCase):

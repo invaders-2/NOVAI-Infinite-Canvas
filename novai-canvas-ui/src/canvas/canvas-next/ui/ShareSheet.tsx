@@ -233,7 +233,7 @@ function PublishedPanel({ ctl, item, loading, reload, back, onEdit, onOpenCommun
       已发布到社区
     </div>
     <div className="nshare-pubcard">
-      {cover ? <img src={cover} alt="" /> : <span className="ph"><Icon name="canvas" size="s" /></span>}
+      {cover ? <img src={cover} alt="" /> : <span className="ph"><Icon name="grid" size="s" /></span>}
       <div>
         <b>{item.title}</b>
         <small>画布 · <span className="mono">v{item.version}</span> · {ago(item.package_updated_at || item.updated_at)}{unlisted ? " · 已下架" : ""}</small>

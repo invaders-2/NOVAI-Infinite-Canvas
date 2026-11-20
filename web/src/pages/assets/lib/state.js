@@ -31,12 +31,11 @@ export const S = reactive({
     // 「画布生成」只读生成物（根视图不返回，进文件夹时懒加载，见 local.js loadGeneratedAssets）
     localGeneratedItems: [],
     localTree: null,
-    // 反推 / 智能分类的平台、模型、提示词（本机记忆，key 与旧版一致）
+    // 反推的平台、模型、提示词（本机记忆，key 与旧版一致）
     caption: {
         provider: savedCaption.provider || '',
         model: savedCaption.model || '',
         prompt: savedCaption.captionPrompt || '描述图片',
-        classifyPrompt: savedCaption.classifyPrompt || '',
     },
     preview: null,      // Lightbox：{ url, kind, name }
     ask: null,          // 应用内确认 / 输入弹窗（代替旧版 window.prompt / confirm / alert）
@@ -54,14 +53,13 @@ export function setTab(tab) {
     if (MEDIA_TABS.includes(tab)) { try { localStorage.setItem(LAST_MEDIA_TAB_KEY, tab); } catch (e) {} }
 }
 
-/* ───────── 反推 / 分类设置 ───────── */
+/* ───────── 反推设置 ───────── */
 export function writeCaptionSettings() {
     try {
         localStorage.setItem(LOCAL_CAPTION_SETTINGS_KEY, JSON.stringify({
             provider: S.caption.provider || '',
             model: S.caption.model || '',
             captionPrompt: S.caption.prompt || '描述图片',
-            classifyPrompt: S.caption.classifyPrompt || '',
         }));
     } catch (e) {}
 }

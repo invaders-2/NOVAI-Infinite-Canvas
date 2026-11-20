@@ -36,6 +36,12 @@ LEGACY_PEER_CODE = "WHLWER"
 LEGACY_TOKEN = "0123456789abcdef0123456789abcdef"
 
 
+def _raw_account(data_dir: str) -> dict:
+    """v2 账号文件按 owner 分桶；没有登录时就是无归属桶 _local。"""
+    raw = json.load(open(os.path.join(data_dir, lan.ACCOUNT_FILE), encoding="utf-8"))
+    return (raw.get("accounts") or {}).get("_local") or {}
+
+
 def check(label: str, ok: bool, detail: str = "") -> None:
     global FAILED
     print(("PASS  " if ok else "FAIL  ") + label + ((" (" + detail + ")") if detail else ""))
@@ -84,7 +90,7 @@ def main() -> int:
     check("旧字段仍在（id/nickname/avatar/lan_ip/port/version）",
           all(key in account for key in ("id", "nickname", "avatar", "lan_ip", "port", "version")),
           str(sorted(account.keys())))
-    raw = json.load(open(os.path.join(data_dir, lan.ACCOUNT_FILE), encoding="utf-8"))
+    raw = _raw_account(data_dir)
     check("code 已落盘", raw.get("code") == code, str(raw.get("code")))
 
     own = lan.load_account()
@@ -106,7 +112,7 @@ def main() -> int:
     migrated = lan.load_account()
     expected = lan.derive_account_code("0123456789abcdef")
     check("老账号补出 code", migrated.get("code") == expected, str(migrated.get("code")))
-    raw = json.load(open(os.path.join(data_dir, lan.ACCOUNT_FILE), encoding="utf-8"))
+    raw = _raw_account(data_dir)
     check("老账号 code 写回文件", raw.get("code") == expected, str(raw.get("code")))
     check("同一 id 派生结果稳定", lan.derive_account_code("0123456789abcdef") == expected)
 
@@ -116,7 +122,7 @@ def main() -> int:
     check("老字母码迁移成数字码", migrated_letter.get("code") == expected, str(migrated_letter.get("code")))
     check("迁移后的码是 6 位纯数字",
           bool(re.match(r"^\d{6}$", str(migrated_letter.get("code") or ""))), str(migrated_letter.get("code")))
-    raw = json.load(open(os.path.join(data_dir, lan.ACCOUNT_FILE), encoding="utf-8"))
+    raw = _raw_account(data_dir)
     check("迁移后的数字码写回文件", raw.get("code") == expected, str(raw.get("code")))
     check("不同 id 派生不同 code", lan.derive_account_code("fedcba9876543210") != expected)
     own_id, own_token = str(migrated.get("id") or ""), str(migrated.get("token") or "")

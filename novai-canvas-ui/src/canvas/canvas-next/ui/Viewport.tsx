@@ -262,7 +262,8 @@ export function Viewport() {
     // 「替换」模式：点另一个节点，用它的当前版本替换目标节点的当前版本
     if (nodeEl && st.ui.replace) {
       const target = st.ui.replace; const src = store.node(nodeEl.dataset.id!); const o = src ? outOf(src) : null;
-      if (src && o?.url) { replaceNodeMedia(store, target, { url: o.url, frame: o.frame, w: o.w, h: o.h }); store.setUI({ replace: null, sel: new Set([target]) }); }
+      // 把源节点的媒体类型一起传进去：图片节点不会被视频替换坏（守卫在 replaceNodeMedia 里）
+      if (src && o?.url) { const ok = replaceNodeMedia(store, target, { url: o.url, frame: o.frame, w: o.w, h: o.h }, isGenKind(src.kind) ? src.kind : undefined); store.setUI(ok ? { replace: null, sel: new Set([target]) } : { replace: null }); }
       else store.toast("这个节点还没有可替换的结果");
       return;
     }
@@ -496,6 +497,10 @@ export function Viewport() {
   useEffect(() => {
     const vp = vpRef.current!;
     const onWheel = (e: WheelEvent) => {
+      // 节点里自己处理滚轮的区域（剪辑时间线的轨道 data-wheel="own"、属性面板 data-wheel="scroll"）：不平移 / 缩放画布。
+      // scroll 区域按住 ⌘/Ctrl（捏合）时仍然缩放画布
+      const own = (e.target as HTMLElement).closest?.("[data-wheel]") as HTMLElement | null;
+      if (own && !(own.dataset.wheel === "scroll" && (e.ctrlKey || e.metaKey))) return;
       if ((e.target as HTMLElement).closest?.(".tgrid,.ntext")) { const el = (e.target as HTMLElement).closest(".tgrid,.ntext") as HTMLElement; if (el.scrollHeight > el.clientHeight && !(e.ctrlKey || e.metaKey) && store.state.ui.sel.has((el.closest(".node") as HTMLElement)?.dataset.id || "")) return; }
       e.preventDefault(); const v = store.state.view;
       // 捏合是浏览器合成的 ⌘/Ctrl+wheel：保持改动前的公式，触控板手感才和以前一样

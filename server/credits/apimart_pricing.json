@@ -6,15 +6,15 @@
   "captured_html_sha256": "47aeca884b6c57893655e397e07d4f80ec214ef753591c7da55cc7bcc43789e4",
   "parsed_at": "2026-10-24T01:36:46+0800",
   "credit_usd": 0.1,
-  "note": "构建期解析产物，运行时不联网；价格单位 USD/计费单位，credits = usd / 0.1"
+  "note": "构建期解析产物，运行时不联网；价格单位 USD/计费单位，credits = usd / 0.1。2026-11-18 增量条目（seedance-2-5-flash、midjourney@video、midjourney@video-720p、gpt-5.6-sol 与 seedance-2.5 的 4K 档）的 source 标为 api:pricing/model@2026-11-18，数值取自文档的 Model Pricing API（GET /api/pricing/model，免鉴权实测），gold=会员实付价、official=标价、platinum/diamond 按 0.95/0.9 推导"
  },
  "coverage": {
-  "models_total": 340,
+  "models_total": 345,
   "by_category": {
-   "image": 50,
-   "video": 57,
+   "image": 52,
+   "video": 59,
    "audio": 43,
-   "chat": 190
+   "chat": 191
   },
   "index_total": 297,
   "detail_pages_used": 49,
@@ -15480,6 +15480,110 @@
       "credits": 137.5
      },
      "source": "page:detail"
+    },
+{
+     "spec": "4K-input",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.5277,
+      "credits": 5.277
+     },
+     "platinum": {
+      "usd": 0.5013,
+      "credits": 5.013
+     },
+     "diamond": {
+      "usd": 0.4749,
+      "credits": 4.749
+     },
+     "official": {
+      "usd": 0.6596,
+      "credits": 6.596
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    },
+{
+     "spec": "4K",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.8609,
+      "credits": 8.609
+     },
+     "platinum": {
+      "usd": 0.8179,
+      "credits": 8.179
+     },
+     "diamond": {
+      "usd": 0.7748,
+      "credits": 7.748
+     },
+     "official": {
+      "usd": 1.0761,
+      "credits": 10.761
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    },
+{
+     "spec": "token-4K-input 4K · 有参考视频",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 2.7143,
+      "credits": 27.143
+     },
+     "platinum": {
+      "usd": 2.5786,
+      "credits": 25.786
+     },
+     "diamond": {
+      "usd": 2.4429,
+      "credits": 24.429
+     },
+     "official": {
+      "usd": 3.3929,
+      "credits": 33.929
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    },
+{
+     "spec": "token-4K 4K · 无参考视频",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 4.4286,
+      "credits": 44.286
+     },
+     "platinum": {
+      "usd": 4.2072,
+      "credits": 42.072
+     },
+     "diamond": {
+      "usd": 3.9857,
+      "credits": 39.857
+     },
+     "official": {
+      "usd": 5.5357,
+      "credits": 55.357
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
     }
    ],
    "token_rates": {}
@@ -40087,6 +40191,351 @@
     }
    ],
    "token_rates": {}
+  },
+  "seedance-2-5-flash": {
+   "id": "seedance-2-5-flash",
+   "name": "seedance-2-5-flash",
+   "category": "video",
+   "billing": "per_second",
+   "spec_dimension": "resolution_duration",
+   "aliases": [
+    "doubao-seedance-2-5-flash"
+   ],
+   "tiers": [
+    {
+     "spec": "480P-input",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.0384,
+      "credits": 0.384
+     },
+     "platinum": {
+      "usd": 0.0365,
+      "credits": 0.365
+     },
+     "diamond": {
+      "usd": 0.0346,
+      "credits": 0.346
+     },
+     "official": {
+      "usd": 0.0384,
+      "credits": 0.384
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    },
+    {
+     "spec": "480P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.0631,
+      "credits": 0.631
+     },
+     "platinum": {
+      "usd": 0.0599,
+      "credits": 0.599
+     },
+     "diamond": {
+      "usd": 0.0568,
+      "credits": 0.568
+     },
+     "official": {
+      "usd": 0.0631,
+      "credits": 0.631
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    },
+    {
+     "spec": "720P-input",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.0864,
+      "credits": 0.864
+     },
+     "platinum": {
+      "usd": 0.0821,
+      "credits": 0.821
+     },
+     "diamond": {
+      "usd": 0.0778,
+      "credits": 0.778
+     },
+     "official": {
+      "usd": 0.0864,
+      "credits": 0.864
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    },
+    {
+     "spec": "720P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.1419,
+      "credits": 1.419
+     },
+     "platinum": {
+      "usd": 0.1348,
+      "credits": 1.348
+     },
+     "diamond": {
+      "usd": 0.1277,
+      "credits": 1.277
+     },
+     "official": {
+      "usd": 0.1419,
+      "credits": 1.419
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    },
+    {
+     "spec": "token-input 480p / 720p · 有参考视频",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 6.5714,
+      "credits": 65.714
+     },
+     "platinum": {
+      "usd": 6.2428,
+      "credits": 62.428
+     },
+     "diamond": {
+      "usd": 5.9143,
+      "credits": 59.143
+     },
+     "official": {
+      "usd": 6.5714,
+      "credits": 65.714
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    },
+    {
+     "spec": "token 480p / 720p · 无参考视频",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 6.5714,
+      "credits": 65.714
+     },
+     "platinum": {
+      "usd": 6.2428,
+      "credits": 62.428
+     },
+     "diamond": {
+      "usd": 5.9143,
+      "credits": 59.143
+     },
+     "official": {
+      "usd": 6.5714,
+      "credits": 65.714
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "midjourney@video": {
+   "id": "midjourney@video",
+   "name": "Midjourney 视频（480p）",
+   "category": "image",
+   "billing": "per_call",
+   "spec_dimension": "default",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "video",
+     "unit": "per_call",
+     "raw_unit": "次",
+     "gold": {
+      "usd": 0.2,
+      "credits": 2.0
+     },
+     "platinum": {
+      "usd": 0.19,
+      "credits": 1.9
+     },
+     "diamond": {
+      "usd": 0.18,
+      "credits": 1.8
+     },
+     "official": {
+      "usd": 0.25,
+      "credits": 2.5
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "midjourney@video-720p": {
+   "id": "midjourney@video-720p",
+   "name": "Midjourney 视频（720p）",
+   "category": "image",
+   "billing": "per_call",
+   "spec_dimension": "default",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "video-720p",
+     "unit": "per_call",
+     "raw_unit": "次",
+     "gold": {
+      "usd": 0.4,
+      "credits": 4.0
+     },
+     "platinum": {
+      "usd": 0.38,
+      "credits": 3.8
+     },
+     "diamond": {
+      "usd": 0.36,
+      "credits": 3.6
+     },
+     "official": {
+      "usd": 0.5,
+      "credits": 5.0
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "gpt-5.6-sol": {
+   "id": "gpt-5.6-sol",
+   "name": "gpt-5.6-sol",
+   "category": "chat",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "input_output",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 3.2,
+      "credits": 32.0
+     },
+     "platinum": {
+      "usd": 3.04,
+      "credits": 30.4
+     },
+     "diamond": {
+      "usd": 2.88,
+      "credits": 28.8
+     },
+     "official": {
+      "usd": 4.0,
+      "credits": 40.0
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 16.0,
+      "credits": 160.0
+     },
+     "platinum": {
+      "usd": 15.2,
+      "credits": 152.0
+     },
+     "diamond": {
+      "usd": 14.4,
+      "credits": 144.0
+     },
+     "official": {
+      "usd": 20.0,
+      "credits": 200.0
+     },
+     "source": "api:pricing/model@2026-11-18",
+     "derived": [
+      "platinum",
+      "diamond"
+     ]
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 3.2,
+      "credits": 32.0
+     },
+     "platinum": {
+      "usd": 3.04,
+      "credits": 30.4
+     },
+     "diamond": {
+      "usd": 2.88,
+      "credits": 28.8
+     },
+     "official": {
+      "usd": 4.0,
+      "credits": 40.0
+     },
+     "source": "api:pricing/model@2026-11-18"
+    },
+    "output": {
+     "gold": {
+      "usd": 16.0,
+      "credits": 160.0
+     },
+     "platinum": {
+      "usd": 15.2,
+      "credits": 152.0
+     },
+     "diamond": {
+      "usd": 14.4,
+      "credits": 144.0
+     },
+     "official": {
+      "usd": 20.0,
+      "credits": 200.0
+     },
+     "source": "api:pricing/model@2026-11-18"
+    }
+   }
   }
  },
  "alias_map": {
@@ -40905,7 +41354,11 @@
   "suno@bpm": "suno@bpm",
   "suno@generate_video": "suno@generate_video",
   "suno@generatevideo": "suno@generate_video",
-  "suno@download": "suno@download"
+  "suno@download": "suno@download",
+  "doubao-seedance-2-5-flash": "seedance-2-5-flash",
+  "claude-opus-5-thinking": "claude-opus-5",
+  "midjourney@video": "midjourney@video",
+  "midjourney@video-720p": "midjourney@video-720p"
  },
  "fallback": {
   "image": "gemini-nano-banana-2.1",

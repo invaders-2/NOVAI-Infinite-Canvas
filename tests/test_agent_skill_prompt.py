@@ -5,7 +5,7 @@
   - 请求顶层可选 skill_id（str，缺省 ""，最长 64）
   - 只有 registry 里查得到且 enabled=true 才应用；否则 HTTP 400「技能不存在或未启用：<id>」
   - 应用方式：把技能段落追加到 system prompt 末尾，不动既有提示词结构
-  - skill_prompt 超过 20000 字符截断并标注
+  - skill_prompt 超过 AGENT_SKILL_PROMPT_MAX_CHARS 字符截断并标注
 
 技能都写在临时数据目录里，不碰仓库 data/；不调模型、不起服务。
 """
@@ -136,15 +136,16 @@ class SkillPromptTests(unittest.TestCase):
         self.assertIn(sid, str(caught.exception.detail))
 
     def test_long_prompt_is_truncated(self):
-        sid = write_skill("novai-test-skill-long", prompt="字" * 30000)
+        too_long = "字" * (main.AGENT_SKILL_PROMPT_MAX_CHARS + 10000)
+        sid = write_skill("novai-test-skill-long", prompt=too_long)
         text = build_prompt(sid)
         self.assertIn(main.AGENT_SKILL_TRUNCATED_NOTE, text)
-        self.assertNotIn("字" * 30000, text)
+        self.assertNotIn(too_long, text)
         body = text.split("—— 以下技能说明必须遵守 ——\n", 1)[1]
         body = body[:body.index(main.AGENT_SKILL_TRUNCATED_NOTE)]
         self.assertEqual(len(body), main.AGENT_SKILL_PROMPT_MAX_CHARS)
-        # 长度受控：基线 + 标题/说明 + 20000 字上限 + 截断标记
-        self.assertLess(len(text), len(build_prompt("")) + 21000)
+        # 长度受控：基线 + 标题/说明 + 上限 + 截断标记
+        self.assertLess(len(text), len(build_prompt("")) + main.AGENT_SKILL_PROMPT_MAX_CHARS + 1000)
 
     def test_endpoint_rejects_unknown_skill_before_streaming(self):
         """坏技能必须在开流之前就 400，而不是让前端先收到 200 再吃一个 error 事件。"""

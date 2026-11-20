@@ -1,6 +1,6 @@
 <script setup>
 // 偏好设置弹窗（旧 storageSettingsOverlay）：
-//   偏好设置 —— 反推 / 分类默认平台与模型、反推提示词、智能分类追加要求与分类规则（可恢复内置规则）
+//   偏好设置 —— 反推默认平台与模型、反推提示词
 //   素材管理 —— 三类保存目录（上传 / 生成 / 本地），目录文件浏览（分页滚动加载）、全选、删除磁盘文件
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import NvIcon from '../../../components/NvIcon.vue';
@@ -14,8 +14,7 @@ const tab = ref('prefs');
 const editor = ref('');
 const dirs = reactive({ upload: '', generated: '', local: '' });
 const defaults = ref({});
-const draft = reactive({ prompt: '', classifyPrompt: '', rule: '' });
-const defaultRule = ref('');
+const draft = reactive({ prompt: '' });
 const files = reactive({ kind: 'generated', items: [], selected: new Set(), loading: false, loadingMore: false, offset: 0, total: 0, hasMore: false });
 const saving = ref('');
 const grid = ref(null);
@@ -27,13 +26,10 @@ async function load() {
     files.selected = new Set();
     normalizeCaption();
     draft.prompt = S.caption.prompt || '描述图片';
-    draft.classifyPrompt = S.caption.classifyPrompt || '';
     try {
-        const [data, promptData] = await Promise.all([apiJson('/api/storage-settings'), apiJson('/api/asset-classification-prompt')]);
+        const data = await apiJson('/api/storage-settings');
         Object.assign(dirs, { upload: '', generated: '', local: '' }, data.dirs || {});
         defaults.value = data.defaults || {};
-        defaultRule.value = promptData.default_prompt || '';
-        draft.rule = promptData.prompt || defaultRule.value || '';
         await loadFiles(files.kind || 'generated');
     } catch (err) { fail(err, '加载存储设置失败'); }
 }
@@ -47,12 +43,7 @@ async function saveEditor(which) {
     saving.value = which;
     try {
         S.caption.prompt = draft.prompt || '描述图片';
-        S.caption.classifyPrompt = draft.classifyPrompt || '';
         writeCaptionSettings();
-        if (which === 'classify') {
-            const d = await apiJson('/api/asset-classification-prompt', jsonBody('PATCH', { prompt: draft.rule || '' }));
-            draft.rule = d.prompt || draft.rule;
-        }
         editor.value = '';
         setStatus('偏好设置已保存');
     } catch (err) { fail(err, '保存偏好设置失败'); } finally { saving.value = ''; }
@@ -137,18 +128,6 @@ async function deleteFiles() {
                                 <div v-if="editor === 'caption'" class="fed">
                                     <label class="fld"><span>反推提示词</span><textarea v-model="draft.prompt" class="am-txa" placeholder="描述图片"></textarea></label>
                                     <div class="act"><button type="button" class="nv-btn sm primary" :disabled="saving === 'caption'" @click="saveEditor('caption')"><span v-if="saving === 'caption'" class="am-spin"></span><NvIcon v-else name="save" />保存</button></div>
-                                </div>
-                                <div class="gap"></div>
-                                <button type="button" class="fold" :aria-expanded="editor === 'classify'" @click="toggleEditor('classify')">
-                                    <NvIcon name="tag" /><b>智能分类提示词</b><em>编辑分类规则和追加要求</em><NvIcon :name="editor === 'classify' ? 'chevu' : 'chev'" class="cv" />
-                                </button>
-                                <div v-if="editor === 'classify'" class="fed">
-                                    <label class="fld"><span>智能分类追加要求</span><textarea v-model="draft.classifyPrompt" class="am-txa" placeholder="可追加分类要求，例如：增加家装风格、镜头焦段、商业用途、人物年龄段、产品材质。"></textarea></label>
-                                    <div class="fld">
-                                        <span>智能分类规则<button type="button" class="lnk" @click="draft.rule = defaultRule">恢复内置规则</button></span>
-                                        <textarea v-model="draft.rule" class="am-txa rule" placeholder="这里显示内置分类提示词，可按你的素材体系编辑后保存。" aria-label="智能分类规则"></textarea>
-                                    </div>
-                                    <div class="act"><button type="button" class="nv-btn sm primary" :disabled="saving === 'classify'" @click="saveEditor('classify')"><span v-if="saving === 'classify'" class="am-spin"></span><NvIcon v-else name="save" />保存</button></div>
                                 </div>
                             </section>
                         </template>

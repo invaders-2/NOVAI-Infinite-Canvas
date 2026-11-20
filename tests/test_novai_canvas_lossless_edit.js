@@ -16,16 +16,16 @@ const ui = 'novai-canvas-ui/src/canvas/canvas-next/ui';
 
 /* ---------- 工具条入口 ---------- */
 const gen = read(ui + '/GenPanel.tsx');
-const imgRow = gen.split('\n').find((l) => l.includes('B("crop"') && l.includes('B("more"'));
+const imgRow = gen.split('\n').find((l) => l.includes('B("mask"') && l.includes('B("more"'));
 assert(imgRow, '找到图片节点工具条那一行');
-assert(imgRow.includes('B("lossless", "edit", "无损改图")'), '工具条有「无损改图」按钮（edit / square-pen 线性图标）');
-assert(imgRow.includes('B("split", "layers", "拆分图层"'), '「拆分图层」仍是 layers（两个按钮不再同图）');
+assert(imgRow.includes('B("lossless", "edit", "无损改图")'), '工具条有「无损改图」按钮（edit / square-pen 线性图标，放在调色旁边）');
+assert(!imgRow.includes('B("split"'), '「拆分图层」不在条上（已收进「更多」菜单）');
 assert(/edit:\s*"square-pen"/.test(read(ui + '/iconData.ts')), 'edit 图标别名指向 square-pen');
-assert(imgRow.indexOf('"relight"') < imgRow.indexOf('"lossless"'), '无损改图排在「重打光」之后');
-assert(imgRow.indexOf('"lossless"') < imgRow.indexOf('"more"'), '无损改图排在「更多」之前');
+assert(imgRow.indexOf('"adjust"') < imgRow.indexOf('"lossless"') && imgRow.indexOf('"lossless"') < imgRow.indexOf('"more"'), '无损改图排在「调色」之后、「更多」之前');
 
 /* ---------- 路由：走全屏编辑层，不进 openModal ---------- */
 const reg = read(ui + '/editors/registry.tsx');
+assert(!reg.includes('data-k="lossless"'), '「无损改图」不在「更多」菜单里（已放回工具条）');
 assert(reg.includes('from "./LosslessEdit"'), 'registry 引入 LosslessEdit');
 assert(reg.includes('if (kind === "lossless") return openLosslessEdit(id);'), 'cn:editor 的 lossless 路由到 openLosslessEdit');
 const losslessRoute = reg.slice(reg.indexOf('kind === "lossless"'), reg.indexOf('kind === "lossless"') + 120);

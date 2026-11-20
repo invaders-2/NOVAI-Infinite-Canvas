@@ -177,6 +177,163 @@ const importedItem = (url) => ({ items: [{ ok: true, item: { url, name: 'x.jpg',
     ok(/下载失败：\{kind\}/.test(assets) || /下载失败：\{kind\} \{detail\}/.test(assets), '非 HTTP 异常带异常类型（例：下载失败：ConnectError）');
     ok(!/result\["error"\] = str\(exc\) or "导入失败"/.test(assets), '不再把异常吞成一句「导入失败」');
 
+    console.log('[11] 视频只有 blob 载荷：回主进程抓到的视频请求还原真链');
+    /* <video> 在 Node 里不存在：probeVideo 只用到 createElement('video') 与元数据事件 */
+    class FakeVideo {
+        constructor() { this._src = ''; this._duration = 12.5; }
+        set src(value) { this._src = value; if (typeof this.onloadedmetadata === 'function') this.onloadedmetadata(); }
+        get src() { return this._src; }
+        removeAttribute() {}
+        load() {}
+        get videoWidth() { return 720; }
+        get videoHeight() { return 1280; }
+        get duration() { return this._duration; }
+    }
+    global.document = { createElement: (tag) => { if (String(tag) === 'video') return new FakeVideo(); throw new Error('unexpected createElement: ' + tag); } };
+    const videoItem = (url) => ({ items: [{ ok: true, item: { url, name: 'xhs-video', kind: 'video' } }] });
+    const videoPage = 'https://www.xiaohongshu.com/explore/abc';
+    const videoDrag = {
+        tagName: 'VIDEO',
+        pageUrl: videoPage,
+        uriList: 'blob:https://www.xiaohongshu.com/1111',
+        bestUrl: 'blob:https://www.xiaohongshu.com/1111',
+        mediaUrl: 'blob:https://www.xiaohongshu.com/1111',
+        videoUrls: ['blob:https://www.xiaohongshu.com/1111'],
+        videoCandidates: [{ url: 'blob:https://www.xiaohongshu.com/1111' }],
+        imageCandidates: [],
+    };
+    const store7 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: videoDrag }),
+        get_recent_source_media: async () => ({ ok: true, items: [
+            { url: 'https://sns-video-v6.xhscdn.com/stream/old.mp4', kind: 'video', pageUrl: videoPage, time: 100 },
+            { url: 'https://sns-video-v6.xhscdn.com/stream/new.mp4', kind: 'video', pageUrl: videoPage, time: 300 },
+            { url: 'https://sns-video-v6.xhscdn.com/stream/other.mp4', kind: 'video', pageUrl: 'https://www.xiaohongshu.com/explore/zzz', time: 500 },
+            { url: 'https://i.pinimg.com/a.jpg', kind: 'image', pageUrl: videoPage, time: 600 },
+        ] }) } } };
+    requests = [];
+    global.fetch = async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, json: async () => videoItem('/assets/uploads/v.mp4') }; };
+    await srcDrop.dropSourceUrls(store7, { x: 0, y: 0 }, dt({}));
+    ok(requests.length === 1 && requests[0].body.items[0].url === 'https://sns-video-v6.xhscdn.com/stream/new.mp4', '用同页面最新的视频地址还原真链（同页面优先、最新优先）');
+    ok(store7.nodes.length === 1 && store7.nodes[0].kind === 'video', '落成一个视频节点（不再是毫无反应）');
+    ok(store7.nodes[0] && store7.nodes[0].hist[0].dur === 12.5, '视频节点带真实时长');
+    ok(store7.toasts.some((t) => t.indexOf('已从在线素材添加') >= 0), '成功提示');
+
+    console.log('[12] 视频连真链都抓不到：给视频专属提示，不落节点');
+    const store8 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: videoDrag }),
+        get_recent_source_media: async () => ({ ok: true, items: [] }),
+    } } };
+    global.fetch = async () => { throw new Error('没有地址时不该发请求'); };
+    await srcDrop.dropSourceUrls(store8, { x: 0, y: 0 }, dt({}));
+    ok(store8.nodes.length === 0, '没有地址时不落节点');
+    ok(store8.toasts.some((t) => t.indexOf('加密流') >= 0), '提示里说明是加密流抓不到地址');
+    ok(!store8.toasts.some((t) => t === '没读到拖进来的素材地址，请从在线素材面板里重新拖一次'), '不再用那句笼统的「没读到地址」糊过去');
+
+    console.log('[13] 地址下载失败 → 页面上下文取字节成功');
+    const videoHttpDrag = {
+        tagName: 'VIDEO',
+        pageUrl: videoPage,
+        uriList: 'https://sns-video-v6.xhscdn.com/stream/x.mp4',
+        bestUrl: 'https://sns-video-v6.xhscdn.com/stream/x.mp4',
+        videoUrls: ['https://sns-video-v6.xhscdn.com/stream/x.mp4'],
+    };
+    const store9 = fakeStore();
+    const pageCalls = [];
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: videoHttpDrag }),
+        get_source_view_fetch_bytes: async (arg) => { pageCalls.push(arg); return { ok: true, dataUrl: 'data:video/mp4;base64,AAAA', contentType: 'video/mp4', size: 4 }; },
+    } } };
+    requests = [];
+    global.fetch = async (url, init) => {
+        const body = JSON.parse(init.body);
+        requests.push({ url: String(url), body });
+        if (body.items[0].data) return { ok: true, json: async () => videoItem('/assets/uploads/v2.mp4') };
+        return { ok: true, json: async () => ({ items: [{ ok: false, error: '下载失败：HTTP 403' }] }) };
+    };
+    await srcDrop.dropSourceUrls(store9, { x: 0, y: 0 }, dt({}));
+    ok(pageCalls[0] && pageCalls[0].url === 'https://sns-video-v6.xhscdn.com/stream/x.mp4', '页面取字节用的是这次拖拽的地址');
+    ok(requests.length === 2 && requests[1].body.items[0].data === 'data:video/mp4;base64,AAAA', '第二条通道把字节内联给后端');
+    ok(store9.nodes.length === 1 && store9.nodes[0].kind === 'video', '兜底成功落视频节点（且只落一个）');
+
+    console.log('[14] 页面取字节也失败 → 主进程带登录态下载成功');
+    const store10 = fakeStore();
+    const sessionCalls = [];
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: videoHttpDrag }),
+        get_source_view_fetch_bytes: async () => ({ ok: false, error: 'too-large' }),
+        fetch_source_url: async (arg) => { sessionCalls.push(arg); return { ok: true, dataUrl: 'data:video/mp4;base64,BBBB', contentType: 'video/mp4' }; },
+    } } };
+    requests = [];
+    global.fetch = async (url, init) => {
+        const body = JSON.parse(init.body);
+        requests.push({ url: String(url), body });
+        if (body.items[0].data) return { ok: true, json: async () => videoItem('/assets/uploads/v3.mp4') };
+        return { ok: true, json: async () => ({ items: [{ ok: false, error: '下载失败：HTTP 403' }] }) };
+    };
+    await srcDrop.dropSourceUrls(store10, { x: 0, y: 0 }, dt({}));
+    ok(sessionCalls[0] && sessionCalls[0].url === 'https://sns-video-v6.xhscdn.com/stream/x.mp4', '带登录态下载用这次拖拽的地址');
+    ok(requests.length === 2 && requests[1].body.items[0].data === 'data:video/mp4;base64,BBBB', '登录态通道同样走内联字节');
+    ok(store10.nodes.length === 1, '登录态兜底也能落节点');
+
+    console.log('[15] 三条通道全失败：提示里能看出各自的原因');
+    const store11 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: videoHttpDrag }),
+        get_source_view_fetch_bytes: async () => ({ ok: false, error: 'too-large' }),
+        fetch_source_url: async () => ({ ok: false, error: 'HTTP 403' }),
+    } } };
+    global.fetch = async () => ({ ok: true, json: async () => ({ items: [{ ok: false, error: '下载失败：ConnectTimeout' }] }) });
+    await srcDrop.dropSourceUrls(store11, { x: 0, y: 0 }, dt({}));
+    const failText11 = store11.toasts.find((t) => t.indexOf('在线素材导入失败') >= 0) || '';
+    ok(failText11.indexOf('下载失败：ConnectTimeout') >= 0, '提示里有地址下载的原因');
+    ok(failText11.indexOf('素材超过 30MB') >= 0, '提示里有「文件过大」');
+    ok(store11.nodes.length === 0, '全失败不落节点');
+
+    console.log('[16] 接线检查（sourceDrop.ts）');
+    const dropSrc = read(SRC + '/sourceDrop.ts');
+    ok(/get_recent_source_media/.test(dropSrc), '接上主进程抓到的最近视频请求');
+    ok(/get_source_view_fetch_bytes/.test(dropSrc), '接上页面上下文取字节');
+    ok(/fetch_source_url/.test(dropSrc), '接上主进程带登录态下载');
+    ok(/blobUrlsFromDataTransfer/.test(dropSrc), 'blob: 载荷单独收集（不再被过滤成空）');
+    ok(/const MAX_FALLBACKS = 3;/.test(dropSrc), '兜底通道有条数上限，不会一次拖 20 个全部串行重试');
+
+    console.log('[17] 载荷只有 HLS（m3u8）：直接说清楚，不做无效下载');
+    const store12 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: { tagName: 'VIDEO', pageUrl: videoPage, uriList: 'https://sns-video-v6.xhscdn.com/stream/x.m3u8', bestUrl: 'https://sns-video-v6.xhscdn.com/stream/x.m3u8', videoUrls: ['https://sns-video-v6.xhscdn.com/stream/x.m3u8'] } }),
+    } } };
+    global.fetch = async () => { throw new Error('m3u8 不该发下载请求'); };
+    await srcDrop.dropSourceUrls(store12, { x: 0, y: 0 }, dt({}));
+    ok(store12.nodes.length === 0, 'm3u8 不落节点');
+    ok(store12.toasts.some((t) => t.indexOf('m3u8') >= 0), '提示里点明是 m3u8 流');
+
+    console.log('[18] 载荷只有页面地址：不当素材导入');
+    const store13 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: { tagName: 'A', pageUrl: videoPage, uriList: 'https://www.xiaohongshu.com/explore/abc', bestUrl: 'https://www.xiaohongshu.com/explore/abc' } }),
+    } } };
+    global.fetch = async () => { throw new Error('页面地址不该发下载请求'); };
+    await srcDrop.dropSourceUrls(store13, { x: 0, y: 0 }, dt({}));
+    ok(store13.nodes.length === 0, '页面地址不落节点');
+    ok(store13.toasts.some((t) => t.indexOf('页面地址') >= 0), '提示拖的是页面不是素材');
+
+    console.log('[19] 主要字段没有地址时，从载荷自带的 HTML 里捞视频源');
+    const store14 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: {
+            tagName: 'DIV',
+            pageUrl: videoPage,
+            html: '<video src="https://sns-video-v6.xhscdn.com/stream/from-html.mp4" poster="https://i.pinimg.com/p.jpg"></video>',
+        } }),
+    } } };
+    requests = [];
+    global.fetch = async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, json: async () => videoItem('/assets/uploads/v4.mp4') }; };
+    await srcDrop.dropSourceUrls(store14, { x: 0, y: 0 }, dt({}));
+    ok(requests.length === 1 && requests[0].body.items[0].url === 'https://sns-video-v6.xhscdn.com/stream/from-html.mp4', 'HTML 里的视频源被捞出来');
+    ok(store14.nodes.length === 1 && store14.nodes[0].kind === 'video', 'HTML 兜底也能落视频节点');
+
     console.log('');
     if (fails.length) {
         console.error('[FAIL] ' + fails.length + ' 项失败：');

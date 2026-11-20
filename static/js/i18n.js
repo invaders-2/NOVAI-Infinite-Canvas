@@ -1,5 +1,5 @@
 (function(){
-    const VERSION = '2026.07.18.api-settings-i18n.3';
+    const VERSION = '2026.11.18.video-upscale.2';
     const scripts = [
         '/static/js/i18n-core.js',
         '/static/js/i18n/common.js',

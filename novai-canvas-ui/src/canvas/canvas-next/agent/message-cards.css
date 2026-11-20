@@ -73,7 +73,7 @@
   box-shadow: none;
 }
 .cn-root .message-card[class] .mc-badge[class][data-variant="info"] { background: rgba(10, 132, 255, 0.12); color: var(--info, #0a84ff); }
-.cn-root .message-card[class] .mc-badge[class][data-variant="success"] { background: color-mix(in srgb, var(--ok) 14%, transparent); color: var(--ok); }
+.cn-root .message-card[class] .mc-badge[class][data-variant="success"] { background: var(--sunken); color: var(--fg); }
 .cn-root .message-card[class] .mc-badge[class][data-variant="warning"] { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
 .cn-root .message-card[class] .mc-badge[class][data-variant="destructive"] { background: color-mix(in srgb, var(--bad) 14%, transparent); color: var(--bad); }
 
@@ -260,37 +260,106 @@
   line-height: 1.5;
 }
 
-/* ══ 问答卡（HextaUI questionnaire 分步表单） ═══════════════════════ */
-.cn-root .qa-card[class] .mc-body[class] { padding-bottom: 10px; }
-.cn-root .qa-card[class] .mc-qa-progress[class] {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* ══ 问答卡 · 选择卡片（卡头 + 选项行 + 其他输入 + 底部：上一题 / 圆点 / 主按钮） ══ */
+.cn-root .qa-card[class] .mc-body[class] { padding-bottom: 8px; }
+
+/* 卡头：20 线性图标 + 13/560 标题 + 状态徽标（不用 Hexta badge 的外观） */
+.cn-root .qa-card[class] .mc-head[class] { padding-bottom: 4px; }
+.cn-root .qa-card[class] .mc-head-row[class] { gap: 9px; }
+.cn-root .qa-card[class] .mc-glyph[class] {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 0;
+  background: none;
+  color: var(--fg2);
+  transition: color var(--d-quick) var(--e-std);
 }
-.cn-root .qa-card[class] .mc-qa-progress[class] [data-slot="questionnaire-progress-track"] { background: var(--sunken); }
-.cn-root .qa-card[class] .mc-qa-progress[class] [data-slot="questionnaire-progress-track"] > span { background: var(--solid); }
-.cn-root .qa-card[class] .mc-qa-progress[class] [data-slot="questionnaire-progress-label"] { color: var(--fg3); font-size: 10.5px; }
+.cn-root .qa-card[class] .mc-glyph[class] svg.i { width: 18px; height: 18px; stroke-width: 1.6; }
+.cn-root .qa-card[class] .mc-glyph[class][data-tone="ok"] { color: var(--fg); }
+.cn-root .qa-card[class] .mc-title[class] {
+  font-size: 13px;
+  font-weight: 560;
+  line-height: 19px;
+  letter-spacing: 0;
+}
+/* 状态徽标：进行中显示已答 n/m，结束后「已回答 / 已反馈 / 已跳过」 */
+.cn-root .qa-card[class] .qa-badge[class] {
+  flex: 0 0 auto;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--sunken);
+  color: var(--fg2);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  transition: background-color var(--d-quick) var(--e-std), color var(--d-quick) var(--e-std);
+}
+.cn-root .qa-card[class] .qa-badge[class][data-tone="live"] { background: color-mix(in srgb, var(--fg) 8%, var(--sunken)); color: var(--fg); }
+.cn-root .qa-card[class] .qa-badge[class][data-tone="ok"] { background: var(--sunken); color: var(--fg); }
+.cn-root .qa-card[class] .qa-badge[class][data-tone="mute"] { background: var(--sunken); color: var(--fg3); }
+
+/* 表单 / 已答摘要：提交后表单 0fr 收起，摘要接在下面 */
+.cn-root .qa-card[class] .qa-stack[class] {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cn-root .qa-card[class] .qa-form-slot[class] {
+  display: grid;
+  grid-template-rows: 1fr;
+  min-width: 0;
+  transition: grid-template-rows 200ms var(--e-std);
+}
+.cn-root .qa-card[class] .qa-form-inner[class] {
+  min-height: 0;
+  overflow: clip;
+  transition: opacity 180ms var(--e-std);
+}
+.cn-root .qa-card[class] .qa-form-slot[class][data-leaving] { grid-template-rows: 0fr; }
+.cn-root .qa-card[class] .qa-form-slot[class][data-leaving] .qa-form-inner[class] { opacity: 0; }
+.cn-root .qa-card[class] .qa-result[class] {
+  margin: 1px 0 0;
+  color: var(--fg2);
+  font-size: 11.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
 .cn-root .qa-card[class] .qa-questionnaire[class] {
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-width: 0;
 }
-.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-item"] { gap: 8px; }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-item"] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
 .cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-title"] {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  margin: 0 0 2px;
+  margin: 0;
   color: var(--hi);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 17px;
+  font-size: 12.5px;
+  font-weight: 560;
+  line-height: 18px;
 }
 .cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-title"] .tnum {
   flex: 0 0 auto;
   color: var(--fg3);
   font-size: 10.5px;
+  font-weight: 400;
 }
 .cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-title"] em {
   font-style: normal;
@@ -298,90 +367,219 @@
   font-size: 10.5px;
   font-weight: 400;
 }
-.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choices"] { gap: 6px; }
+
+/* 选项行：36 高 / 10 圆角 / 软底；选中=软底提亮 + 文字提亮加粗 + 图形变实 */
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choices"] {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
 .cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"] {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 6px 10px;
+  gap: 10px;
+  min-height: 36px;
+  padding: 5px 9px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--sunken);
-  color: var(--fg1, var(--fg));
-  font-size: 12px;
-  line-height: 17px;
+  color: var(--fg);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 18px;
   box-shadow: none;
   transition: background-color var(--d-feedback) var(--e-std), color var(--d-feedback) var(--e-std);
 }
 .cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"]:hover { background: var(--hover); }
 .cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"][data-checked] {
-  background: var(--s4, var(--s2));
+  background: color-mix(in srgb, var(--fg) 8%, var(--sunken));
   color: var(--hi);
-  font-weight: 500;
+  font-weight: 560;
 }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"][data-checked]:hover {
+  background: color-mix(in srgb, var(--fg) 11%, var(--sunken));
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice-label"] {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+/* 图形一律线性：单选=圆环+内点，多选=圆角方框+对勾（1.5 描边；图形例外，不当分隔线用） */
 .cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice-indicator"] {
-  width: 15px;
-  height: 15px;
-  border: 0;
-  background: rgba(var(--ink), 0.14);
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--fg3);
+  border-radius: 50%;
+  background: none;
   box-shadow: none;
+  color: var(--fg);
+  transition: border-color var(--d-quick) var(--e-std);
 }
-.cn-root .qa-card[class] .qa-questionnaire[class] [data-checked] [data-slot="questionnaire-choice-indicator"] { background: var(--solid); color: var(--on-solid); }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"][data-type="checkbox"] [data-slot="questionnaire-choice-indicator"] { border-radius: 5px; }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"][data-checked] [data-slot="questionnaire-choice-indicator"] { border-color: var(--fg); }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice-indicator"] > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg);
+  transform: scale(0);
+  transition: transform 200ms var(--e-std);
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"][data-checked] [data-slot="questionnaire-choice-indicator"] > span { transform: scale(1); }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice-indicator"] svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 3;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity var(--d-quick) var(--e-std), transform var(--d-quick) var(--e-std);
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"][data-checked] [data-slot="questionnaire-choice-indicator"] svg {
+  opacity: 1;
+  transform: scale(1);
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"][data-type="radio"] [data-slot="questionnaire-choice-indicator"] svg { display: none; }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-choice"][data-type="checkbox"] [data-slot="questionnaire-choice-indicator"] > span { display: none; }
+
+/* 其他：每题下面一枚胶囊输入（38 高 / 下沉底 / focus 提亮，不画描边） */
 .cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-input"] {
-  height: 30px;
-  padding: 0 10px;
+  height: 38px;
+  margin: 0;
+  padding: 0 11px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 11px;
   background: var(--sunken);
   color: var(--fg);
-  font-size: 12px;
+  font-size: 12.5px;
+  box-shadow: none;
+  outline: none;
+  transition: background-color var(--d-quick) var(--e-std);
+}
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-input"]::placeholder { color: var(--fg3); }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-input"]:hover { background: var(--hover); }
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-input"]:focus,
+.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-input"]:focus-visible {
+  background: var(--hover);
   box-shadow: none;
   outline: none;
 }
-.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-input"]::placeholder { color: var(--fg3); }
-.cn-root .qa-card[class] .qa-questionnaire[class] [data-slot="questionnaire-input"]:focus-visible {
-  box-shadow: inset 0 0 0 1px rgba(var(--ink), 0.18);
-}
+
+/* 底部：上一题（图标按钮，第一步只留位置）+ 步骤圆点 + 步骤数 + 主按钮 */
 .cn-root .qa-card[class] .qa-nav[class] {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 12px;
 }
 .cn-root .qa-card[class] .qa-nav[class] .sp { flex: 1; }
-.cn-root .qa-card[class] .qa-nav[class] [data-slot^="questionnaire-"] {
+.cn-root .qa-card[class] .qa-nav[class] .qa-prev[class] {
+  width: 28px;
   height: 28px;
-  padding: 0 10px;
+  flex: 0 0 28px;
+  padding: 0;
   border: 0;
-  border-radius: 8px;
-  font-size: 11.5px;
-  box-shadow: none;
-}
-.cn-root .qa-card[class] .qa-nav[class] [data-slot="questionnaire-next"] { background: var(--sunken); color: var(--fg); }
-.cn-root .qa-card[class] .qa-nav[class] [data-slot="questionnaire-previous"],
-.cn-root .qa-card[class] .qa-nav[class] [data-slot="questionnaire-skip"] { background: transparent; color: var(--fg3); }
-.cn-root .qa-card[class] .qa-nav[class] [data-slot="questionnaire-previous"]:hover,
-.cn-root .qa-card[class] .qa-nav[class] [data-slot="questionnaire-skip"]:hover { background: var(--hover); color: var(--fg); }
-.cn-root .qa-card[class] .mc-qa-q[class] { display: flex; flex-direction: column; gap: 4px; }
-.cn-root .qa-card[class] .mc-qa-q[class] .mc-qa-title[class] {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  color: var(--hi);
-  font-size: 12px;
-  line-height: 17px;
-}
-.cn-root .qa-card[class] .mc-qa-q[class] .mc-qa-title[class] .tnum { color: var(--fg3); font-size: 10.5px; }
-.cn-root .qa-card[class] .mc-qa-q[class] .mc-qa-title[class] em { font-style: normal; color: var(--fg3); font-size: 10.5px; }
-.cn-root .qa-card[class] .mc-qa-answer[class] {
-  padding: 6px 10px;
-  border-radius: 9px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
   background: var(--sunken);
   color: var(--fg2);
-  font-size: 12px;
-  line-height: 17px;
+  box-shadow: none;
+  transition: background-color var(--d-quick) var(--e-std), color var(--d-quick) var(--e-std);
 }
+.cn-root .qa-card[class] .qa-nav[class] .qa-prev[class]:hover { background: var(--hover); color: var(--fg); }
+/* Hexta 在第一步直接把上一题隐藏；这里保留占位（置灰不可点），圆点就不会左右跳 */
+.cn-root .qa-card[class] .qa-nav[class] .qa-prev[class][hidden] {
+  display: grid !important;
+  opacity: 0.35;
+  pointer-events: none;
+}
+.cn-root .qa-card[class] .qa-dots[class] { display: flex; align-items: center; gap: 6px; }
+.cn-root .qa-card[class] .qa-dot[class] {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg);
+  opacity: 0.35;
+  transform: scale(0.75);
+  transition: opacity var(--d-quick) var(--e-std), transform var(--d-std) var(--e-std);
+}
+.cn-root .qa-card[class] .qa-dot[class][data-on] { opacity: 1; }
+.cn-root .qa-card[class] .qa-dot[class][data-current] { transform: scale(1); }
+.cn-root .qa-card[class] .qa-steps[class] {
+  flex: 0 0 auto;
+  color: var(--fg3);
+  font-size: 10.5px;
+  line-height: 1;
+}
+.cn-root .qa-card[class] .qa-nav[class] .qa-skip-q[class] {
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg3);
+  font-size: 11.5px;
+  font-weight: 500;
+  box-shadow: none;
+  transition: background-color var(--d-quick) var(--e-std), color var(--d-quick) var(--e-std);
+}
+.cn-root .qa-card[class] .qa-nav[class] .qa-skip-q[class]:hover { background: var(--sunken); color: var(--fg); }
+.cn-root .qa-card[class] .qa-nav[class] .qa-primary[class] {
+  height: 30px;
+  min-width: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: var(--solid);
+  color: var(--on-solid);
+  font-size: 11.5px;
+  font-weight: 560;
+  box-shadow: none;
+  transition: background-color var(--d-quick) var(--e-std), transform var(--d-feedback) var(--e-std);
+}
+.cn-root .qa-card[class] .qa-nav[class] .qa-primary[class]:hover { background: var(--hi); }
+.cn-root .qa-card[class] .qa-nav[class] .qa-primary[class]:active { transform: scale(0.96); }
+.cn-root .qa-card[class] .qa-nav[class] [data-slot="questionnaire-next"][class] { width: 30px; padding: 0; }
+.cn-root .qa-card[class] .qa-nav[class] .qa-primary[class]:disabled { opacity: 0.42; cursor: default; transform: none; }
+
+/* 整卡跳过：幽灵文字，挂在底部 */
+.cn-root .qa-card[class] .mc-foot[class] {
+  align-items: flex-start;
+  padding: 0 12px 12px;
+}
+.cn-root .qa-card[class] .qa-skip[class] {
+  align-self: flex-start;
+  height: 26px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--fg3);
+  font-size: 11.5px;
+  font-weight: 500;
+  box-shadow: none;
+  transition: background-color var(--d-quick) var(--e-std), color var(--d-quick) var(--e-std);
+}
+.cn-root .qa-card[class] .qa-skip[class]:hover { background: var(--sunken); color: var(--fg); }
 .cn-root .qa-card[class].is-done { opacity: 0.86; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cn-root .qa-card[class] .qa-form-slot[class],
+  .cn-root .qa-card[class] .qa-form-inner[class],
+  .cn-root .qa-card[class] .qa-dot[class] { transition: none; }
+}
 
 /* ══ 技能安装卡 ══════════════════════════════════════════════════════ */
 .cn-root .skill-card[class] .skill-meta[class] {
@@ -480,30 +678,63 @@
 .cn-root .plan-card[class] .plan-roadmap-list[class] li.is-now b { color: var(--hi); }
 
 /* 待生成卡片：每个节点一行（种类徽标 + 标题 + 提示词摘要 + 模型 / 比例 / 分辨率 / 张数或时长），无描边 */
-.cn-root .gen-card[class] .gen-sub { margin-top: 2px; color: var(--fg3); font-size: 11px; line-height: 1.5; }
+.cn-root .gen-card[class] .gen-sub { margin-top: 3px; color: var(--fg2); font-size: 11.5px; line-height: 1.55; }
 .cn-root .gen-card[class] .gen-body { display: flex; flex-direction: column; gap: 8px; }
-.cn-root .gen-card[class] .gen-bulk { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--fg3); }
+/* 卡头这一排：「统一模型」和「统一设置」也是同一套字段格（两列；只剩统一设置时占整行） */
+.cn-root .gen-card[class] .gen-bulk { gap: 6px; font-size: 11px; color: var(--fg3); }
+.cn-root .gen-card[class] .gen-bulk > span { flex: none; }
+/* 统一模型按钮自带 .gen-model[class] 的字号/内边距，这里要盖过它，所以两条一起写并带上 [class] */
+.cn-root .gen-card[class] .gen-bulk .gen-select,
+.cn-root .gen-card[class] .gen-bulk .gen-model[class] { font-size: 11px; padding: 0 4px; }
+/* 模型按钮原本有 150px 下限（行内点选面积）；这一排并排时那 47px 会把它顶到下一行，收到内容宽度以下 */
+.cn-root .gen-card[class] .gen-bulk .gen-model[class] { min-width: 88px; max-width: 100%; }
 .cn-root .gen-card[class] .gen-list { display: flex; flex-direction: column; gap: 6px; }
 .cn-root .gen-card[class] .gen-row { padding: 8px 10px; border-radius: 12px; background: color-mix(in srgb, var(--fg) 3.5%, transparent); }
 .cn-root .gen-card[class] .gen-row.is-pending { background: color-mix(in srgb, var(--fg) 6%, transparent); }
-.cn-root .gen-card[class] .gen-row-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cn-root .gen-card[class] .gen-row-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .cn-root .gen-card[class] .gen-row-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .cn-root .gen-card[class] .gen-kind { flex: none; }
 .cn-root .gen-card[class] .gen-title { border: 0; background: transparent; padding: 0; color: var(--hi); font-size: 12px; font-weight: 600; line-height: 17px; cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cn-root .gen-card[class] .gen-title:hover { text-decoration: underline; text-underline-offset: 2px; }
-.cn-root .gen-card[class] .gen-prompt { color: var(--fg3); font-size: 11px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.cn-root .gen-card[class] .gen-params { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
-.cn-root .gen-card[class] .gen-field { display: inline-flex; align-items: center; gap: 4px; color: var(--fg3); font-size: 11px; }
+/* 提示词块：和参数格同一层下沉面，标签 10px、正文 11.5px、最多两行 */
+.cn-root .gen-card[class] .gen-prompt {
+  display: flex; flex-direction: column; gap: 2px; padding: 8px 10px;
+  border-radius: 11px; background: var(--sunken); color: var(--fg2); font-size: 11.5px; line-height: 1.6;
+}
+.cn-root .gen-card[class] .gen-prompt em { font-style: normal; font-size: 10px; line-height: 15px; color: var(--fg3); }
+.cn-root .gen-card[class] .gen-prompt-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* 参数格：两列（标签 10px / 值 11.5px / 右侧 10px 线性 caret），底色用下沉面，hover 提亮；「更多」占整行 */
+.cn-root .gen-card[class] .gen-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.cn-root .gen-card[class] .gen-fieldwrap { position: relative; min-width: 0; }
+.cn-root .gen-card[class] .gen-fieldwrap-wide { grid-column: 1 / -1; }
+.cn-root .gen-card[class] .gen-field {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  width: 100%; padding: 7px 22px 7px 9px; border: 0; border-radius: 10px;
+  background: var(--sunken); color: inherit; font: inherit; text-align: left; cursor: pointer;
+  transition: background-color var(--d-feedback) var(--e-std), opacity var(--d-quick) var(--e-std);
+}
+.cn-root .gen-card[class] .gen-field:hover:not(:disabled) { background: var(--hover); }
+.cn-root .gen-card[class] .gen-field:disabled { opacity: .5; cursor: default; }
+.cn-root .gen-card[class] .gen-field > span { font-size: 10px; line-height: 15px; color: var(--fg3); }
+.cn-root .gen-card[class] .gen-field > b {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; line-height: 17px; font-weight: 500; color: var(--fg);
+}
+.cn-root .gen-card[class] .gen-field > b[data-empty="true"] { color: var(--fg3); font-weight: 400; }
+.cn-root .gen-card[class] svg.gen-caret {
+  position: absolute; right: 7px; top: 50%; width: 10px; height: 10px; color: var(--fg3);
+  transform: translateY(-50%); pointer-events: none;
+}
 .cn-root .gen-card[class] .gen-select { height: 26px; min-height: 26px; padding: 0 8px; font-size: 11.5px; border: 0; box-shadow: none; border-radius: 8px; background: color-mix(in srgb, var(--fg) 6%, transparent); color: var(--fg2); }
 .cn-root .gen-card[class] .gen-select:focus, .cn-root .gen-card[class] .gen-select:focus-visible { outline: none; box-shadow: none; }
 .cn-root .gen-card[class] .gen-model { min-width: 150px; max-width: 100%; }
 .cn-root .gen-card[class] .gen-model.is-empty { color: var(--hi); font-weight: 600; background: color-mix(in srgb, var(--fg) 10%, transparent); }
-.cn-root .gen-card[class] .gen-note { width: 100%; color: var(--fg3); font-size: 11px; }
+.cn-root .gen-card[class] .gen-note { width: 100%; color: var(--fg3); font-size: 10.5px; line-height: 1.5; }
 /* 参数按钮：和模型按钮同一套外观，点开的是 #pop 里的 .opt-grid 卡片（不再是下拉框） */
 .cn-root .gen-card[class] .gen-param { display: inline-flex; align-items: center; justify-content: space-between; gap: 6px; max-width: 100%; cursor: pointer; }
 .cn-root .gen-card[class] .gen-param:disabled { opacity: .5; cursor: default; }
 /* 卡片在助手面板里，全屏助手 (#agent.full, z-index 65) 打开时弹层要盖在它上面 */
-.cn-root #pop.gen-pop { z-index: 70; }
+.cn-root #pop.gen-pop, .cn-root #pop.uset-pop { z-index: 70; }
 /* 下拉：盖过助手面板；不画描边 */
 .cn-root [data-slot="select-positioner"]:has(> .nv-gen-select) { z-index: 400 !important; }
 .cn-root .nv-gen-select[class] { border: 0; box-shadow: 0 10px 32px rgba(0, 0, 0, .18), 0 2px 8px rgba(0, 0, 0, .08); font-size: 12px; }
@@ -515,15 +746,19 @@
 .cn-root .gen-card[class] .gen-kind { flex: none; font-size: 10.5px; line-height: 16px; padding: 0 6px; border-radius: 6px; color: var(--fg2); background: color-mix(in srgb, var(--fg) 8%, transparent); }
 .cn-root .gen-card[class] .gen-check { flex: none; }
 .cn-root .gen-card[class] .gen-title { flex: 1; min-width: 0; }
-.cn-root .gen-card[class] .gen-edit { flex: none; border: 0; background: transparent; padding: 0 2px; color: var(--fg3); font-size: 11px; cursor: pointer; }
-.cn-root .gen-card[class] .gen-edit:hover:not(:disabled) { color: var(--fg); }
+.cn-root .gen-card[class] .gen-edit {
+  flex: none; margin-left: auto; padding: 0; border: 0; background: transparent;
+  color: var(--fg3); font-size: 10.5px; line-height: 15px; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.cn-root .gen-card[class] .gen-edit:hover:not(:disabled) { color: var(--fg2); }
 .cn-root .gen-card[class] .gen-row.is-off { opacity: .55; }
 .cn-root .gen-card[class] .gen-row.is-off .gen-title { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--fg) 30%, transparent); }
 .cn-root .gen-card[class] .gen-prompt-edit { font-size: 12px; line-height: 1.6; border: 0; box-shadow: none; border-radius: 10px; background: color-mix(in srgb, var(--fg) 5%, transparent); color: var(--fg); }
 /* 输入框获得焦点：不出焦点环、不加阴影、不浮起 */
 .cn-root .gen-card[class] .gen-prompt-edit:focus, .cn-root .gen-card[class] .gen-prompt-edit:focus-visible { outline: none; box-shadow: none; transform: none; border: 0; }
-/* 全屏聊天：参数在一行里排开，模型下拉更宽 */
-.cn-root #agent.full .gen-card[class] .gen-model { min-width: 220px; }
+/* 全屏聊天：参数在一行里排开；模型下拉宽度由下面「占满剩余」的规则决定，这里只留最低宽度 */
+.cn-root #agent.full .gen-card[class] .gen-model { min-width: 110px; }
 
 /* ── 卡片底部：说明文字左对齐，按钮一律右对齐（HextaUI CardFooter 自带居中，这里压回去） ── */
 .cn-root .message-card[class] .mc-foot[class] { align-items: stretch; text-align: left; }
@@ -932,3 +1167,450 @@
 }
 .cn-root .plan-card[class] .plan-params[class] .pr-btn:hover { background: var(--hover); }
 .cn-root .plan-card[class] .plan-params[class] .pr-btn:disabled { opacity: .5; cursor: default; }
+
+/* ══ 执行进度清单（输入框上方的折叠条） ══════════════════════════════ */
+/* 条面按「默认磨砂玻璃」：半透明底 + blur（含 -webkit-）+ 两层柔和投影；不描边、不用分隔线 */
+.cn-root #agent.ap2-agent .checklist-bar[class] {
+    flex: 0 0 auto;
+    min-width: 0;
+    margin: 0 12px 8px;
+    border: 0;
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--card) 86%, transparent);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16), 0 10px 22px rgba(0, 0, 0, 0.16);
+    overflow: hidden;
+}
+.cn-root[data-theme="light"] #agent.ap2-agent .checklist-bar[class] {
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+/* 全屏助手时和输入区一起居中收窄，别一条通到屏幕两边 */
+.cn-root #agent.ap2-agent.full .checklist-bar[class] {
+    margin: 0 auto 8px;
+    width: min(760px, calc(100% - 32px));
+}
+/* 收起态那一行：状态图标 + 任务清单 + 进度 + 当前这一步 + 展开箭头 */
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-head[class] {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 0;
+    background: transparent;
+    color: var(--fg2);
+    text-align: left;
+    cursor: pointer;
+    transition: background var(--d-quick) var(--ease);
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-head[class]:hover { background: var(--hover); }
+/* 20px 图标位：完成时换成绿勾圆（对勾描边动画），其余状态保持线性 */
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-glyph[class] {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    color: var(--fg2);
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-glyph[class][data-tone="ok"] { color: var(--fg); }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-glyph[class][data-tone="bad"] { color: var(--bad); }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-glyph-linear[class] {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    transition: opacity var(--d-quick) var(--ease), transform var(--d-std) var(--ease);
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-glyph-linear[class] svg { width: 16px; height: 16px; overflow: visible; }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-glyph-check[class] {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    color: var(--fg);
+    opacity: 0;
+    transform: scale(0.72);
+    transition: opacity var(--d-quick) var(--ease), transform var(--d-std) var(--ease);
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-glyph-tick[class] {
+    stroke: var(--on-solid);
+    stroke-dasharray: 1 1;
+    stroke-dashoffset: 1;
+    transition: stroke-dashoffset var(--d-std) var(--ease);
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-glyph[data-complete="1"] .checklist-glyph-linear[class] { opacity: 0; transform: scale(0.72); }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-glyph[data-complete="1"] .checklist-glyph-check[class] { opacity: 1; transform: none; }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-glyph[data-complete="1"] .checklist-glyph-tick[class] { stroke-dashoffset: 0; }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-title[class] {
+    flex: 0 0 auto;
+    color: var(--fg);
+    font-size: 13px;
+    font-weight: 560;
+    letter-spacing: -0.01em;
+    line-height: 18px;
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-count[class] {
+    flex: 0 0 auto;
+    color: var(--fg2);
+    font-size: 11.5px;
+    font-weight: 500;
+    line-height: 16px;
+    font-variant-numeric: tabular-nums;
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-count[class][data-complete="1"] { color: var(--fg); }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-dot[class] {
+    flex: 0 0 auto;
+    color: var(--fg3);
+    font-size: 11px;
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-hint[class] {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--fg3);
+    font-size: 10.5px;
+    line-height: 15px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-caret[class] {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: var(--fg3);
+    transition: rotate var(--d-quick) var(--ease);
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-caret[class] svg { width: 14px; height: 14px; }
+.cn-root #agent.ap2-agent .checklist-bar[class][data-open="1"] .checklist-bar-caret[class] { rotate: 180deg; }
+/* 展开态：高度过渡（0fr → 1fr）+ 限高内部滚动，别把输入框挤没 */
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-body[class] {
+    display: grid;
+    grid-template-rows: 0fr;
+    max-height: min(38vh, 240px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    transition: grid-template-rows 140ms var(--ease);
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-body[class]::-webkit-scrollbar { display: none; }
+.cn-root #agent.ap2-agent .checklist-bar[class][data-open="1"] .checklist-bar-body[class] {
+    grid-template-rows: 1fr;
+    transition-duration: 220ms;
+    animation: checklist-bar-in 160ms var(--ease) both;
+}
+@keyframes checklist-bar-in {
+    from { opacity: 0; }
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-inner[class] {
+    min-height: 0;
+    overflow: hidden;
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-list[class] {
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: 2px 10px 10px;
+    list-style: none;
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row[class] {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    min-height: 36px;
+    padding: 3px 6px;
+    border-radius: 10px;
+}
+/* 状态图形：底环 / 68% 圆弧 / 对勾 / 叉，按行状态亮其中一层（纯图形，不是分隔线） */
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-mark[class] {
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    color: var(--fg2);
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-mark[class] .checklist-status[class] { width: 20px; height: 20px; overflow: visible; }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-mark[class] .checklist-ring[class] {
+    fill-opacity: 0;
+    stroke-dasharray: none;
+    transition: fill-opacity 180ms var(--ease), opacity 180ms var(--ease), stroke-dasharray 200ms var(--ease);
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-mark[class] .checklist-progress[class],
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-mark[class] .checklist-tick[class],
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-mark[class] .checklist-cross[class] {
+    opacity: 0;
+    stroke-dasharray: 1 1;
+    stroke-dashoffset: 1;
+    transition: stroke-dashoffset 240ms var(--ease), opacity 200ms var(--ease);
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-mark[class] .checklist-progress[class] {
+    transform: rotate(-90deg);
+    transform-box: view-box;
+    transform-origin: 12px 12px;
+    stroke-dasharray: 0.68 1;
+    stroke-dashoffset: 0;
+}
+@keyframes checklist-spin {
+    from { transform: rotate(-90deg); }
+    to { transform: rotate(270deg); }
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-text[class] {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--fg);
+    font-size: 12.5px;
+    line-height: 19px;
+    white-space: nowrap;
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-label[class] {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: top;
+}
+/* 完成行的划线：1px、currentColor、从左展开，延迟 60ms 让对勾先落位 */
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-label[class]::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background: currentColor;
+    transform: scaleX(0);
+    transform-origin: left center;
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 280ms var(--ease) 60ms, opacity 180ms var(--ease) 60ms;
+}
+/* 可纠正的失败那一行的备注 */
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-note[class] {
+    flex: 0 0 auto;
+    color: var(--fg3);
+    font-size: 10.5px;
+    line-height: 19px;
+    white-space: nowrap;
+}
+/* 已完成：浅底圆 + 对勾描边 + 从左划开的划线，文字压一档灰 */
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-done[class] .checklist-mark[class] { color: var(--fg2); }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-done[class] .checklist-mark[class] .checklist-ring[class] { fill-opacity: 0.06; }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-done[class] .checklist-mark[class] .checklist-tick[class] { opacity: 1; stroke-dashoffset: 0; transition-delay: 60ms; }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-done[class] .checklist-text[class] { color: color-mix(in srgb, var(--fg2) 60%, transparent); }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-done[class] .checklist-label[class]::after { transform: scaleX(1); opacity: 1; }
+/* 进行中：外圈 20% 底 + 68% 圆弧慢转，文字提亮到 --fg */
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-run[class] .checklist-mark[class] { color: var(--fg); }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-run[class] .checklist-mark[class] .checklist-ring[class] { opacity: 0.2; }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-run[class] .checklist-mark[class] .checklist-progress[class] { opacity: 1; animation: checklist-spin 1.1s linear infinite; }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-run[class] .checklist-text[class] { color: var(--fg); }
+/* 失败：红叉，文字和已完成的灰同一档，不假装做完（不加划线） */
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-failed[class] .checklist-mark[class] { color: var(--bad); }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-failed[class] .checklist-mark[class] .checklist-cross[class] { opacity: 1; stroke-dashoffset: 0; }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-failed[class] .checklist-text[class] { color: color-mix(in srgb, var(--fg2) 55%, transparent); }
+/* 可纠正的失败（工具在要参数 / 消歧义）：中性小圆点，文字只弱一度 */
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-info[class] .checklist-mark[class] { color: var(--fg3); }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-info-dot[class] {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-info[class] .checklist-text[class] { color: var(--fg2); }
+/* 待办：虚线圆环，文字比进行中弱一档 */
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-todo[class] .checklist-mark[class] .checklist-ring[class] { stroke-dasharray: 2 3; }
+.cn-root #agent.ap2-agent .checklist-bar[class] .checklist-row.is-todo[class] .checklist-text[class] { color: color-mix(in srgb, var(--fg2) 68%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+    .cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-body[class] { animation: none; }
+    .cn-root #agent.ap2-agent .checklist-bar[class][data-open="1"] .checklist-bar-body[class] { animation: none; transition: none; }
+    .cn-root #agent.ap2-agent .checklist-bar[class] .checklist-bar-caret[class] { transition: none; }
+    .cn-root #agent.ap2-agent .checklist-bar[class] .checklist-label[class]::after { transition: none; }
+    .cn-root #agent.ap2-agent .checklist-bar[class] .checklist-mark[class] .checklist-progress[class] { animation: none; }
+}
+
+
+/* ── 待生成卡片 · 参数折叠：外面只留核心几项，其余收进「更多设置」（样式与 ParamField 同一套，不画线框） ── */
+.cn-root .gen-card[class] .gen-more { flex: none; }
+.cn-root .gen-card[class] .gen-more.is-changed { background-color: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--hi); font-weight: 600; }
+.cn-root .gen-card[class] .gen-more-dot { display: inline-block; width: 5px; height: 5px; margin-right: 5px; border-radius: 50%; vertical-align: 1px; background: currentColor; }
+/* 更多设置弹层：加厚磨砂底 + 保留柔和投影（常压在图片上，不靠低透明度让背后透出来） */
+.cn-root #pop.mset-pop[class] { padding: 10px 12px 12px; }
+.cn-root #pop.mset-pop[class] {
+  background: linear-gradient(color-mix(in srgb, var(--glass-tint) 60%, transparent), color-mix(in srgb, var(--glass-tint) 60%, transparent)), color-mix(in srgb, var(--panel) 96%, transparent);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 0;
+  box-shadow: var(--glass-shadow);
+}
+.cn-root #pop.mset-pop[class] .mh { padding: 0 0 6px; }
+.cn-root #pop.mset-pop[class] .mset-group + .mset-group { margin-top: 2px; }
+.cn-root #pop.mset-pop[class] .mset-g { padding: 8px 0 2px; color: var(--fg3); font-size: 10.5px; font-weight: 600; }
+.cn-root #pop.mset-pop[class] .mset-row { gap: 8px; }
+.cn-root #pop.mset-pop[class] .mset-l { flex: 1; min-width: 0; }
+.cn-root #pop.mset-pop[class] .mset-v { flex: none; max-width: 52%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg3); font-size: 11.5px; }
+.cn-root #pop.mset-pop[class] .mset-ic { flex: none; display: inline-flex; color: var(--fg3); }
+.cn-root #pop.mset-pop[class] .mset-row.is-changed .mset-l { color: var(--fg); font-weight: 600; }
+.cn-root #pop.mset-pop[class] .mset-row.is-changed .mset-v { color: var(--hi); font-weight: 600; }
+.cn-root #pop.mset-pop[class] .mset-row.is-changed .mset-l::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: 1px; }
+
+
+/* 参数行：模型选择器吃掉剩余宽度（110–260），比例 / 分辨率 / 张数 / 更多设置跟在后面；
+   卡片 560-660 宽时四项核心参数 + 「更多设置」排成一行（入口带计数时也不折行），不留大片空白 */
+.cn-root .gen-card[class] .gen-params .gen-model[class] { flex: 1 1 auto; min-width: 110px; max-width: 260px; }
+
+
+/* ── 待生成卡片 · 统一设置：一次把同类行的参数改好 ──
+   入口和「更多设置」同一套按钮；弹层沿用加厚磨砂底 + 柔和投影，不画线框。
+   每项默认「保持不改」，只把改过的项写到勾选中的同类型行。 */
+.cn-root .gen-card[class] .gen-unify-entry { flex: none; }
+.cn-root .gen-card[class] .gen-unify-entry.is-changed { background-color: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--hi); font-weight: 600; }
+.cn-root #pop.uset-pop[class] { width: 316px; max-width: min(360px, calc(100vw - 24px)); padding: 10px 12px 0; scroll-padding-bottom: 64px; }
+.cn-root #pop.uset-pop[class] .uset-note { padding: 0 0 4px; color: var(--fg3); font-size: 10.5px; line-height: 1.5; }
+.cn-root #pop.uset-pop[class] .uset-warn { margin: 2px 0 4px; padding: 7px 9px; border-radius: 9px; background: #ffd60a14; color: var(--warn-fg); font-size: 10.5px; line-height: 1.55; }
+.cn-root #pop.uset-pop[class] .mset-item + .mset-item { margin-top: 1px; }
+.cn-root #pop.uset-pop[class] .mset-v.is-keep { color: var(--fg3); }
+.cn-root #pop.uset-pop[class] .uset-open { padding: 2px 0 8px; border-radius: 10px; background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.cn-root #pop.uset-pop[class] .uset-pop-hint { padding: 4px 8px 2px; color: var(--fg3); font-size: 10.5px; line-height: 1.5; }
+.cn-root #pop.uset-pop[class] .uset-foot {
+  position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; margin: 6px -12px 0; padding: 10px 12px 12px;
+  border-radius: 0 0 16px 16px;
+  background: linear-gradient(color-mix(in srgb, var(--glass-tint) 60%, transparent), color-mix(in srgb, var(--glass-tint) 60%, transparent)), color-mix(in srgb, var(--panel) 96%, transparent);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.cn-root #pop.uset-pop[class] .uset-scope { flex: 1; min-width: 0; color: var(--fg2); font-size: 10.5px; line-height: 1.45; }
+.cn-root #pop.uset-pop[class] .uset-apply { flex: none; height: 28px; min-height: 28px; padding: 0 12px; border: 0; border-radius: 9px; background: color-mix(in srgb, var(--fg) 12%, transparent); color: var(--hi); font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.cn-root #pop.uset-pop[class] .uset-apply:hover:not(:disabled) { background: color-mix(in srgb, var(--fg) 18%, transparent); }
+
+/* ── 待生成卡片 · 按节点类型拆成多张卡（图片 / 视频 / 文本 / 配音各一张） ──
+   卡与卡之间只用留白分开（比卡内行距大一圈），不画分隔线、不加描边；
+   底部整体操作条比卡片更轻（一层淡底 + 磨砂 + 柔影），说明这两颗按钮对全部卡生效。 */
+.cn-root .gen-card[class] + .gen-card[class] { margin-top: 8px; }
+.cn-root .gen-card[class] + .gen-foot[class] { margin-top: 8px; }
+.cn-root .gen-foot[class] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px 10px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .05), 0 6px 16px rgba(0, 0, 0, .06);
+}
+.cn-root[data-theme="light"] .gen-foot[class] { box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 6px 16px rgba(15, 23, 42, .06); }
+.cn-root .gen-foot[class] .gen-foot-note { margin: 0; color: var(--fg3); font-size: 11px; line-height: 1.5; }
+.cn-root .gen-foot[class] .gen-foot-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; width: 100%; }
+.cn-root .gen-foot[class] .gen-foot-actions [data-slot="button"] { height: 30px; min-width: 0; padding: 0 14px; border: 0; border-radius: 999px; font-size: 12px; font-weight: 500; box-shadow: none; }
+.cn-root .gen-foot[class] .gen-foot-actions .mc-btn-solid[data-slot="button"] { background: var(--solid); color: var(--on-solid); }
+.cn-root .gen-foot[class] .gen-foot-actions .mc-btn-solid[data-slot="button"]:hover { background: var(--hi); }
+/* 次级按钮只是文字（和预览一致）：默认不铺底，hover 才提亮，不抢主按钮的层级 */
+.cn-root .gen-foot[class] .gen-foot-actions .mc-btn-ghost[data-slot="button"] { background: transparent; color: var(--fg2); }
+.cn-root .gen-foot[class] .gen-foot-actions .mc-btn-ghost[data-slot="button"]:hover { background: var(--hover); color: var(--fg); }
+.cn-root .gen-foot[class] .gen-foot-actions [data-slot="button"]:disabled { opacity: .5; cursor: default; }
+
+
+/* ══ 待生成卡片 · 参数弹层（预览同款）：提升面底 + 12 圆角 + 柔和投影 ══════════════
+   字段弹层 / 模型列表 / 「更多设置」共用这一套；底色用 --card-hi（不靠透明度让背后透出来），
+   分组标题 10px 灰，列表行「11.5px 名称 + 10px 副标题」，选中行软底 + 右侧线性勾，不画描边。 */
+/* 只认 .gen-card-pop 这个标记类：plan 卡的参数弹层也用 #pop.gen-pop，不能被这套改动波及；
+   底色 / 柔影沿用 agent-panel-v2.css 里 .gen-pop 的「加厚磨砂」那一套（深色 rgba(24,24,24,.95)）。 */
+.cn-root #pop.gen-card-pop[class] {
+  padding: 6px; border: 0; border-radius: 12px;
+  min-width: 200px; max-width: min(268px, calc(100vw - 24px));
+}
+.cn-root #pop.gen-card-pop[class] .gen-pop-hd {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 7px 3px; color: var(--fg3); font-size: 10px; line-height: 15px;
+}
+.cn-root #pop.gen-card-pop[class] .gen-pop-g { padding: 7px 7px 1px; color: var(--fg3); font-size: 10px; font-weight: 600; line-height: 15px; }
+.cn-root #pop.gen-card-pop[class] .gen-pop-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.cn-root #pop.gen-card-pop[class] .gen-pop-list { display: flex; flex-direction: column; gap: 1px; max-height: 220px; overflow-y: auto; scrollbar-width: none; }
+.cn-root #pop.gen-card-pop[class] .gen-pop-list::-webkit-scrollbar { display: none; }
+.cn-root #pop.gen-card-pop[class] .gen-opt {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 8px;
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  transition: background-color var(--d-feedback) var(--e-std);
+}
+.cn-root #pop.gen-card-pop[class] .gen-opt:hover:not(:disabled) { background: var(--hover); }
+.cn-root #pop.gen-card-pop[class] .gen-opt[data-on="true"] { background: color-mix(in srgb, var(--solid) 10%, transparent); }
+.cn-root #pop.gen-card-pop[class] .gen-opt-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.cn-root #pop.gen-card-pop[class] .gen-opt-main b {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; font-weight: 500; line-height: 17px; color: var(--fg);
+}
+.cn-root #pop.gen-card-pop[class] .gen-opt-main > span {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; line-height: 15px; color: var(--fg3);
+}
+.cn-root #pop.gen-card-pop[class] .gen-opt-mark { flex: 0 0 12px; width: 12px; height: 12px; color: var(--fg); opacity: 0; }
+.cn-root #pop.gen-card-pop[class] .gen-opt-mark svg { width: 12px; height: 12px; }
+.cn-root #pop.gen-card-pop[class] .gen-opt[data-on="true"] .gen-opt-mark { opacity: 1; }
+.cn-root #pop.gen-card-pop[class] .gen-opt:disabled { opacity: .45; cursor: default; }
+/* 比例：2 列画幅网格，画幅是 1.5px 线性小方框（图标例外，允许描边） */
+.cn-root #pop.gen-card-pop[class] .gen-pop-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 2px; }
+.cn-root #pop.gen-card-pop[class] .gen-shape {
+  display: flex; align-items: center; gap: 9px; padding: 8px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--fg); font: inherit; font-size: 11px; text-align: left; cursor: pointer;
+  transition: background-color var(--d-feedback) var(--e-std);
+}
+.cn-root #pop.gen-card-pop[class] .gen-shape:hover:not(:disabled) { background: var(--hover); }
+.cn-root #pop.gen-card-pop[class] .gen-shape[data-on="true"] { background: color-mix(in srgb, var(--solid) 10%, transparent); }
+.cn-root #pop.gen-card-pop[class] .gen-shape i { display: block; flex: 0 0 auto; border: 1.5px solid currentColor; border-radius: 2px; }
+.cn-root #pop.gen-card-pop[class] .gen-shape span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 「更多设置」：10px 灰标签 + 分段按钮（质量 / 风格 / 开关这类原地改，不再开二级弹层） */
+.cn-root #pop.gen-card-pop[class] .gen-more-set { display: flex; flex-direction: column; }
+.cn-root #pop.gen-card-pop[class] .gen-pop-grp { display: flex; flex-direction: column; padding-bottom: 4px; }
+.cn-root #pop.gen-card-pop[class] .gen-seg { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 6px 4px; }
+.cn-root #pop.gen-card-pop[class] .gen-seg button {
+  flex: 1 1 auto; min-width: 44px; height: 26px; padding: 0 8px; border: 0; border-radius: 7px;
+  background: var(--sunken); color: var(--fg2); font: inherit; font-size: 11px; cursor: pointer;
+  transition: background-color var(--d-feedback) var(--e-std), color var(--d-feedback) var(--e-std);
+}
+.cn-root #pop.gen-card-pop[class] .gen-seg button:hover:not(:disabled) { background: var(--hover); color: var(--fg); }
+.cn-root #pop.gen-card-pop[class] .gen-seg button[data-on="true"] { background: var(--solid); color: var(--on-solid); font-weight: 560; }
+.cn-root #pop.gen-card-pop[class] .gen-seg button:disabled { opacity: .45; cursor: default; }
+/* 模型一步选：可搜索的平铺列表，每行「模型名 + 供应商 · 规格」，选中行软底 + 右侧线性勾 */
+.cn-root #pop.gen-model-pop[class] { max-width: min(300px, calc(100vw - 24px)); }
+.cn-root #pop.gen-model-pop[class] .combo { max-height: calc(min(420px, 55vh) - 12px); }
+.cn-root #pop.gen-model-pop[class] .combo-s { height: 28px; margin: 0 1px 4px; border-radius: 8px; }
+.cn-root #pop.gen-model-pop[class] .combo-in { font-size: 12px; }
+.cn-root #pop.gen-model-pop[class] .combo-list { padding: 1px 0; }
+.cn-root #pop.gen-model-pop[class] .gen-model-item[class] { min-height: 0; padding: 7px 8px; border-radius: 8px; gap: 8px; }
+.cn-root #pop.gen-model-pop[class] .gen-model-item[class].on { font-weight: 400; }
+.cn-root #pop.gen-model-pop[class] .gen-model-row { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.cn-root #pop.gen-model-pop[class] .gen-model-row b {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11.5px; font-weight: 500; line-height: 17px; color: var(--fg);
+}
+.cn-root #pop.gen-model-pop[class] .gen-model-row > span {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; line-height: 15px; color: var(--fg3);
+}
+
+
+/* 方案卡「为什么这样安排」：理由 / 假设默认收起，一行灰字入口 */
+.cn-root .message-card[class] .mc-why-fold { margin: 0; }
+.cn-root .message-card[class] .mc-why-fold > summary { list-style: none; cursor: pointer; color: var(--fg3); font-size: 11px; line-height: 1.5; }
+.cn-root .message-card[class] .mc-why-fold > summary::-webkit-details-marker { display: none; }
+.cn-root .message-card[class] .mc-why-fold > summary::after { content: " ›"; }
+.cn-root .message-card[class] .mc-why-fold[open] > summary::after { content: " ⌄"; }
+.cn-root .message-card[class] .mc-why-fold > summary:hover { color: var(--fg2); }
+.cn-root .message-card[class] .mc-why-fold > .mc-why { margin-top: 2px; }
+
+/* 运行技能脚本：确认卡里的脚本 / 参数明细 */
+.plan-script{display:flex;flex-direction:column;gap:4px;margin-top:6px;padding:8px 10px;border-radius:10px;background:color-mix(in oklab,currentColor 5%,transparent)}
+.plan-script-row{display:flex;gap:8px;align-items:baseline;font-size:12px;line-height:1.5;min-width:0}
+.plan-script-row>span{flex:none;opacity:.55}
+.plan-script-row code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;word-break:break-all;white-space:pre-wrap}
+.plan-script-row em{font-style:normal;opacity:.45}

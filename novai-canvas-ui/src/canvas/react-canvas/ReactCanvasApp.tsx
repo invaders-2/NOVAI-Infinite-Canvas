@@ -63,6 +63,7 @@ import { createCollab, type Collab, type PeerCursor, type PeerState } from "./re
 import { StudioHome } from "../studio/StudioHome";
 import { AssetsPanel } from "./AssetsPanel";
 import { buildCanvasModelLabelIndex, canvasModelBaseName } from "../canvasModelLabels";
+import { AnimatedSendIcon } from "../canvas-next/ui/AnimatedSendIcon";
 import { CanvasInvitePanel } from "../CanvasInvitePanel";
 import { CanvasSharePanel } from "../CanvasSharePanel";
 import { LanCollabPanel, type LanJoinInfo } from "./LanCollabPanel";
@@ -2814,7 +2815,7 @@ function CanvasWorkspace({
             <div className="rc-comment-bar-foot">
               <span className="rc-comment-count" data-testid="comment-count">{commentDraft.length}/200</span>
               <button className="rc-comment-send" data-testid="comment-send" aria-label="发送评论" disabled={!pendingComment || !commentDraft.trim()} onClick={submitComment}>
-                <Send size={14} />
+                <AnimatedSendIcon size={14} />
               </button>
             </div>
           </div>
@@ -3045,7 +3046,7 @@ function CanvasWorkspace({
               {streaming ? (
               <button className="rc-send rc-send-stop" data-testid="agent-stop" aria-label="停止" onClick={() => { const bridge = canvasBridge(); if (bridge && streamRunRef.current) void bridge.command({ type: "canvas/runStop", canvasId, runId: streamRunRef.current, reason: "USER_STOP" }); streamRequestRef.current = ""; setStreaming(false); }}>■</button>
             ) : (
-              <button className="rc-send" data-testid="agent-send" aria-label="发送" onClick={submitDraft}><Send size={15} /></button>
+              <button className="rc-send" data-testid="agent-send" aria-label="发送" onClick={submitDraft}><AnimatedSendIcon size={16} /></button>
             )}
             </div>
             {voiceError ? <div className="rc-voice-status is-error" data-testid="voice-error">{voiceError}</div> : null}

@@ -37,6 +37,8 @@ from server.routes.deps import deps
 router = APIRouter(prefix="/api/community")
 
 RATE_READ_PER_MIN = 120
+# 媒体单独一档：一个作品详情要拉 20 个素材，视频每个还会发多次 Range，120 会把正常浏览打成 429
+RATE_MEDIA_PER_MIN = 900
 RATE_EVENT_PER_MIN = 30
 EVENT_DEDUPE_MS = 5 * 60 * 1000
 MAX_EVENT_REASON = 80
@@ -111,6 +113,10 @@ def _rate_limit(request: Request, bucket: str, limit: int) -> None:
 
 def _rate_read(request: Request) -> None:
     _rate_limit(request, "read", RATE_READ_PER_MIN)
+
+
+def _rate_media(request: Request) -> None:
+    _rate_limit(request, "media", RATE_MEDIA_PER_MIN)
 
 
 def _rate_event(request: Request) -> None:
@@ -236,7 +242,8 @@ async def feed(request: Request, kind: str = "", q: str = "", sort: str = "lates
         "counts": counts,
         "categories": [{"id": key, "count": value} for key, value in categories.items()],
         "creators_online": data["creators_online"],
-        "nodes": [{"id": node.get("id"), "nickname": node.get("nickname"), "online": True}
+        "nodes": [{"id": node.get("id"), "nickname": node.get("nickname"),
+                   "online": bool(node.get("online", True))}
                   for node in data.get("nodes") or []],
     }
 
@@ -417,7 +424,12 @@ def _package_cover_path(item_id: str) -> Optional[str]:
 
 def _cache_cover_path(item_id: str) -> Optional[str]:
     path = os.path.join(store.cache_item_dir(item_id), "cover.webp")
-    return path if os.path.isfile(path) else None
+    if not os.path.isfile(path):
+        return None
+    try:
+        return path if os.path.getsize(path) > 0 else None
+    except OSError:
+        return None
 
 
 async def _serve_media(item_id: str, filename: str, cover: bool = False) -> FileResponse:
@@ -437,8 +449,11 @@ async def _serve_media(item_id: str, filename: str, cover: bool = False) -> File
         cached = _cache_cover_path(item_id)
     if cached:
         return _media_response(cached, name)
-    # 作者在线：按需下载并缓存（封面也走这条路）
-    content = await transport.get_transport().download_media(item_id, name)
+    # 作者在线：按需下载并缓存（封面在包根目录，走专用接口）
+    if cover:
+        content = await transport.get_transport().download_cover(item_id)
+    else:
+        content = await transport.get_transport().download_media(item_id, name)
     if not content:
         raise HTTPException(status_code=404, detail="作者离线，素材没有缓存")
     directory = store.cache_item_dir(item_id)
@@ -455,13 +470,13 @@ async def _serve_media(item_id: str, filename: str, cover: bool = False) -> File
 
 @router.get("/media/{item_id}/{filename}")
 async def local_media(item_id: str, filename: str, request: Request) -> FileResponse:
-    _rate_read(request)
+    _rate_media(request)
     return await _serve_media(item_id, filename)
 
 
 @router.get("/cover/{item_id}")
 async def local_cover(item_id: str, request: Request) -> FileResponse:
-    _rate_read(request)
+    _rate_media(request)
     return await _serve_media(item_id, "cover.webp", cover=True)
 
 
@@ -878,7 +893,8 @@ async def _media_bytes(item_id: str, filename: str) -> Tuple[Optional[bytes], st
     return content, transport.media_content_type(filename)
 
 
-async def _clone_canvas(item: Dict[str, Any], package: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
+async def _clone_canvas(item: Dict[str, Any], package: Dict[str, Any], payload: Dict[str, Any],
+                        owner_id: Optional[int] = None) -> Dict[str, Any]:
     from server.routes.canvas_share import _store_media
     item_id = str(item.get("id") or "")
     mapping: Dict[str, str] = {}
@@ -929,6 +945,9 @@ async def _clone_canvas(item: Dict[str, Any], package: Dict[str, Any], payload: 
     new_canvas["connections"] = connections
     if isinstance(new_payload.get("settings"), dict) and new_payload.get("settings"):
         new_canvas["settings"] = new_payload.get("settings")
+    # 登录态下画布要归属当前用户，否则打开时被判「无权访问该画布」
+    if owner_id:
+        new_canvas["owner_id"] = int(owner_id)
     new_canvas["source"] = {
         "item_id": item_id,
         "version": int(item.get("version") or 1),
@@ -1052,6 +1071,21 @@ async def _report_clone_to_author(item: Dict[str, Any]) -> None:
         pass
 
 
+def _clone_owner_id(request: Request) -> Optional[int]:
+    """克隆出来的画布要归当前登录用户；本机模式（没绑钩子 / 没登录）返回 None。"""
+    lookup = deps.get("CURRENT_CANVAS_OWNER_ID")
+    if not callable(lookup):
+        return None
+    try:
+        value = lookup(request)
+    except Exception:
+        return None
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 @router.post("/items/{item_id}/clone")
 async def clone_item(item_id: str, request: Request) -> Dict[str, Any]:
     resolved = await resolve_item(item_id, for_clone=True)
@@ -1064,7 +1098,7 @@ async def clone_item(item_id: str, request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=409, detail="作者离线，本机没有完整缓存，暂时不能克隆")
     kind = str(item.get("kind") or "canvas")
     if kind == "canvas":
-        result = await _clone_canvas(item, package, payload)
+        result = await _clone_canvas(item, package, payload, _clone_owner_id(request))
     elif kind == "skill":
         result = _clone_skill(item, payload)
     else:
@@ -1616,7 +1650,7 @@ async def public_package(item_id: str, request: Request) -> Dict[str, Any]:
 
 @router.get("/public/items/{item_id}/cover")
 async def public_cover(item_id: str, request: Request) -> FileResponse:
-    _rate_read(request)
+    _rate_media(request)
     _ensure_visible()
     item = store.find_item(_my_items(), item_id)
     if not item or item.get("status") != "published":
@@ -1629,7 +1663,7 @@ async def public_cover(item_id: str, request: Request) -> FileResponse:
 
 @router.get("/public/media/{item_id}/{filename}")
 async def public_media(item_id: str, filename: str, request: Request) -> FileResponse:
-    _rate_read(request)
+    _rate_media(request)
     _ensure_visible()
     if not store.valid_item_id(item_id):
         raise HTTPException(status_code=400, detail="作品 ID 不合法")

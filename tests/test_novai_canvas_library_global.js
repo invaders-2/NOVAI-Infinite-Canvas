@@ -55,7 +55,7 @@ const css = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-n
 assert.ok(css.includes('.drawer:has(.lib-shell)') && css.includes('.lib-row') && css.includes('.lib-scope'), '抽屉布局样式');
 assert.ok(component.includes('aria-expanded={isOpen}') && component.includes('toggleFolder') && component.includes('lib-fbody'), '文件夹手风琴：点开在下方就地展开，再点收起');
 assert.ok(component.includes('这个文件夹还是空的') && component.includes('显示全部'), '展开后的空态 / 超出先折叠');
-assert.ok(component.includes('canvas/assetLibrary/products') && component.includes('lib-chips') && component.includes('lib-types'), '产品档案 / 用途筛选 / 类型筛选');
+assert.ok(component.includes('canvas/assetLibrary/products') && component.includes('lib-types') && !component.includes('lib-chips'), '产品档案 / 类型筛选（用途筛选已移除）');
 assert.ok(component.includes('normalizeAssetUrl(store, o.url)') && component.includes('input.url = prep.url'), '素材地址先归一化再直传 URL');
 assert.ok(component.includes('prep.dataUrl') && component.includes('读取素材失败'), 'data/不可读素材有明确兜底');
 assert.ok(component.includes('x?.detail || x?.error'), '后端 detail 原样进 toast');

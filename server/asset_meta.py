@@ -2,8 +2,8 @@
 
 用途（item["use"]）回答「这张素材在工作流里拿来干什么」，技能和画布助手按它取素材：
     product 产品 / model 模特 / scene 场景 / source 源视频 / depth 深度视频 / style 风格参考 / sound 音效
-item["use_source"] = "manual" 表示用户或助手明确指定过，AI 分类回来后不再覆盖；
-否则是 "auto"，每次分类完成按 infer_use 重新推断。
+item["use_source"] = "manual" 表示用户或助手明确指定过，自动推断不再覆盖；
+否则是 "auto"，每次保存素材时按 infer_use 重新推断。
 
 产品档案存在资产库顶层 lib["products"]：
     {"id", "name", "selling_points", "angles": [{"item_id", "label"}], "created_at", "updated_at"}
@@ -54,23 +54,8 @@ def normalize_use(value: Any) -> str:
     return _USE_ALIASES.get(text, _USE_ALIASES.get(low, ""))
 
 
-def _classification_values(classification: Any, *dims: str) -> List[str]:
-    if not isinstance(classification, dict):
-        return []
-    cats = classification.get("categories") if isinstance(classification.get("categories"), dict) else {}
-    out: List[str] = []
-    for dim in dims:
-        values = cats.get(dim)
-        if isinstance(values, list):
-            out.extend(str(v) for v in values if v)
-    for entry in classification.get("flat") or []:
-        if isinstance(entry, dict) and entry.get("dimension") in dims and entry.get("tag"):
-            out.append(str(entry["tag"]))
-    return out
-
-
 def infer_use(item: Dict[str, Any], category_name: str = "") -> str:
-    """按媒体类型 → 名称 / 文件夹名 → AI 分类推断用途；推不出返回空串。"""
+    """按媒体类型 → 名称 / 文件夹名推断用途；推不出返回空串。"""
     kind = str(item.get("kind") or "image").lower()
     name = str(item.get("name") or "")
     hay = (name + " " + str(category_name or "")).lower()
@@ -83,19 +68,6 @@ def infer_use(item: Dict[str, Any], category_name: str = "") -> str:
             continue
         if any(n in hay for n in needles):
             return use
-    cls = item.get("classification")
-    model_tags = " ".join(_classification_values(cls, "model", "people"))
-    subject_tags = " ".join(_classification_values(cls, "subject", "objects"))
-    style_tags = " ".join(_classification_values(cls, "use_case"))
-    has_person = bool(re.search(r"模特|单人|多人|男性|女性|儿童|半身|全身|手部", model_tags)) and "无人" not in model_tags
-    if has_person:
-        return "model"
-    if re.search(r"产品|商品|鞋|包|服装|饰品|化妆品|食物|电器|家具", subject_tags):
-        return "product"
-    if re.search(r"风格参考|情绪板|moodboard", style_tags, re.I):
-        return "style"
-    if _classification_values(cls, "scene", "space", "environment"):
-        return "scene"
     return ""
 
 
@@ -169,12 +141,28 @@ def products(lib: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
-def find_product(lib: Dict[str, Any], product_id: str = "", name: str = "") -> Optional[Dict[str, Any]]:
+def _owner_int(value: Any) -> Optional[int]:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def visible_products(lib: Dict[str, Any], owner_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """产品档案按归属过滤；owner_id=None（本机模式）返回全部。"""
+    rows = [p for p in products(lib) if isinstance(p, dict)]
+    if owner_id is None:
+        return rows
+    return [p for p in rows if _owner_int(p.get("owner_id")) == int(owner_id)]
+
+
+def find_product(lib: Dict[str, Any], product_id: str = "", name: str = "",
+                 owner_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
     product_id = str(product_id or "").strip()
     name = str(name or "").strip()
-    for p in products(lib):
-        if not isinstance(p, dict):
-            continue
+    for p in visible_products(lib, owner_id):
         if (product_id and p.get("id") == product_id) or (name and str(p.get("name") or "").strip() == name):
             return p
     return None
@@ -203,19 +191,22 @@ def _clean_angles(lib: Dict[str, Any], angles: Any) -> List[Dict[str, str]]:
 
 
 def upsert_product(lib: Dict[str, Any], *, product_id: str = "", name: str = "", selling_points: Optional[str] = None,
-                   angles: Any = None, append: bool = False) -> Dict[str, Any]:
+                   angles: Any = None, append: bool = False, owner_id: Optional[int] = None) -> Dict[str, Any]:
     """新建或更新产品档案。同名产品视为同一个（助手说「存成白色运动鞋档案」要能累加角度）。
 
     angles=None 不动角度；append=True 把新角度追加到已有角度后面（去重），否则整体替换。
     角度里的素材会被标成「产品」用途（手动标记）。
     """
     name = re.sub(r"\s+", " ", str(name or "").strip())[:60]
-    product = find_product(lib, product_id=product_id) or (find_product(lib, name=name) if name else None)
+    product = find_product(lib, product_id=product_id, owner_id=owner_id) or \
+        (find_product(lib, name=name, owner_id=owner_id) if name else None)
     if product is None:
         if not name:
             raise ValueError("产品名称不能为空")
         product = {"id": f"prod_{uuid.uuid4().hex[:10]}", "name": name, "selling_points": "", "angles": [],
                    "created_at": _now_ms()}
+        if owner_id is not None:
+            product["owner_id"] = int(owner_id)
         products(lib).append(product)
     elif name:
         product["name"] = name

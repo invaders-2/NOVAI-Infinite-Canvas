@@ -155,7 +155,8 @@ class B_AssetAclTest(unittest.TestCase):
         self.assertEqual(owner.get(asset).status_code, 200)
         self.assertEqual(viewer.get(asset).status_code, 200)
         self.assertEqual(editor.get(asset).status_code, 200)
-        self.assertEqual(admin.get(asset).status_code, 200)
+        # 2026-11：管理员没有素材特权，和普通账号一样只能读自己的 + 共享画布引用的素材
+        self.assertEqual(admin.get(asset).status_code, 403)
         # URL 带 query 仍按路径比较
         self.assertEqual(viewer.get(asset + "?v=123&x=1").status_code, 200)
 

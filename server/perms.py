@@ -173,14 +173,16 @@ def remove_member(canvas_id: str, user_id: int) -> None:
 # ---------------------------------------------------------------- 角色判定
 
 def resolve_role(owner_id: Optional[int], user: Optional[Dict[str, Any]], share: Optional[Dict[str, Any]]) -> Optional[str]:
-    """owner 优先，其次 admin，最后是显式分享角色；没关系返回 None。"""
+    """owner 优先，其次显式分享角色；没关系返回 None。
+
+    2026-11：画布不再给管理员通吃——管理员和普通账号一样，只能看自己的 + 别人共享给自己的
+    （账号管理接口不受影响）；素材隔离（asset_acl）另有自己的 admin 例外，不经过这里。
+    """
     if not user:
         return None
     user_id = int(user.get("id"))
     if owner_id is not None and int(owner_id) == user_id:
         return "owner"
-    if str(user.get("role")) == "admin":
-        return "admin"
     if share and str(share.get("role")) in MEMBER_ROLES:
         return str(share["role"])
     return None

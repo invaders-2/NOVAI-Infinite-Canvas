@@ -17,6 +17,23 @@ const ASSETS_TTL = 1_500;
 let appsCache: { at: number; value: Promise<Part> } | null = null;
 let assetsCache: { at: number; value: Promise<Part> } | null = null;
 
+/** 最近一次成功读到的素材列表：历史消息只有文本，靠它把「@素材名」反查回缩略图（同步读取，渲染时能用） */
+let assetSnapshot: AgentReference[] = [];
+let assetSnapshotVersion = 0;
+const assetListeners = new Set<() => void>();
+
+export function cachedAgentAssets(): AgentReference[] { return assetSnapshot; }
+export function agentAssetsVersion(): number { return assetSnapshotVersion; }
+export function subscribeAgentAssets(listener: () => void): () => void {
+  assetListeners.add(listener);
+  return () => { assetListeners.delete(listener); };
+}
+function rememberAgentAssets(items: AgentReference[]): void {
+  assetSnapshot = items;
+  assetSnapshotVersion += 1;
+  for (const listener of assetListeners) listener();
+}
+
 /** 素材库被增删改之后调用：不等 TTL，下一次打开面板就能看到新内容 */
 export function invalidateAgentReferences(): void {
   assetsCache = null;
@@ -110,5 +127,7 @@ async function fetchAssets(): Promise<Part> {
     }
   }));
   // 部分库读失败也把能读到的给用户，但整份素材库结果不进缓存，下次打开会补拉
-  return { items: groups.flat(), error: failedReads ? "素材库读取失败" : "" };
+  const items = groups.flat();
+  rememberAgentAssets(items);
+  return { items, error: failedReads ? "素材库读取失败" : "" };
 }

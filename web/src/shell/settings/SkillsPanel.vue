@@ -89,7 +89,7 @@ async function installGithub(force = false) {
         const { ok, status, data } = await post('/api/skills/import-github', { url: gh.value.url.trim(), path: gh.value.path.trim(), ref: gh.value.ref.trim(), overwrite: force });
         if (status === 409) { overwrite.value = { kind: 'github', text: data.detail }; return; }
         if (!ok) throw new Error(data.detail || '安装失败');
-        toast(`已安装技能「${(data.skill && data.skill.name) || ''}」`, { icon: 'check' });
+        toast(`已安装技能「${(data.skill && data.skill.name) || ''}」，默认停用；打开右侧开关即可用`, { icon: 'check' });
         dlg.value = false; overwrite.value = null; gh.value = { url: '', path: '', ref: '' };
         load();
     } catch (e) { err.value = (e && e.message) || '安装失败'; }
@@ -105,7 +105,7 @@ async function importFile(file, force = false) {
     if (status === 409) { overwrite.value = { kind: 'file', text: data.detail }; return; }
     if (!ok) { toast(data.detail || '导入失败', { danger: true, icon: 'alert' }); return; }
     pendingMarkdown = ''; overwrite.value = null;
-    toast(`已导入技能「${(data.skill && data.skill.name) || ''}」`, { icon: 'check' });
+    toast(`已导入技能「${(data.skill && data.skill.name) || ''}」，默认停用；打开右侧开关即可用`, { icon: 'check' });
     load();
 }
 function confirmOverwrite() {
@@ -257,7 +257,38 @@ async function clearRelay() {
     } finally { relayBusy.value = false; }
 }
 
-onMounted(() => { load(); loadToken(); loadRelay(); });
+// 全局开关：禁止运行技能脚本（安装本来就不执行脚本，这里管的是「装好的包里的脚本能不能跑」）
+const scriptGuard = ref({ disabled: false, busy: false, supported: true });
+async function loadScriptGuard() {
+    try {
+        const r = await fetch('/api/settings/skill-scripts', { headers: { Accept: 'application/json' } });
+        if (!r.ok) { scriptGuard.value.supported = false; return; }
+        const d = await r.json();
+        scriptGuard.value = { disabled: !!(d && d.disabled), busy: false, supported: true };
+    } catch (e) {
+        scriptGuard.value.supported = false;
+    }
+}
+async function toggleScriptGuard(nextDisabled) {
+    if (scriptGuard.value.busy) return;
+    scriptGuard.value = { ...scriptGuard.value, busy: true };
+    try {
+        const r = await fetch('/api/settings/skill-scripts', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ disabled: !!nextDisabled }),
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(detailOf(d, r.status));
+        scriptGuard.value = { disabled: !!(d && d.disabled), busy: false, supported: true };
+        toast(nextDisabled ? '已禁止运行技能脚本' : '已允许运行技能脚本（运行时仍逐次确认）', { icon: 'check' });
+    } catch (e) {
+        scriptGuard.value = { ...scriptGuard.value, busy: false };
+        toast((e && e.message) || '切换失败', { danger: true, icon: 'alert' });
+    }
+}
+
+onMounted(() => { load(); loadToken(); loadRelay(); loadScriptGuard(); });
 </script>
 
 <template>
@@ -317,6 +348,14 @@ onMounted(() => { load(); loadToken(); loadRelay(); });
             <button type="button" class="nv-btn sm primary" @click="confirmOverwrite">覆盖</button>
         </div>
 
+        <SetCard v-if="scriptGuard.supported" :title="'技能脚本'" desc="安装技能时不会执行任何仓库脚本；这里控制的是已安装技能包里的脚本能不能被画布助手运行，运行时仍会逐次弹确认卡。">
+            <div class="row">
+                <span class="lead"><NvIcon name="shield" /></span>
+                <span class="tx"><b>允许运行技能脚本</b><small>{{ scriptGuard.disabled ? '已关闭：脚本一律拒绝执行' : '已开启：每次运行都要你点「执行」' }}</small></span>
+                <NvSwitch :model-value="!scriptGuard.disabled" :disabled="scriptGuard.busy" label="允许运行技能脚本" @update:model-value="v => toggleScriptGuard(!v)" />
+            </div>
+        </SetCard>
+
         <div v-if="loading" class="ld"><div v-for="n in 4" :key="n" class="nv-skel"></div></div>
         <div v-else-if="failed" class="empty">技能列表加载失败 <button type="button" class="nv-btn sm" @click="load">重试</button></div>
         <template v-else>
@@ -326,6 +365,7 @@ onMounted(() => { load(); loadToken(); loadRelay(); });
                         <span class="lead"><NvIcon :name="icon(s)" /></span>
                         <span class="tx"><b>{{ s.name }}</b><small>{{ s.description || s.id }}</small></span>
                         <span class="st">{{ s.enabled === false ? '已停用' : '可用' }}</span>
+                        <span v-if="s.has_scripts" class="chip" :title="'技能包里有 ' + (s.scripts || []).length + ' 个脚本，运行时需要你逐次确认'">含脚本</span>
                         <span v-if="s.source && s.source.type === 'community'" class="chip src" :title="'社区克隆 · v' + ((s.source.version) || 1) + ' · ' + ((s.source.author || {}).account_id || '')">来自 {{ (s.source.author || {}).nickname || '局域网用户' }}</span>
                         <span v-if="s.builtin_pack" class="chip" title="随安装包分发，不能删除，可以停用">内置</span>
                         <button type="button" class="act" :title="'发布「' + s.name + '」到社区'" :aria-label="'发布 ' + s.name + ' 到社区'" @click="publishToCommunity(s)"><NvIcon name="users" /></button>
@@ -347,6 +387,7 @@ onMounted(() => { load(); loadToken(); loadRelay(); });
                         <span class="tx"><b>{{ s.name }}</b><small>{{ s.description || s.id }}</small></span>
                         <span v-if="s.usage_count" class="st">用过 {{ s.usage_count }} 次</span>
                         <span v-if="s.enabled === false" class="st">已停用</span>
+                        <span v-if="s.has_scripts" class="chip" :title="'技能包里有 ' + (s.scripts || []).length + ' 个脚本，运行时需要你逐次确认'">含脚本</span>
                         <span v-if="s.source && s.source.type === 'community'" class="chip src" :title="'社区克隆 · v' + ((s.source.version) || 1)">来自 {{ (s.source.author || {}).nickname || '局域网用户' }}</span>
                         <span v-if="s.builtin_pack" class="chip" title="随安装包分发，不能删除，可以停用">内置</span>
                         <button type="button" class="act" :title="'发布「' + s.name + '」到社区'" :aria-label="'发布 ' + s.name + ' 到社区'" @click="publishToCommunity(s)"><NvIcon name="users" /></button>

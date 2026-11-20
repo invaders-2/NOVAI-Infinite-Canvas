@@ -264,6 +264,15 @@ assert(engineSrc.includes('wantedRatio(store.state.doc, node, node.kind as GenKi
 const actionsSrc = src('actions.ts');
 assert(actionsSrc.includes('function syncSourceRatio') && actionsSrc.includes('syncSourceRatio(store, n)'), '输入变化后同步原图比例');
 assert(actionsSrc.includes('sourceSizeForTier(sourceBoxForNode(store, n, n.kind as GenKind), tier)'), '连入 / 更换参考图后按新源图尺寸重写备忘（0 尺寸不写）');
+// 上传的目标节点只收同类型媒体（往视频节点塞图片会把节点写坏）
+assert(actionsSrc.includes('if (dst && isGenKind(dst.kind) && dst.kind !== kind)') && actionsSrc.includes('\`「\${f.name}」放不进\${TYPE_LABEL[dst.kind]}节点：这里只收\${TYPE_LABEL[dst.kind]}\`'), 'addFiles 的类型守卫：目标节点类型和文件媒体类型不符时提示「放不进 X 节点：这里只收 X」并跳过');
+// 「替换」也只收同类型媒体：守卫收在 replaceNodeMedia 一处，三个入口（上传文件 / 拖节点 / 素材库）都传类型
+assert(actionsSrc.includes('mediaKind?: GenKind') && actionsSrc.includes('\`不能把\${TYPE_LABEL[mediaKind]}替换进\${TYPE_LABEL[n.kind]}节点：这里只收\${TYPE_LABEL[n.kind]}\`'), 'replaceNodeMedia 收 mediaKind：类型不符时拒绝并提示「不能把 X 替换进 Y 节点：这里只收 Y」');
+assert(actionsSrc.includes('}, kind); continue; }'), '节点「替换 → 上传文件」这条入口把文件类型传给 replaceNodeMedia');
+// 文件选择框按 cn:upload 的 accept 收窄（空视频节点只筛视频），读完文件复位
+const canvasAppSrc = src('CanvasApp.tsx');
+assert(canvasAppSrc.includes('el.accept = d.accept || UPLOAD_ACCEPT') && canvasAppSrc.includes('el.accept = UPLOAD_ACCEPT'), '文件选择框按 detail.accept 收窄，选完文件立刻复位成默认全量类型');
+assert(canvasAppSrc.includes('const UPLOAD_ACCEPT = "image/*,video/*,audio/*," + DOC_ACCEPT;'), '默认 accept 仍是图片 / 视频 / 音频 + 文档');
 
 /* ---------- 源码接线：换比例的尺寸过渡 / 拖拽缩放不播 / 圆角缩放手柄 ---------- */
 const nodeViewSrc = src('ui/NodeView.tsx');
@@ -293,14 +302,24 @@ assert(/right:5\.5px;bottom:5\.5px;width:13px;height:13px/.test(rzRule), '遮罩
 assert(/\.cn-root \.rz\{position:absolute;right:-11px;bottom:-11px;width:22px;height:22px/.test(cssSrc), '命中区外扩到 22×22 / -11（命中区不画东西）');
 assert(cssSrc.includes('.cn-root .rz{') && cssSrc.includes('color:var(--solid)'), '手柄颜色跟主题走，浅色主题下也看得见');
 
-// 空状态的浮动工具条：图片只留「上传」一颗，文本 / 视频 / 音频不挂（生成中、有结果、非生成类都不受影响）
+// 空状态的浮动工具条：空图片 / 空视频节点各留一颗「上传」（tip 分别是上传图片 / 上传视频），文本 / 音频不挂
+// （生成中、有结果、非生成类都不受影响）
 const genPanelSrc = src('ui/GenPanel.tsx');
-assert(genPanelSrc.includes('if (isGenKind(node.kind) && !out && !running && node.kind !== "image") return null;'), 'Toolbar：空状态的文本 / 视频 / 音频不渲染整条，图片例外');
+assert(genPanelSrc.includes('if (isGenKind(node.kind) && !out && !running && node.kind !== "image" && node.kind !== "video") return null;'), 'Toolbar：空状态的文本 / 音频不渲染整条，空图片 / 空视频走单颗上传');
+assert(genPanelSrc.includes('if (isGenKind(node.kind) && !out && !running) {') && genPanelSrc.includes('const video = node.kind === "video";'), '空图片 / 空视频共用同一个单颗上传分支');
+assert(genPanelSrc.includes('const what = video ? "上传视频" : "上传图片";') && genPanelSrc.includes('data-tip={what} aria-label={what}'), '按钮 tip / aria / data-tip 按节点类型给「上传视频」/「上传图片」');
+assert(genPanelSrc.includes('...(video ? { kind: "video", accept: "video/*" } : { kind: "image", accept: "image/*" })'), '空的图片 / 视频节点上传时把「只收图片 / 只收视频」的类型提示交给 CanvasApp');
 assert(genPanelSrc.includes('if (kind !== "image" && kind !== "video") return;') && genPanelSrc.includes('isAdaptiveRatio(ratioMemo.ratio)'), '面板量到源图尺寸后写回备忘（图片 / 视频同一处）');
-// 空图片节点不再走 FloatMenuBar，而是单独一颗按钮：只有一个 upload 按钮、图标 + 文字常显
+// 空图片 / 空视频不再走 FloatMenuBar，而是单独一颗按钮：只有一个 upload 按钮、图标 + 文字常显
 const emptyUpload = genPanelSrc.slice(genPanelSrc.indexOf('className="float enter ntb-empty-upload"'), genPanelSrc.indexOf('if (running) items ='));
-assert(emptyUpload.includes('data-tb="upload"') && emptyUpload.includes('<Icon name="upload" />上传'), '空图片节点：图标 + 「上传」文字都写在按钮里（不靠 hover 展开）');
-assert((emptyUpload.match(/data-tb=/g) || []).length === 1, '空图片节点只有这一颗按钮（没有裁剪 / 涂鸦 / 调色 / 素材库等）');
+assert(emptyUpload.includes('data-tb="upload"') && emptyUpload.includes('<Icon name="upload" />上传'), '空的图片 / 视频节点：图标 + 「上传」文字都写在按钮里（不靠 hover 展开）');
+assert((emptyUpload.match(/data-tb=/g) || []).length === 1, '空图片 / 空视频节点都只有这一颗按钮（没有裁剪 / 涂鸦 / 调色 / 素材库等）');
+assert(emptyUpload.includes('accept: "video/*"') && emptyUpload.includes('accept: "image/*"'), '空的视频 / 图片节点的这颗按钮都带类型提示（video/* 、image/*）');
+assert(emptyUpload.includes('detail: { target: node.id') && emptyUpload.includes('cn:upload'), '上传仍派发 cn:upload 并带上目标节点（沿用老的追加成当前版本那条链路）');
+// 另外两条替换入口也要把媒体类型传进来（否则守卫等于没接上）
+const librarySrc = src('ui/Library.tsx');
+assert(viewportSrc.includes('isGenKind(src.kind) ? src.kind : undefined'), '拖别的节点来替换：把源节点类型传给 replaceNodeMedia');
+assert(librarySrc.includes('replaceNodeMedia(store, target, { url: it.url, w: box.w, h: box.h }, mk)'), '素材库点一条替换：把素材类型传给 replaceNodeMedia');
 // 专属样式：和整条 dock 同一套容器（50 高 / 圆角 14 / padding 7 / 磨砂玻璃）里放一颗 36 高的按钮，图标 + 文字常显
 const cssEmpty = cssSrc.slice(cssSrc.indexOf('#ntb.ntb-empty-upload'), cssSrc.indexOf('#ntb.ntb-empty-upload .ib svg'));
 assert(/height:50px/.test(cssEmpty) && /border-radius:14px/.test(cssEmpty), '空上传 dock 容器：50 高、圆角 14');
@@ -358,5 +377,38 @@ assert(/\.cn-root \.node\.sel \.rz\{opacity:1\}/.test(cssSrc), '手柄仍然只�
     const pv = pressed[pressed.length - 1];
     assert.deepStrictEqual({ w: pv.w, h: pv.h }, { w: 320, h: 569 }, '视频生成中占位按 9:16 源图摆正（320×569）');
 
-    console.log('[PASS] 空状态图片 / 视频节点宽高跟随所选比例（改比例立刻摆正、原图比例按源图 / sourceSize 摆正、生成中占位第一帧就是原图比例、没有源图与已有结果不动、拖过的尺寸只认比例变化、新建即按默认比例；换比例有尺寸过渡、拖拽缩放不播、缩放手柄是角外圆头弧线；空状态图片节点一颗磨砂玻璃「上传」单按钮条、其它生成类空状态不挂浮动工具条）');
+    /* ---------- 上传类型守卫：目标节点只收同类型媒体 ---------- */
+    const guardVideo = emptyNode('video', 320, 180);
+    const toastsBefore = store.state.toasts.length;
+    await actions.addFiles(store, [new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'pic.png', { type: 'image/png' })], { x: 0, y: 0 }, { target: guardVideo });
+    eq(model.genOf(store.node(guardVideo)).hist.length, 0, '往视频节点塞图片：一个版本都不写');
+    eq(store.node(guardVideo).kind, 'video', '被拒之后节点类型不变');
+    const vidToast = store.state.toasts.slice(toastsBefore).map((t) => t.html).join(' | ');
+    assert(vidToast.includes('放不进视频节点：这里只收视频'), '提示说人话「pic.png」放不进视频节点：这里只收视频（实际：' + vidToast + '）');
+
+    const guardImage = emptyNode('image', 240, 240);
+    const toastsAfterVideo = store.state.toasts.length;
+    await actions.addFiles(store, [new File([new Uint8Array([1, 2, 3])], 'a.mp3', { type: 'audio/mpeg' })], { x: 0, y: 0 }, { target: guardImage });
+    eq(model.genOf(store.node(guardImage)).hist.length, 0, '往图片节点塞音频：一个版本都不写');
+    const imgToast = store.state.toasts.slice(toastsAfterVideo).map((t) => t.html).join(' | ');
+    assert(imgToast.includes('放不进图片节点：这里只收图片'), '提示说人话「a.mp3」放不进图片节点：这里只收图片（实际：' + imgToast + '）');
+
+    /* ---------- 「替换」守卫：视频进不了图片节点，图片可以 ---------- */
+    const repImg = emptyNode('image', 240, 240, { hist: [{ url: '/assets/base.png', w: 800, h: 600 }], hi: 0 });
+    const repToasts = store.state.toasts.length;
+    assert.strictEqual(actions.replaceNodeMedia(store, repImg, { url: '/assets/clip.mp4', w: 320, h: 180 }, 'video'), false, '视频替换进图片节点：被拒（返回 false）');
+    const repAfter = model.genOf(store.node(repImg));
+    eq({ url: repAfter.hist[repAfter.hi].url, n: repAfter.hist.length, hi: repAfter.hi }, { url: '/assets/base.png', n: 1, hi: 0 }, '被拒之后当前版本原封不动（hist / hi / url 都没动）');
+    const repToast = store.state.toasts.slice(repToasts).map((t) => t.html).join(' | ');
+    assert(repToast.includes('不能把视频替换进图片节点：这里只收图片'), '提示说人话「不能把视频替换进图片节点：这里只收图片」（实际：' + repToast + '）');
+    assert.strictEqual(actions.replaceNodeMedia(store, repImg, { url: '/assets/new.png', w: 1024, h: 768 }, 'image'), true, '图片替换进图片节点：放行');
+    const repOk = model.genOf(store.node(repImg));
+    eq(repOk.hist.length, 1, '替换不新增版本（hist 仍 1）');
+    assert.strictEqual(repOk.hist[repOk.hi].url, '/assets/new.png', '当前版本的 url 换成新素材');
+    // 文本节点不带类型也照旧放行（守卫只管图片 / 视频 / 音频节点）
+    const repText = emptyNode('text', 280, 200);
+    store.patchGen(repText, { hist: [{ text: '原文' }], hi: 0 });
+    assert.strictEqual(actions.replaceNodeMedia(store, repText, { url: '/assets/x.png' }, 'image'), true, '文本节点不受「替换」类型守卫影响（不拦）');
+
+    console.log('[PASS] 空状态图片 / 视频节点宽高跟随所选比例（改比例立刻摆正、原图比例按源图 / sourceSize 摆正、生成中占位第一帧就是原图比例、没有源图与已有结果不动、拖过的尺寸只认比例变化、新建即按默认比例；换比例有尺寸过渡、拖拽缩放不播、缩放手柄是角外圆头弧线；空图片 / 空视频节点都是一颗磨砂玻璃「上传」单按钮条、tip 分别是上传图片 / 上传视频、选择框分别只筛图片 / 只筛视频、文本 / 音频空状态不挂浮动工具条；上传（addFiles target）与替换（replaceNodeMedia）两处都按节点类型守卫，图片塞不进视频节点、音频塞不进图片节点、视频也替换不进图片节点，同类型替换只换当前版本不新增 hist）');
 })().catch((error) => { console.error(error); process.exit(1); });

@@ -140,6 +140,32 @@ const veoLiteUi = caps.modelCapsUi('video', {
 assert.deepStrictEqual(veoLiteUi.modes, ['文生视频'], 'lite 只出文生视频');
 assert.deepStrictEqual(veoLiteUi.durs, [8], 'VEO 3.1 ext 档固定 8 秒');
 
+// ---- 2b. 视频原生音频（配乐 / 音效）：只有后端明确下发 audio:true 才给开关入口 ----
+// 后端 apimart_video_audio_field 判定：只有文档确证有 audio / generate_audio 布尔参数的模型才下发 audio:true
+const audioUi = caps.modelCapsUi('video', {
+    provider: 'apimart', model: 'seedance-2.5', kind: 'video',
+    ratios: ['16:9'], resolutions: ['720p'], durations: [5], audio: true,
+});
+assert.strictEqual(audioUi.audio, true, 'audio:true → ui.audio（面板才给「音频」开关）');
+const noAudioUi = caps.modelCapsUi('video', {
+    provider: 'apimart', model: 'kling-v4', kind: 'video',
+    ratios: ['16:9'], resolutions: ['720p'], durations: [5],
+});
+assert.strictEqual('audio' in noAudioUi, false, '缺字段 = 没有音频开关入口');
+const falseAudioItem = { provider: 'apimart', model: 'kling-v4', kind: 'video', ratios: ['16:9'], audio: false };
+assert.strictEqual('audio' in caps.modelCapsUi('video', falseAudioItem), false, 'audio:false 不落进 ui');
+assert.strictEqual('audio' in caps.modelCapsUi('image', { ...falseAudioItem, kind: 'image', ratios: ['1:1'] }), false, '图片分支不受影响');
+
+const audioSpec = model.specFor({ configId: 'apimart::seedance-2.5', label: 'seedance-2.5', vendor: 'APIMART', kind: 'video', ui: audioUi, specSource: 'spec' });
+assert.strictEqual(audioSpec.audio, true, 'specFor 认 ui.audio');
+const noAudioSpec = model.specFor({ configId: 'apimart::kling-v4', label: 'kling-v4', vendor: 'APIMART', kind: 'video', ui: noAudioUi, specSource: 'spec' });
+assert.strictEqual(noAudioSpec.audio, false, '没声明就是不支持（既有约定不变）');
+// 有开关的模型：sound 原样保留；没开关的模型：sound 被夹成 false
+const keepSound = model.clampParams('video', { model: audioSpec.id, mode: '文生视频', ratio: '16:9', res: '720p', dur: 5, sound: true, times: 1 }, audioSpec);
+assert.strictEqual(keepSound.sound, true, '有音频能力的模型保留用户打开的声音');
+const dropSound = model.clampParams('video', { model: noAudioSpec.id, mode: '文生视频', ratio: '16:9', res: '720p', dur: 5, sound: true, times: 1 }, noAudioSpec);
+assert.strictEqual(dropSound.sound, false, '没有音频能力的模型关掉声音');
+
 // ---- 3. 无 caps：保持 guess（未验证）----
 const guessed = model.specFor({ configId: 'x::some-image', label: 'some-image', kind: 'image', ui: null });
 assert.strictEqual(guessed.specSource, 'guess', '没有 caps 仍标 guess');
@@ -307,7 +333,16 @@ const card = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-
 const genPanel = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/GenPanel.tsx'), 'utf8');
 assert.ok(backend.includes('fetch("/api/model-caps"'), 'listModels 会 best-effort 拉 /api/model-caps');
 assert.ok(backend.includes('MODEL_CAPS_TIMEOUT_MS = 1000') && backend.includes('AbortController'), '接口带短超时，不拖死模型列表');
-assert.ok(backend.includes('capsCache = null') && backend.includes('capsCache = null; cb()'), 'caps 缓存与 config 一起失效');
+// 缓存失效：config 一变（设置页改模型 / 平台增删）两份 caps 都要跟着作废，否则面板参数还是上一个平台的
+const invalidateBody = (backend.match(/const invalidate = \(\) => \{([^}]*)\}/) || [])[1] || '';
+assert.ok(
+  /configCache = null/.test(invalidateBody) && /capsCache = null/.test(invalidateBody)
+  && /builtinCapsCache = null/.test(invalidateBody) && /cb\(\)/.test(invalidateBody),
+  'caps 缓存与 config 一起失效（含 include_builtin 那份）'
+);
+// config 拉取失败（切平台 / 网关异常）时同样不能留着上一轮的 caps
+const configLine = (backend.match(/configCache = request\("\/api\/config"\)[^\n]*/) || [''])[0];
+assert.ok(/capsCache = null/.test(configLine) && /builtinCapsCache = null/.test(configLine), 'config 拉取失败时 caps 缓存一起清掉');
 assert.ok(backend.indexOf('const capsPromise = loadCaps()') >= 0 && backend.indexOf('const caps = await capsPromise') >= 0, '模型列表与 caps 并发加载');
 assert.ok(backend.includes('let capsUi =') && backend.includes('const ui = capsUi ||') && backend.includes('mergeCapsReferenceCapability'), 'caps 优先于官方硬编码，并保留参考图能力');
 assert.ok(card.includes('该模型未提供规格，比例/分辨率为推断'), '未验证模型在方案卡上有提示');

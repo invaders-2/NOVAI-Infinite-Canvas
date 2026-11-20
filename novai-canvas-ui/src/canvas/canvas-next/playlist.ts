@@ -34,13 +34,43 @@ export function readingOrder(nodes: CanvasNode[]): CanvasNode[] {
   return [...nodes].sort((a, b) => (Math.abs(a.y - b.y) < Math.min(a.h, b.h) / 2 ? a.x - b.x : a.y - b.y));
 }
 
-/** 追加到时间线末尾；返回加了几段 */
+/**
+ * 时间线的「来源」连线：连入时间线 = 素材入轨。片段是内容权威（顺序 / 修剪 / 转场都在片段上），
+ * 连线只表达来源关系，两者必须保持一致，否则画布上看着连着、时间线上却是空的（用户反馈过）。
+ */
+export const sourceEdges = (doc: { edges: Array<{ id: string; from: string; to: string }> }, tlId: string) => doc.edges.filter((e) => e.to === tlId);
+
+/** 补齐 / 清掉来源连线：有片段没线就补，线在但该来源已无片段就删。幂等，不记历史 */
+export function syncTimelineEdges(store: CanvasStore, tlId: string) {
+  const tl = store.node(tlId); if (!tl || tl.kind !== "timeline") return;
+  const doc = store.state.doc; const clips = (tl.clips || []) as Clip[];
+  // 来源节点已从画布删除的片段保留（片段自带地址和修剪，等于已导入的素材），不补线也不删片段
+  const want = new Set(clips.map((c) => c.sourceNodeId).filter((id) => !!id && !!store.node(id)));
+  const live = sourceEdges(doc, tlId);
+  const have = new Set(live.map((e) => e.from));
+  const add = [...want].filter((id) => !have.has(id));
+  const drop = live.filter((e) => !want.has(e.from));
+  if (!add.length && !drop.length) return;
+  const gone = new Set(drop.map((e) => e.id));
+  store.mutate((d) => ({ ...d, edges: [...d.edges.filter((e) => !gone.has(e.id)), ...add.map((from) => ({ id: uid("e"), from, to: tlId }))] }), { history: false });
+}
+
+/** 追加到时间线末尾；返回加了几段。顺带补齐来源连线，一次历史 */
 export function addToTimeline(store: CanvasStore, tlId: string, ids: string[]): number {
   const tl = store.node(tlId); if (!tl || tl.kind !== "timeline") return 0;
-  const add = readingOrder(ids.map((id) => store.node(id)).filter(clipable)).map(clipFromNode);
+  const src = readingOrder(ids.map((id) => store.node(id)).filter(clipable));
+  const add = src.map(clipFromNode);
   if (!add.length) { store.toast("只有生成好的视频 / 音频 / 图片能放进剪辑"); return 0; }
   store.snapshot();
-  store.updateNode(tlId, (n) => ({ ...n, clips: normalize([...((n.clips || []) as Clip[]), ...add]) }));
+  store.mutate((d) => {
+    const linked = new Set(d.edges.filter((e) => e.to === tlId).map((e) => e.from));
+    const fresh = src.filter((n) => !linked.has(n.id)).map((n) => ({ id: uid("e"), from: n.id, to: tlId }));
+    return {
+      ...d,
+      nodes: d.nodes.map((n) => (n.id === tlId ? { ...n, clips: normalize([...((n.clips || []) as Clip[]), ...add]) } : n)),
+      ...(fresh.length ? { edges: [...d.edges, ...fresh] } : {}),
+    };
+  });
   store.toast(`已把 ${add.length} 段放进剪辑时间线`);
   return add.length;
 }
@@ -61,6 +91,7 @@ export function timelineFromOrdered(store: CanvasStore, nodes: CanvasNode[], nam
   const hit = () => store.state.doc.nodes.some((o) => o.kind !== "group" && x < o.x + o.w + 20 && x + w + 20 > o.x && y < o.y + o.h + 44 && y + h + 44 > o.y);
   for (let i = 0; i < 40 && hit(); i++) y += 60;
   const tl = { id: uid("n"), kind: "timeline", x, y, w, h, text: name, clips: normalize(src.map(clipFromNode)) } as unknown as CanvasNode;
-  store.addNodes([tl], [], { select: true });
+  // 建剪辑同样落连线：画布上看得见「这几段是从哪来的」
+  store.addNodes([tl], src.map((n) => ({ id: uid("e"), from: n.id, to: tl.id })), { select: true });
   return tl;
 }

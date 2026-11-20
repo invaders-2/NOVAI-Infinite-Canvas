@@ -3,13 +3,33 @@
  *   图片尺寸换算与 main.py 的 CHAT_RATIO_SIZE_OPTIONS 同表（1:1 / 2:3 / 3:2 / 3:4 / 4:3 / 9:16 / 16:9 × 1k/2k/4k）；
  *   模型 ratios / sizes / batch / res / durs 来自 ModelSpec，是面板可选项的唯一来源。
  */
-import { VMODES, type ModelSpec } from "../model";
+import {
+  DEFAULT_CAMERA, STYLES, VMODES, clampQuality, clampThinking, isQualityDefault, normalizeStyle,
+  outputFormatForRequest, outputFormatLabel, outputFormatOptions, qualityChoices, qualityLabel,
+  qualityLevelsFor, resRange, thinkLevelLabel, thinkLevelsFor, thinkingAvailable,
+  type CameraParams, type ImageOutputFormat, type MjParams, type ModelSpec,
+} from "../model";
 import { ratioDisplayLabel } from "../originalRatio";
 import type { AgentTaskPlan } from "../backend/types";
 
 export type PlanStep = AgentTaskPlan["steps"][number];
 export type PlanKind = "image" | "video";
-export type PlanStepPatch = { modelConfigId?: string; ratio?: string; resolution?: string; count?: number; duration?: number; mode?: string };
+/** 待生成卡片能改参数的四类节点（文本 / 音频参数比图片视频少） */
+export type CardKind = PlanKind | "text" | "audio";
+/** 三态开关：默认（不传）/ 开 / 关 */
+export type TriState = "default" | "on" | "off";
+export type TextOutputMode = "text" | "table" | "storyboard";
+/** 文本节点输出：与画布 table.ts 的 OUTPUT_MODES 同三档 */
+export const TEXT_OUTPUT_MODES: Array<[TextOutputMode, string]> = [["text", "文本"], ["table", "多维表格"], ["storyboard", "分镜表"]];
+
+export type PlanStepPatch = {
+  modelConfigId?: string; ratio?: string; resolution?: string; count?: number; duration?: number; mode?: string;
+  /** 卡片：把整套参数（含「默认」清空标记）都写进 settings，而不是只写本次改动的那几项 */
+  full?: boolean;
+  quality?: string; thinking?: TriState; outputFormat?: "" | ImageOutputFormat; background?: boolean;
+  search?: boolean; style?: string; camera?: CameraParams; mj?: MjParams;
+  audio?: boolean; times?: number; genMode?: string; turbo?: boolean; draft?: boolean; multiShot?: boolean;
+};
 export type PlanParams = {
   kind: PlanKind;
   scope: "args" | "settings";
@@ -24,6 +44,28 @@ export type PlanParams = {
   duration: number;
   /** 视频生成方式：VMODES 的接口值（text_to_video 等）；空串 = 自动选择 */
   mode: string;
+  /** 图片质量档（"" = 跟随上游默认） */
+  quality: string;
+  /** 图片先思考（default = 交给模型决定） */
+  thinking: TriState;
+  /** 图片输出格式（"" = 静态图） */
+  outputFormat: "" | ImageOutputFormat;
+  /** 图片透明背景 */
+  background: boolean;
+  /** 图片 / 文本的联网检索 */
+  search: boolean;
+  style: string;
+  camera: CameraParams;
+  mj?: MjParams;
+  /** 视频一次生成几条 */
+  times: number;
+  /** 视频生成模式（"" = 默认） */
+  genMode: string;
+  turbo: boolean;
+  draft: boolean;
+  multiShot: boolean;
+  /** 视频原生音频（settings.audio → params.sound） */
+  audio?: boolean;
 };
 
 /** 与 main.py CHAT_RATIO_SIZE_OPTIONS 逐格一致（只用于生成显式 size，最终由后端尺寸策略收敛） */
@@ -100,6 +142,33 @@ export function planStepKind(step: PlanStep, models: ModelSpec[] = []): PlanKind
 
 export function planStepScope(step: PlanStep): "args" | "settings" {
   return SETTINGS_TOOLS.has(String(step?.tool || "").trim().toLowerCase()) ? "settings" : "args";
+}
+
+/** 待生成卡片拆卡的固定顺序：图片 → 视频 → 文本 → 配音（没有行的类型不出现） */
+export const CARD_KIND_ORDER: CardKind[] = ["image", "video", "text", "audio"];
+
+/** 步骤属于哪一类卡：只认 args.type（后端 _agent_generation_plan 给每个 run_generation 都写了它） */
+export function stepCardKind(step: PlanStep): CardKind | null {
+  const type = String((step?.args || {}).type || "").trim().toLowerCase();
+  return CARD_KIND_ORDER.find((kind) => kind === type) || null;
+}
+
+export type StepKindGroup = {
+  /** null = 认不出类型的步骤（照旧按「节点」渲染，拆卡不丢行） */
+  kind: CardKind | null;
+  /** 在原始 steps / rows 里的下标：行、touched、统一设置全都按这个下标走 */
+  indices: number[];
+};
+
+/** 按类型把步骤分组：顺序固定，空类型不出现；认不出类型的挂最后一组 */
+export function groupPlanSteps(steps: PlanStep[]): StepKindGroup[] {
+  const groups: StepKindGroup[] = CARD_KIND_ORDER.map((kind) => ({ kind: kind as CardKind | null, indices: [] }));
+  const other: StepKindGroup = { kind: null, indices: [] };
+  (steps || []).forEach((step, index) => {
+    const kind = stepCardKind(step);
+    (kind ? groups[CARD_KIND_ORDER.indexOf(kind)] : other).indices.push(index);
+  });
+  return [...groups, other].filter((group) => group.indices.length);
 }
 
 function readSource(step: PlanStep): Record<string, any> {
@@ -234,9 +303,9 @@ export function countOptions(spec: ModelSpec | undefined, current = 1): number[]
 
 export function durationOptions(spec: ModelSpec | undefined, current = 5): number[] {
   const declared = spec && Array.isArray(spec.durs);
-  const list = declared ? (spec!.durs || []).map((x) => Number(x)).filter((x) => Number.isFinite(x) && x >= 1 && x <= 15) : [];
+  const list = declared ? (spec!.durs || []).map((x) => Number(x)).filter((x) => Number.isFinite(x) && x >= 1 && x <= 60) : [];
   const base = declared ? [...new Set(list)].sort((a, b) => a - b) : [5, 10];
-  if (!declared && current >= 1 && current <= 15 && !base.includes(current)) base.push(current);
+  if (!declared && current >= 1 && current <= 60 && !base.includes(current)) base.push(current);
   return [...new Set(base)].sort((a, b) => a - b);
 }
 
@@ -250,9 +319,8 @@ export function readPlanParams(step: PlanStep, kind: PlanKind, models: ModelSpec
   const fallback = models.find((m) => m.kind === kind);
   const chosen = spec || fallback;
   const ratio = kind === "video" ? planVideoRatio(source.ratio || "adaptive") : String(source.ratio || "1:1");
-  const resolution = kind === "image"
-    ? (String(source.resolution || "").toUpperCase() || resolutionFromSize(String(source.size || ""), ratio) || "1K")
-    : String(source.resolution || (chosen?.res && chosen.res[0]) || "");
+  // 分辨率：步骤里没写、或写的值不在该模型的档位里（换过模型 / 旧数据）→ 回落到模型第一档，不能显示空白
+  const resolution = kind === "image" ? imageResolutionFor(chosen, source) : videoResolutionFor(chosen, source);
   const rows = Array.isArray(args.rows) ? args.rows.length : 0;
   // 不再静默回落到 spec.batch[0]：这里只保留「用户要几张」，
   // 模型一次最多 N 张时由 countPlan()/expandGenerationSteps() 拆成多次执行（见文件末尾）。
@@ -263,6 +331,8 @@ export function readPlanParams(step: PlanStep, kind: PlanKind, models: ModelSpec
     const supported = videoModeOptions(spec).map((x) => x.value);
     if (!supported.includes(mode)) mode = supported[0] || "";
   }
+  const thinkingRaw = source.thinking;
+  const mjRaw = source.mj;
   return {
     kind,
     scope,
@@ -274,7 +344,46 @@ export function readPlanParams(step: PlanStep, kind: PlanKind, models: ModelSpec
     count,
     duration,
     mode,
+    quality: String(source.quality || ""),
+    thinking: thinkingRaw === true ? "on" : thinkingRaw === false ? "off" : "default",
+    outputFormat: outputFormatForRequest(source.outputFormat),
+    background: source.background === "transparent",
+    search: source.search === true,
+    style: normalizeStyle(source.style),
+    camera: cameraFor(source.camera),
+    ...(mjRaw && typeof mjRaw === "object" && Object.keys(mjRaw).length ? { mj: { ...(mjRaw as MjParams) } } : {}),
+    times: Math.max(1, Math.round(Number(source.times) || 1)),
+    genMode: String(source.genMode || ""),
+    turbo: source.turbo === true,
+    draft: source.draft === true,
+    multiShot: source.multiShot === true,
   };
+}
+
+/** 摄影机组合：节点 / 步骤里存的是 {on, body, lens, focal, aperture}；布尔只表示开关 */
+function cameraFor(raw: unknown): CameraParams {
+  if (raw && typeof raw === "object") {
+    const value = raw as Partial<CameraParams>;
+    return { ...DEFAULT_CAMERA, ...value, on: value.on === true };
+  }
+  return { ...DEFAULT_CAMERA, on: raw === true };
+}
+
+/** 图片分辨率档：步骤给的值不在该模型的 sizes 里就回落到第一档（没有 sizes 声明才保留原值） */
+function imageResolutionFor(spec: ModelSpec | undefined, source: Record<string, any>): string {
+  const list = imageResolutionOptions(spec);
+  const current = String(source.resolution || "").toUpperCase()
+    || resolutionFromSize(String(source.size || ""), String(source.ratio || "1:1"));
+  if (current && (!list.length || list.includes(current))) return current;
+  return list[0] || current || "1K";
+}
+
+/** 视频分辨率档：同上，模型有 res 列表时绝不显示空白 */
+function videoResolutionFor(spec: ModelSpec | undefined, source: Record<string, any>): string {
+  const list = videoResOptions(spec);
+  const current = String(source.resolution || "").trim().toLowerCase();
+  if (current && (!list.length || list.includes(current))) return current;
+  return list[0] || current || "";
 }
 
 /** 该模型一次最多能出几张：batch 声明的最大合法值；没有声明 / 批量未知按 1 张处理 */
@@ -377,7 +486,39 @@ export function countGroupQueue(steps: PlanStep[]): Map<string, CountGroupItem[]
   return queues;
 }
 
-function writePlanParams(step: PlanStep, params: PlanParams): PlanStep {
+/** 卡片写 settings：图片行不带视频键、视频行不带图片键；full = 连「默认 / 清空」标记一起写 */
+function writeSettingsExtras(settings: Record<string, any>, params: PlanParams, full: boolean) {
+  if (params.kind === "image") {
+    delete settings.duration; delete settings.times; delete settings.genMode;
+    delete settings.turbo; delete settings.draft; delete settings.multiShot; delete settings.audio;
+    if (!full) return;
+    if (params.quality) settings.quality = params.quality; else delete settings.quality;
+    // 「默认」用 default 表示：后端把它当「删掉这个键」，回到跟随上游默认
+    settings.thinking = params.thinking === "on" ? true : params.thinking === "off" ? false : "default";
+    settings.outputFormat = params.outputFormat || "default";
+    settings.background = params.background ? "transparent" : "default";
+    settings.search = params.search === true;
+    settings.style = params.style || "无";
+    settings.camera = { ...params.camera };
+    settings.mj = params.mj && Object.keys(params.mj).length ? { ...params.mj } : {};
+    // GIF 帧参数只在 gif 输出时跟着走（后端 / 画布都按 outputFormat 判断）
+    if (params.outputFormat !== "gif") { delete settings.frameCount; delete settings.frameDuration; }
+  } else {
+    delete settings.quality; delete settings.thinking; delete settings.outputFormat; delete settings.background;
+    delete settings.search; delete settings.style; delete settings.camera; delete settings.mj;
+    delete settings.frameCount; delete settings.frameDuration;
+    if (!full) return;
+    settings.times = params.times;
+    settings.genMode = params.genMode || "default";
+    settings.turbo = params.turbo === true;
+    settings.draft = params.draft === true;
+    settings.multiShot = params.multiShot === true;
+    if (typeof params.audio === "boolean") settings.audio = params.audio;
+    if (params.mode) settings.mode = params.mode; else delete settings.mode;
+  }
+}
+
+function writePlanParams(step: PlanStep, params: PlanParams, full = false): PlanStep {
   const copy = JSON.parse(JSON.stringify(step || {})) as PlanStep;
   const args = (copy.args || {}) as Record<string, any>;
   if (params.scope === "settings") {
@@ -390,9 +531,10 @@ function writePlanParams(step: PlanStep, params: PlanParams): PlanStep {
       if (params.size) settings.size = params.size; else delete settings.size;
       if (copy.tool !== "batch_generate") settings.count = params.count;
     } else {
-      if (params.resolution) settings.resolution = params.resolution;
+      if (params.resolution) settings.resolution = params.resolution; else delete settings.resolution;
       settings.duration = params.duration;
     }
+    writeSettingsExtras(settings, params, full);
     args.settings = settings;
   } else {
     if (params.provider) args.provider = params.provider; else delete args.provider;
@@ -433,6 +575,20 @@ export function patchPlanStep(step: PlanStep, kind: PlanKind, models: ModelSpec[
   let count = patch.count !== undefined ? Math.max(1, Math.round(patch.count)) : current.count;
   let duration = patch.duration !== undefined ? Math.max(1, Math.round(patch.duration)) : current.duration;
   let mode = patch.mode !== undefined ? videoModeApi(patch.mode) : current.mode;
+  let quality = patch.quality !== undefined ? patch.quality : current.quality;
+  let thinking: TriState = patch.thinking !== undefined ? patch.thinking : current.thinking;
+  let outputFormat = patch.outputFormat !== undefined ? patch.outputFormat : current.outputFormat;
+  let background = patch.background !== undefined ? patch.background : current.background;
+  let search = patch.search !== undefined ? patch.search : current.search;
+  let style = patch.style !== undefined ? patch.style : current.style;
+  let camera = patch.camera !== undefined ? patch.camera : current.camera;
+  let mj = patch.mj !== undefined ? patch.mj : current.mj;
+  let times = patch.times !== undefined ? Math.max(1, Math.round(patch.times)) : current.times;
+  let genMode = patch.genMode !== undefined ? patch.genMode : current.genMode;
+  let turbo = patch.turbo !== undefined ? patch.turbo : current.turbo;
+  let draft = patch.draft !== undefined ? patch.draft : current.draft;
+  let multiShot = patch.multiShot !== undefined ? patch.multiShot : current.multiShot;
+  let audio = patch.audio !== undefined ? patch.audio : current.audio;
   if (optionSpec) {
     const ratios = kind === "image" ? imageRatioOptions(optionSpec) : videoRatioOptions(optionSpec);
     if (ratios.length && !ratios.includes(ratio)) ratio = ratios[0];
@@ -448,11 +604,43 @@ export function patchPlanStep(step: PlanStep, kind: PlanKind, models: ModelSpec[
       if (resList.length && !resList.includes(resolution)) resolution = resList[0];
       const modes = videoModeOptions(optionSpec).map((x) => x.value);
       if (mode && !modes.includes(mode)) mode = modes[0] || "";
+      const timesList = (optionSpec.times || [1]).filter((n) => Number(n) >= 1);
+      if (!timesList.includes(times)) times = timesList[0] || 1;
+      const genModes = optionSpec.genModes || [];
+      if (genModes.length && genMode && !genModes.includes(genMode)) genMode = genModes[0];
+      if (!optionSpec.genModes?.length) genMode = "";
+      if (!optionSpec.turbo) turbo = false;
+      if (!optionSpec.multiShot) multiShot = false;
+      if (!resRange(optionSpec)) draft = false;
+      if (!optionSpec.audio) audio = false;
+    }
+    if (kind === "image") {
+      quality = clampQuality(qualityLevelsFor(optionSpec), quality);
+      const thinkFlag = clampThinking(thinkingAvailable(optionSpec), thinking === "on" ? true : thinking === "off" ? false : undefined);
+      thinking = thinkFlag === true ? "on" : thinkFlag === false ? "off" : "default";
+      const formats = outputFormatOptions(optionSpec).map((x) => x.value);
+      if (!formats.includes(outputFormat)) outputFormat = "";
+      if (!optionSpec.nativeBackground) background = false;
+      if (!optionSpec.search) search = false;
+      style = optionSpec.style ? normalizeStyle(style) : "无";
+      if (!optionSpec.camera) camera = { ...camera, on: false };
+      if (optionSpec.mj) {
+        const next: MjParams = { ...(mj || {}) };
+        if (next.version && !optionSpec.mj.versions.includes(next.version)) delete next.version;
+        if (next.speed && !optionSpec.mj.speeds.includes(next.speed)) delete next.speed;
+        if (next.hd && !optionSpec.mj.hd.includes(next.version || "")) next.hd = false;
+        mj = Object.keys(next).length ? next : undefined;
+      } else mj = undefined;
     }
   }
-  const next: PlanParams = { kind, scope: planStepScope(step), provider, model, ratio, resolution, size: "", count, duration, mode };
+  const next: PlanParams = {
+    kind, scope: planStepScope(step), provider, model, ratio, resolution, size: "", count, duration, mode,
+    quality, thinking, outputFormat, background, search, style, camera, times, genMode, turbo, draft, multiShot,
+    ...(mj ? { mj } : {}),
+    ...(typeof audio === "boolean" ? { audio } : {}),
+  };
   if (kind === "image") next.size = imageSizeFor(ratio, resolution);
-  return writePlanParams(step, next);
+  return writePlanParams(step, next, patch.full === true);
 }
 
 function modelLabel(spec: ModelSpec | undefined, provider: string, model: string): string {
@@ -497,15 +685,405 @@ export type ApproveRow = {
   count: number;
   duration: number;
   mode: string;
+  /** 视频：这一镜要不要模型自带的原生音频（只有 video 行有意义） */
+  audio?: boolean;
   prompt: string;
+  // ---- 图片（键名与 ImageParams 一致；默认值 = 跟随上游默认）----
+  quality?: string;
+  thinking?: TriState;
+  outputFormat?: "" | ImageOutputFormat;
+  background?: boolean;
+  /** 图片 / 文本的联网检索 */
+  search?: boolean;
+  style?: string;
+  camera?: CameraParams;
+  mj?: MjParams;
+  // ---- 视频（键名与 VideoParams 一致）----
+  times?: number;
+  genMode?: string;
+  turbo?: boolean;
+  draft?: boolean;
+  multiShot?: boolean;
+  // ---- 文本（TextParams.out of 面板同款三档 / 模型强度 / 联网）----
+  output?: TextOutputMode;
+  think?: string;
+  // ---- 音频（AudioParams）----
+  audioKind?: string;
+  audioDur?: string;
 };
 export type ApproveNode = { node_id: string; title: string; prompt?: string };
 
 /** 「执行生成」能不能点：至少勾一个节点，图片 / 视频节点都必须选了模型 */
-export function generationReady(rows: ApproveRow[], kinds: Array<PlanKind | "audio" | null>): boolean {
+export function generationReady(rows: ApproveRow[], kinds: Array<CardKind | null>): boolean {
   const picked = rows.filter((r) => r.on).length;
   if (!picked) return false;
   return !rows.some((r, i) => r.on && (kinds[i] === "image" || kinds[i] === "video") && !r.modelId);
+}
+
+/** 文本行的默认值：步骤 settings → 模型能力第一档 */
+export type TextRowParams = { output: TextOutputMode; think: string; search: boolean };
+export function readTextRowParams(step: PlanStep, models: ModelSpec[] = []): TextRowParams {
+  const source = readSource(step);
+  const spec = models.find((m) => m.kind === "text");
+  const levels = thinkLevelsFor(spec);
+  const output = String(source.output || "text").toLowerCase();
+  const think = String(source.think || "");
+  return {
+    output: output === "table" || output === "storyboard" ? output : "text",
+    think: levels.includes(think) ? think : "",
+    search: source.search === true,
+  };
+}
+
+/** 音频行的默认值：步骤 settings → 模型能力第一档 */
+export type AudioRowParams = { kind: string; dur: string };
+export function readAudioRowParams(step: PlanStep, models: ModelSpec[] = []): AudioRowParams {
+  const source = readSource(step);
+  const spec = models.find((m) => m.kind === "audio");
+  const kinds = spec?.kinds || [];
+  const durs = spec?.adurs || [];
+  const kind = String(source.kind || "");
+  const dur = String(source.dur || "");
+  return {
+    kind: kinds.includes(kind) ? kind : (kinds[0] || kind || ""),
+    dur: durs.includes(dur) ? dur : (durs[0] || dur || ""),
+  };
+}
+
+/** 节点上现有的 params → 一行默认值（键名与四套 param 类型逐项对齐；卡片默认优先读它） */
+export function rowFromNodeParams(kind: CardKind, params: Record<string, any> | null | undefined): Partial<ApproveRow> {
+  const p = (params && typeof params === "object" ? params : {}) as Record<string, any>;
+  if (kind === "image") {
+    const out: Partial<ApproveRow> = {
+      outputFormat: outputFormatForRequest(p.outputFormat),
+      background: p.background === "transparent",
+      search: p.search === true,
+      style: normalizeStyle(p.style),
+      camera: cameraFor(p.camera),
+    };
+    if (p.ratio) out.ratio = String(p.ratio);
+    if (p.size) out.resolution = String(p.size).toUpperCase();
+    if (p.count) out.count = Math.max(1, Math.round(Number(p.count) || 1));
+    if (p.quality) out.quality = String(p.quality);
+    if (p.thinking === true || p.thinking === false) out.thinking = p.thinking ? "on" : "off";
+    if (p.mj && typeof p.mj === "object" && Object.keys(p.mj).length) out.mj = { ...(p.mj as MjParams) };
+    return out;
+  }
+  if (kind === "video") {
+    const out: Partial<ApproveRow> = { audio: p.sound === true, turbo: p.turbo === true, draft: p.draft === true, multiShot: p.multiShot === true };
+    if (p.ratio) out.ratio = planVideoRatio(p.ratio);
+    if (p.res) out.resolution = String(p.res).toLowerCase();
+    if (p.dur) out.duration = Math.max(1, Number(p.dur) || 5);
+    if (p.times) out.times = Math.max(1, Math.round(Number(p.times) || 1));
+    if (p.mode) out.mode = videoModeApi(p.mode);
+    if (p.genMode) out.genMode = String(p.genMode);
+    return out;
+  }
+  if (kind === "text") {
+    const output = String(p.output || "text").toLowerCase();
+    return {
+      output: output === "table" || output === "storyboard" ? output : "text",
+      think: String(p.think || ""),
+      search: p.search === true,
+    };
+  }
+  return { audioKind: String(p.kind || ""), audioDur: String(p.dur || "") };
+}
+
+/**
+ * 按模型能力收敛一行参数（换模型时用）：比例 / 分辨率 / 时长 / 方式 / 质量档 / 输出格式 …
+ * 张数故意不收敛（批量拆分交给 expandGenerationSteps），其它都收到该模型第一档。
+ */
+export function clampRowParams(kind: PlanKind, row: ApproveRow, spec: ModelSpec | undefined): Partial<ApproveRow> {
+  if (!spec) return {};
+  const out: Partial<ApproveRow> = {};
+  const ratios = kind === "image" ? imageRatioOptions(spec) : videoRatioOptions(spec);
+  if (ratios.length && !ratios.includes(kind === "image" ? row.ratio : planVideoRatio(row.ratio))) out.ratio = ratios[0];
+  if (kind === "image") {
+    const sizes = imageResolutionOptions(spec);
+    if (sizes.length && !sizes.includes(row.resolution)) out.resolution = sizes[0];
+    out.quality = clampQuality(qualityLevelsFor(spec), row.quality);
+    const thinkFlag = clampThinking(thinkingAvailable(spec), row.thinking === "on" ? true : row.thinking === "off" ? false : undefined);
+    out.thinking = thinkFlag === true ? "on" : thinkFlag === false ? "off" : "default";
+    const formats = outputFormatOptions(spec).map((x) => x.value);
+    out.outputFormat = formats.includes(row.outputFormat || "") ? (row.outputFormat || "") : "";
+    if (!spec.nativeBackground) out.background = false;
+    if (!spec.search) out.search = false;
+    out.style = spec.style ? normalizeStyle(row.style) : "无";
+    const camera = cameraFor(row.camera);
+    out.camera = spec.camera ? camera : { ...camera, on: false };
+    if (spec.mj && row.mj) {
+      const mj: MjParams = { ...row.mj };
+      if (mj.version && !spec.mj.versions.includes(mj.version)) delete mj.version;
+      if (mj.speed && !spec.mj.speeds.includes(mj.speed)) delete mj.speed;
+      if (mj.hd && !spec.mj.hd.includes(mj.version || "")) mj.hd = false;
+      out.mj = Object.keys(mj).length ? mj : undefined;
+    } else out.mj = undefined;
+    return out;
+  }
+  const resList = videoResOptions(spec);
+  if (resList.length && !resList.includes(row.resolution)) out.resolution = resList[0];
+  const durs = durationOptions(spec, row.duration);
+  if (durs.length && !durs.includes(row.duration)) out.duration = durs[0];
+  const modes = videoModeOptions(spec).map((x) => x.value);
+  if (modes.length && row.mode && !modes.includes(row.mode)) out.mode = modes[0] || "";
+  const timesList = (spec.times || [1]).filter((n) => Number(n) >= 1);
+  out.times = timesList.includes(row.times || 1) ? row.times || 1 : (timesList[0] || 1);
+  const genModes = spec.genModes || [];
+  if (!genModes.length) out.genMode = "";
+  else if (row.genMode && !genModes.includes(row.genMode)) out.genMode = genModes[0];
+  if (!spec.turbo) out.turbo = false;
+  if (!spec.multiShot) out.multiShot = false;
+  if (!resRange(spec)) out.draft = false;
+  if (!spec.audio) out.audio = false;
+  return out;
+}
+
+
+/* ---------- 待生成卡片「统一设置」：一次把同类行的参数改好 ----------
+   能力取交集：只列「这批行（勾选中的同类型行；一个都没勾就按同类全部行）的模型都支持」的参数与取值，
+   避免把 turbo / 透明背景这类能力应用到不支持它的行。默认「保持不改」，只把用户明确改过的项写进行里。 */
+export type UnifiedOption = { value: string; label: string; patch: (row: ApproveRow) => Partial<ApproveRow> };
+export type UnifiedItem = { key: string; label: string; options: UnifiedOption[]; hint?: string };
+export type UnifiedGroup = { title?: string; items: UnifiedItem[] };
+export type UnifiedPlan = {
+  kind: CardKind;
+  /** 这次要应用到的行（勾选中的同类型行；没有勾选 = 全部同类型行） */
+  targets: number[];
+  groups: UnifiedGroup[];
+  /** 面板顶部那句小字：只列出都支持的参数 / 为什么没有可改项 */
+  note: string;
+  /** 这批行还有没选模型的（图片 / 视频）：没有能力交集，先不让改 */
+  blocked: boolean;
+};
+
+const UNIFIED_NOTE = "只列出这些行都支持的参数";
+const uniqueStrings = (list: string[]): string[] => [...new Set(list)];
+/** 交集：只有每一行都支持时才保留这个取值 */
+const commonStrings = (lists: string[][]): string[] => {
+  if (!lists.length) return [];
+  const head = uniqueStrings(lists[0]);
+  return head.filter((value) => lists.every((list) => list.includes(value)));
+};
+const unifiedOption = (value: string, label: string, patch: Partial<ApproveRow> | ((row: ApproveRow) => Partial<ApproveRow>)): UnifiedOption =>
+  ({ value, label, patch: typeof patch === "function" ? patch : () => patch });
+const onOffOptions = (patch: (on: boolean, row: ApproveRow) => Partial<ApproveRow>): UnifiedOption[] => [
+  unifiedOption("off", "关", (row) => patch(false, row)),
+  unifiedOption("on", "开", (row) => patch(true, row)),
+];
+
+/** 只改 MJ 版本，其它（速度 / HD / 风格化）沿用行上的值 */
+export function mjWithVersion(current: ApproveRow["mj"] | undefined, version: string) {
+  const next = { ...(current || {}) };
+  if (version) next.version = version; else delete next.version;
+  return Object.keys(next).length ? next : undefined;
+}
+
+function imageUnifiedGroups(targets: number[], specs: Array<ModelSpec | undefined>): UnifiedGroup[] {
+  const list = targets.map((i) => specs[i]).filter((spec): spec is ModelSpec => !!spec);
+  const every = (test: (spec: ModelSpec) => boolean) => list.length === targets.length && list.every(test);
+  const groups: UnifiedGroup[] = [];
+  const frame: UnifiedItem[] = [];
+  const ratios = commonStrings(list.map((spec) => imageRatioOptions(spec)));
+  const sizes = commonStrings(list.map((spec) => imageResolutionOptions(spec)));
+  const counts = commonStrings(list.map((spec) => countOptions(spec).map(String)));
+  if (ratios.length) frame.push({ key: "ratio", label: "比例", options: ratios.map((v) => unifiedOption(v, ratioDisplayLabel(v), { ratio: v })) });
+  if (sizes.length) frame.push({ key: "resolution", label: "分辨率", options: sizes.map((v) => unifiedOption(v, v, { resolution: v })) });
+  if (counts.length) frame.push({ key: "count", label: "张数", options: counts.map((v) => unifiedOption(v, v + " 张", { count: Number(v) })) });
+  if (frame.length) groups.push({ title: "画幅与张数", items: frame });
+
+  const quality: UnifiedItem[] = [];
+  if (every((spec) => qualityChoices(spec).length > 1)) {
+    // 「默认」在有些模型是 auto、有些是空串：统一按空串写（后端两种都不发字段）
+    const values = commonStrings(list.map((spec) => qualityChoices(spec).map((q) => (q.isDefault ? "" : q.value))));
+    if (values.length) quality.push({ key: "quality", label: "质量", options: values.map((v) => unifiedOption(v, isQualityDefault(v) ? "默认" : qualityLabel(v), { quality: v })) });
+  }
+  if (every(thinkingAvailable)) quality.push({ key: "thinking", label: "先思考", options: [
+    unifiedOption("default", "默认", { thinking: "default" }),
+    unifiedOption("on", "开", { thinking: "on" }),
+    unifiedOption("off", "关", { thinking: "off" }),
+  ] });
+  if (every((spec) => outputFormatOptions(spec).length > 1)) {
+    const values = commonStrings(list.map((spec) => outputFormatOptions(spec).map((f) => f.value)));
+    if (values.length) quality.push({ key: "outputFormat", label: "输出格式", options: values.map((v) => unifiedOption(v, outputFormatLabel(v),
+      // 和节点面板一致：选 GIF / SVG 会清掉透明背景；选静态图不动背景
+      v ? { outputFormat: v as ImageOutputFormat, background: false } : { outputFormat: "" })) });
+  }
+  if (every((spec) => spec.nativeBackground === true)) quality.push({ key: "background", label: "透明背景", hint: "透明只出 PNG，开了就不带输出格式", options: [
+    unifiedOption("off", "关", { background: false }),
+    // 透明与输出格式互斥（以透明为准）：开透明顺手把输出格式收回静态图
+    unifiedOption("on", "开", { background: true, outputFormat: "" }),
+  ] });
+  if (quality.length) groups.push({ title: "画质", items: quality });
+
+  const extra: UnifiedItem[] = [];
+  if (every((spec) => spec.search === true)) extra.push({ key: "search", label: "联网", options: onOffOptions((on) => ({ search: on })) });
+  if (every((spec) => spec.style === true)) extra.push({ key: "style", label: "风格", options: STYLES.map(([name]) => unifiedOption(name, name, { style: name })) });
+  if (every((spec) => spec.camera === true)) extra.push({ key: "camera", label: "摄影机", options: onOffOptions((on, row) => ({ camera: { ...(row.camera || DEFAULT_CAMERA), on } })) });
+  if (every((spec) => !!spec.mj && spec.mj.versions.length > 0)) {
+    const versions = commonStrings(list.map((spec) => spec.mj!.versions.map(String)));
+    if (versions.length) extra.push({ key: "mj", label: "MJ 版本", options: [
+      unifiedOption("", "默认", (row) => ({ mj: mjWithVersion(row.mj, "") })),
+      ...versions.map((v) => unifiedOption(v, /^niji/i.test(v) ? v.replace(/^niji\s*/i, "Niji ") : "v" + v, (row) => ({ mj: mjWithVersion(row.mj, v) }))),
+    ] });
+  }
+  if (extra.length) groups.push({ title: "风格与参考", items: extra });
+  return groups;
+}
+
+function videoUnifiedGroups(targets: number[], specs: Array<ModelSpec | undefined>): UnifiedGroup[] {
+  const list = targets.map((i) => specs[i]).filter((spec): spec is ModelSpec => !!spec);
+  const every = (test: (spec: ModelSpec) => boolean) => list.length === targets.length && list.every(test);
+  const groups: UnifiedGroup[] = [];
+  const frame: UnifiedItem[] = [];
+  const ratios = commonStrings(list.map((spec) => videoRatioOptions(spec)));
+  const sizes = commonStrings(list.map((spec) => videoResOptions(spec)));
+  const durs = commonStrings(list.map((spec) => durationOptions(spec).map(String)));
+  if (ratios.length) frame.push({ key: "ratio", label: "比例", options: ratios.map((v) => unifiedOption(v, ratioDisplayLabel(v), { ratio: v })) });
+  // 换分辨率会关掉草稿：和节点面板选清晰度时的行为一致
+  if (sizes.length) frame.push({ key: "resolution", label: "分辨率", options: sizes.map((v) => unifiedOption(v, v, { resolution: v, draft: false })) });
+  if (durs.length) frame.push({ key: "duration", label: "时长", options: durs.map((v) => unifiedOption(v, v + "s", { duration: Number(v) })) });
+  if (frame.length) groups.push({ title: "画幅与时长", items: frame });
+
+  const gen: UnifiedItem[] = [];
+  const modes = commonStrings(list.map((spec) => videoModeOptions(spec).map((m) => m.value)));
+  if (modes.length) gen.push({ key: "mode", label: "方式", options: [
+    unifiedOption("", "自动", { mode: "" }),
+    ...modes.map((v) => unifiedOption(v, videoModeLabel(v), { mode: v })),
+  ] });
+  const times = commonStrings(list.map((spec) => (spec.times || [1]).filter((n) => Number(n) >= 1).map(String)));
+  if (times.length) gen.push({ key: "times", label: "一次几条", options: times.map((v) => unifiedOption(v, v + " 条", { times: Number(v) })) });
+  if (every((spec) => spec.audio === true)) gen.push({ key: "audio", label: "音频", options: onOffOptions((on) => ({ audio: on })) });
+  if (every((spec) => (spec.genModes || []).length > 0)) {
+    const genModes = commonStrings(list.map((spec) => spec.genModes || []));
+    if (genModes.length) gen.push({ key: "genMode", label: "生成模式", options: [
+      unifiedOption("", "默认", { genMode: "" }),
+      ...genModes.map((v) => unifiedOption(v, v, { genMode: v })),
+    ] });
+  }
+  if (gen.length) groups.push({ title: "生成", items: gen });
+
+  const perf: UnifiedItem[] = [];
+  if (every((spec) => spec.turbo === true)) perf.push({ key: "turbo", label: "加速", options: onOffOptions((on) => ({ turbo: on })) });
+  // 草稿只在两档以上清晰度的模型上可用（节点面板的草稿行也是这个门槛）
+  if (every((spec) => !!resRange(spec))) perf.push({ key: "draft", label: "草稿", hint: "按最低清晰度先出草稿，出成片再按所选清晰度", options: onOffOptions((on) => ({ draft: on })) });
+  if (every((spec) => spec.multiShot === true)) perf.push({ key: "multiShot", label: "多镜头", options: onOffOptions((on) => ({ multiShot: on })) });
+  if (perf.length) groups.push({ title: "性能", items: perf });
+  return groups;
+}
+
+function textUnifiedGroups(targets: number[], specs: Array<ModelSpec | undefined>): UnifiedGroup[] {
+  const list = targets.map((i) => specs[i]).filter((spec): spec is ModelSpec => !!spec);
+  const every = (test: (spec: ModelSpec) => boolean) => list.length === targets.length && list.every(test);
+  const items: UnifiedItem[] = [{ key: "output", label: "输出", options: TEXT_OUTPUT_MODES.map(([v, label]) => unifiedOption(v, label, { output: v })) }];
+  if (every((spec) => thinkLevelsFor(spec).length > 1)) {
+    const levels = commonStrings(list.map((spec) => thinkLevelsFor(spec)));
+    if (levels.length) items.push({ key: "think", label: "强度", options: [
+      unifiedOption("", "默认", { think: "" }),
+      ...levels.map((lv) => unifiedOption(lv, thinkLevelLabel(lv), { think: lv })),
+    ] });
+  }
+  if (every((spec) => spec.search === true)) items.push({ key: "search", label: "联网", options: onOffOptions((on) => ({ search: on })) });
+  return [{ items }];
+}
+
+function audioUnifiedGroups(targets: number[], specs: Array<ModelSpec | undefined>): UnifiedGroup[] {
+  const list = targets.map((i) => specs[i]).filter((spec): spec is ModelSpec => !!spec);
+  const every = (test: (spec: ModelSpec) => boolean) => list.length === targets.length && list.every(test);
+  const items: UnifiedItem[] = [];
+  if (every((spec) => (spec.kinds || []).length > 0)) {
+    const kinds = commonStrings(list.map((spec) => spec.kinds || []));
+    if (kinds.length) items.push({ key: "audioKind", label: "类型", options: kinds.map((v) => unifiedOption(v, v, { audioKind: v })) });
+  }
+  if (every((spec) => (spec.adurs || []).length > 0)) {
+    const durs = commonStrings(list.map((spec) => spec.adurs || []));
+    if (durs.length) items.push({ key: "audioDur", label: "时长", options: durs.map((v) => unifiedOption(v, v, { audioDur: v })) });
+  }
+  return items.length ? [{ items }] : [];
+}
+
+/**
+ * 统一设置的面板内容：取「这次要应用到的行」的模型能力交集。
+ * 图片 / 视频行必须都选好模型才有能力交集；文本 / 音频行没有模型选择，用节点当前模型判能力。
+ */
+export function buildUnifiedPlan(kind: CardKind, rows: ApproveRow[], kinds: Array<CardKind | null>, specs: Array<ModelSpec | undefined>): UnifiedPlan {
+  const same = rows.map((_, index) => index).filter((index) => kinds[index] === kind);
+  const checked = same.filter((index) => rows[index]?.on);
+  // 没勾选任何一行 → 应用到全部同类型行（文案在面板里写清作用对象）
+  const targets = checked.length ? checked : same;
+  if (!targets.length) return { kind, targets, groups: [], note: "卡片里没有这类节点", blocked: false };
+  const needModel = kind === "image" || kind === "video";
+  const missing = targets.filter((index) => !specs[index]).length;
+  if (needModel && missing) return { kind, targets, groups: [], note: "还有 " + missing + " 行没选模型，先选好模型再统一设置", blocked: true };
+  const groups = kind === "image" ? imageUnifiedGroups(targets, specs)
+    : kind === "video" ? videoUnifiedGroups(targets, specs)
+      : kind === "text" ? textUnifiedGroups(targets, specs)
+        : audioUnifiedGroups(targets, specs);
+  const usable = groups.filter((group) => group.items.length);
+  return { kind, targets, groups: usable, note: usable.length ? UNIFIED_NOTE : "这些行没有可统一的参数", blocked: false };
+}
+
+/** 只保留面板上真实存在的选项（换模型 / 勾选变化后旧值自动失效，计数跟着降） */
+export function pruneUnifiedValues(groups: UnifiedGroup[], values: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const group of groups) for (const item of group.items) {
+    const value = values[item.key];
+    if (value !== undefined && item.options.some((option) => option.value === value)) out[item.key] = value;
+  }
+  return out;
+}
+
+/** 入口上的计数：改了几项（「保持不改」不算） */
+export function unifiedValueCount(groups: UnifiedGroup[], values: Record<string, string>): number {
+  return Object.keys(pruneUnifiedValues(groups, values)).length;
+}
+
+/**
+ * 把用户改过的项写成每一行的 patch（保持不改的项不出现 = 不改）。
+ * 顺序按分组：画幅 → 画质 → 风格；分辨率在草稿前面（同一次里草稿开关仍以用户选择为准），
+ * 输出格式在透明背景前面（两者互斥时以透明为准，和节点面板 / 后端一致）。
+ */
+export function applyUnifiedValues(groups: UnifiedGroup[], rows: ApproveRow[], targets: number[], values: Record<string, string>): Array<{ index: number; patch: Partial<ApproveRow> }> {
+  const picked: UnifiedOption[] = [];
+  for (const group of groups) for (const item of group.items) {
+    const value = values[item.key];
+    const option = value === undefined ? undefined : item.options.find((entry) => entry.value === value);
+    if (option) picked.push(option);
+  }
+  const out: Array<{ index: number; patch: Partial<ApproveRow> }> = [];
+  for (const index of targets) {
+    const row = rows[index];
+    if (!row) continue;
+    const patch: Partial<ApproveRow> = {};
+    for (const option of picked) Object.assign(patch, option.patch(row));
+    if (Object.keys(patch).length) out.push({ index, patch });
+  }
+  return out;
+}
+
+/** 文本行 → run_generation 的 settings（只写文本键，模型仍用节点当前的） */
+export function writeTextApproveSettings(step: PlanStep, row: ApproveRow): PlanStep {
+  const copy = JSON.parse(JSON.stringify(step || {})) as PlanStep;
+  const args = (copy.args || {}) as Record<string, any>;
+  const settings = { ...((args.settings && typeof args.settings === "object" ? args.settings : {}) as Record<string, any>) };
+  settings.output = row.output || "text";
+  settings.think = row.think || "default";
+  settings.search = row.search === true;
+  args.settings = settings;
+  copy.args = args;
+  return copy;
+}
+
+/** 音频行 → run_generation 的 settings（只写音频键） */
+export function writeAudioApproveSettings(step: PlanStep, row: ApproveRow): PlanStep {
+  const copy = JSON.parse(JSON.stringify(step || {})) as PlanStep;
+  const args = (copy.args || {}) as Record<string, any>;
+  const settings = { ...((args.settings && typeof args.settings === "object" ? args.settings : {}) as Record<string, any>) };
+  if (row.audioKind) settings.kind = row.audioKind;
+  if (row.audioDur) settings.dur = row.audioDur;
+  args.settings = settings;
+  copy.args = args;
+  return copy;
 }
 
 /** 点「执行生成」时真正交给后端的步骤（L6）：改过的提示词先写回节点，再按行里选的模型 / 参数生成；
@@ -516,7 +1094,7 @@ export function buildGenerationApproveSteps(steps: PlanStep[], rows: ApproveRow[
   const infoOf = (step: PlanStep) => nodes.find((n) => n.node_id === (step.args || {}).node_id);
   steps.forEach((step, index) => {
     const type = String((step.args || {}).type || "").toLowerCase();
-    const kind: PlanKind | "audio" | null = type === "image" || type === "video" ? type : type === "audio" ? "audio" : null;
+    const kind: CardKind | null = type === "image" || type === "video" || type === "text" || type === "audio" ? type : null;
     const row = rows[index];
     if (!row?.on) return;
     const args = (step.args || {}) as Record<string, any>;
@@ -524,15 +1102,21 @@ export function buildGenerationApproveSteps(steps: PlanStep[], rows: ApproveRow[
     if (info && row.prompt.trim() && row.prompt.trim() !== (info.prompt || "").trim()) {
       out.push({ tool: "update_node", args: { canvas_id: args.canvas_id, node_id: args.node_id, prompt: row.prompt.trim() }, description: "改「" + info.title + "」的提示词" });
     }
+    if (kind === "text") { out.push(writeTextApproveSettings(step, row)); return; }
+    if (kind === "audio") { out.push(writeAudioApproveSettings(step, row)); return; }
     if (kind !== "image" && kind !== "video") { out.push(step); return; }
     const patched = patchPlanStep(step, kind, models, {
+      full: true,
       modelConfigId: row.modelId, ratio: row.ratio, resolution: row.resolution,
       ...(kind === "image" ? { count: row.count } : { duration: row.duration }),
+      quality: row.quality, thinking: row.thinking, outputFormat: row.outputFormat,
+      background: row.background, search: row.search, style: row.style, camera: row.camera, mj: row.mj,
+      mode: row.mode, audio: row.audio, times: row.times, genMode: row.genMode,
+      turbo: row.turbo, draft: row.draft, multiShot: row.multiShot,
     });
     const settings = ((patched.args || {}) as Record<string, any>).settings;
     if (settings && typeof settings === "object") {
       delete settings.size;   // 画布节点参数用档位（1k/2k/4k），像素尺寸不往后端写
-      if (kind === "video") { if (row.mode) settings.mode = row.mode; else delete settings.mode; }
     }
     out.push(...expandGenerationSteps([patched], models));
   });

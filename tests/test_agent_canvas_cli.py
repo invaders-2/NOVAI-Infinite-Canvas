@@ -69,9 +69,9 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual(schema["required"], ["command"])
         enum = schema["properties"]["command"]["enum"]
         self.assertEqual(enum, sorted(cli_spec.COMMANDS))
-        self.assertEqual(len(enum), 26)
+        self.assertEqual(len(enum), len(cli_spec.COMMANDS))   # 11/14 素材库新增 2 条后是 28 条，跟着命令表走
         self.assertIn("args", schema["properties"])
-        # 文案说的是「一条命令 / 写命令要确认」，并把 26 条命令名都点出来
+        # 文案说的是「一条命令 / 写命令要确认」，并把每条命令名都点出来
         self.assertIn("用一条命令操作画布", item["description"])
         self.assertIn("写命令需要用户确认", item["description"])
         for name in cli_spec.command_names():
@@ -79,7 +79,7 @@ class RegistryTests(unittest.TestCase):
 
 
 class PreviewTests(unittest.TestCase):
-    """main.agent_preview 会取 entry["preview"]：26 条命令都必须给一句非空中文，且永不抛错。"""
+    """main.agent_preview 会取 entry["preview"]：每条命令都必须给一句非空中文，且永不抛错。"""
 
     def setUp(self):
         self.entry = main.AGENT_TOOLS["canvas_cli"]

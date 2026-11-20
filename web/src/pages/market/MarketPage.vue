@@ -67,38 +67,18 @@ const searching = computed(() => !!q.value.trim());
 
 function setTab(id) { tab.value = id; cat.value = ''; const el = document.querySelector('.mk'); if (el) el.scrollTo({ top: 0 }); }
 
-/* ── 轮播（coverflow） ── */
+/* ── 轮播（大图 hero + 缩略图条）：进度条走完自动切下一张，悬停 / 打开详情时暂停 ── */
 const cf = ref(0);
-let timer = 0;
-function cfGo(i) { const n = SHOWCASE.length; if (n) cf.value = (i + n) % n; }
-function cfStyle(i) {
-    const n = SHOWCASE.length;
-    let d = i - cf.value;
-    if (d > n / 2) d -= n;
-    if (d < -n / 2) d += n;
-    const a = Math.abs(d);
-    // 步长 / 后退距离 / 倾角 / 缩放都走 .cf 上的变量，窄屏由媒体查询单独调
-    return {
-        transform: `translateX(calc(-50% + ${d} * var(--cf-step))) translateZ(${a ? 'var(--cf-z)' : '0px'}) rotateY(calc(${-d} * var(--cf-tilt))) scale(${a ? 'var(--cf-scale)' : 1})`,
-        zIndex: 10 - a,
-        filter: a ? 'brightness(.7)' : 'none',
-        '--cf-o': a > 1 ? 0 : 1,
-        '--cf-pe': a > 1 ? 'none' : 'auto',
-    };
-}
+const tick = ref(0);
 const hovering = ref(false);
-function autoplay() {
-    clearInterval(timer);
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    timer = setInterval(() => {
-        if (state.active === 'store' && tab.value === 'rec' && !searching.value && !document.hidden && !hovering.value && !detail.value) cfGo(cf.value + 1);
-    }, 5000);
-}
+const cur = computed(() => SHOWCASE[cf.value] || SHOWCASE[0]);
+const heroPaused = computed(() => hovering.value || !!detail.value || searching.value || tab.value !== 'rec');
+function cfGo(i) { const n = SHOWCASE.length; if (n) cf.value = (i + n) % n; }
+function autoplay() { tick.value++; }
 function showcaseGo(it) {
     if (it.to === 'skills') openSettings('skills');
     else navigate(it.to);
 }
-function cfClick(i, it) { if (i === cf.value) showcaseGo(it); else { cfGo(i); autoplay(); } }
 
 /* ── 详情 ── */
 function openStore(it) { detail.value = { source: 'store', item: it }; }
@@ -140,7 +120,7 @@ function pauseCover(e) { const v = e.currentTarget.querySelector('video'); if (v
 function onFocus(e) { if (e.detail && e.detail.id === 'store') loadPlugins(); }
 watch(() => state.settingsOpen, open => { if (!open && state.active === 'store') loadPlugins(); });
 onMounted(() => { load(); autoplay(); window.addEventListener('novai-page-focus', onFocus); });
-onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-page-focus', onFocus); });
+onBeforeUnmount(() => { window.removeEventListener('novai-page-focus', onFocus); });
 </script>
 
 <template>
@@ -163,30 +143,35 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
                 <!-- 推荐 -->
                 <template v-if="tab === 'rec' && !searching">
                     <section v-if="SHOWCASE.length" class="mk-sec">
-                        <div class="mk-sh"><h2>最新上线</h2>
+                        <div class="mk-sh"><h2>最新模型</h2>
                             <div class="ar"><button type="button" class="flip" aria-label="上一张" @click="cfGo(cf - 1); autoplay()"><NvIcon name="chevr" /></button><button type="button" aria-label="下一张" @click="cfGo(cf + 1); autoplay()"><NvIcon name="chevr" /></button></div>
                         </div>
-                        <div class="cf" @mouseenter="hovering = true" @mouseleave="hovering = false">
-                            <div v-for="(it, i) in SHOWCASE" :key="it.id" class="cf-card" :class="{ on: i === cf }" :style="cfStyle(i)" role="button" :tabindex="i === cf ? 0 : -1" :aria-label="it.title" @click="cfClick(i, it)" @keydown.enter="cfClick(i, it)">
-                                <video v-if="it.video && i === cf" :src="it.video" :poster="it.cover" autoplay muted loop playsinline></video>
-                                <img v-else :src="it.cover" alt="" loading="lazy" decoding="async">
-                                <span class="t"><b>{{ it.title }}</b><small>{{ it.desc }}</small></span>
-                                <span class="cat"><NvIcon :name="it.icon" />{{ it.tag }}</span>
+                        <div class="hero" :class="{ paused: heroPaused }" @mouseenter="hovering = true" @mouseleave="hovering = false">
+                            <div v-for="(it, i) in SHOWCASE" :key="it.id" class="hs" :class="{ on: i === cf }" aria-hidden="true">
+                                <video v-if="it.video && i === cf" :src="it.video" :poster="it.cover" autoplay muted loop playsinline preload="auto"></video>
+                                <img v-else :src="it.cover" alt="" :loading="i === 0 ? 'eager' : 'lazy'" decoding="async">
+                            </div>
+                            <div :key="'t' + cf" class="hero-tx">
+                                <span class="tag"><NvIcon :name="cur.icon" />{{ cur.tag }} · {{ cur.maker }}</span>
+                                <h3>{{ cur.title }}</h3>
+                                <p>{{ cur.desc }}</p>
+                                <button type="button" class="go" @click="showcaseGo(cur)">立即体验<NvIcon name="chevr" /></button>
+                            </div>
+                            <div class="rail" role="tablist" aria-label="切换模型">
+                                <button v-for="(it, i) in SHOWCASE" :key="it.id" type="button" role="tab" :aria-selected="i === cf" :aria-label="it.title" :class="{ on: i === cf }" @click="cfGo(i); autoplay()">
+                                    <img :src="it.cover" alt="" loading="lazy" decoding="async">
+                                    <i v-if="i === cf" :key="cf + '-' + tick" class="bar" :style="{ animationDuration: (it.dur || 5.5) + 's' }" @animationend="cfGo(cf + 1)"></i>
+                                </button>
                             </div>
                         </div>
-                        <div class="cf-dots"><button v-for="(it, i) in SHOWCASE" :key="it.id" type="button" :class="{ on: i === cf }" :aria-label="'第 ' + (i + 1) + ' 张'" @click="cfGo(i); autoplay()"></button></div>
                     </section>
 
                     <section v-if="storeSkills.length" class="mk-sec">
                         <div class="mk-sh"><h2>精选技能</h2><button type="button" class="more" @click="setTab('skill')">查看全部<NvIcon name="chevr" /></button></div>
                         <div class="sk-grid">
-                            <button v-for="it in byAvail(storeSkills).slice(0, 9)" :key="it.name" type="button" class="sk" @mouseenter="playCover" @mouseleave="pauseCover" @click="openStore(it)">
-                                <span class="ico"><CoverMedia :item="it" :icon="skillIcon(it)" /></span>
+                            <button v-for="it in byAvail(storeSkills).slice(0, 8)" :key="it.name" type="button" class="sk" @mouseenter="playCover" @mouseleave="pauseCover" @click="openStore(it)">
+                                <span class="ico"><CoverMedia :item="it" :icon="skillIcon(it)" /><span v-if="it.builtin" class="st">官方{{ it.installed ? ' · 已添加' : '' }}</span><span v-else-if="!it.storeAvailable" class="st">即将上线</span><span v-else-if="it.installed" class="st">已添加</span></span>
                                 <span class="tx"><b>{{ it.displayName }}</b><small>{{ it.marketingLine || it.description }}</small></span>
-                                <span v-if="it.builtin" class="st">官方{{ it.installed ? ' · 已添加' : '' }}</span>
-                                <span v-else-if="!it.storeAvailable" class="st">即将上线</span>
-                                <span v-else-if="it.installed" class="st">已添加</span>
-                                <span v-else class="go"><NvIcon name="chevr" /></span>
                             </button>
                         </div>
                     </section>
@@ -232,13 +217,9 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
                         <template v-if="skillList.length">
                             <div class="sk-grid">
                                 <button v-for="it in skillList" :key="it.name" type="button" class="sk" @mouseenter="playCover" @mouseleave="pauseCover" @click="openStore(it)">
-                                    <span class="ico"><CoverMedia :item="it" :icon="skillIcon(it)" /></span>
-                                    <span class="tx"><b>{{ it.displayName }}</b><small>{{ it.marketingLine || it.description }}</small></span>
-                                    <span v-if="it.builtin" class="st">官方{{ it.installed ? ' · 已添加' : '' }}</span>
-                                    <span v-else-if="!it.storeAvailable" class="st">即将上线</span>
-                                    <span v-else-if="it.installed" class="st">已添加</span>
-                                    <span v-else class="go"><NvIcon name="chevr" /></span>
-                                </button>
+                                    <span class="ico"><CoverMedia :item="it" :icon="skillIcon(it)" /><span v-if="it.builtin" class="st">官方{{ it.installed ? ' · 已添加' : '' }}</span><span v-else-if="!it.storeAvailable" class="st">即将上线</span><span v-else-if="it.installed" class="st">已添加</span></span>
+                                <span class="tx"><b>{{ it.displayName }}</b><small>{{ it.marketingLine || it.description }}</small></span>
+                            </button>
                             </div>
                         </template>
                         <div v-if="!skillList.length" class="mk-empty"><b>没有找到相关技能</b><span>换个关键词试试</span></div>
@@ -297,7 +278,6 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
                             <button v-for="it in installedStore.filter(hitStore)" :key="it.kind + it.name" type="button" class="sk" @mouseenter="playCover" @mouseleave="pauseCover" @click="openStore(it)">
                                 <span class="ico"><CoverMedia :item="it" :icon="skillIcon(it)" /></span>
                                 <span class="tx"><b>{{ it.displayName }}</b><small>{{ it.marketingLine || it.description }}</small></span>
-                                <span class="go"><NvIcon name="chevr" /></span>
                             </button>
                         </div>
                         <div class="pl-grid" :style="{ marginTop: installedStore.length ? '16px' : '0' }">
@@ -356,42 +336,47 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
 .sub { margin: 4px 0 8px; font: 400 11px/14px var(--font-mono); letter-spacing: .05em; color: var(--ink-3); }
 .sk-grid + .sub { margin-top: 22px; }
 
-/* 轮播：中间一张最大，两侧略小、后退并朝外倾斜
-   宽 36.3% 内容宽、步长 103.6%（补偿透视把平面位移放大的部分）：三张卡 + 3~4px 细缝正好铺满内容区，三张都完整可见 */
-.cf { position: relative; aspect-ratio: 4.9; perspective: 1000px; --cf-step: 103.6%; --cf-z: -120px; --cf-tilt: 12deg; --cf-scale: .91; }
-.cf-card { position: absolute; top: 0; left: 50%; width: 36.3%; height: 100%; border-radius: 16px; overflow: hidden; background: var(--fill-1); cursor: pointer; outline: none; box-shadow: var(--shadow-float);
-  opacity: var(--cf-o, 1); pointer-events: var(--cf-pe, auto);
-  transition: transform .55s cubic-bezier(.2,.8,.2,1), opacity .55s, filter .55s, box-shadow .2s; will-change: transform; }
-.cf-card:focus-visible { box-shadow: var(--shadow-pop); }
-.cf-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
-/* 封面视频：轮播当前卡自动播；列表 / 应用卡由悬停触发（preload=none，不悬停不下载） */
-.cf-card video, .sk .ico video, .app .acv video { width: 100%; height: 100%; object-fit: cover; display: block; }
-.cf-card::after { content: ""; position: absolute; inset: 34% 0 0; background: linear-gradient(transparent, rgba(0,0,0,.72)); pointer-events: none; }
-.cf-card .t { position: absolute; left: 18px; right: 124px; bottom: 15px; z-index: 1; color: #fff; }
-.cf-card .t b { display: block; font: 600 15px/21px var(--font-sans); letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cf-card .t small { display: block; font: 400 11px/15px var(--font-sans); opacity: .8; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cf-card .cat { position: absolute; right: 14px; bottom: 15px; z-index: 1; height: 22px; padding: 0 9px; border-radius: 11px; background: rgba(255,255,255,.16); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: #fff; font: 400 10.5px/1 var(--font-sans); display: flex; align-items: center; gap: 4px; white-space: nowrap; }
-.cf-card .cat .nv-i { width: 11px; height: 11px; }
+/* 轮播：整宽大图 + 左下文案 + 右下缩略图条（进度条走完切下一张） */
+.hero { position: relative; aspect-ratio: 2.6; border-radius: 22px; overflow: hidden; background: #0b0b0c; box-shadow: var(--shadow-float); isolation: isolate; }
+.hs { position: absolute; inset: 0; opacity: 0; transition: opacity .9s ease; }
+.hs.on { opacity: 1; }
+.hs img { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.06); transition: transform 7s linear; }
+.hs.on img { transform: scale(1); }
+.hs video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hero::after { content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(90deg, rgba(0,0,0,.64) 0%, rgba(0,0,0,.28) 40%, transparent 64%), linear-gradient(0deg, rgba(0,0,0,.5) 0%, transparent 42%); }
+.hero-tx { position: absolute; left: 40px; bottom: 38px; z-index: 2; max-width: 44%; color: #fff; animation: hero-in .6s cubic-bezier(.2,.8,.2,1) both; }
+.hero-tx .tag { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border-radius: 12px; background: rgba(255,255,255,.16); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); font: 500 11px/1 var(--font-sans); }
+.hero-tx .tag .nv-i { width: 12px; height: 12px; }
+.hero-tx h3 { margin: 14px 0 6px; font: 600 34px/40px var(--font-sans); letter-spacing: -.02em; }
+.hero-tx p { margin: 0; font: 400 14px/21px var(--font-sans); opacity: .84; }
+.hero-tx .go { margin-top: 18px; height: 36px; padding: 0 14px 0 18px; border: 0; border-radius: 18px; background: #fff; color: #111; font: 600 13px/1 var(--font-sans); display: inline-flex; align-items: center; gap: 4px; cursor: pointer; transition: transform .2s; }
+.hero-tx .go:hover { transform: translateX(2px); }
+.hero-tx .go .nv-i { width: 14px; height: 14px; }
+.rail { position: absolute; right: 22px; bottom: 22px; z-index: 2; display: flex; gap: 6px; padding: 6px; border-radius: 16px; background: rgba(18,18,20,.34); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.rail button { position: relative; width: 64px; height: 40px; padding: 0; border: 0; border-radius: 10px; overflow: hidden; cursor: pointer; background: #222; opacity: .5; transition: opacity .25s, transform .25s; }
+.rail button:hover { opacity: .85; }
+.rail button.on { opacity: 1; transform: translateY(-2px); }
+.rail img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rail .bar { position: absolute; left: 0; bottom: 0; width: 100%; height: 3px; background: #fff; transform-origin: left; animation: hero-bar 5.5s linear both; }
+.hero.paused .bar { animation-play-state: paused; }
+@keyframes hero-bar { from { transform: scaleX(0); } }
+@keyframes hero-in { from { opacity: 0; transform: translateY(10px); } }
 .soon { position: absolute; left: 12px; top: 12px; z-index: 1; height: 22px; padding: 0 9px; border-radius: 11px; background: rgba(0,0,0,.45); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #fff; font: 400 11px/22px var(--font-sans); }
-.cf-dots { display: flex; justify-content: center; gap: 5px; margin-top: 18px; }
-.cf-dots button { width: 5px; height: 5px; padding: 0; border: 0; border-radius: 3px; background: var(--fill-3); cursor: pointer; transition: width .3s, background .3s; }
-.cf-dots button.on { width: 18px; background: var(--ink); }
+.sk .ico video, .app .acv video { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-/* 技能：三列列表 */
-.sk-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 28px; }
-.sk { display: flex; align-items: center; gap: 14px; padding: 12px 10px; border: 0; border-radius: 14px; background: transparent; text-align: left; min-width: 0; cursor: pointer; color: var(--ink); transition: background var(--duration-fast); }
-.sk:hover { background: var(--fill-1); }
-.sk .ico { width: 48px; height: 48px; border-radius: 14px; background: var(--fill-1); display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; color: var(--ink); }
-.sk:hover .ico { background: var(--fill-2); }
-.sk .ico .nv-i { width: 20px; height: 20px; }
-.sk .ico img { width: 100%; height: 100%; object-fit: cover; }
-.sk .tx { flex: 1; min-width: 0; }
+/* 技能：封面卡片 */
+.sk-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px 16px; }
+.sk { display: flex; flex-direction: column; gap: 10px; padding: 0; border: 0; background: transparent; text-align: left; min-width: 0; cursor: pointer; color: var(--ink); }
+.sk .ico { position: relative; width: 100%; aspect-ratio: 4 / 3; border-radius: 16px; overflow: hidden; background: linear-gradient(145deg, var(--fill-1), var(--fill-2)); display: flex; align-items: center; justify-content: center; color: var(--ink-2); transition: transform .25s, box-shadow .25s; }
+.sk:hover .ico { transform: translateY(-3px); box-shadow: var(--shadow-lift); }
+.sk .ico img, .sk .ico video { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .6s cubic-bezier(.2,.8,.2,1); }
+.sk:hover .ico img, .sk:hover .ico video { transform: scale(1.04); }
+.sk .ico .nv-i { width: 28px; height: 28px; }
+.sk .tx { min-width: 0; padding: 0 2px; }
 .sk b { display: block; font: 600 14px/19px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sk small { display: block; font: 400 12px/16px var(--font-sans); color: var(--ink-3); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sk .go { color: var(--ink-4); display: inline-flex; transition: transform .2s, color .2s; }
-.sk .go .nv-i { width: 15px; height: 15px; }
-.sk:hover .go { color: var(--ink); transform: translateX(3px); }
-.sk .st { font: 400 11px/1 var(--font-sans); color: var(--ink-3); flex-shrink: 0; }
+.sk small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font: 400 12px/17px var(--font-sans); color: var(--ink-3); margin-top: 4px; }
+.sk .st { position: absolute; left: 10px; top: 10px; z-index: 1; height: 22px; padding: 0 9px; border-radius: 11px; background: rgba(0,0,0,.42); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: #fff; font: 500 11px/22px var(--font-sans); white-space: nowrap; }
 
 /* 插件卡 */
 .pl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
@@ -439,26 +424,23 @@ onBeforeUnmount(() => { clearInterval(timer); window.removeEventListener('novai-
 
 /* 721–1023：三张卡沿用基准比例（36.3% / step / scale / z / aspect 都不动），只收紧文字和内边距 */
 @media (max-width: 980px) {
-  .sk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .cf-card { border-radius: 14px; }
-  .cf-card .t { left: 14px; right: 16px; bottom: 12px; }
-  .cf-card .t b { font: 600 13.5px/19px var(--font-sans); }
-  .cf-card .t small { font: 400 10.5px/14px var(--font-sans); }
-  .cf-card .cat { top: 12px; right: 12px; bottom: auto; height: 20px; padding: 0 8px; font: 400 10px/1 var(--font-sans); }
+  .sk-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .hero { aspect-ratio: 2; }
+  .hero-tx { left: 28px; bottom: 84px; max-width: 70%; }
+  .hero-tx h3 { font: 600 28px/34px var(--font-sans); }
+  .rail { left: 22px; right: auto; bottom: 18px; }
 }
 @media (max-width: 720px) {
   .mk-in { width: calc(100% - 32px); padding-top: calc(var(--tbh, 0px) + 20px); }
   .mk-search { width: 100%; order: 3; }
-  .sk-grid { grid-template-columns: minmax(0, 1fr); }
-  /* 手机上一屏一卡：不把邻卡切在窗口边缘 */
-  .cf { aspect-ratio: 1.78; perspective: none; --cf-step: 0%; --cf-z: 0px; --cf-tilt: 0deg; --cf-scale: 1; }
-  .cf-card { width: 100%; border-radius: 16px; opacity: 0; pointer-events: none; }
-  .cf-card.on { opacity: 1; pointer-events: auto; }
-  .cf-card .t { left: 16px; right: 16px; bottom: 14px; }
-  .cf-card .t b { font: 600 15px/21px var(--font-sans); }
-  .cf-card .t small { font: 400 11px/15px var(--font-sans); }
-  .cf-card .cat { top: 14px; right: 14px; bottom: auto; height: 22px; padding: 0 9px; font: 400 10.5px/1 var(--font-sans); }
-  .cf-dots { margin-top: 14px; }
+  .sk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 12px; }
+  .hero { aspect-ratio: 1.15; border-radius: 18px; }
+  .hero-tx { left: 18px; right: 18px; bottom: 74px; max-width: none; }
+  .hero-tx h3 { font: 600 24px/30px var(--font-sans); margin-top: 10px; }
+  .hero-tx p { font: 400 13px/19px var(--font-sans); }
+  .hero-tx .go { margin-top: 12px; height: 32px; }
+  .rail { left: 50%; right: auto; transform: translateX(-50%); bottom: 14px; gap: 4px; padding: 4px; border-radius: 12px; }
+  .rail button { width: 40px; height: 28px; border-radius: 8px; }
 }
-@media (prefers-reduced-motion: reduce) { .cf-card { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .hs, .hs img, .hero-tx { transition: none; animation: none; } }
 </style>

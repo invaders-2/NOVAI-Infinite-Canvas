@@ -1,6 +1,6 @@
 /** 画布上的编辑动作（连线、删除、复制粘贴、上传……），界面和 Agent 共用 */
 import type { CanvasEdge, CanvasNode } from "../react-canvas/reactCanvasStore";
-import { autoVideoMode, cloneParams, connectBlock, genOf, inputsOf, isGenKind, NODE_DEFAULT_SIZE, outOf, uid, withGen, type GenKind, type TextParams, type VideoParams } from "./model";
+import { autoVideoMode, cloneParams, connectBlock, genOf, inputsOf, isGenKind, NODE_DEFAULT_SIZE, outOf, TYPE_LABEL, uid, withGen, type GenKind, type TextParams, type VideoParams } from "./model";
 import { fitSourceBox, isAdaptiveRatio, refitNodeBox } from "./mediaFit";
 import { sourceBoxForNode, sourceSizeForTier } from "./originalRatio";
 import type { CanvasStore } from "./store";
@@ -11,12 +11,19 @@ import { keyHint } from "./ui/shortcuts";
 import { computeFlowLayout, computeGridLayout, type LayoutMode } from "./autoLayout";
 import { frameOf, isFrame, memberIdsDeep } from "./groupFit";
 import { withGroupColor } from "./groupStyle";
+import { addToTimeline } from "./playlist";
 import { convertImageToPng, planImageUpload } from "./imageUpload";
 
 /** 连线；成功后选中下游节点，并按输入自动切换视频生成方式 */
 export function connect(store: CanvasStore, from: string, to: string, opts: { quiet?: boolean; select?: boolean } = {}): CanvasEdge | null {
   const block = connectBlock(store.state.doc, from, to);
   if (block) { if (!opts.quiet) store.toast(block); return null; }
+  // 连到剪辑时间线 = 素材入轨：连线要和片段一起产生（以前只连线，用户看到画布连着、画面轨空着）
+  if (store.node(to)?.kind === "timeline") {
+    if (!addToTimeline(store, to, [from])) return null;
+    if (opts.select !== false) store.setUI({ sel: new Set([to]), edge: null });
+    return store.state.doc.edges.find((e) => e.from === from && e.to === to) || null;
+  }
   const e = store.addEdge(from, to);
   afterInputsChanged(store, to);
   if (opts.select !== false) store.setUI({ sel: new Set([to]), edge: null });
@@ -175,6 +182,10 @@ export async function addFiles(store: CanvasStore, files: File[], at: { x: numbe
     const kind: GenKind | null = f.type.startsWith("image/") ? "image" : f.type.startsWith("video/") ? "video" : f.type.startsWith("audio/") ? "audio" : null;
     if (!kind && isDocument(f)) { const id = await addDocument(store, f, { x: at.x + dx, y: at.y }); if (id) { made.push(id); dx += 360; if (opts.linkTo && store.node(opts.linkTo)) connect(store, id, opts.linkTo, { quiet: true, select: false }); } continue; }
     if (!kind) { store.toast(/\.pdf$/i.test(f.name) ? `${f.name}：暂不能读取 PDF 正文，请另存为 docx 或文本后上传` : `不支持的文件：${f.name}`, 5000); continue; }
+    // 目标节点只收同类型媒体：往视频节点塞图片、往图片节点塞音频都会把节点写坏，直接跳过并说清原因。
+    // 只作用在 target 分支上（替换 / 连成输入 / 空白处新建各走各的路，不受影响）。
+    const dst = opts.target ? store.node(opts.target) : undefined;
+    if (dst && isGenKind(dst.kind) && dst.kind !== kind) { store.toast(`「${f.name}」放不进${TYPE_LABEL[dst.kind]}节点：这里只收${TYPE_LABEL[dst.kind]}`, 5000); continue; }
     if (f.size > MEDIA_UPLOAD_LIMIT) { store.toast(`${f.name} 超过 200MB，未添加`); continue; }
     // 图片先过一遍格式判定：直接传 / 浏览器转 PNG / 明确拒绝（三档规则见 imageUpload.ts）
     const plan = kind === "image" ? planImageUpload(f) : null;
@@ -198,7 +209,7 @@ export async function addFiles(store: CanvasStore, files: File[], at: { x: numbe
     if (store.backend.kind === "bridge" && url.startsWith("data:") && url.length > INLINE_FALLBACK_MAX) { store.toast(`${f.name} 存入资源库失败，未添加（文件较大，不能内嵌进画布）`); continue; }
     const name = uploadName.replace(/\.[^.]+$/, "").slice(0, 24);
     // 「替换」：只换当前版本，节点本身不动（位置/尺寸/连线/提示词保留）
-    if (opts.replace && store.node(opts.replace)) { replaceNodeMedia(store, opts.replace, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }); continue; }
+    if (opts.replace && store.node(opts.replace)) { replaceNodeMedia(store, opts.replace, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }, kind); continue; }
     if (opts.target && store.node(opts.target)) {
       const t = store.node(opts.target)!; const g = genOf(t);
       const box = kind === "image" ? refitNodeBox(t, wh[0], wh[1]) : null;
@@ -218,9 +229,16 @@ export async function addFiles(store: CanvasStore, files: File[], at: { x: numbe
 
 /**
  * 「替换」：只换当前版本的媒体（url / 封帧 / 宽高），节点位置、尺寸、连线、提示词、参数都不动。
+ * mediaKind：这次要写进去的媒体类型。和节点类型不符时直接拒绝并说清原因——往图片节点塞视频、
+ * 往视频节点塞音频都会把节点写坏。三个替换入口（节点「替换」菜单 / 拖别的节点过来 / 素材库点一条）
+ * 都把类型传进来，守卫只写在这一处。文本 / 表格这类非媒体节点不拦（替换入口本身只对图片 / 视频 / 音频开放）。
  */
-export function replaceNodeMedia(store: CanvasStore, id: string, next: { url?: string; frame?: string; w?: number; h?: number; dur?: number }) {
+export function replaceNodeMedia(store: CanvasStore, id: string, next: { url?: string; frame?: string; w?: number; h?: number; dur?: number }, mediaKind?: GenKind) {
   const n = store.node(id); if (!n || !next.url) return false;
+  if (mediaKind && mediaKind !== n.kind && (n.kind === "image" || n.kind === "video" || n.kind === "audio")) {
+    store.toast(`不能把${TYPE_LABEL[mediaKind]}替换进${TYPE_LABEL[n.kind]}节点：这里只收${TYPE_LABEL[n.kind]}`, 5000);
+    return false;
+  }
   store.patchGen(id, (g) => ({
     hist: g.hist.map((h, i) => (i === g.hi ? { ...h, ...next, ...(n.kind === "video" && !next.frame ? { frame: h.frame || next.url } : {}) } : h)),
   }), { history: true });
@@ -276,16 +294,41 @@ export function alignSelection(store: CanvasStore, mode: "left" | "top" | "hgap"
 }
 
 /**
- * 多选一键排版：只对「自由」节点生效（分组本身和组员都不参与，免得把组框和成员拆开）。
+ * 多选排版的有效目标：分组 / 堆叠当一个整体块，自由节点照旧。
+ * 选中节点如果已在某个「也被选中」的块里，跳过（跟着父块走）；如果属于未选中的分组，也跳过（不能把成员抽走）。
+ */
+export function resolveLayoutTargets(store: CanvasStore): { targets: CanvasNode[]; blocked: CanvasNode[]; reason: string } {
+  const doc = store.state.doc;
+  const byId = new Map(doc.nodes.map((n) => [n.id, n]));
+  const parentOf = new Map<string, string>();
+  for (const g of doc.nodes) if (g.kind === "group") for (const c of g.children || []) if (!parentOf.has(c)) parentOf.set(c, g.id);
+  const selected = store.state.ui.sel;
+  const ancestorsOf = (id: string): string[] => {
+    const out: string[] = []; const seen = new Set<string>([id]);
+    for (let cur = parentOf.get(id); cur && !seen.has(cur); cur = parentOf.get(cur)) { seen.add(cur); out.push(cur); }
+    return out;
+  };
+  const targets: CanvasNode[] = []; const blocked: CanvasNode[] = [];
+  for (const id of selected) {
+    const n = byId.get(id); if (!n) continue;
+    const ancestors = ancestorsOf(id);
+    if (ancestors.some((a) => selected.has(a))) continue;
+    if (n.kind === "group") { targets.push(n); continue; }
+    if (!ancestors.length) targets.push(n);
+    else blocked.push(n);
+  }
+  const reason = blocked.length ? "分组里的节点要和分组一起选，才能参与排版" : "至少选中 2 个节点再排版";
+  return { targets, blocked, reason };
+}
+
+/**
+ * 多选一键排版：分组 / 堆叠按一个整体块参与，块内全部后代跟着平移；纯自由节点沿用原算法。
  * 一次撤销：先 snapshot 再 mutate({history:false})，和 ungroup 同一套写法。
  */
 export function layoutSelection(store: CanvasStore, mode: LayoutMode) {
   const doc = store.state.doc;
-  const grouped = new Set<string>();
-  for (const g of doc.nodes) if (g.kind === "group") (g.children || []).forEach((c) => grouped.add(c));
-  const targets = [...store.state.ui.sel].map((id) => doc.nodes.find((n) => n.id === id))
-    .filter((n): n is CanvasNode => !!n && n.kind !== "group" && !grouped.has(n.id));
-  if (targets.length < 2) { store.toast("至少选中 2 个节点再排版"); return; }
+  const { targets, blocked, reason } = resolveLayoutTargets(store);
+  if (targets.length < 2) { store.toast(blocked.length ? reason : "至少选中 2 个节点再排版"); return; }
 
   const ids = new Set(targets.map((n) => n.id));
   const inner = doc.edges.filter((e) => ids.has(e.from) && ids.has(e.to));
@@ -293,13 +336,22 @@ export function layoutSelection(store: CanvasStore, mode: LayoutMode) {
   const pos = new Map(result.positions.map((p) => [p.id, p]));
   const sides = new Map(result.edgeSides.map((s) => [s.id, s.fromSide]));
 
+  // 每个目标（块或自由节点）自己 + 它的全部后代，平移同一个 dx/dy；块尺寸不重算
+  const shift = new Map<string, { dx: number; dy: number }>();
+  for (const n of targets) {
+    const p = pos.get(n.id); if (!p) continue;
+    const dx = p.x - n.x, dy = p.y - n.y; if (!dx && !dy) continue;
+    for (const id of memberIdsDeep(doc, [n.id])) shift.set(id, { dx, dy });
+    shift.set(n.id, { dx, dy });
+  }
+
   store.snapshot();
   store.mutate((d) => ({
     ...d,
-    nodes: d.nodes.map((n) => { const p = pos.get(n.id); return p ? { ...n, x: p.x, y: p.y } : n; }),
+    nodes: d.nodes.map((n) => { const s = shift.get(n.id); return s ? { ...n, x: n.x + s.dx, y: n.y + s.dy } : n; }),
     edges: sides.size ? d.edges.map((e) => { const s = sides.get(e.id); return s ? { ...e, fromSide: s } : e; }) : d.edges,
   }), { history: false });
-  store.toast(mode === "grid" ? `已按宫格排列 ${targets.length} 个节点` : `已按水平流排列 ${targets.length} 个节点`);
+  store.toast(mode === "grid" ? `已按宫格排列 ${targets.length} 个目标` : `已按水平流排列 ${targets.length} 个目标`);
 }
 
 /**

@@ -1075,7 +1075,11 @@ class ApiIntegrationTests(unittest.TestCase):
 def tearDownModule():
     # 不删 _TMP_DATA：合并跑时它可能已是后续套件正在使用的共享库（谁先 import 谁建库）。
     # 单个套件跑完留下的临时目录由系统清理，和其他 python 测试套件的行为保持一致。
-    set_auth(False)
+    # 退出时把 auth 开关清干净：本套件用 NOVAI_AUTH_DISABLED=1 关鉴权，留着会让后续套件
+    # （如 test_lan_account_owner）以为「登录体系未启用」而失败；默认 optional 即可。
+    os.environ.pop("NOVAI_AUTH_DISABLED", None)
+    os.environ.pop("NOVAI_AUTH_ENABLED", None)
+    os.environ.pop("NOVAI_AUTH_MODE", None)
     reset_for_tests()
 
 

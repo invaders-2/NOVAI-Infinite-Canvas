@@ -98,6 +98,159 @@ const appendPart = (state: SessionState, message: Message, part: Part): Part => 
 	return part
 }
 
+type ThinkingPart = Extract<Part, { type: "thinking" }>
+type TextPart = Extract<Part, { type: "text" }>
+
+const lastPartOf = <T extends Part["type"]>(message: Message, type: T): Extract<Part, { type: T }> | null => {
+	for (let i = message.parts.length - 1; i >= 0; i -= 1) {
+		const part = message.parts[i]
+		if (part.type === type) return part as Extract<Part, { type: T }>
+	}
+	return null
+}
+
+const lastStreamedText = (message: Message): TextPart | null => {
+	for (let i = message.parts.length - 1; i >= 0; i -= 1) {
+		const part = message.parts[i]
+		if (part.type === "text" && part.streamed) return part
+	}
+	return null
+}
+
+const ensureThinkingPart = (message: Message, at: number): ThinkingPart => {
+	let part = lastPartOf(message, "thinking")
+	if (!part) {
+		part = { type: "thinking", id: uid("part"), text: "", totalDurationMs: 0, streaming: true, startedAt: at, segments: [] }
+		message.parts.push(part)
+	} else {
+		if (!part.segments) part.segments = part.text ? [{ kind: "base", round: 0, text: part.text }] : []
+		if (!part.startedAt) part.startedAt = at
+		part.streaming = true
+	}
+	return part
+}
+
+/* 同一轮里只要出现 reasoning_delta，这一轮的 thought 短句就不进正文（中英草稿不混排）；
+   没有 reasoning_delta 的轮次，thought 按行拼成正文（兼容只出短句的模型）。 */
+const recomputeThinking = (part: ThinkingPart) => {
+	const segments = part.segments
+	if (!segments) return
+	const reasoned = new Set<number>()
+	for (const segment of segments) {
+		if (segment.kind === "reasoning") reasoned.add(segment.round)
+	}
+	let text = ""
+	let previous = ""
+	for (const segment of segments) {
+		if (!segment.text) continue
+		if (segment.kind === "thought" && reasoned.has(segment.round)) continue
+		if (text && (segment.kind === "thought" || previous === "thought" || segment.kind === "base" || previous === "base")) text += "\n"
+		text += segment.text
+		previous = segment.kind
+	}
+	part.text = text
+}
+
+const appendReasoningDelta = (message: Message, text: string, at: number, round: number) => {
+	const part = ensureThinkingPart(message, at)
+	const segments = part.segments || []
+	const last = segments[segments.length - 1]
+	if (last && last.kind === "reasoning" && last.round === round) last.text += text
+	else segments.push({ kind: "reasoning", round, text })
+	part.segments = segments
+	recomputeThinking(part)
+}
+
+const appendThought = (message: Message, text: string, at: number, round: number) => {
+	const part = ensureThinkingPart(message, at)
+	const segments = part.segments || []
+	segments.push({ kind: "thought", round, text })
+	part.segments = segments
+	recomputeThinking(part)
+}
+
+const finalizeThinkingPart = (part: ThinkingPart, at: number, hard: boolean) => {
+	if (part.segments) recomputeThinking(part)
+	const elapsed = part.startedAt ? Math.max(0, at - part.startedAt) : 0
+	if (part.streaming) {
+		part.streaming = false
+		part.endedAt = at
+	}
+	/* soft：正文开始流出时先停光标；hard：done/error 时按「首个思考事件 → done」定格 */
+	if (hard && !part.durationLocked) {
+		part.totalDurationMs = Math.max(Number(part.totalDurationMs) || 0, elapsed)
+		part.durationLocked = true
+	} else if (!hard && (part.totalDurationMs === undefined || part.totalDurationMs === 0)) {
+		part.totalDurationMs = elapsed
+	}
+}
+
+const finalizeThinkingIn = (message: Message, at: number, hard: boolean) => {
+	for (const part of message.parts) {
+		if (part.type === "thinking") finalizeThinkingPart(part, at, hard)
+	}
+}
+
+/* 正文开始流出：思考正文停止流式（标题不再 Shimmer），但时长等 done 再定格 */
+const endThinkingStream = (message: Message, at: number) => {
+	for (const part of message.parts) {
+		if (part.type === "thinking" && part.streaming) finalizeThinkingPart(part, at, false)
+	}
+}
+
+/* abort 等没有 done/error 的结束路径：把还在流的思考定格，不然标题会永远停在「思考中…」 */
+export const finishStreaming = (state: SessionState, at = now()) => {
+	for (const message of state.messages) finalizeThinkingIn(message, at, true)
+}
+
+const appendTextDelta = (message: Message, text: string): TextPart => {
+	/* 整个 run 只维护一个流式正文 part：几百条 delta 合并进去，不按帧新建 part */
+	const existing = lastStreamedText(message)
+	if (existing) {
+		existing.text += text
+		return existing
+	}
+	const last = message.parts[message.parts.length - 1]
+	if (last && last.type === "text") {
+		last.text += text
+		last.streamed = true
+		return last
+	}
+	const part: TextPart = { type: "text", id: uid("part"), text, streamed: true }
+	message.parts.push(part)
+	return part
+}
+
+const applyWholeThinking = (state: SessionState, raw: string, at: number, duration: number) => {
+	const text = String(raw ?? "")
+	if (!text.trim()) return
+	const message = ensureAssistant(state)
+	const part = ensureThinkingPart(message, at)
+	const segments = part.segments || []
+	segments.push({ kind: "base", round: 0, text })
+	part.segments = segments
+	recomputeThinking(part)
+	part.totalDurationMs = Math.max(Number(part.totalDurationMs) || 0, Number(duration) || 0)
+	if (duration > 0) part.durationLocked = true
+	part.streaming = false
+	part.endedAt = at
+}
+
+/* message / done.message 是最终文本：已经通过 message_delta 流式累加过就只做收尾，不再追加一遍 */
+const applyFinalText = (state: SessionState, message: Message, raw: string) => {
+	const text = String(raw ?? "")
+	const clean = text.trim()
+	if (!clean) return
+	const streamed = lastStreamedText(message)
+	if (streamed) {
+		/* 最终文本是权威版本：直接收尾替换，绝不再追加一遍 */
+		if (streamed.text !== text) streamed.text = text
+		return
+	}
+	const spoken = message.parts.some((part) => part.type === "text" && part.text.trim() === clean)
+	if (!spoken) appendPart(state, message, { type: "text", id: uid("part"), text })
+}
+
 const stepKey = (data: Record<string, unknown>) =>
 	data.index === undefined || data.index === null || data.index === "" ? "" : String(data.index)
 
@@ -215,6 +368,8 @@ export const applyEvent = (state: SessionState, event: StreamEvent): SessionStat
 	const data: Record<string, unknown> = event.data && typeof event.data === "object" ? event.data : (event as Record<string, unknown>)
 
 	if (type === "run_start") {
+		/* 上一轮如果没收到 done/error（断流），先把还在流的思考定格 */
+		finishStreaming(state)
 		const previous = state.messages[state.messages.length - 1]
 		const visionOnly = previous?.role === "assistant" && !previous.runId && previous.parts.length > 0 && previous.parts.every((part) => part.type === "vision")
 		const assistant = visionOnly ? previous : pushAssistant(state)
@@ -300,18 +455,41 @@ export const applyEvent = (state: SessionState, event: StreamEvent): SessionStat
 	}
 
 	if (type === "thinking") {
+		applyWholeThinking(state, String(data.text ?? ""), now(), Number(data.duration_ms || data.totalDurationMs) || 0)
+		return state
+	}
+
+	if (type === "reasoning_delta") {
 		const text = String(data.text ?? "")
-		if (text.trim()) appendPart(state, ensureAssistant(state), { type: "thinking", id: uid("part"), text, totalDurationMs: Number(data.duration_ms || data.totalDurationMs) || 0 })
+		if (text) appendReasoningDelta(ensureAssistant(state), text, now(), Number(data.round) || 0)
+		return state
+	}
+
+	if (type === "thought") {
+		const text = String(data.text ?? "").trim()
+		if (text) appendThought(ensureAssistant(state), text, now(), Number(data.round) || 0)
+		return state
+	}
+
+	if (type === "message_delta") {
+		const text = String(data.text ?? "")
+		if (!text) return state
+		const message = ensureAssistant(state)
+		endThinkingStream(message, now())
+		appendTextDelta(message, text)
 		return state
 	}
 
 	if (type === "message") {
 		const text = String(data.text ?? "")
 		if (!text.trim()) return state
+		const at = now()
 		if (String(data.kind || "") === "thinking") {
-			appendPart(state, ensureAssistant(state), { type: "thinking", id: uid("part"), text, totalDurationMs: Number(data.duration_ms) || 0 })
+			applyWholeThinking(state, text, at, Number(data.duration_ms) || 0)
 		} else {
-			appendPart(state, ensureAssistant(state), { type: "text", id: uid("part"), text })
+			const message = ensureAssistant(state)
+			endThinkingStream(message, at)
+			applyFinalText(state, message, text)
 		}
 		return state
 	}
@@ -390,12 +568,9 @@ export const applyEvent = (state: SessionState, event: StreamEvent): SessionStat
 		const status = normalizeDone(data)
 		state.streamState = status
 		message.status = status
-		const doneText = String(data.message || "").trim()
-		/* 纯问答时 message 事件与 done.message 是同一段文本，别在气泡里重复一遍 */
-		const alreadySpoken = doneText && message.parts.some(
-			(part) => part.type === "text" && part.text.trim() === doneText,
-		)
-		if (doneText && !alreadySpoken) appendPart(state, message, { type: "text", id: uid("part"), text: doneText })
+		finalizeThinkingIn(message, now(), true)
+		/* 纯问答时 message / message_delta 与 done.message 是同一段文本，别在气泡里重复一遍 */
+		applyFinalText(state, message, String(data.message || ""))
 		message.activeWorkMs = freezeActivity(state)
 		appendPart(state, message, { type: "run_outcome", id: uid("part"), status, activeWorkMs: message.activeWorkMs, steps: Number(data.steps_executed) || 0 })
 		state.streamingMessageId = null
@@ -405,6 +580,7 @@ export const applyEvent = (state: SessionState, event: StreamEvent): SessionStat
 
 	if (type === "error") {
 		const message = ensureAssistant(state)
+		finalizeThinkingIn(message, now(), true)
 		state.streamState = "failed"
 		message.status = "failed"
 		appendPart(state, message, { type: "agent_error", id: uid("part"), message: String(data.message || data.error || "未知错误"), code: data.code ? String(data.code) : "" })

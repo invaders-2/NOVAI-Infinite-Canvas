@@ -7,7 +7,6 @@ import os
 import re
 import shutil
 import tempfile
-import threading
 import urllib.parse
 import uuid
 import zipfile
@@ -25,6 +24,83 @@ from server.agents import store as agent_store
 from server.routes.deps import deps
 
 router = APIRouter(prefix="/api")
+
+
+# --- 素材归属（2026-11）：登录后只看自己的；没登录 = 本机模式全量 ---
+
+def _owner_id():
+    """当前素材归属账号：登录（含 optional）返回 id，没登录返回 None。"""
+    getter = deps.get("current_asset_owner_id")
+    if callable(getter):
+        try:
+            value = getter()
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _library_dir():
+    getter = deps.get("asset_library_dir")
+    if callable(getter):
+        return getter()
+    return deps.ASSET_LIBRARY_DIR
+
+
+def _visible_lib():
+    loader = deps.get("load_asset_library")
+    return deps.visible_asset_library(_owner_id(), loader=loader if callable(loader) else None)
+
+
+def _lib_view(lib):
+    """返回给前端的资产库：登录态一定是过滤后的视图，绝不能把别人的库整份回传。"""
+    return _visible_lib() if _owner_id() is not None else lib
+
+
+def _url_readable(url):
+    """API 读/下载文件时的归属判断：users/{uid} 只给本人（或共享画布成员）；机器级旧路径保持公共。"""
+    text = str(url or "")
+    m = re.match(r"^/assets/users/(\d+)/", urllib.parse.unquote(text.split("?", 1)[0]))
+    if not m:
+        return True
+    return bool(deps.can_read_other_user_asset(int(m.group(1)), text))
+
+
+def _require_library(lib, library_id=None):
+    library = deps.owned_asset_library(lib, library_id or "", _owner_id())
+    if not library:
+        raise HTTPException(status_code=404, detail="资产库不存在")
+    return library
+
+
+def _require_category(lib, category_id, library_id=""):
+    library, cat = deps.owned_asset_category(lib, category_id, library_id, _owner_id())
+    if not library or not cat:
+        raise HTTPException(status_code=404, detail="分类不存在")
+    return library, cat
+
+
+def _require_item(lib, item_id, library_id=""):
+    library, cat, item = deps.owned_asset_item(lib, item_id, library_id, _owner_id())
+    if not item:
+        raise HTTPException(status_code=404, detail="资产不存在")
+    return library, cat, item
+
+
+def _set_owner(obj):
+    owner = _owner_id()
+    if owner is not None and isinstance(obj, dict):
+        obj["owner_id"] = owner
+    return obj
+
+
+def _prompt_library_or_404(data, library_id="", need_write=False):
+    library = deps.find_prompt_library(data, library_id)
+    if not library:
+        raise HTTPException(status_code=404, detail="提示词库不存在")
+    if need_write and not deps.prompt_library_writable(library, _owner_id()):
+        raise HTTPException(status_code=404, detail="提示词库不存在")
+    return library
 
 
 # --- Pydantic 模型（自 main.py 迁入，字段定义保持不变） ---
@@ -52,14 +128,6 @@ class LocalAssetCaptionSaveRequest(BaseModel):
     caption: str = ""
 
 
-class LocalAssetClassifyRequest(BaseModel):
-    names: List[str] = []
-    provider: str = "comfly"
-    model: str = ""
-    ms_model: str = ""
-    prompt: str = ""
-
-
 class LocalAssetUrlImportItem(BaseModel):
     url: str = ""
     name: str = ""
@@ -70,11 +138,6 @@ class LocalAssetUrlImportItem(BaseModel):
 class LocalAssetUrlImportRequest(BaseModel):
     items: List[LocalAssetUrlImportItem] = []
     folder: str = ""
-    classify: bool = False
-    provider: str = "comfly"
-    model: str = ""
-    ms_model: str = ""
-    prompt: str = ""
 
 
 class LocalAssetFolderRequest(BaseModel):
@@ -105,9 +168,7 @@ class AssetLibraryAddRequest(BaseModel):
     url: str = ""
     name: str = ""
     library_id: str = ""
-    # false = 跳过 AI 分类（只落库立即返回）；默认 true 但分类在后台跑，不阻塞保存
-    classify: bool = True
-    # 用途（product/model/scene/source/depth/style/sound，也认中文）；空 = 按类型 / 文件夹 / AI 分类自动推断
+    # 用途（product/model/scene/source/depth/style/sound，也认中文）；空 = 按类型 / 文件夹自动推断
     use: str = ""
     # 由哪个素材生成（深度视频 → 原视频），条目 id 或 url
     derived_from: str = ""
@@ -134,7 +195,6 @@ class AssetLibraryBatchAddRequest(BaseModel):
     category_id: str = ""
     library_id: str = ""
     items: List[AssetLibraryAddRequest] = []
-    classify: bool = True
 
 
 def _generation_sidecar(rel):
@@ -188,15 +248,6 @@ class AssetAvatarRegisterRequest(BaseModel):
     provider_id: str = ""
     project_name: str = "default"
     group_name: str = ""
-
-
-class AssetLibraryClassifyRequest(BaseModel):
-    library_id: str = ""
-    ids: List[str] = []
-    provider: str = "comfly"
-    model: str = ""
-    ms_model: str = ""
-    prompt: str = ""
 
 
 class PromptLibraryRequest(BaseModel):
@@ -318,10 +369,6 @@ async def upload_local_assets(files: List[UploadFile] = File(...), folder: str =
         path = os.path.join(folder_abs, filename)
         with open(path, "wb") as f:
             f.write(content)
-        if kind == "image":
-            classification = await deps.classify_asset_image_best_effort(path)
-            if classification:
-                deps._write_local_upload_classification(rel_name, classification)
         uploaded.append(deps._local_upload_item(rel_name))
     return {"files": uploaded}
 
@@ -386,10 +433,6 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
                 path = os.path.join(folder_abs, filename)
                 with open(path, "wb") as f:
                     f.write(content)
-                if payload.classify and kind == "image":
-                    classification = await deps.classify_asset_image_best_effort(path, payload.provider, payload.model, payload.ms_model, payload.prompt)
-                    if classification:
-                        deps._write_local_upload_classification(rel_name, classification)
                 # 从画布存进来的生成图：把提示词 / 模型等生成信息一起带过来
                 try:
                     gen = await asyncio.to_thread(deps.generation_meta_for_url, src_url)
@@ -696,45 +739,6 @@ async def caption_local_assets(payload: LocalAssetCaptionRequest):
     return {"ok": True, "count": ok_count, "items": items}
 
 
-@router.post("/local-assets/classify")
-async def classify_local_assets(payload: LocalAssetClassifyRequest):
-    items = []
-    ok_count = 0
-    for name in (payload.names or [])[:80]:
-        item = {"name": name, "ok": False, "classification": None, "classification_file": "", "error": ""}
-        try:
-            if deps.local_output_readonly_name(name):
-                raise HTTPException(status_code=403, detail="「画布生成」里的素材是只读的生成物，不能智能分类")
-            filename, path = deps._local_upload_safe_path(name)
-            if not os.path.isfile(path):
-                raise HTTPException(status_code=404, detail="文件不存在")
-            kind, _ = deps._local_upload_kind_ext(filename, "")
-            if kind != "image":
-                raise HTTPException(status_code=400, detail="仅支持图片素材智能分类")
-            classification = await deps.classify_image_with_provider(
-                path,
-                payload.provider,
-                payload.model,
-                payload.ms_model,
-                payload.prompt,
-            )
-            deps._write_local_upload_classification(filename, classification)
-            item.update({
-                "ok": True,
-                "name": filename,
-                "classification": classification,
-                "classification_file": os.path.basename(deps._local_upload_classification_path(filename)),
-                "model": classification.get("model") or "",
-            })
-            ok_count += 1
-        except HTTPException as exc:
-            item["error"] = str(exc.detail or "智能分类失败")
-        except Exception as exc:
-            item["error"] = str(exc) or "智能分类失败"
-        items.append(item)
-    return {"ok": True, "count": ok_count, "items": items}
-
-
 @router.patch("/local-assets/caption")
 async def save_local_asset_caption(payload: LocalAssetCaptionSaveRequest):
     if deps.local_output_readonly_name(payload.name):
@@ -801,7 +805,7 @@ def _asset_library_child_dir(library, parent_cat, name, current_id=""):
     }
     candidate = base
     index = 2
-    while candidate in siblings or os.path.exists(os.path.join(deps.ASSET_LIBRARY_DIR, parent_dir, candidate)):
+    while candidate in siblings or os.path.exists(os.path.join(_library_dir(), parent_dir, candidate)):
         candidate = f"{base}_{index}"
         index += 1
     return f"{parent_dir}/{candidate}".strip("/") if parent_dir else candidate
@@ -827,6 +831,9 @@ def _ensure_asset_library_media_category(lib, library, media_kind):
     existing_ids = {str(cat.get("id") or "") for cat in categories}
     category_id = base_id if base_id not in existing_ids else f"cat_{uuid.uuid4().hex[:12]}"
     category = {"id": category_id, "name": label, "type": media_kind, "items": []}
+    owner = _owner_id()
+    if owner is not None:
+        category["owner_id"] = owner
     categories.append(category)
     if (library.get("id") or "") == (lib.get("active_library_id") or ""):
         lib["categories"] = categories
@@ -851,20 +858,6 @@ def _resolve_asset_library_target_category(lib, library, category_id, media_kind
     return category, ""
 
 
-def _find_asset_library_item(lib, item_id, library_id=""):
-    library = deps.find_asset_library(lib, library_id)
-    if not library:
-        return None
-    for cat in library.get("categories") or []:
-        for item in cat.get("items") or []:
-            if isinstance(item, dict) and item.get("id") == item_id:
-                return item
-    return None
-
-
-_ASSET_LIBRARY_CLASSIFY_LOCK = threading.Lock()
-
-
 # 助手 / 技能存素材时，没指定文件夹就按用途落到这些文件夹（没有就建），不再全塞进第一个图片分类（「角色」）
 _USE_DEFAULT_FOLDER = {"product": "产品", "model": "模特", "scene": "场景", "source": "视频素材",
                        "depth": "深度视频", "style": "风格参考", "sound": "音效"}
@@ -878,32 +871,46 @@ def _folder_by_name(lib, library, name, media_kind):
         if str(cat.get("name") or "") == name and _asset_library_media_type(cat) == media_kind:
             return cat
     cat = {"id": f"cat_{uuid.uuid4().hex[:12]}", "name": name, "type": media_kind, "items": [], "parent_id": ""}
+    owner = _owner_id()
+    if owner is not None:
+        cat["owner_id"] = owner
     categories.append(cat)
     if (library.get("id") or "") == (lib.get("active_library_id") or ""):
         lib["categories"] = categories
     return cat
 
 
-def save_urls_to_asset_library(entries, *, library="", folder="", use="", derived_from="", classify=True):
+def save_urls_to_asset_library(entries, *, library="", folder="", use="", derived_from=""):
     """把一批本地媒体 URL 存进资产库（画布助手的 save_asset 工具用）。
 
     entries: [{"url", "name"?, "label"?}]；library: 库名或 id（空 = 当前激活库）；
     folder: 文件夹名（空 = 按用途 / 媒体类型自动选）。返回 (lib, [(entry, item)], errors)。
     """
+    owner = _owner_id()
     lib = deps.load_asset_library()
     wanted = str(library or "").strip()
     target = None
     if wanted:
-        target = next((l for l in lib.get("libraries") or [] if l.get("id") == wanted or l.get("name") == wanted), None)
+        target = next((l for l in (lib.get("libraries") or [])
+                       if (l.get("id") == wanted or l.get("name") == wanted)
+                       and (owner is None or str(l.get("owner_id") or "") == str(owner))), None)
         if target is None:
             return lib, [], [{"url": "", "error": f"没有叫「{wanted}」的资产库"}]
     else:
-        target = deps.find_asset_library(lib, "")
+        target = deps.owned_asset_library(lib, "", owner) if owner is not None else deps.find_asset_library(lib, "")
+        if target is None:
+            return lib, [], [{"url": "", "error": "当前账号还没有素材库，请刷新页面后重试"}]
     norm_use = asset_meta.normalize_use(use)
-    added, errors, spawn = [], [], []
+    added, errors = [], []
     for entry in (entries or [])[:50]:
         url = str((entry or {}).get("url") or "").strip()
-        _, _, existing = asset_meta.find_item(lib, url=url)
+        existing = None
+        if owner is not None:
+            _, _, visible_existing = asset_meta.find_item(deps.visible_asset_library(owner), url=url)
+            if visible_existing:
+                _, _, existing = asset_meta.find_item(lib, item_id=str(visible_existing.get("id") or ""))
+        else:
+            _, _, existing = asset_meta.find_item(lib, url=url)
         if existing:  # 已经是素材库里的条目：只补用途，不再复制一份
             if norm_use:
                 asset_meta.set_manual_use(existing, norm_use)
@@ -933,12 +940,8 @@ def save_urls_to_asset_library(entries, *, library="", folder="", use="", derive
         _apply_item_meta(lib, item, cat, norm_use, derived_from)
         cat.setdefault("items", []).append(item)
         added.append((entry, item))
-        spawn.append((item, src))
     if added:
         deps.save_asset_library(lib)
-    if classify:
-        for item, src in spawn:
-            _spawn_asset_library_classification(item, src, target.get("id") or "")
     return lib, added, errors
 
 
@@ -952,46 +955,9 @@ def _apply_item_meta(lib, item, cat, use="", derived_from=""):
         asset_meta.apply_auto_use(item, (cat or {}).get("name") or "")
 
 
-def _classify_asset_item_background(item_id, src, library_id=""):
-    """后台跑 AI 分类：完成后重新加载资产库更新该条目并落盘（save_asset_library 内部会广播 ws）。
-    分类失败只打日志，条目保持可用，前端仍可手动点分类。"""
-    if not item_id or not src:
-        return
-    try:
-        classification = asyncio.run(deps.classify_asset_image_best_effort(src))
-    except Exception as exc:
-        print(f"[AssetLibrary] 后台分类失败 item={item_id}: {exc}", flush=True)
-        return
-    if not classification:
-        return
-    try:
-        with _ASSET_LIBRARY_CLASSIFY_LOCK:
-            lib = deps.load_asset_library()
-            item = _find_asset_library_item(lib, item_id, library_id)
-            if not item:
-                return
-            item["classification"] = classification
-            _, cat, _ = asset_meta.find_item(lib, item_id=item_id)
-            asset_meta.apply_auto_use(item, (cat or {}).get("name") or "")
-            deps.save_asset_library(lib)
-        print(f"[AssetLibrary] 后台分类完成 item={item_id}", flush=True)
-    except Exception as exc:
-        print(f"[AssetLibrary] 后台分类写库失败 item={item_id}: {exc}", flush=True)
-
-
-def _spawn_asset_library_classification(item, src, library_id=""):
-    """图片条目落库后异步触发分类（daemon 线程），请求不等它。"""
-    if not isinstance(item, dict) or item.get("kind") != "image" or not item.get("id"):
-        return False
-    path = deps.output_file_from_url(item.get("url") or "") or src
-    if not path:
-        return False
-    threading.Thread(target=_classify_asset_item_background,
-                     args=(str(item.get("id") or ""), path, library_id), daemon=True).start()
-    return True
-
-
 def _asset_library_src_or_error(url):
+    if not _url_readable(url):
+        raise HTTPException(status_code=404, detail="素材不存在")
     src = deps.output_file_from_url(url)
     if not src:
         raise HTTPException(status_code=400, detail="只支持保存本地 /assets 或 /output 媒体（图片/视频/音频）")
@@ -1006,8 +972,9 @@ async def upload_asset_library_workflows(
     library_id: str = Form(""),
     category_id: str = Form(""),
 ):
+    owner = _owner_id()
     lib = deps.load_asset_library()
-    _, cat = deps.asset_library_workflow_category(lib, library_id, category_id)
+    _, cat = deps.asset_library_workflow_category(lib, library_id, category_id, owner)
     added = []
     for file in files[:100]:
         raw = await file.read()
@@ -1016,17 +983,18 @@ async def upload_asset_library_workflows(
         if not (lower.endswith(".json") or lower.endswith(".zip") or raw[:2] == b"PK"):
             continue
         item = deps.make_workflow_library_item_from_bytes(raw, filename, os.path.splitext(filename)[0])
+        _set_owner(item)
         cat.setdefault("items", []).append(item)
         added.append(item)
     if not added:
         raise HTTPException(status_code=400, detail="没有可上传的工作流文件")
     deps.save_asset_library(lib)
-    return {"library": lib, "items": added}
+    return {"library": _visible_lib(), "items": added}
 
 
 @router.get("/asset-library")
 async def get_asset_library():
-    return {"library": deps.load_asset_library()}
+    return {"library": _visible_lib()}
 
 
 @router.get("/asset-library/items/{item_id}/workflow")
@@ -1037,7 +1005,7 @@ async def get_asset_library_item_workflow(item_id: str):
     但 vite dev 只代理 /api，静态路径 404 → 模板读不出来。这里统一走 API，
     dev / 生产行为一致；文件只允许落在 ASSET_LIBRARY_DIR 下。
     """
-    lib = deps.load_asset_library()
+    lib = _visible_lib()
     found = None
     for library in lib.get("libraries", []):
         for cat in library.get("categories", []):
@@ -1051,11 +1019,8 @@ async def get_asset_library_item_workflow(item_id: str):
             break
     if not found or str(found.get("kind") or "") != "workflow":
         raise HTTPException(status_code=404, detail="工作流条目不存在")
-    raw_url = urllib.parse.unquote(str(found.get("url") or "").split("?")[0])
-    name = os.path.basename(raw_url)
-    base = os.path.abspath(deps.ASSET_LIBRARY_DIR)
-    path = os.path.abspath(os.path.join(base, name))
-    if not name or not path.startswith(base + os.sep):
+    path = deps.output_file_from_url(str(found.get("url") or ""))
+    if not path:
         raise HTTPException(status_code=404, detail="工作流文件不存在")
     if path.lower().endswith(".zip"):
         raise HTTPException(status_code=415, detail="压缩包格式的模板暂不支持读取")
@@ -1159,14 +1124,19 @@ async def list_agent_artifacts():
     return {"items": items, "count": len(items)}
 
 
+def _prompt_lib_view():
+    return deps.visible_prompt_libraries(_owner_id())
+
+
 @router.get("/prompt-libraries")
 async def get_prompt_libraries():
-    return {"library": deps.public_prompt_libraries()}
+    return {"library": _prompt_lib_view()}
 
 
 @router.post("/prompt-libraries")
 async def create_prompt_library(payload: PromptLibraryRequest):
     data = deps.load_prompt_libraries()
+    owner = _owner_id()
     library = {
         "id": f"lib_{uuid.uuid4().hex[:12]}",
         "name": deps.sanitize_asset_name(payload.name, "提示词库"),
@@ -1174,46 +1144,43 @@ async def create_prompt_library(payload: PromptLibraryRequest):
         "categories": [],
         "items": [],
     }
+    if owner is not None:
+        library["owner_id"] = owner
     data.setdefault("libraries", []).append(library)
-    data["active_library_id"] = library["id"]
+    deps.set_active_prompt_library(data, library["id"], owner)
     data = deps.save_prompt_libraries(data)
     new_lib = next((lib for lib in data.get("libraries", []) if lib.get("id") == library["id"]), library)
-    return {"library": deps.public_prompt_libraries(data), "prompt_library": new_lib}
+    return {"library": _prompt_lib_view(), "prompt_library": new_lib}
 
 
 @router.patch("/prompt-libraries/{library_id}")
 async def rename_prompt_library(library_id: str, payload: PromptLibraryRequest):
     data = deps.load_prompt_libraries()
-    library = deps.find_prompt_library(data, library_id)
-    if not library or library.get("id") != library_id:
-        raise HTTPException(status_code=404, detail="提示词库不存在")
+    library = _prompt_library_or_404(data, library_id, need_write=True)
     library["name"] = deps.sanitize_asset_name(payload.name, library.get("name") or "提示词库")
     data = deps.save_prompt_libraries(data)
-    return {"library": deps.public_prompt_libraries(data), "prompt_library": library}
+    return {"library": _prompt_lib_view(), "prompt_library": library}
 
 
 @router.delete("/prompt-libraries/{library_id}")
 async def delete_prompt_library(library_id: str):
-    if library_id == "system":
+    if library_id == "system" and _owner_id() is None:
         raise HTTPException(status_code=400, detail="系统提示词库不能删除，可以删除其中的提示词")
     data = deps.load_prompt_libraries()
+    _prompt_library_or_404(data, library_id, need_write=True)
     libraries = data.get("libraries", []) or []
     kept = [lib for lib in libraries if lib.get("id") != library_id]
-    if len(kept) == len(libraries):
-        raise HTTPException(status_code=404, detail="提示词库不存在")
     data["libraries"] = kept
     if data.get("active_library_id") == library_id:
         data["active_library_id"] = "system"
     data = deps.save_prompt_libraries(data)
-    return {"library": deps.public_prompt_libraries(data)}
+    return {"library": _prompt_lib_view()}
 
 
 @router.post("/prompt-libraries/items")
 async def add_prompt_library_item(payload: PromptLibraryItemRequest):
     data = deps.load_prompt_libraries()
-    library = deps.find_prompt_library(data, payload.library_id)
-    if not library:
-        raise HTTPException(status_code=404, detail="提示词库不存在")
+    library = _prompt_library_or_404(data, payload.library_id, need_write=True)
     if not str(payload.positive or "").strip():
         raise HTTPException(status_code=400, detail="提示词内容不能为空")
     item = deps.normalize_prompt_library_item({
@@ -1227,15 +1194,18 @@ async def add_prompt_library_item(payload: PromptLibraryItemRequest):
         "updated_at": deps.now_ms(),
     })
     library.setdefault("items", []).insert(0, item)
-    data["active_library_id"] = library.get("id") or data.get("active_library_id")
+    deps.set_active_prompt_library(data, library.get("id") or "", _owner_id())
     data = deps.save_prompt_libraries(data)
-    return {"library": deps.public_prompt_libraries(data), "item": item}
+    return {"library": _prompt_lib_view(), "item": item}
 
 
 @router.patch("/prompt-libraries/items/{item_id}")
 async def update_prompt_library_item(item_id: str, payload: PromptLibraryItemRequest):
+    owner = _owner_id()
     data = deps.load_prompt_libraries()
     for library in data.get("libraries", []) or []:
+        if not deps.prompt_library_writable(library, owner):
+            continue
         if payload.library_id and library.get("id") != payload.library_id:
             continue
         for index, item in enumerate(library.get("items", []) or []):
@@ -1251,15 +1221,18 @@ async def update_prompt_library_item(item_id: str, payload: PromptLibraryItemReq
                 })
                 library["items"][index] = next_item
                 data = deps.save_prompt_libraries(data)
-                return {"library": deps.public_prompt_libraries(data), "item": next_item}
+                return {"library": _prompt_lib_view(), "item": next_item}
     raise HTTPException(status_code=404, detail="提示词不存在")
 
 
 @router.delete("/prompt-libraries/items/{item_id}")
 async def delete_prompt_library_item(item_id: str):
+    owner = _owner_id()
     data = deps.load_prompt_libraries()
     removed = None
     for library in data.get("libraries", []) or []:
+        if not deps.prompt_library_writable(library, owner):
+            continue
         keep = []
         for item in library.get("items", []) or []:
             if item.get("id") == item_id:
@@ -1270,7 +1243,7 @@ async def delete_prompt_library_item(item_id: str):
     if not removed:
         raise HTTPException(status_code=404, detail="提示词不存在")
     data = deps.save_prompt_libraries(data)
-    return {"library": deps.public_prompt_libraries(data), "removed": 1}
+    return {"library": _prompt_lib_view(), "removed": 1}
 
 
 @router.post("/prompt-libraries/items/delete")
@@ -1278,9 +1251,12 @@ async def batch_delete_prompt_library_items(payload: PromptLibraryBatchDeleteReq
     ids = {str(item) for item in (payload.ids or []) if str(item)}
     if not ids:
         raise HTTPException(status_code=400, detail="没有选择提示词")
+    owner = _owner_id()
     data = deps.load_prompt_libraries()
     removed = 0
     for library in data.get("libraries", []) or []:
+        if not deps.prompt_library_writable(library, owner):
+            continue
         keep = []
         for item in library.get("items", []) or []:
             if item.get("id") in ids:
@@ -1289,7 +1265,7 @@ async def batch_delete_prompt_library_items(payload: PromptLibraryBatchDeleteReq
                 keep.append(item)
         library["items"] = keep
     data = deps.save_prompt_libraries(data)
-    return {"library": deps.public_prompt_libraries(data), "removed": removed}
+    return {"library": _prompt_lib_view(), "removed": removed}
 
 
 @router.post("/prompt-libraries/categories")
@@ -1297,6 +1273,8 @@ async def add_prompt_library_category(payload: PromptLibraryCategoryRequest):
     data = deps.load_prompt_libraries()
     library = deps.find_prompt_library(data, payload.library_id) or deps.find_prompt_library(data, "system")
     if not library:
+        raise HTTPException(status_code=404, detail="提示词库不存在")
+    if not deps.prompt_library_writable(library, _owner_id()):
         raise HTTPException(status_code=404, detail="提示词库不存在")
     name = deps.sanitize_asset_name(payload.name, "新分组")
     existing = {str(c.get("id")) for c in (library.get("categories") or []) if isinstance(c, dict)} | deps.PROMPT_BUILTIN_CATEGORY_IDS
@@ -1306,7 +1284,7 @@ async def add_prompt_library_category(payload: PromptLibraryCategoryRequest):
     category = {"id": cat_id, "name": name}
     library.setdefault("categories", []).append(category)
     data = deps.save_prompt_libraries(data)
-    return {"library": deps.public_prompt_libraries(data), "category": category}
+    return {"library": _prompt_lib_view(), "category": category}
 
 
 @router.patch("/prompt-libraries/categories/{category_id}")
@@ -1316,9 +1294,12 @@ async def rename_prompt_library_category(category_id: str, payload: PromptLibrar
     name = deps.sanitize_asset_name(payload.name, "")
     if not name:
         raise HTTPException(status_code=400, detail="分组名称不能为空")
+    owner = _owner_id()
     data = deps.load_prompt_libraries()
     updated = False
     for library in data.get("libraries", []) or []:
+        if not deps.prompt_library_writable(library, owner):
+            continue
         for cat in library.get("categories") or []:
             if isinstance(cat, dict) and cat.get("id") == category_id:
                 cat["name"] = name
@@ -1326,15 +1307,18 @@ async def rename_prompt_library_category(category_id: str, payload: PromptLibrar
     if not updated:
         raise HTTPException(status_code=404, detail="分组不存在")
     data = deps.save_prompt_libraries(data)
-    return {"library": deps.public_prompt_libraries(data)}
+    return {"library": _prompt_lib_view()}
 
 
 @router.delete("/prompt-libraries/categories/{category_id}")
 async def delete_prompt_library_category(category_id: str):
     # 系统库（内置）分组也允许删除，与素材库管理/画布保持一致。
+    owner = _owner_id()
     data = deps.load_prompt_libraries()
     found = False
     for library in data.get("libraries", []) or []:
+        if not deps.prompt_library_writable(library, owner):
+            continue
         cats = library.get("categories") or []
         kept = [c for c in cats if not (isinstance(c, dict) and c.get("id") == category_id)]
         if len(kept) != len(cats):
@@ -1348,53 +1332,65 @@ async def delete_prompt_library_category(category_id: str):
     if not found:
         raise HTTPException(status_code=404, detail="分组不存在")
     data = deps.save_prompt_libraries(data)
-    return {"library": deps.public_prompt_libraries(data)}
+    return {"library": _prompt_lib_view()}
 
 
 @router.post("/asset-library/libraries")
 async def create_asset_library(payload: AssetLibraryRequest):
+    owner = _owner_id()
     lib = deps.load_asset_library()
     library = {"id": f"lib_{uuid.uuid4().hex[:12]}", "name": deps.sanitize_asset_name(payload.name, "资产库"), "type": "asset", "categories": []}
-    library["categories"].append({"id": f"cat_{uuid.uuid4().hex[:12]}", "name": "默认分组", "type": "image", "items": []})
-    library["categories"].append({"id": f"wf_{uuid.uuid4().hex[:12]}", "name": "工作流", "type": "workflow", "items": []})
+    image_cat = {"id": f"cat_{uuid.uuid4().hex[:12]}", "name": "默认分组", "type": "image", "items": []}
+    wf_cat = {"id": f"wf_{uuid.uuid4().hex[:12]}", "name": "工作流", "type": "workflow", "items": []}
+    if owner is not None:
+        library["owner_id"] = owner
+        image_cat["owner_id"] = owner
+        wf_cat["owner_id"] = owner
+    library["categories"].append(image_cat)
+    library["categories"].append(wf_cat)
     lib.setdefault("libraries", []).append(library)
-    lib["active_library_id"] = library["id"]
+    deps.set_active_asset_library(lib, library["id"], owner)
     deps.save_asset_library(lib)
-    return {"library": lib, "asset_library": library}
+    return {"library": _visible_lib(), "asset_library": library}
 
 
 @router.patch("/asset-library/libraries/{library_id}")
 async def rename_asset_library(library_id: str, payload: AssetLibraryRenameRequest):
     lib = deps.load_asset_library()
-    library = deps.find_asset_library(lib, library_id)
-    if not library or library.get("id") != library_id:
-        raise HTTPException(status_code=404, detail="资产库不存在")
+    library = _require_library(lib, library_id)
     library["name"] = deps.sanitize_asset_name(payload.name, library.get("name") or "资产库")
     deps.save_asset_library(lib)
-    return {"library": lib, "asset_library": library}
+    return {"library": _visible_lib(), "asset_library": library}
 
 
 @router.delete("/asset-library/libraries/{library_id}")
 async def delete_asset_library(library_id: str):
+    owner = _owner_id()
     lib = deps.load_asset_library()
+    library = _require_library(lib, library_id)
     libraries = lib.get("libraries") or []
-    if len(libraries) <= 1:
+    if owner is not None:
+        owned = [item for item in libraries if str(item.get("owner_id") or "") == str(owner)]
+        if len(owned) <= 1:
+            raise HTTPException(status_code=400, detail="至少保留一个资产库")
+    elif len(libraries) <= 1:
         raise HTTPException(status_code=400, detail="至少保留一个资产库")
-    if not any(item.get("id") == library_id for item in libraries):
-        raise HTTPException(status_code=404, detail="资产库不存在")
-    lib["libraries"] = [item for item in libraries if item.get("id") != library_id]
-    if lib.get("active_library_id") == library_id:
-        lib["active_library_id"] = lib["libraries"][0].get("id")
+    lib["libraries"] = [item for item in libraries if item.get("id") != library.get("id")]
+    if lib.get("active_library_id") == library.get("id"):
+        lib["active_library_id"] = (lib["libraries"] or [{}])[0].get("id")
+    if owner is not None:
+        remaining = [item for item in lib["libraries"] if str(item.get("owner_id") or "") == str(owner)]
+        if remaining:
+            deps.set_active_asset_library(lib, remaining[0].get("id"), owner)
     deps.save_asset_library(lib)
-    return {"library": lib}
+    return {"library": _visible_lib()}
 
 
 @router.post("/asset-library/categories")
 async def create_asset_library_category(payload: AssetLibraryCategoryRequest):
+    owner = _owner_id()
     lib = deps.load_asset_library()
-    library = deps.find_asset_library(lib, payload.library_id)
-    if not library:
-        raise HTTPException(status_code=404, detail="资产库不存在")
+    library = _require_library(lib, payload.library_id)
     categories = library.setdefault("categories", [])
     parent_id = str(payload.parent_id or "").strip()
     parent = None
@@ -1413,6 +1409,8 @@ async def create_asset_library_category(payload: AssetLibraryCategoryRequest):
     category = {"id": f"cat_{uuid.uuid4().hex[:12]}",
                 "name": deps.sanitize_asset_name(payload.name, "新文件夹"),
                 "type": cat_type, "parent_id": parent_id, "items": []}
+    if owner is not None:
+        category["owner_id"] = owner
     if cat_type == "image":
         # 图片分组在 library/ 下建真实文件夹；子分类建在父分类目录里面（真正嵌套）
         if parent is not None:
@@ -1422,21 +1420,19 @@ async def create_asset_library_category(payload: AssetLibraryCategoryRequest):
         else:
             category["dir"] = deps.unique_asset_category_dir(library, payload.name)
         try:
-            os.makedirs(os.path.join(deps.ASSET_LIBRARY_DIR, category["dir"]), exist_ok=True)
+            os.makedirs(os.path.join(_library_dir(), category["dir"]), exist_ok=True)
         except Exception as exc:
             print(f"创建分组文件夹失败: {exc}")
     categories.append(category)
-    lib["active_library_id"] = library.get("id") or lib.get("active_library_id")
+    deps.set_active_asset_library(lib, library.get("id"), owner)
     deps.save_asset_library(lib)
-    return {"library": lib, "category": category}
+    return {"library": _visible_lib(), "category": category}
 
 
 @router.patch("/asset-library/categories/{category_id}")
 async def rename_asset_library_category(category_id: str, payload: AssetLibraryRenameRequest):
     lib = deps.load_asset_library()
-    library, cat = deps.find_asset_category_with_library(lib, category_id, payload.library_id)
-    if not cat:
-        raise HTTPException(status_code=404, detail="分类不存在")
+    library, cat = _require_category(lib, category_id, payload.library_id)
     if payload.name:
         cat["name"] = deps.sanitize_asset_name(payload.name, cat.get("name") or "新文件夹")
     wanted_type = str(payload.type or "").strip().lower()
@@ -1480,8 +1476,8 @@ async def rename_asset_library_category(category_id: str, payload: AssetLibraryR
                         parent["dir"] = deps.unique_asset_category_dir(library, parent.get("name") or "分组")
                     new_dir = _asset_library_child_dir(library, parent, cat.get("name") or "分组", current_id=category_id)
                 if old_dir and new_dir and old_dir != new_dir:
-                    old_abs = os.path.join(deps.ASSET_LIBRARY_DIR, old_dir)
-                    new_abs = os.path.join(deps.ASSET_LIBRARY_DIR, new_dir)
+                    old_abs = os.path.join(_library_dir(), old_dir)
+                    new_abs = os.path.join(_library_dir(), new_dir)
                     try:
                         os.makedirs(os.path.dirname(new_abs), exist_ok=True)
                         if os.path.isdir(old_abs):
@@ -1491,15 +1487,13 @@ async def rename_asset_library_category(category_id: str, payload: AssetLibraryR
                 cat["dir"] = new_dir or old_dir
             cat["parent_id"] = target_parent_id
     deps.save_asset_library(lib)
-    return {"library": lib, "category": cat}
+    return {"library": _visible_lib(), "category": cat}
 
 
 @router.delete("/asset-library/categories/{category_id}")
 async def delete_asset_library_category(category_id: str, library_id: str = "", force: Optional[bool] = None):
     lib = deps.load_asset_library()
-    library, cat = deps.find_asset_category_with_library(lib, category_id, library_id)
-    if not cat:
-        raise HTTPException(status_code=404, detail="分类不存在")
+    library, cat = _require_category(lib, category_id, library_id)
     if cat.get("type") == "workflow" and category_id == "workflows" and (library.get("id") or "") == "default":
         raise HTTPException(status_code=400, detail="默认工作流分类不能删除")
     categories = library.setdefault("categories", [])
@@ -1524,23 +1518,21 @@ async def delete_asset_library_category(category_id: str, library_id: str = "", 
         if not node_dir:
             continue
         try:
-            target = os.path.join(deps.ASSET_LIBRARY_DIR, node_dir)
-            if os.path.isdir(target) and os.path.abspath(target).startswith(os.path.abspath(deps.ASSET_LIBRARY_DIR) + os.sep):
+            target = os.path.join(_library_dir(), node_dir)
+            if os.path.isdir(target) and os.path.abspath(target).startswith(os.path.abspath(_library_dir()) + os.sep):
                 shutil.rmtree(target, ignore_errors=True)
         except Exception as exc:
             print(f"删除分组文件夹失败: {exc}")
     removed_ids = {str(node.get("id") or "") for node in subtree}
     library["categories"] = [c for c in categories if str(c.get("id") or "") not in removed_ids]
     deps.save_asset_library(lib)
-    return {"library": lib, "deleted_categories": len(subtree), "deleted_items": len(subtree_items)}
+    return {"library": _lib_view(lib), "deleted_categories": len(subtree), "deleted_items": len(subtree_items)}
 
 
 @router.post("/asset-library/items")
 async def add_asset_library_item(payload: AssetLibraryAddRequest):
     lib = deps.load_asset_library()
-    library = deps.find_asset_library(lib, payload.library_id)
-    if not library:
-        raise HTTPException(status_code=404, detail="资产库不存在")
+    library = _require_library(lib, payload.library_id)
     src, media_kind = _asset_library_src_or_error(payload.url)
     cat, error = _resolve_asset_library_target_category(lib, library, payload.category_id, media_kind)
     if error:
@@ -1551,12 +1543,9 @@ async def add_asset_library_item(payload: AssetLibraryAddRequest):
         item["generation"] = gen
     _apply_item_meta(lib, item, cat, payload.use, payload.derived_from)
     cat.setdefault("items", []).append(item)
-    # 先落库并返回（save 内部会广播 ws），AI 分类改到后台线程：不再让保存等几秒
+    # 先落库并返回（save 内部会广播 ws）
     deps.save_asset_library(lib)
-    pending = False
-    if payload.classify and item.get("kind") == "image":
-        pending = _spawn_asset_library_classification(item, src, payload.library_id)
-    return {"library": lib, "item": item, "category": cat, "classification_pending": pending}
+    return {"library": _lib_view(lib), "item": item, "category": cat}
 
 
 @router.post("/asset-library/items/batch")
@@ -1564,9 +1553,7 @@ async def batch_add_asset_library_items(payload: AssetLibraryBatchAddRequest):
     added = []
     errors = []
     lib = deps.load_asset_library()
-    library = deps.find_asset_library(lib, payload.library_id)
-    if not library:
-        raise HTTPException(status_code=404, detail="资产库不存在")
+    library = _require_library(lib, payload.library_id)
     # 目标分类允许为空/auto：按每个条目的媒体类型自动落到图片/视频/音频分类，混合批量也能一次存
     target = str(payload.category_id or "").strip()
     for entry in (payload.items or [])[:200]:
@@ -1591,15 +1578,8 @@ async def batch_add_asset_library_items(payload: AssetLibraryBatchAddRequest):
         _apply_item_meta(lib, item, cat, entry.use, entry.derived_from)
         cat.setdefault("items", []).append(item)
         added.append((item, src, entry))
-    # 先落库并返回（save 内部广播一次 ws），图片分类全部丢到后台，批量保存不再逐张等 AI
     deps.save_asset_library(lib)
-    pending = 0
-    for item, src, entry in added:
-        if payload.classify and entry.classify and item.get("kind") == "image":
-            if _spawn_asset_library_classification(item, src, payload.library_id):
-                pending += 1
-    return {"library": lib, "items": [item for item, _src, _entry in added], "errors": errors,
-            "classification_pending": pending}
+    return {"library": _lib_view(lib), "items": [item for item, _src, _entry in added], "errors": errors}
 
 
 @router.get("/shared-folders")
@@ -1687,9 +1667,7 @@ async def import_shared_folder_files(payload: SharedFolderImport):
         raise HTTPException(status_code=404, detail="共享文件夹不存在")
     folder_abs = deps.shared_folder_abs(entry)
     lib = deps.load_asset_library()
-    cat = deps.find_asset_category_in_library(lib, payload.category_id, payload.library_id)
-    if not cat:
-        raise HTTPException(status_code=404, detail="分类不存在")
+    _library, cat = _require_category(lib, payload.category_id, payload.library_id)
     if cat.get("type") != "image":
         raise HTTPException(status_code=400, detail="该分类暂不支持添加媒体")
     added = []
@@ -1701,23 +1679,17 @@ async def import_shared_folder_files(payload: SharedFolderImport):
         if ext not in deps.SHARED_MEDIA_EXTS:
             continue
         _, item = deps.make_asset_library_item(abs_path, os.path.basename(abs_path), subdir=cat.get("dir") or "")
-        if item.get("kind") == "image":
-            classification = await deps.classify_asset_image_best_effort(deps.output_file_from_url(item.get("url") or "") or abs_path)
-            if classification:
-                item["classification"] = classification
         cat.setdefault("items", []).append(item)
         added.append(item)
     deps.save_asset_library(lib)
-    return {"library": lib, "items": added}
+    return {"library": _lib_view(lib), "items": added}
 
 
 @router.patch("/asset-library/items/{item_id}")
 async def rename_asset_library_item(item_id: str, payload: AssetLibraryItemPatchRequest):
     """改名 / 改用途 / 记来源素材（只改传了的字段）。"""
     lib = deps.load_asset_library()
-    _, cat, item = asset_meta.find_item(lib, item_id=item_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="资产不存在")
+    _, cat, item = _require_item(lib, item_id)
     if payload.name is not None:
         item["name"] = deps.sanitize_asset_name(payload.name, item.get("name") or "asset")
     if payload.use is not None:
@@ -1731,7 +1703,7 @@ async def rename_asset_library_item(item_id: str, payload: AssetLibraryItemPatch
         elif not asset_meta.link_derived(lib, item, payload.derived_from):
             raise HTTPException(status_code=404, detail="来源素材不存在")
     deps.save_asset_library(lib)
-    return {"library": lib, "item": item}
+    return {"library": _lib_view(lib), "item": item}
 
 
 # ===== 产品档案 =====
@@ -1739,7 +1711,8 @@ async def rename_asset_library_item(item_id: str, payload: AssetLibraryItemPatch
 @router.get("/asset-library/products")
 async def list_asset_products():
     lib = deps.load_asset_library()
-    return {"products": [asset_meta.product_view(lib, p) for p in asset_meta.products(lib) if isinstance(p, dict)],
+    return {"products": [asset_meta.product_view(lib, p)
+                         for p in asset_meta.visible_products(lib, _owner_id()) if isinstance(p, dict)],
             "uses": asset_meta.ASSET_USES}
 
 
@@ -1749,7 +1722,7 @@ async def create_asset_product(payload: AssetProductRequest):
     lib = deps.load_asset_library()
     try:
         product = asset_meta.upsert_product(lib, name=payload.name, selling_points=payload.selling_points,
-                                            angles=payload.angles, append=payload.append)
+                                            angles=payload.angles, append=payload.append, owner_id=_owner_id())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     deps.save_asset_library(lib)
@@ -1759,11 +1732,11 @@ async def create_asset_product(payload: AssetProductRequest):
 @router.patch("/asset-library/products/{product_id}")
 async def update_asset_product(product_id: str, payload: AssetProductRequest):
     lib = deps.load_asset_library()
-    if not asset_meta.find_product(lib, product_id=product_id):
+    if not asset_meta.find_product(lib, product_id=product_id, owner_id=_owner_id()):
         raise HTTPException(status_code=404, detail="产品档案不存在")
     product = asset_meta.upsert_product(lib, product_id=product_id, name=payload.name,
                                         selling_points=payload.selling_points, angles=payload.angles,
-                                        append=payload.append)
+                                        append=payload.append, owner_id=_owner_id())
     deps.save_asset_library(lib)
     return {"product": asset_meta.product_view(lib, product)}
 
@@ -1771,54 +1744,18 @@ async def update_asset_product(product_id: str, payload: AssetProductRequest):
 @router.delete("/asset-library/products/{product_id}")
 async def delete_asset_product(product_id: str):
     lib = deps.load_asset_library()
+    if not asset_meta.find_product(lib, product_id=product_id, owner_id=_owner_id()):
+        raise HTTPException(status_code=404, detail="产品档案不存在")
     if not asset_meta.delete_product(lib, product_id):
         raise HTTPException(status_code=404, detail="产品档案不存在")
     deps.save_asset_library(lib)
     return {"ok": True}
 
 
-@router.post("/asset-library/items/classify")
-async def classify_asset_library_items(payload: AssetLibraryClassifyRequest):
-    lib = deps.load_asset_library()
-    results = []
-    changed = False
-    for item_id in (payload.ids or [])[:80]:
-        item = deps.find_asset_item_in_library(lib, item_id, payload.library_id)
-        result = {"id": item_id, "ok": False, "classification": None, "error": ""}
-        if not item:
-            result["error"] = "资产不存在"
-            results.append(result)
-            continue
-        if deps.asset_library_media_kind(item.get("url") or "") != "image" and item.get("kind") != "image":
-            result["error"] = "仅支持图片素材智能分类"
-            results.append(result)
-            continue
-        path = deps.output_file_from_url(item.get("url") or "")
-        if not path or not os.path.isfile(path):
-            result["error"] = "文件不存在"
-            results.append(result)
-            continue
-        try:
-            classification = await deps.classify_image_with_provider(path, payload.provider, payload.model, payload.ms_model, payload.prompt)
-            item["classification"] = classification
-            _, cat, _ = asset_meta.find_item(lib, item_id=item_id)
-            asset_meta.apply_auto_use(item, (cat or {}).get("name") or "")
-            changed = True
-            result.update({"ok": True, "classification": classification})
-        except Exception as exc:
-            result["error"] = str(getattr(exc, "detail", "") or exc)
-        results.append(result)
-    if changed:
-        deps.save_asset_library(lib)
-    return {"library": lib, "count": sum(1 for item in results if item.get("ok")), "items": results}
-
-
 @router.post("/asset-library/items/{item_id}/register-avatar")
 async def register_asset_library_avatar(item_id: str, payload: AssetAvatarRegisterRequest):
     lib = deps.load_asset_library()
-    target_item = deps.find_asset_item_in_library(lib, item_id, payload.library_id)
-    if not target_item:
-        raise HTTPException(status_code=404, detail="资产不存在")
+    _library, _cat, target_item = _require_item(lib, item_id, payload.library_id)
     provider = deps.get_api_provider(payload.provider_id)
     platform = deps.avatar_platform_for_provider(provider)
     if platform not in deps.AVATAR_SUPPORTED_PLATFORMS:
@@ -1865,15 +1802,13 @@ async def register_asset_library_avatar(item_id: str, payload: AssetAvatarRegist
     }
     target_item["registrations"] = regs
     deps.save_asset_library(lib)
-    return {"library": lib, "item": target_item}
+    return {"library": _lib_view(lib), "item": target_item}
 
 
 @router.post("/asset-library/items/{item_id}/avatar-status")
 async def check_asset_library_avatar(item_id: str, payload: AssetAvatarRegisterRequest):
     lib = deps.load_asset_library()
-    target_item = deps.find_asset_item_in_library(lib, item_id, payload.library_id)
-    if not target_item:
-        raise HTTPException(status_code=404, detail="资产不存在")
+    _library, _cat, target_item = _require_item(lib, item_id, payload.library_id)
     regs = target_item.get("registrations") if isinstance(target_item.get("registrations"), dict) else {}
     provider = deps.get_api_provider(payload.provider_id or "")
     platform = deps.avatar_platform_for_provider(provider)
@@ -1899,14 +1834,17 @@ async def check_asset_library_avatar(item_id: str, payload: AssetAvatarRegisterR
     regs[platform] = reg
     target_item["registrations"] = regs
     deps.save_asset_library(lib)
-    return {"library": lib, "item": target_item}
+    return {"library": _lib_view(lib), "item": target_item}
 
 
 @router.delete("/asset-library/items/{item_id}")
 async def delete_asset_library_item(item_id: str):
+    owner = _owner_id()
     lib = deps.load_asset_library()
     removed = None
     for library in lib.get("libraries", []):
+        if owner is not None and str(library.get("owner_id") or "") != str(owner):
+            continue
         for cat in library.get("categories", []):
             keep = []
             for item in cat.get("items", []):
@@ -1919,7 +1857,7 @@ async def delete_asset_library_item(item_id: str):
         raise HTTPException(status_code=404, detail="资产不存在")
     deps.remove_asset_library_file(removed)  # 同时删除本地文件，避免磁盘上堆积
     deps.save_asset_library(lib)
-    return {"library": lib}
+    return {"library": _lib_view(lib)}
 
 
 @router.post("/asset-library/items/delete")
@@ -1927,10 +1865,13 @@ async def batch_delete_asset_library_items(payload: AssetLibraryBatchDeleteReque
     ids = {str(item) for item in (payload.ids or []) if str(item)}
     if not ids:
         raise HTTPException(status_code=400, detail="没有选择资产")
+    owner = _owner_id()
     lib = deps.load_asset_library()
     removed = 0
     removed_items = []
     for library in lib.get("libraries", []):
+        if owner is not None and str(library.get("owner_id") or "") != str(owner):
+            continue
         if payload.library_id and library.get("id") != payload.library_id:
             continue
         for cat in library.get("categories", []):
@@ -1945,7 +1886,7 @@ async def batch_delete_asset_library_items(payload: AssetLibraryBatchDeleteReque
     for item in removed_items:  # 批量删除同时清理本地文件
         deps.remove_asset_library_file(item)
     deps.save_asset_library(lib)
-    return {"library": lib, "removed": removed}
+    return {"library": _lib_view(lib), "removed": removed}
 
 
 @router.post("/asset-library/items/move")
@@ -1953,13 +1894,14 @@ async def batch_move_asset_library_items(payload: AssetLibraryBatchMoveRequest):
     ids = {str(item) for item in (payload.ids or []) if str(item)}
     if not ids:
         raise HTTPException(status_code=400, detail="没有选择资产")
+    owner = _owner_id()
     lib = deps.load_asset_library()
-    target_cat = deps.find_asset_category_in_library(lib, payload.target_category_id, payload.target_library_id)
-    if not target_cat:
-        raise HTTPException(status_code=404, detail="目标分组不存在")
+    _target_library, target_cat = _require_category(lib, payload.target_category_id, payload.target_library_id)
     target_type = target_cat.get("type") or "image"
     moved = []
     for library in lib.get("libraries", []):
+        if owner is not None and str(library.get("owner_id") or "") != str(owner):
+            continue
         if payload.library_id and library.get("id") != payload.library_id:
             continue
         for cat in library.get("categories", []):
@@ -1978,7 +1920,7 @@ async def batch_move_asset_library_items(payload: AssetLibraryBatchMoveRequest):
             target_cat.setdefault("items", []).append(item)
             existing_ids.add(item.get("id"))
     deps.save_asset_library(lib)
-    return {"library": lib, "moved": len(moved)}
+    return {"library": _lib_view(lib), "moved": len(moved)}
 
 
 @router.post("/asset-library/items/crop")
@@ -1986,16 +1928,17 @@ async def batch_crop_asset_library_items(payload: AssetLibraryBatchCropRequest):
     ids = {str(item) for item in (payload.ids or []) if str(item)}
     if not ids:
         raise HTTPException(status_code=400, detail="没有选择资产")
+    owner = _owner_id()
     lib = deps.load_asset_library()
     target_cat = None
     if payload.target_category_id:
-        target_cat = deps.find_asset_category_in_library(lib, payload.target_category_id, payload.target_library_id)
-        if not target_cat:
-            raise HTTPException(status_code=404, detail="目标分组不存在")
+        _target_library, target_cat = _require_category(lib, payload.target_category_id, payload.target_library_id)
         if target_cat.get("type") != "image":
             raise HTTPException(status_code=400, detail="目标分组不支持媒体")
     added = []
     for library in lib.get("libraries", []):
+        if owner is not None and str(library.get("owner_id") or "") != str(owner):
+            continue
         if payload.library_id and library.get("id") != payload.library_id:
             continue
         for cat in library.get("categories", []):
@@ -2034,7 +1977,7 @@ async def batch_crop_asset_library_items(payload: AssetLibraryBatchCropRequest):
                 except Exception:
                     continue
     deps.save_asset_library(lib)
-    return {"library": lib, "added": len(added), "items": added}
+    return {"library": _lib_view(lib), "added": len(added), "items": added}
 
 
 # ===== canvas-assets 族 =====
@@ -2065,6 +2008,20 @@ async def list_canvas_assets(canvas: str = "", category: str = "", q: str = "", 
     # canvas_assets_index 会同步遍历并解析所有画布 JSON，放进线程池避免阻塞事件循环
     # （否则画布多时一次请求就会卡住整个 asyncio loop，连 WebSocket 一起掉线）。
     index = await asyncio.to_thread(deps.canvas_assets_index)
+    owner = _owner_id()
+    if owner is not None:
+        shares = deps.canvas_shared_roles_for_user(owner)
+        allowed = set()
+        for record in (index.get("canvases") or []):
+            if not isinstance(record, dict):
+                continue
+            cid = str(record.get("id") or "")
+            if str(record.get("owner_id") or "") == str(owner) or cid in shares:
+                allowed.add(cid)
+        index["canvases"] = [r for r in (index.get("canvases") or [])
+                             if isinstance(r, dict) and str(r.get("id") or "") in allowed]
+        index["items"] = [it for it in (index.get("items") or [])
+                          if isinstance(it, dict) and str(it.get("canvas_id") or "") in allowed]
     items = index.get("items") or []
     canvases = index.get("canvases") or []
     # 老资产的 natural_w/natural_h 可能没写进画布节点：从资产注册表按 url 补齐一次。
@@ -2144,6 +2101,26 @@ async def list_canvas_assets(canvas: str = "", category: str = "", q: str = "", 
     result = dict(index)
     result["canvases"] = filtered_canvases
     result["items"] = filtered_items[:limit_value] if limit_value else filtered_items
+    # 分类计数按当前账号可见范围重算，不能把别人的画布数量带出去
+    canvas_counts = {"all": 0, "smart": 0, "classic": 0}
+    item_counts = {"all": 0, "smart": 0, "classic": 0}
+    for record in canvases:
+        kind = normalize_kind = str(record.get("kind") or "classic")
+        if normalize_kind not in ("smart", "classic"):
+            normalize_kind = "classic"
+        canvas_counts["all"] += 1
+        canvas_counts[normalize_kind] += 1
+    for item in items:
+        kind = str(item.get("canvas_kind") or "classic")
+        if kind not in ("smart", "classic"):
+            kind = "classic"
+        item_counts["all"] += 1
+        item_counts[kind] += 1
+    result["categories"] = [
+        {"id": "all", "name": "全部画布", "count": item_counts["all"], "canvas_count": canvas_counts["all"]},
+        {"id": "smart", "name": "旧版智能画布", "count": item_counts["smart"], "canvas_count": canvas_counts["smart"]},
+        {"id": "classic", "name": "智能画布", "count": item_counts["classic"], "canvas_count": canvas_counts["classic"]},
+    ]
     # 新增字段（不改既有字段含义）：过滤后数量 + 过滤前总数，方便前端显示「已筛选 N / 共 M」
     result["count"] = len(result["items"])
     result["total"] = len(items)
@@ -2158,7 +2135,7 @@ async def check_canvas_assets(payload: CanvasAssetCheckRequest):
         if not text:
             continue
         if text.startswith("/output/") or text.startswith("/assets/"):
-            result[text] = bool(deps.output_file_from_url(text))
+            result[text] = bool(deps.output_file_from_url(text)) and _url_readable(text)
         else:
             result[text] = True
     return {"exists": result}
@@ -2179,6 +2156,8 @@ async def download_canvas_assets(payload: CanvasAssetDownloadRequest):
                 text = str(raw or "").strip()
                 requested_name = ""
             if not text:
+                continue
+            if not _url_readable(text):
                 continue
             path = deps.output_file_from_url(text)
             content = None

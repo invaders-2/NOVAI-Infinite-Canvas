@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """画布「MCP 接入」入口卡数据：GET /api/mcp/connect-info。
 
-全部字段从运行态推导：端口读 NOVAI_PORT（main 启动时写回实际端口）、server_py 走仓库根存在性校验、
+全部字段从运行态推导：端口读 NOVAI_PORT（main 启动时写回实际端口）、server_entry 指向
+main.py --mcp（源码）或主程序 --mcp（打包后）、server_py 只是兼容字段（找不到给空串）、
 http_url 从 data 目录的 MCP 客户端配置里取 type=http 的 url。
 """
 import json
 import os
+import shlex
 import shutil
 import sys
 import tempfile
@@ -71,14 +73,31 @@ class ConnectInfoTests(unittest.TestCase):
             body = get_info()
         self.assertEqual(body["base_url"], "http://127.0.0.1:3000")
 
-    def test_server_py_is_absolute_existing_path(self):
+    def _expected_codex_command(self, base_url, command, args):
+        parts = ["codex", "mcp", "add", "novai-canvas",
+                 "--env", "NOVAI_BASE_URL=%s" % base_url, "--", command] + list(args)
+        return " ".join(shlex.quote(part) for part in parts)
+
+    def test_source_entry_runs_repo_main_with_mcp(self):
         body = get_info()
-        expected = str(ROOT / "novai_mcp_server.py")
-        self.assertTrue(os.path.isabs(body["server_py"]))
-        self.assertEqual(body["server_py"], expected)
-        self.assertTrue(os.path.isfile(body["server_py"]))
-        self.assertEqual(body["server_entry"]["args"], [expected])
-        self.assertTrue(body["codex_command"].endswith(body["server_py"]))
+        main_py = str(ROOT / "main.py")
+        self.assertTrue(os.path.isfile(main_py))
+        self.assertEqual(body["server_entry"]["command"], sys.executable)
+        self.assertEqual(body["server_entry"]["args"], [main_py, "--mcp"])
+        self.assertEqual(body["server_py"], str(ROOT / "novai_mcp_server.py"))
+        self.assertEqual(
+            body["codex_command"],
+            self._expected_codex_command(body["base_url"], sys.executable, [main_py, "--mcp"]))
+
+    def test_frozen_entry_uses_app_binary_with_mcp(self):
+        with patch.object(mcp_routes.sys, "frozen", True, create=True):
+            body = get_info()
+        self.assertEqual(body["server_entry"]["command"], sys.executable)
+        self.assertEqual(body["server_entry"]["args"], ["--mcp"])
+        self.assertEqual(body["server_entry"]["env"]["NOVAI_BASE_URL"], body["base_url"])
+        self.assertEqual(
+            body["codex_command"],
+            self._expected_codex_command(body["base_url"], sys.executable, ["--mcp"]))
 
     def test_server_py_empty_when_missing(self):
         with tempfile.TemporaryDirectory() as tmp, \

@@ -1,6 +1,5 @@
 
 import { Markdown } from "@/components/ai-elements/markdown"
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { Bubble, BubbleContent, BubbleGroup } from "@/components/hexta/bubble"
 import { Marker, MarkerContent, MarkerTime } from "@/components/hexta/marker"
@@ -38,6 +37,7 @@ import {
 	XIcon,
 } from "lucide-react"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import type { ReactNode } from "react"
 import { BeatAvatar } from "./beat/BeatAvatar"
 import { Composer } from "./Composer"
 import { ThreadBar } from "./ThreadBar"
@@ -49,6 +49,7 @@ import { referenceCardFromPart } from "./reference"
 import { SourcesCard } from "./SourcesCard"
 import { ToolCard } from "./ToolCard"
 import { ToolIcon } from "./icons"
+import { ThinkingBlock } from "./ThinkingBlock"
 import type { AssistantStore } from "./store"
 import type { ArtifactItem, Message as AssistantMessage } from "./types"
 import { useBeatActivity, type BeatActivity } from "./useBeatActivity"
@@ -541,22 +542,11 @@ const RunTurn = ({
 		referenceCards.length > 0
 	const showRunHeader = streaming || (!hasBody && run.texts.length === 0)
 	const reasoning = run.thinking ? (
-		<Reasoning
-			className="nvca-reasoning"
-			duration={run.thinking.durationMs ? Math.max(1, Math.round(run.thinking.durationMs / 1000)) : undefined}
-			defaultOpen={false}
-			isStreaming={streaming && Boolean(run.thinking.text)}
-		>
-			<ReasoningTrigger
-				className="nvca-reasoning-trigger"
-				getThinkingMessage={(isStreaming, duration) =>
-					isStreaming ? <Shimmer duration={1.6}>思考中…</Shimmer> : <span>{duration ? "已思考 " + duration + "s" : "思考"}</span>
-				}
-			/>
-			<ReasoningContent className="nvca-reasoning-content">
-				<Markdown>{run.thinking.text}</Markdown>
-			</ReasoningContent>
-		</Reasoning>
+		<ThinkingBlock
+			durationMs={run.thinking.durationMs}
+			streaming={streaming && run.thinking.streaming}
+			text={run.thinking.text}
+		/>
 	) : null
 	const inlineNodeRefs = nodeRefs.length > 0 ? (
 		<span className="nvca-node-refs">
@@ -687,7 +677,7 @@ const RunTurn = ({
 	)
 }
 
-const StepGroup = ({ parts, streaming, summary, thinking, checkpoint }: { parts: Extract<AssistantMessage["parts"][number], { type: "tool_event" }>[]; streaming: boolean; summary: string; thinking?: Parameters<typeof Reasoning>[0]["children"]; checkpoint?: Parameters<typeof Reasoning>[0]["children"] }) => {
+const StepGroup = ({ parts, streaming, summary, thinking, checkpoint }: { parts: Extract<AssistantMessage["parts"][number], { type: "tool_event" }>[]; streaming: boolean; summary: string; thinking?: ReactNode; checkpoint?: ReactNode }) => {
 	const [open, setOpen] = useState(streaming)
 	const total = parts.length
 	const finished = parts.filter((part) => part.status === "done" || part.status === "failed").length

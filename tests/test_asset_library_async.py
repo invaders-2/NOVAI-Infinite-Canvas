@@ -1,4 +1,4 @@
-"""资产库保存提速：AI 分类后台化 + 保存即时广播 + 分类管理返回结构。"""
+"""资产库保存：不再触发 AI 分类 + 保存即时广播 + 分类管理返回结构。"""
 import asyncio
 import copy
 import json
@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import main
 from server.routes import assets as assets_routes
+from server.routes import page_import
 from server.routes.deps import deps
 
 
@@ -32,14 +33,10 @@ def make_library(extra_categories=None, items=None):
 
 
 class FakeAssetLibrary:
-    def __init__(self, lib, classify_delay=0.6, classify_result=None, classify_error=None, media_ok=True):
+    def __init__(self, lib, media_ok=True):
         self.lib = lib
         self.saved = []
-        self.classify_calls = []
         self.remove_calls = []
-        self.classify_delay = classify_delay
-        self.classify_result = classify_result if classify_result is not None else {"summary": "一张海报"}
-        self.classify_error = classify_error
         self.media_ok = media_ok
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup = self.tmp.cleanup
@@ -60,14 +57,6 @@ class FakeAssetLibrary:
             return name, {"id": item_id, "name": name, "url": f"/assets/library/{item_id}.png",
                           "kind": kind, "created_at": 1}
 
-        async def classify(_src):
-            if self.classify_delay:
-                await asyncio.sleep(self.classify_delay)
-            self.classify_calls.append(_src)
-            if self.classify_error:
-                raise self.classify_error
-            return self.classify_result
-
         def save(lib_obj):
             self.saved.append(copy.deepcopy(lib_obj))
 
@@ -83,7 +72,6 @@ class FakeAssetLibrary:
             "output_file_from_url": output_url,
             "make_asset_library_item": make_item,
             "generation_meta_for_url": lambda url: {},
-            "classify_asset_image_best_effort": classify,
             "save_asset_library": save,
             "remove_asset_library_file": lambda item: self.remove_calls.append(item),
             "sanitize_asset_name": lambda name, default="": name or default,
@@ -91,14 +79,6 @@ class FakeAssetLibrary:
             "asset_library_media_kind": main.asset_library_media_kind,
             "ASSET_LIBRARY_DIR": self.tmp.name,
         }
-
-    def wait_for(self, predicate, timeout=5.0):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            if predicate():
-                return True
-            time.sleep(0.02)
-        return False
 
     def item_by_id(self, item_id):
         for cat in self.lib["libraries"][0]["categories"]:
@@ -108,13 +88,12 @@ class FakeAssetLibrary:
         return None
 
 
-class SaveSpeedTests(unittest.TestCase):
+class SaveAssetTests(unittest.TestCase):
     def setUp(self):
         self.lib = make_library()
         self.fake = FakeAssetLibrary(self.lib)
 
     def patched(self):
-        # 后台线程在请求返回后才跑，patch 必须活到它完成（不能一返回就退出 with）
         patcher = unittest.mock.patch.dict(deps._bound, self.fake.bindings())
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -123,57 +102,44 @@ class SaveSpeedTests(unittest.TestCase):
         payload = assets_routes.AssetLibraryAddRequest(url=url, name="封面", category_id="characters",
                                                        library_id="default", **kwargs)
         self.patched()
-        started = time.time()
-        result = run(assets_routes.add_asset_library_item(payload))
-        return result, time.time() - started
+        return run(assets_routes.add_asset_library_item(payload))
 
-    def test_save_does_not_wait_for_classification(self):
-        result, elapsed = self.add()
-        # 分类函数要睡 0.6s：保存必须明显快于它，且响应里还没有 classification
-        self.assertLess(elapsed, 0.35, f"保存等了分类：{elapsed:.2f}s")
-        self.assertTrue(result["classification_pending"])
+    def test_save_no_longer_classifies(self):
+        result = self.add()
+        # 保存只落库：响应里没有分类进度字段，条目里也没有 classification
+        self.assertNotIn("classification_pending", result)
         self.assertNotIn("classification", result["item"])
-        self.assertEqual(self.fake.classify_calls, [])
         self.assertEqual(len(self.fake.saved), 1)
-        # 后台最终把分类写进条目并再次保存（save 内部会广播 ws）
-        item_id = result["item"]["id"]
-        self.assertTrue(self.fake.wait_for(lambda: (self.fake.item_by_id(item_id) or {}).get("classification")))
-        self.assertGreaterEqual(len(self.fake.saved), 2)
-        self.assertEqual(self.fake.item_by_id(item_id)["classification"], {"summary": "一张海报"})
-
-    def test_classify_false_skips_background(self):
-        result, elapsed = self.add(classify=False)
-        self.assertLess(elapsed, 0.35)
-        self.assertFalse(result["classification_pending"])
-        time.sleep(0.3)
-        self.assertEqual(self.fake.classify_calls, [])
         self.assertNotIn("classification", self.fake.item_by_id(result["item"]["id"]))
 
-    def test_background_classification_failure_keeps_item(self):
-        self.fake.classify_error = RuntimeError("AI 超时")
-        result, elapsed = self.add()
-        self.assertLess(elapsed, 0.35)
-        item_id = result["item"]["id"]
-        self.assertTrue(self.fake.wait_for(lambda: bool(self.fake.classify_calls), timeout=3))
-        # 失败不影响条目存在，也不会写坏库
-        self.assertIsNotNone(self.fake.item_by_id(item_id))
-        self.assertNotIn("classification", self.fake.item_by_id(item_id))
+    def test_classify_fields_and_endpoints_are_removed(self):
+        self.assertNotIn("classify", assets_routes.AssetLibraryAddRequest.model_fields)
+        self.assertNotIn("classify", assets_routes.AssetLibraryBatchAddRequest.model_fields)
+        self.assertNotIn("classify", assets_routes.LocalAssetUrlImportRequest.model_fields)
+        self.assertNotIn("classify", page_import.PageImportRequest.model_fields)
+        routes = {(route.path, method) for route in assets_routes.router.routes
+                  for method in (route.methods or ())}
+        self.assertNotIn(("/api/local-assets/classify", "POST"), routes)
+        self.assertNotIn(("/api/asset-library/items/classify", "POST"), routes)
+        self.assertFalse(hasattr(assets_routes, "classify_local_assets"))
+        self.assertFalse(hasattr(assets_routes, "classify_asset_library_items"))
+        # 分类 helper 不再注入 deps，后台分类线程也不存在
+        self.assertNotIn("classify_asset_image_best_effort", deps._bound)
+        self.assertNotIn("classify_image_with_provider", deps._bound)
+        self.assertNotIn("_write_local_upload_classification", deps._bound)
+        self.assertFalse(hasattr(assets_routes, "_spawn_asset_library_classification"))
 
-    def test_batch_returns_before_classification(self):
+    def test_batch_saves_without_classification(self):
         items = [assets_routes.AssetLibraryAddRequest(url="/output/a.png", name="图A"),
                  assets_routes.AssetLibraryAddRequest(url="/output/b.png", name="图B")]
         payload = assets_routes.AssetLibraryBatchAddRequest(category_id="characters", library_id="default", items=items)
         self.patched()
-        started = time.time()
         result = run(assets_routes.batch_add_asset_library_items(payload))
-        elapsed = time.time() - started
-        self.assertLess(elapsed, 0.35, f"批量保存等了分类：{elapsed:.2f}s")
-        self.assertEqual(result["classification_pending"], 2)
+        self.assertNotIn("classification_pending", result)
         self.assertEqual(len(result["items"]), 2)
         self.assertEqual(len(self.fake.saved), 1)
-        self.assertTrue(self.fake.wait_for(
-            lambda: all((self.fake.item_by_id(item["id"]) or {}).get("classification") for item in result["items"])))
-        self.assertEqual(len(self.fake.classify_calls), 2)
+        for item in result["items"]:
+            self.assertNotIn("classification", self.fake.item_by_id(item["id"]))
 
 
 class CategoryManagementTests(unittest.TestCase):

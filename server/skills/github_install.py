@@ -63,9 +63,11 @@ _SSL_CONTEXT = None
 
 
 class GitHubSkillError(ValueError):
-    def __init__(self, message, status_code=400):
+    def __init__(self, message, status_code=400, recoverable=False):
         super().__init__(message)
         self.status_code = status_code
+        # 错误本身在告诉模型「补哪个参数」：模型拿到原文就能改道，不算真的没做成
+        self.recoverable = bool(recoverable)
 
 
 class RateLimitError(GitHubSkillError):
@@ -520,10 +522,12 @@ def _select_skill_path(paths, prefix=""):
     scope = str(prefix or "").strip("/")
     if scope:
         skills = [item for item in skills if item == scope or item.startswith(scope + "/")]
+    # 这两条都是「补 path 再试一次」：模型读到错误原文就能改道，标 recoverable 让清单不当成真失败
     if not skills:
-        raise GitHubSkillError("仓库中没有 SKILL.md，请指定文件路径", 404)
+        raise GitHubSkillError("仓库中没有 SKILL.md，请指定文件路径", 404, recoverable=True)
     if len(skills) > 1:
-        raise GitHubSkillError("仓库中有多个 SKILL.md，请用 path 指定一个：%s" % "、".join(skills[:5]))
+        raise GitHubSkillError("仓库中有多个 SKILL.md，请用 path 指定一个：%s" % "、".join(skills[:5]),
+                               recoverable=True)
     return _valid_path(skills[0])
 
 

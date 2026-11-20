@@ -6,6 +6,7 @@
 // 种子规格两边一致，由画布侧翻译成节点；旧智能画布（/static/smart-canvas.html）只剩历史画布与外链在用。
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
+import AnimatedSendIcon from '../../components/AnimatedSendIcon.vue';
 import VendorLogo from '../../components/VendorLogo.vue';
 import NvVeilBg from '../../components/NvVeilBg.vue';
 import EffortSlider from '../../components/EffortSlider.vue';
@@ -163,7 +164,7 @@ function seedFromTemplate(t, opts = {}) {
     const nodes = t.nodes.map(n => {
         const copy = JSON.parse(JSON.stringify(n));
         if (copy.ref && rs.length) copy.images = rs;
-        if (copy.brief) copy.text = tx;
+        if (copy.brief && tx) copy.text = tx;
         return copy;
     });
     const seed = { v: 1, nodes, toast: t.toast };
@@ -840,7 +841,18 @@ async function loadCommunity() {
         community.value = { items: [], creators: 0 };
     }
 }
-const communityCover = it => coverUrl(it);
+const communityCoverRetried = ref(new Set());
+const communityCover = it => {
+    if (!it || !it.id || communityBroken.value.has(it.id)) return '';
+    const base = coverUrl(it);
+    if (!base) return '';
+    return communityCoverRetried.value.has(it.id) ? base + '&r=1' : base;
+};
+function markCommunityCover(id) {
+    if (!id || communityBroken.value.has(id)) return;
+    if (communityCoverRetried.value.has(id)) { communityBroken.value.add(id); return; }
+    setTimeout(() => communityCoverRetried.value.add(id), 2000);
+}
 const communityAuthor = it => (it && it.author) || {};
 function communityAvatarImg(it) {
     if (!it || communityBroken.value.has(it.id)) return '';
@@ -852,7 +864,6 @@ function communityAvatarText(it) {
 }
 function markCommunityAvatar(id) { communityBroken.value.add(id); }
 function openCommunityCard(it) { if (it && it.id) openCommunityDetail(it.id); }
-
 
 /* 带视频的模板卡：移上去才播，移出暂停回第一帧（只叠一层同尺寸 video，不动布局） */
 function cardVideoIn(e) { const v = e.currentTarget.querySelector('video'); if (v) { v.currentTime = 0; v.play().catch(() => {}); } }
@@ -927,7 +938,7 @@ onBeforeUnmount(() => {
                                 <NvIcon name="sparkles" /><span class="mn">{{ chatModelLabel }}</span><NvIcon name="chev" class="cd" />
                             </button>
                             <button type="button" class="hp-send" :disabled="!canSend" aria-label="发送" title="新建画布，交给画布助手" @click="submit">
-                                <span v-if="busy" class="hp-spin"></span><NvIcon v-else name="up" />
+                                <span v-if="busy" class="hp-spin"></span><AnimatedSendIcon v-else />
                             </button>
                         </div>
                     </div>
@@ -1098,7 +1109,7 @@ onBeforeUnmount(() => {
                     <div class="hp-com-grid">
                         <button v-for="it in community.items" :key="it.id" type="button" class="cm-card" :class="{ off: !it.online }" @click="openCommunityCard(it)">
                             <span class="cv">
-                                <img v-if="communityCover(it)" :src="communityCover(it)" alt="" loading="lazy" decoding="async" />
+                                <img v-if="communityCover(it)" :src="communityCover(it)" alt="" loading="lazy" decoding="async" @error="markCommunityCover(it.id)" />
                                 <span v-else class="ph"><NvIcon :name="kindMeta(it.kind).icon" /></span>
                                 <span class="tag"><NvIcon :name="kindMeta(it.kind).icon" />{{ kindMeta(it.kind).label }}</span>
                             </span>
@@ -1145,9 +1156,9 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.hp { position: absolute; inset: 0; background: var(--shell-bg); color: var(--ink); --hp-panel: rgba(255,255,255,.82); --hp-card: rgba(0,0,0,.04); --hp-card-h: rgba(0,0,0,.07); --hp-pop: #fff; --hp-ill: #c7c7cc; --hp-ill-2: #e5e5ea; --hp-ill-n: #fff; --hp-glass: rgba(255,255,255,.55); --hp-glass-h: rgba(255,255,255,.72); }
+.hp { position: absolute; inset: 0; background: var(--shell-bg); color: var(--ink); --hp-panel: rgba(255,255,255,.82); --hp-card: rgba(0,0,0,.04); --hp-card-h: rgba(0,0,0,.07); --hp-pop: #fff; --hp-ill: #c7c7cc; --hp-ill-2: #e5e5ea; --hp-ill-n: #fff; --hp-glass: rgba(255,255,255,.55); --hp-glass-h: rgba(255,255,255,.72); --hp-plate: rgba(255,255,255,.72); --hp-plate-h: rgba(255,255,255,.86); }
 .hp-scroll { position: absolute; inset: 0; overflow: auto; }
-.hp-inner { max-width: 1180px; margin: 0 auto; padding: calc(var(--tbh) + 36px) 24px 96px; display: flex; flex-direction: column; align-items: center; }
+.hp-inner { width: min(1240px, calc(100% - 96px)); margin: 0 auto; padding: calc(var(--tbh) + 36px) 0 96px; display: flex; flex-direction: column; align-items: center; }
 
 /* 标题打字机 */
 .hp-title { margin: 20px 0 22px; min-height: 1.4em; font: 600 26px/1.3 var(--font-sans); letter-spacing: -.01em; display: flex; align-items: center; justify-content: center; text-align: center; }
@@ -1451,7 +1462,7 @@ html.theme-dark .hp-mpanel { box-shadow: 0 18px 40px rgba(0, 0, 0, .36), 0 4px 1
 .hp-send { width: 34px; height: 34px; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: opacity var(--duration-fast), transform var(--duration-instant); }
 .hp-send:active { transform: scale(.94); }
 .hp-send:disabled { opacity: .3; cursor: default; transform: none; }
-.hp-send .nv-i { width: 16px; height: 16px; }
+.hp-send .nv-send-ic { width: 16px; height: 16px; }
 .hp-spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: hpSpin .7s linear infinite; }
 @keyframes hpSpin { to { transform: rotate(360deg); } }
 
@@ -1646,7 +1657,7 @@ html.theme-dark .hp-mpanel { box-shadow: 0 18px 40px rgba(0, 0, 0, .36), 0 4px 1
 .hp-bfx i:nth-child(4) { background: linear-gradient(to top, var(--tb-tint), transparent 85%); }
 
 @media (max-width: 640px) {
-    .hp-inner { padding-left: 16px; padding-right: 16px; }
+    .hp-inner { width: calc(100% - 32px); }
     .hp-quick, .hp-recent { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .hp-pop { left: 0 !important; width: calc(100vw - 48px) !important; }
     /* 模型菜单是 fixed 的 teleport 容器，不吃上面那条宽度/左对齐 */
@@ -1659,7 +1670,7 @@ html.theme-dark .hp-mpanel { box-shadow: 0 18px 40px rgba(0, 0, 0, .36), 0 4px 1
 
 <style>
 /* 深色：放非 scoped 块（scoped 下 :global(html.theme-dark) .x 会把整条选择器编译成 html.theme-dark） */
-html.theme-dark .hp { --hp-panel: rgba(26,26,26,.74); --hp-card: rgba(255,255,255,.04); --hp-card-h: rgba(255,255,255,.07); --hp-pop: #1e1e20; --hp-ill: #4a4a4f; --hp-ill-2: #2a2a2d; --hp-ill-n: #1f1f22; --hp-glass: rgba(38,38,40,.52); --hp-glass-h: rgba(48,48,50,.62); }
+html.theme-dark .hp { --hp-panel: rgba(26,26,26,.74); --hp-card: rgba(255,255,255,.04); --hp-card-h: rgba(255,255,255,.07); --hp-pop: #1e1e20; --hp-ill: #4a4a4f; --hp-ill-2: #2a2a2d; --hp-ill-n: #1f1f22; --hp-glass: rgba(38,38,40,.52); --hp-glass-h: rgba(48,48,50,.62); --hp-plate: rgba(40,40,42,.78); --hp-plate-h: rgba(52,52,54,.86); }
 
 /* 输入区里的标签：用 DOM API 插进 contenteditable，拿不到 scoped 属性，所以放这里 */
 .hp-input .hp-tk { --tk-bg: #fff; --tk-bd: rgba(0,0,0,.12); --tk-ref: rgba(0,0,0,.05); display: inline-flex; align-items: center; gap: 5px; height: 24px; margin: 0 2px; padding: 0 8px 0 6px; vertical-align: middle; position: relative; top: -1px;

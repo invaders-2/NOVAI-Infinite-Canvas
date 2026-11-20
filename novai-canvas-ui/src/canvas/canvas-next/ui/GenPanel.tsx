@@ -8,27 +8,31 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { addMention, afterInputsChanged, title } from "../actions";
-import { mentionable, mentionedIds, unmentionedInputs } from "../mentions";
+import { mentionable, mentionedIds, remapMention, unmentionedInputs } from "../mentions";
 import { PromptEditor } from "./PromptEditor";
-import { requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRole, stopNode } from "../engine";
+import { regenAsNew, requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRole, stopNode } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
 import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, withGen, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, newNode, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatOptions, outputFormatShortLabel, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchInputWarnings, batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, ownRefCount, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
 import { useCtl, useS, type Ctl } from "./ctx";
 import { isSplitNode } from "./SplitNode";
-import { openSplitEditor } from "./editors/SplitEditor";
-import { startVoiceCapture, transcribeVoice, voiceErrorText, type VoiceCapture, type VoicePhase } from "../voiceInput";
 import { keyHint } from "./shortcuts";
 import { ratioDisplayLabel, sourceBoxForNode, sourceSizeForTier, type RatioParams, type SourceBox } from "../originalRatio";
 import { fitSourceBox, isAdaptiveRatio } from "../mediaFit";
 import { ComboMenu } from "./combo";
 import { FloatMenuBar, FloatMenuButton } from "./FloatMenu";
 import { Icon, type IconName } from "./Icon";
+import { AnimatedSendIcon } from "./AnimatedSendIcon";
 import { download } from "./menus";
 import { saveNodeToLibrary } from "./Library";
 import { VendorLogo } from "./VendorLogo";
 import { openPop } from "./overlay";
+import { openModelCatalog } from "./ModelCatalog";
+import { togglePromptPresets } from "./PromptPresets";
+import { AiContentGeneratorIcon } from "./HugeAnimatedIcons";
 import { ThumbImg } from "./thumb";
+import { InputChipFace, InputPeek } from "./InputPeek";
+import { displaySrc } from "../stack";
 import { OptCards, normRatio, ratioShape } from "./OptCards";
 import { OptimizeButton } from "./OptimizeButton";
 import { DurationSlider } from "./DurationSlider";
@@ -69,19 +73,44 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
   const ctl = useCtl(); const store = ctl.store; const out = isGenKind(node.kind) ? outOf(node) : null; const g = isGenKind(node.kind) ? genOf(node) : null;
   // 拆分结果节点自己就是编辑器：不挂普通图片工具条（关闭键在节点标题栏里）
   if (isSplitNode(node)) return null;
-  // 空状态（还没结果、也没在生成）的文本 / 视频 / 音频节点不挂这条工具条：这时条上只剩背景色、标记这类零碎入口，
-  // 却一直压在节点上方（右键菜单里都有）。生成中要能停止、有结果要能编辑，都不受影响。空图片节点见下面单独的分支。
-  if (isGenKind(node.kind) && !out && !running && node.kind !== "image") return null;
-  // 空图片节点只有一颗「上传」：同一套 dock 容器里的单颗按钮（常显图标 + 文字）。
+  // 空状态（还没结果、也没在生成）的文本 / 音频节点不挂这条工具条：这时条上只剩背景色、标记这类零碎入口，
+  // 却一直压在节点上方（右键菜单里都有）。生成中要能停止、有结果要能编辑，都不受影响。空图片 / 空视频节点见下面单独的分支。
+  if (isGenKind(node.kind) && !out && !running && node.kind !== "image" && node.kind !== "video") return null;
+  // 空图片 / 空视频节点只有一颗「上传」：同一套 dock 容器里的单颗按钮（常显图标 + 文字）。
   // 不走 FloatMenuBar —— 那套「按指针所在那颗长标签」是给一排按钮用的，单颗按钮用它会像一条空条子。
-  if (isGenKind(node.kind) && !out && !running && node.kind === "image") {
+  // 空视频只收视频、空图片只收图片：detail 里带 kind + accept，CanvasApp 打开文件选择前用它收窄类型
+  // （拖拽 / 粘贴等别的入口选错类型，仍由 addFiles 的类型守卫挡住并说明原因）。
+  if (isGenKind(node.kind) && !out && !running) {
+    const video = node.kind === "video";
+    const what = video ? "上传视频" : "上传图片";
     return <div id="ntb" ref={refEl} className="float enter ntb-empty-upload" style={style} onPointerDown={(e) => e.stopPropagation()}>
-      <button className="ib tipT lab" data-tb="upload" data-tip="上传图片" onClick={() => window.dispatchEvent(new CustomEvent("cn:upload", { detail: { target: node.id, at: { x: node.x + 120, y: node.y + 120 } } }))}><Icon name="upload" />上传</button>
+      <button className="ib tipT lab" data-tb="upload" data-tip={what} aria-label={what} onClick={() => window.dispatchEvent(new CustomEvent("cn:upload", { detail: { target: node.id, at: { x: node.x + 120, y: node.y + 120 }, ...(video ? { kind: "video", accept: "video/*" } : { kind: "image", accept: "image/*" }) } }))}><Icon name="upload" />上传</button>
     </div>;
   }
   /** 展开态用的短标签（提示文字仍是原来的 tip，data-tb / data-tip 逐字保留给 e2e 与功能） */
-  const LABEL: Record<string, string> = { crop: "裁剪", markup: "涂鸦", angle: "角度", mask: "局部", relight: "打光", whitemodel: "白膜", adjust: "调色", lossless: "无损", more: "更多", bg: "背景色", pin: "标记", lib: "素材库", dl: "下载", full: "全屏", frame: "截帧", stop: "停止", upload: "上传", copy: "复制", trim: "修剪", smartclip: "切分", final: "出成片" };
+  const LABEL: Record<string, string> = { mask: "局部", adjust: "调色", lossless: "无损", more: "更多", bg: "背景色", pin: "标记", lib: "素材库", dl: "下载", full: "全屏", frame: "截帧", stop: "停止", upload: "上传", copy: "复制", trim: "修剪", smartclip: "切分", final: "出成片" };
   const B = (act: string, ic: IconName, tip: string, lab = "", on?: (el: HTMLElement) => void) => <FloatMenuButton key={act} icon={ic} label={lab || LABEL[act] || tip} title={tip} data={{ "data-tb": act, "data-tip": tip }} onClick={(e) => on ? on(e.currentTarget) : edit(act, e.currentTarget)} />;
+  const hasModel = !!out && !!(g?.params as { model?: string } | undefined)?.model;
+  const rerunBtn = hasModel ? B("rerun", "redo", node.kind === "video" ? "用同样的提示词、参考素材和参数再生成一条，新结果放在右边" : "用同样的提示词、参考图和参数再生成一张，新结果放在右边", node.kind === "video" ? "再来一条" : "再来一张", () => {
+    const fresh = regenAsNew(store, node, undefined, { linkSelf: false });
+    if (node.kind !== "text" && mentionedIds(genOf(fresh).prompt).has(node.id)) {
+      // 提示词里 @ 了本节点：「再来一张」要的是同一张参考图。以前把 @ 改写成新节点自己——新节点还没有结果，
+      // 这张参考图就悄悄丢了。现在把原节点连成新节点的上游，@ 原样指向原节点（面板里显示成上游胶囊）。
+      store.addNodes([], [{ id: uid("e"), from: node.id, to: fresh.id }], { history: false });
+      // 原来只 @ 了自己时其它已连接的上游照旧全部发送：去掉引用模式，免得现在 @ 了上游反而把别的输入挡掉（同 runNode）
+      const others = mentionedIds(genOf(fresh).prompt); others.delete(node.id);
+      if (!others.size && genOf(fresh).refMode) store.patchGen(fresh.id, { refMode: undefined }, { history: false });
+    } else {
+      const prompt = remapMention(genOf(fresh).prompt, node.id, fresh.id);
+      if (prompt !== genOf(fresh).prompt) store.patchGen(fresh.id, { prompt });
+    }
+    if (!store.modelOf(fresh)) {
+      const wanted = String((genOf(fresh).params as { model?: string }).model || "");
+      store.toast(`原模型「${wanted}」已不可用，请在新的节点里重新选模型`);
+      return;
+    }
+    void runNode(store, fresh.id);
+  }) : null;
   /** TapNow「背景颜色」：无色 + 7 种低饱和色，竖排弹出 */
   const bgBtn = () => <FloatMenuButton key="bg" icon="palette" label="背景色" title="背景颜色" data={{ "data-tb": "bg", "data-tip": "背景颜色" }}
     adornment={<i className="bgdot" style={{ background: bgColor(g!.bg) || "var(--fg)" }} />}
@@ -107,7 +136,8 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
   if (running) items = node.kind === "video"
     ? [B("frame", "frame", "截帧（快捷键 1）", "截帧"), <span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))]
     : [<span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))];
-  else if (node.kind === "image") items = [B("crop", "crop", "裁剪 / 旋转"), B("markup", "pencil", "涂鸦 / 文字 / 马赛克"), B("angle", "cube", "多角度"), B("mask", "brush", "局部重绘"), B("relight", "sun", "重打光"), B("whitemodel", "user", "白膜处理：把人物变成白色石膏人台，保留姿势与构图"), B("adjust", "palette", "调色"), B("lossless", "edit", "无损改图"), B("split", "layers", "拆分图层", "拆分图层", (el) => splitMenu(ctl, node.id, el)), B("more", "more", "更多"), <span key="s" className="vsep" />, tagBtn(), B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store)), B("full", "expand", "全屏查看", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })))];
+  // 图片工具条只留 局部重绘 / 调色 / 无损改图 + 更多；裁剪 / 涂鸦 / 拆分图层和低频 AI 特效（多角度 / 重打光 / 白膜）都收进「更多」菜单（见 registry.tsx MoreMenu）
+  else if (node.kind === "image") items = [B("mask", "brush", "局部重绘"), B("adjust", "palette", "调色"), B("lossless", "edit", "无损改图"), B("more", "more", "更多"), <span key="s" className="vsep" />, tagBtn(), B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store)), ...(rerunBtn ? [rerunBtn] : []), B("full", "expand", "全屏查看", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })))];
   else if (node.kind === "text") items = [bgBtn(), tagBtn(), <span key="s" className="vsep" />, B("copy", "copy", "复制全部", "", async () => { try { await navigator.clipboard.writeText(textOf(node)); store.toast("已复制全部内容"); } catch { store.toast("剪贴板不可用"); } }), B("lib", "libadd", "保存到素材库", "", (el) => { const r = el.getBoundingClientRect(); void saveNodeToLibrary(ctl, node, { x: r.left, y: r.bottom + 6 }); }), B("full", "expand", "全屏编辑", "", () => window.dispatchEvent(new CustomEvent("cn:textdoc", { detail: node.id })))];
   else if (node.kind === "video" && out) items = [
     // TapNow 视频工具栏：修剪 / 智能切镜 / AI 编辑（替换·移除·续写·重拍）/ 截帧 / 更多 ┃ 标签 ┃ 保存素材库 / 下载 / 全屏
@@ -121,6 +151,7 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
     <span key="s1" className="vsep" />, tagBtn(), <span key="s2" className="vsep" />,
     B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)),
     B("dl", "download", "下载", "", () => void download(node, store)),
+    ...(rerunBtn ? [rerunBtn] : []),
     B("full", "expand", "全屏播放", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id }))),
   ];
   // TapNow 音频结果：颜色标记 ┃ 保存素材库 / 下载
@@ -139,7 +170,8 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
 }
 
 /* ---------------- 生成面板 ---------------- */
-function GenPanel({ node }: { node: CanvasNode }) {
+/** 生成面板：选中生成节点时浮在节点下方；剪辑时间线的「片段重拍」也直接复用它（同一个编辑器） */
+export function GenPanel({ node }: { node: CanvasNode }) {
   const ctl = useCtl(); const store = ctl.store;
   const doc = useS((s) => s.doc); const run = useS((s) => s.runtime[node.id]); const preview = useS((s) => s.ui.preview); const pick = useS((s) => s.ui.pick); useS((s) => s.models);
   const kind = node.kind as GenKind; const g = genOf(node); const m = store.modelOf(node); const p = g.params;
@@ -161,6 +193,14 @@ function GenPanel({ node }: { node: CanvasNode }) {
   const optsRef = useRef<HTMLDivElement>(null); const [fit, setFit] = useState(true);
   useLayoutEffect(() => { const o = optsRef.current; if (o) setFit(o.scrollWidth <= o.clientWidth + 1); });
   const [draft, setDraft] = useState(g.prompt); const lastId = useRef(node.id);
+  /** 鼠标停在哪个输入缩略图上：上方浮出它的完整预览（分组 / 堆叠列出全部成员）；按下拖动时收起 */
+  const [peek, setPeek] = useState<{ id: string; el: HTMLElement } | null>(null);
+  const peekTimer = useRef(0);
+  const peekOn = (id: string, el: HTMLElement) => { window.clearTimeout(peekTimer.current); peekTimer.current = window.setTimeout(() => setPeek({ id, el }), 220); };
+  const peekOff = () => { window.clearTimeout(peekTimer.current); setPeek(null); };
+  useEffect(() => () => window.clearTimeout(peekTimer.current), []);
+  const peekNode = peek && peek.el.isConnected ? doc.nodes.find((n) => n.id === peek.id) : undefined;
+  const peekView = peekNode && peek ? <InputPeek node={peekNode} nodes={doc.nodes} anchor={peek.el} /> : null;
   /** 风格 / 摄影机：自己管浮层（不进全局 popover 栈），这样 enter/exit 150ms 能按 SPEC 走完整；锚点取自 chip */
   const [camOpen, setCamOpen] = useState(false); const camRef = useRef<HTMLButtonElement>(null);
   const [styleOpen, setStyleOpen] = useState(false); const styleRef = useRef<HTMLButtonElement>(null);
@@ -190,67 +230,6 @@ function GenPanel({ node }: { node: CanvasNode }) {
     return () => removeEventListener("keydown", on);
   }, [kind, node.id, store]);
   const commitPrompt = (v: string) => { if (v !== genOf(store.node(node.id)!).prompt) store.patchGen(node.id, { prompt: v }); };
-  /* 语音输入：录音 → WAV → 后端转写，成功后接在当前提示词后面 */
-  const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
-  const voiceCap = useRef<VoiceCapture | null>(null);
-  const voiceStarting = useRef(false);
-  const voiceToken = useRef(0);
-  /** 卸载时权限弹窗可能还没回来：回来后再拿到的 cap 要立刻取消 */
-  const voiceAlive = useRef(true);
-  const applyVoiceText = (text: string) => {
-    const cur = genOf(store.node(node.id)!).prompt;
-    const next = (cur ? cur + "，" : "") + text;
-    setDraft(next);
-    commitPrompt(next);
-  };
-  const transcribeIntoPrompt = async (blob: Blob) => {
-    const token = voiceToken.current;
-    const result = await transcribeVoice(blob);
-    if (token !== voiceToken.current) return;
-    if (result.ok && result.text) applyVoiceText(result.text);
-    else store.toast(voiceErrorText(result.code, result.error));
-    setVoicePhase("idle");
-  };
-  const voice = async () => {
-    if (voicePhase === "transcribing" || voiceStarting.current) return;
-    if (voicePhase === "recording") {
-      const cap = voiceCap.current;
-      // 到时长上限自动结束时回调已经接管，这次点击直接忽略
-      if (!cap) return;
-      voiceCap.current = null;
-      setVoicePhase("transcribing");
-      let blob: Blob | null = null;
-      try { blob = await cap.stop(); } catch { blob = null; }
-      if (!blob) { setVoicePhase("idle"); return; }
-      await transcribeIntoPrompt(blob);
-      return;
-    }
-    voiceStarting.current = true;
-    try {
-      const cap = await startVoiceCapture({
-        maxSeconds: 90,
-        onAutoStop: (blob) => { voiceCap.current = null; setVoicePhase("transcribing"); void transcribeIntoPrompt(blob); },
-      });
-      if (!voiceAlive.current) { cap.cancel(); return; }
-      voiceCap.current = cap;
-      setVoicePhase("recording");
-    } catch (error) {
-      const err = error as { name?: string; message?: string } | null;
-      store.toast(voiceErrorText(err?.name, err?.message));
-    } finally {
-      voiceStarting.current = false;
-    }
-  };
-  // 面板关掉 / 切节点时释放麦克风
-  useEffect(() => {
-    voiceAlive.current = true;
-    return () => {
-      voiceAlive.current = false;
-      voiceToken.current += 1;
-      voiceCap.current?.cancel();
-      voiceCap.current = null;
-    };
-  }, []);
   /** 编辑器每次改动：插入 @ 引用时立刻写回并切到引用模式（其余改动失焦时写回） */
   const onPrompt = (v: string, o?: { mention?: boolean }) => { setDraft(v); if (o?.mention) store.patchGen(node.id, { prompt: v, refMode: "mention" }); };
 
@@ -259,7 +238,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
   if (m && kind === "image" && imgIns.length && !m.i2i) warns.push(`${m.name} 不支持参考图，${imgIns.length} 张图片输入不会发送。`);
   else if (m && kind === "image" && imgIns.length > (m.maxRefs || 0)) warns.push(`${m.name} 最多接收 ${m.maxRefs} 张参考图，按连线顺序只发送前 ${m.maxRefs} 张。`);
   if (m && kind === "text" && imgIns.length && !m.vision) warns.push(`${m.name} 不读图片，${imgIns.length} 张图片输入会被忽略。`);
-  if (kind === "video") { const vp = p as VideoParams; if (["视频编辑", "视频延长", "参考视频生视频"].includes(vp.mode) && !ins.some((x) => x.node.kind === "video") && !tables.length) warns.push(`「${vp.mode}」需要连入一段视频。`); if (vp.mode === "数字人" && !(imgIns.length && ins.some((x) => x.node.kind === "audio"))) warns.push("「数字人」需要 1 张人像和 1 段音频。"); if (imgIns.length && vp.mode === "文生视频") warns.push("当前是文生视频，图片输入不会发送。切到「首帧」可以用上第 1 张图。"); }
+  if (kind === "video") { const vp = p as VideoParams; if (["视频编辑", "视频延长", "参考视频生视频"].includes(vp.mode) && !ins.some((x) => x.node.kind === "video") && !tables.length && !(m && mentionedIds(g.prompt).has(node.id) && selfInputRole(kind, p, m, imgIns.length))) warns.push(`「${vp.mode}」需要连入一段视频。`); if (vp.mode === "数字人" && !(imgIns.length && ins.some((x) => x.node.kind === "audio"))) warns.push("「数字人」需要 1 张人像和 1 段音频。"); if (imgIns.length && vp.mode === "文生视频") warns.push("当前是文生视频，图片输入不会发送。切到「首帧」可以用上第 1 张图。"); }
   // 音频节点的输入现在会带一条「来源」连线（媒体节点再生成时自己也是输入），但音频模型还不收音频 / 图片参考
   if (kind === "audio" && ins.some((x) => x.node.kind !== "text" && x.node.kind !== "table")) warns.push("音频模型还不支持把音频 / 图片输入当参考：这条连线只表示来源，不会随请求发送。");
   // 提示词里 @ 了本节点，但当前模型 / 生成方式不收自己这条结果：说清楚，别让人以为发了
@@ -270,12 +249,6 @@ function GenPanel({ node }: { node: CanvasNode }) {
         ? `当前生成方式「${(p as VideoParams).mode}」不接受视频输入：@ 的本节点当前视频不会发送，切到「参考视频生视频」或「视频编辑」才行。`
         : `${m.name} 不支持参考图：提示词里 @ 的本节点当前结果不会发送。`);
     }
-    // 当前版本上记着生成时的自我参考源（或明确没有）：重新生成沿用那条记录，不会把新一版结果再喂回去。
-    // 这是有意的行为变化，在面板上说清楚怎么拿当前这一版继续改。
-    const fixed = outOf(node)?.meta?.selfSrc;
-    if (fixed !== undefined) warns.push(fixed
-      ? `重新生成会继续用最初带出去的「本节点」参考图，不会把新一版结果再喂回去。想拿当前这一版继续改，先右键「副本」复制成独立的${kind === "video" ? "视频" : "图片"}节点，再 @ 引用它。`
-      : `这一版生成时没有带「本节点」参考图，重新生成也不会补上上一版结果。想拿当前这一版继续改，先右键「副本」复制成独立的${kind === "video" ? "视频" : "图片"}节点，再 @ 引用它。`);
   }
   refsIn(g.prompt, ins).missing.forEach((r) => warns.push(`找不到引用「@${r}」：确认上游节点里有这一段。`));
 
@@ -372,13 +345,14 @@ function GenPanel({ node }: { node: CanvasNode }) {
         {hasLast ? <><button className="vp-swap tipB" data-p="vswap" data-fram-swap data-tip="交换首尾帧" disabled={busy || !first || !last} onClick={swap}><Icon name="branch" size="xs" /></button>{slot("last", "尾帧", last)}</> : null}
         {/* 连进来的图片 / 视频：在首尾帧旁边以缩略图列出（视频带播放角标），点一下定位到画布节点 */}
         {others.map((x) => { const src = srcOf(x.node); return (
-          <button key={x.edge.id} className="vp-thumb has vp-in" data-in={x.edge.id} title={title(x.node)} disabled={busy}
-            onClick={() => ctl.focusNode(x.node.id)}>
-            {src ? <ChipImg src={src} /> : <Icon name={x.node.kind === "table" ? "grid" : TYPE_ICON[x.node.kind as GenKind] || "layers"} size="s" />}
-            {x.node.kind === "video" ? <span className="vp-vplay"><Icon name="play" size="xs" /></span> : null}
+          <button key={x.edge.id} className="vp-thumb has vp-in" data-in={x.edge.id} aria-label={title(x.node)} disabled={busy}
+            onClick={() => { peekOff(); ctl.focusNode(x.node.id); }}
+            onPointerEnter={(e) => peekOn(x.node.id, e.currentTarget)} onPointerLeave={peekOff}>
+            {x.node.kind === "group" || x.node.kind === "video" ? <InputChipFace node={x.node} nodes={doc.nodes} /> : src ? <ChipImg src={src} /> : <Icon name={x.node.kind === "table" ? "grid" : TYPE_ICON[x.node.kind as GenKind] || "layers"} size="s" />}
             <span className="x" onPointerDown={(e) => { e.stopPropagation(); store.removeEdge(x.edge.id); afterInputsChanged(store, node.id); store.toast(`已移除输入「${title(x.node)}」`); }}><Icon name="x" size="xs" /></span>
           </button>); })}
         <button className="vp-add tipB" data-p="addin" data-tip="添加参考图" onClick={(e) => addMenu(e.currentTarget)}><Icon name="plus" size="s" /></button>
+        {peekView}
         <button className={"vp-pick tipB" + (preview ? " on" : "")} data-p="preview" data-tip="请求预览：看看这次会发给后端什么" onClick={() => store.setUI({ preview: !preview })}><Icon name="text" size="s" /></button>
         {m?.modes?.includes("视频编辑") ? <button className="vp-object" data-p="object-replace" disabled={busy} onClick={() => { set({ mode: "视频编辑" }); const next = draft.trim() || "替换源视频中的目标对象，保持其他人物、背景、光照、镜头运动和场景连续性不变"; setDraft(next); commitPrompt(next); }}><Icon name="wand" size="xs" />对象替换</button> : null}
       </div>
@@ -404,11 +378,12 @@ function GenPanel({ node }: { node: CanvasNode }) {
         </button>}
         <span className="grow" />
         {promptOnly ? null : <button className={"vp-audio tipT" + (vp.sound ? " on" : "")} data-p="vaudio" data-tip={vp.sound ? "音频：开" : "音频：关"} disabled={busy || !m?.audio} onClick={() => set({ sound: !vp.sound })}><Icon name="audio" size="s" /></button>}
+        <button className="vp-audio" data-p="presets" data-tip="预设提示词" title="预设提示词" aria-label="预设提示词" onClick={(e) => togglePromptPresets(ctl, node.id, e.currentTarget)}><AiContentGeneratorIcon size={14} /></button>
         <OptimizeButton node={node} draft={draft} setDraft={setDraft} className="vp-audio opt" />
         {promptOnly ? null : <button className="vp-times tnum" data-p="vtimes" disabled={busy || !m || (m.times || [1]).length < 2} onClick={(e) => paramPop(ctl, node, "vtimes", e.currentTarget)}>{videoTimesLabel(vp.times)}</button>}
         {run
           ? <button className="vp-send busy" data-p="stop" title="停止生成" onClick={() => stopNode(store, node.id)}><span className="sqr" /></button>
-          : <button className="vp-send" data-p="send" title={"生成 " + keyHint("promptSend")} onClick={send}><Icon name="send" size="s" /></button>}
+          : <button className="vp-send" data-p="send" title={"生成 " + keyHint("promptSend")} onClick={send}><AnimatedSendIcon size={16} /></button>}
       </div>
     </>;
   }
@@ -465,9 +440,9 @@ function GenPanel({ node }: { node: CanvasNode }) {
     <div className="gp-in">
       <button className={"sq tipT" + (pick === node.id ? " on" : "")} data-p="pick" data-tip="从画布选择输入" onClick={() => { const on = pick !== node.id; store.setUI({ pick: on ? node.id : null }); if (on) store.toast("点画布上的节点，把它连成这个节点的输入；Esc 结束"); }}><Icon name="cursor" size="s" /></button>
       {ins.map((x) => { const src = srcOf(x.node); return (
-        <button key={x.edge.id} className={"sq chip-in" + (src ? "" : " txt") + (ignored.has(x.edge.id) || unm.has(x.edge.id) ? " ignored" : "") + (unm.has(x.edge.id) ? " unref" : "")} data-chip={x.edge.id} title={unm.has(x.edge.id) ? `「${title(x.node)}」没有在提示词里 @ 引用，这次不会发送` : title(x.node)} draggable={false}
-          onPointerDown={(e) => onChipDown(e, x.edge.id)} onPointerEnter={() => store.setUI({ hlEdge: x.edge.id, hlNode: x.node.id })} onPointerLeave={() => store.setUI({ hlEdge: null, hlNode: null })}>
-          {src ? <ChipImg src={src} /> : <Icon name={x.node.kind === "table" ? "grid" : TYPE_ICON[x.node.kind as GenKind] || "layers"} size="s" />}
+        <button key={x.edge.id} className={"sq chip-in" + (src || (x.node.kind === "group" && displaySrc(doc.nodes, x.node)) ? "" : " txt") + (ignored.has(x.edge.id) || unm.has(x.edge.id) ? " ignored" : "") + (unm.has(x.edge.id) ? " unref" : "")} data-chip={x.edge.id} aria-label={unm.has(x.edge.id) ? `「${title(x.node)}」没有在提示词里 @ 引用，这次不会发送` : title(x.node)} draggable={false}
+          onPointerDown={(e) => { peekOff(); onChipDown(e, x.edge.id); }} onPointerEnter={(e) => { store.setUI({ hlEdge: x.edge.id, hlNode: x.node.id }); peekOn(x.node.id, e.currentTarget); }} onPointerLeave={() => { store.setUI({ hlEdge: null, hlNode: null }); peekOff(); }}>
+          {x.node.kind === "group" || x.node.kind === "video" ? <InputChipFace node={x.node} nodes={doc.nodes} /> : src ? <ChipImg src={src} /> : <Icon name={x.node.kind === "table" ? "grid" : TYPE_ICON[x.node.kind as GenKind] || "layers"} size="s" />}
           <span className="ord">{x.order + 1}</span>
           <span className="x" data-rm={x.edge.id} onPointerDown={(e) => { e.stopPropagation(); store.removeEdge(x.edge.id); afterInputsChanged(store, node.id); store.toast(`已移除输入「${title(x.node)}」`); }}><Icon name="x" size="xs" /></span>
         </button>); })}
@@ -478,6 +453,7 @@ function GenPanel({ node }: { node: CanvasNode }) {
       </>)}><Icon name="plus" size="s" /></button>
       <span className="grow" />
       <button className={"linkbtn" + (preview ? " on" : "")} data-p="preview" onClick={() => store.setUI({ preview: !preview })}><Icon name="text" size="xs" />请求预览</button>
+      {peekView}
     </div>
     <PromptEditor node={node} placeholder={ph} value={draft} onChange={onPrompt} onCommit={commitPrompt} onSend={send} onEscape={() => store.setUI({ sel: new Set(), pick: null })} onSlash={kind === "image" ? () => slashMenu(document.getElementById("gpPrompt") as HTMLElement) : undefined} />
     {tables.length ? <BatchPanel node={node} /> : null}
@@ -487,37 +463,19 @@ function GenPanel({ node }: { node: CanvasNode }) {
     <div className="gp-foot">
       {kind === "image" || kind === "text" ? <div className="gp-line" data-gline>{gline}</div> : null}
       {foot.length ? <div className={"gp-opts" + (fit ? " fit" : "")} ref={optsRef}>{foot}</div> : null}
-      {/* 动作区三个独立元素（不再用一个药丸包住耗时+发送）：同一中线、间距 8、发送不压药丸 */}
+      {/* 动作区四个独立元素（不再用一个药丸包住耗时+发送）：同一中线、间距 8、发送不压药丸 */}
       <div className="gp-act">
+        <button className="mic" data-p="presets" data-tip="预设提示词" title="预设提示词" aria-label="预设提示词" onClick={(e) => togglePromptPresets(ctl, node.id, e.currentTarget)}><AiContentGeneratorIcon size={14} /></button>
         <OptimizeButton node={node} draft={draft} setDraft={setDraft} className="mic opt" />
-        <button className={"mic" + (voicePhase === "recording" ? " rec" : "")} data-p="mic" data-voice-phase={voicePhase} aria-pressed={voicePhase === "recording"} disabled={voicePhase === "transcribing"} title={voicePhase === "recording" ? "结束并转写" : voicePhase === "transcribing" ? "正在转写…" : "语音输入"} onClick={() => void voice()}><Icon name="mic" size="s" /></button>
         {/* 没配模型时 est 为空：不渲染空药丸（否则看起来像没渲染完），也不占位 */}
         {est ? <span className="est tnum" title="预计耗时">{est}{m?.local ? " · 本机" : ""}</span> : null}
         {run ? <button className="send busy" data-p="stop" title="停止生成" onClick={() => stopNode(store, node.id)}><i className="ring"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9" /></svg></i><span className="sqr" /></button>
-          : <button className="send" data-p="send" title={"生成 " + keyHint("promptSend")} onClick={send}><Icon name="send" size="s" /></button>}
+          : <button className="send" data-p="send" title={"生成 " + keyHint("promptSend")} onClick={send}><AnimatedSendIcon size={16} /></button>}
       </div>
     </div>
     {kind === "image" && camOpen ? <CamLayer node={node} anchor={camRef.current} onClose={() => setCamOpen(false)} /> : null}
     {kind === "image" && styleOpen ? <StyleLayer node={node} onClose={() => setStyleOpen(false)} /> : null}
   </>;
-}
-
-/** 工具条「拆分图层」：自动 / 自定义两种拆法都打开同一个全屏编辑器（拆分本身不消耗积分） */
-function splitMenu(ctl: Ctl, id: string, anchor: Element) {
-  openPop(anchor, (close) => {
-    const fire = (mode: "auto" | "custom") => () => { close(); openSplitEditor(id, mode); };
-    return <>
-      <div className="mh">拆分图层</div>
-      <button className="mi" data-split-mode="auto" onClick={fire("auto")}>
-        <span className="ic"><Icon name="layers" size="s" /></span>
-        <span>自动拆分<span className="d">自动识别图层和文字，先出结果再调</span></span>
-      </button>
-      <button className="mi" data-split-mode="custom" onClick={fire("custom")}>
-        <span className="ic"><Icon name="crop" size="s" /></span>
-        <span>自定义拆分<span className="d">框选区域并描述，只拆你圈出的部分</span></span>
-      </button>
-    </>;
-  }, "up");
 }
 
 /**
@@ -701,9 +659,46 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
     const list = store.modelsOf(kind);
     const vendorOf = (x: ModelSpec) => x.vendor.trim() || "未命名供应商";
     const vendors = [...new Set(list.map(vendorOf))];
+    // 供应商 → 平台 id（fetch-models / 清单外模型都按平台 id 记）
+    const providerIdOf = (vendor: string) => { const hit = list.find((x) => vendorOf(x) === vendor); return hit ? String(hit.id).split("::")[0] : ""; };
+    // 「全部可用模型」：按平台现拉一份上游 /v1/models 目录；挑中的模型只记进本机的清单外清单，
+    // 设置里的模型清单一个字都不改（要改去设置 → 拉取模型），移除后自动回到设置里那一份
+    const showCatalog = (vendor: string) => {
+      const providerId = providerIdOf(vendor);
+      if (!providerId) return;
+      openModelCatalog({
+        anchor, providerId, providerName: vendor, kind, models: store.modelsOf(kind),
+        onBack: () => showModels(vendor),
+        onPick: (pick) => {
+          void (async () => {
+            await store.reloadModels();
+            if (pick.type === "remove") {
+              // 移除的正好是当前节点的模型：不能把节点留在一个已经不在清单里的 id 上
+              const live = store.node(node.id);
+              if (live && !store.modelOf(live)) {
+                const fallback = store.defaultModel(kind);
+                if (fallback) store.patchGen(node.id, (gg) => ({ params: clampParams(kind, gg.params, fallback) }));
+              }
+              return;
+            }
+            if (pick.kind !== kind) {
+              // 内置清单里两种节点都能加：加的是另一种节点才用得上的模型时，只入清单、不动当前节点
+              store.toast("已加入" + TYPE_LABEL[pick.kind] + "模型清单：" + pick.model + "，换到" + TYPE_LABEL[pick.kind] + "节点就能选");
+              return;
+            }
+            const spec = store.modelsOf(kind).find((x) => x.id === pick.provider + "::" + pick.model);
+            if (!spec) return;
+            store.rememberModel(kind, spec.id);
+            store.patchGen(node.id, (gg) => ({ params: clampParams(kind, gg.params, spec) }));
+            if (kind === "video") afterInputsChanged(store, node.id);
+          })();
+        },
+      });
+    };
     const showModels = (vendor: string) => openPop(anchor, (close) => <ComboMenu
       autoFocus
       empty={<span>{list.filter((x) => vendorOf(x) === vendor).length ? "没有匹配的模型" : "这个供应商还没有模型"}</span>}
+      footer={kind === "image" || kind === "video" ? <button className="mi" data-model-all onClick={() => showCatalog(vendor)}><Icon name="download" size="s" /><span style={{ flex: 1 }}>全部可用模型<span className="d">从 {vendor} 拉一份上游目录，只加进这台设备的可选清单</span></span></button> : undefined}
       header={<>
         <button className="mi" data-model-back aria-label="返回供应商列表" onClick={showProviders}><Icon name="left" size="s" /><span style={{ flex: 1 }}>{vendor}<span className="d">返回供应商列表</span></span></button>
         <div className="msep" />
@@ -713,7 +708,7 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
       items={list.filter((x) => vendorOf(x) === vendor)}
       label={(x) => x.name}
       onPick={(x) => { close(); store.rememberModel(kind, x.id); store.patchGen(node.id, (gg) => ({ params: clampParams(kind, gg.params, x) })); if (kind === "video") afterInputsChanged(store, node.id); }}
-      renderItem={(x) => <><VendorLogo name={x.vendor} model={x.name} size={14} /><span style={{ flex: 1 }}><span style={{ display: "flex", gap: 6, alignItems: "center" }}>{x.name}{x.tags.map((t) => <span key={t} className={"tag" + (t === "NEW" ? " new" : "")}>{t}</span>)}{x.specSource === "guess" ? <span className="tag" data-spec-source="guess" title="服务商没有提供该模型的参数规格，下面的比例 / 档位 / 选项是按模型名推断的，以实际生成为准">未验证</span> : null}</span>
+      renderItem={(x) => <><VendorLogo name={x.vendor} model={x.name} size={14} /><span style={{ flex: 1 }}><span style={{ display: "flex", gap: 6, alignItems: "center" }}>{x.name}{x.tags.map((t) => <span key={t} className={"tag" + (t === "NEW" ? " new" : "")}>{t}</span>)}{x.specSource === "guess" ? <span className="tag" data-spec-source="guess" title="服务商没有提供该模型的参数规格，下面的比例 / 档位 / 选项是按模型名推断的，以实际生成为准">未验证</span> : null}{x.extra ? <span className="tag" data-model-origin="extra" title="在这台设备的下拉里加的：设置里的模型清单没有它，删掉本地记录即还原">清单外</span> : x.unlisted ? <span className="tag" data-model-origin="builtin" title="后端有该模型的参数规格，但没登记进「设置 → API」的模型清单">内置</span> : null}</span>
         {kind === "video" ? <span className="mtags">{x.res?.length && !x.tags.some((t) => t.toLowerCase() === x.res![x.res!.length - 1].toLowerCase()) ? <span className="tag">{x.res[x.res.length - 1]}</span> : null}{x.durs?.length ? <span className="tag tnum">{videoDurationTagLabel(x.durs)}</span> : null}{x.audio ? <span className="tag"><Icon name="audio" size="xs" /></span> : null}<span className="tag">{(x.modes || []).length} 种方式</span></span> : null}
         <span className="d">{x.vendor}{kind === "image" ? ` · ${x.i2i ? "最多 " + x.maxRefs + " 张参考图" : "仅文生图"}` : kind === "video" ? "" : kind === "text" ? (x.vision ? " · 能读图" : " · 只读文字") : ""}{x.specSource === "guess" ? " · 参数按名字推断" : ""}</span></span></>}
       searchPlaceholder="搜索模型"

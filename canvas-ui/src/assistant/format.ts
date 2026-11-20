@@ -93,7 +93,7 @@ export const toolIconKey = (tool: string): string => {
 
 export interface DerivedRun {
 	texts: { id: string; text: string }[]
-	thinking: { id: string; text: string; durationMs: number } | null
+	thinking: { id: string; text: string; durationMs: number; streaming: boolean } | null
 	steps: Extract<Part, { type: "tool_event" }>[]
 	tools: Extract<Part, { type: "tool_event" }>[]
 	visions: Extract<Part, { type: "vision" }>[]
@@ -121,10 +121,11 @@ export const deriveRun = (message: Message): DerivedRun => {
 		if (part.type === "text") {
 			if (part.text.trim()) run.texts.push({ id: part.id, text: part.text })
 		} else if (part.type === "thinking") {
-			if (!run.thinking) run.thinking = { id: part.id, text: part.text, durationMs: part.totalDurationMs }
+			if (!run.thinking) run.thinking = { id: part.id, text: part.text, durationMs: part.totalDurationMs, streaming: Boolean(part.streaming) }
 			else {
 				run.thinking.text += part.text
 				run.thinking.durationMs += part.totalDurationMs
+				run.thinking.streaming = run.thinking.streaming || Boolean(part.streaming)
 			}
 		} else if (part.type === "tool_event") {
 			if (part.kind === "step") run.steps.push(part)
