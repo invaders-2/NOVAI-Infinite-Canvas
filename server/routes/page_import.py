@@ -201,10 +201,13 @@ def _private_host_allowlist() -> Tuple[str, ...]:
     return tuple(part.strip().lower() for part in raw.split(",") if part.strip())
 
 
-def split_public_url(raw: str) -> Tuple[str, str, Optional[int]]:
+def split_public_url(raw: str, allow_any_port: bool = False) -> Tuple[str, str, Optional[int]]:
     """同步校验 scheme/userinfo/端口/host 形态，返回 (normalized_url, host, port)。
 
     不做 DNS 解析，便于单测；DNS/IP 校验在 assert_public_url() 里。
+
+    allow_any_port 只给「素材/媒体下载」用：B 站这类 DASH 站的真实 CDN 跑在 4483/8082 上，
+    限死 80/443 会让整段直链都下不了。网页抓取必须保持默认 False（风险面不同）。
     """
     text = str(raw or "").strip()
     if not text:
@@ -222,7 +225,7 @@ def split_public_url(raw: str) -> Tuple[str, str, Optional[int]]:
     host = (parsed.hostname or "").strip().lower().rstrip(".")
     if not host:
         raise PageImportError("链接里没有有效域名", "unsafe_url")
-    if port not in (None, 80, 443) and host not in _private_host_allowlist():
+    if not allow_any_port and port not in (None, 80, 443) and host not in _private_host_allowlist():
         raise PageImportError("只允许访问 80/443 端口的公开链接", "unsafe_url")
     if not re.match(r"^[a-z0-9._:\[\]-]+$", host):
         raise PageImportError("链接域名不合法", "unsafe_url")
@@ -269,8 +272,8 @@ def _assert_ips_public(host: str, ips: List[str]) -> None:
             )
 
 
-async def assert_public_url(raw: str) -> Tuple[str, str, Optional[int]]:
-    normalized, host, port = split_public_url(raw)
+async def assert_public_url(raw: str, allow_any_port: bool = False) -> Tuple[str, str, Optional[int]]:
+    normalized, host, port = split_public_url(raw, allow_any_port=allow_any_port)
     # IP 字面量直接判定，避免多一次 DNS
     try:
         ipaddress.ip_address(host.strip("[]"))

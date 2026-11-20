@@ -4,10 +4,12 @@
 不联网：DNS 相关的用例只用 IP 字面量或直接调用 _assert_ips_public。
 跑法：venv/bin/python -m unittest tests.test_page_import -v
 """
+import asyncio
 import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -38,6 +40,40 @@ class UrlGuardTests(unittest.TestCase):
             self.assertEqual(normalized, url)
             self.assertTrue(host)
             self.assertIn(port, (None, 80, 443))
+
+    def test_allows_non_default_port_for_media_only(self):
+        # 素材下载（allow_any_port=True）：B 站 CDN 的 4483 / 8082 必须放行
+        for url in ("https://cdn.example.com:4483/a.m4s", "https://mcdn.bilivideo.cn:8082/v1/resource/x.m4s",
+                    "http://example.com:8443/a.mp4"):
+            normalized, host, port = pi.split_public_url(url, allow_any_port=True)
+            self.assertEqual(normalized, url)
+            self.assertTrue(host)
+            self.assertNotIn(port, (None, 80, 443))
+        # 网页抓取（默认 allow_any_port=False）不改风险面：非标端口照样拒绝
+        for url in ("http://example.com:8080/a", "https://example.com:8443/a", "http://example.com:22/"):
+            with self.assertRaises(pi.PageImportError) as ctx:
+                pi.split_public_url(url)
+            self.assertEqual(ctx.exception.code, "unsafe_url")
+
+    def test_assert_public_url_any_port_keeps_private_blocks(self):
+        # 端口放开不等于内网放开：IP 字面量 + 解析到私网的域名都还要拒绝
+        for url in ("http://127.0.0.1:4483/a.m4s", "http://10.0.0.5:8082/a.m4s",
+                    "http://169.254.169.254:4483/latest/meta-data", "http://[::1]:4483/a.m4s",
+                    "http://192.168.1.7:4483/a.m4s"):
+            with self.assertRaises(pi.PageImportError) as ctx:
+                asyncio.run(pi.assert_public_url(url, allow_any_port=True))
+            self.assertEqual(ctx.exception.code, "unsafe_url", url)
+        with patch.object(pi, "_resolved_ips", return_value=["8.8.8.8"]):
+            normalized, _host, port = asyncio.run(pi.assert_public_url("https://cdn.example.com:4483/a.m4s", allow_any_port=True))
+            self.assertEqual(port, 4483)
+            with self.assertRaises(pi.PageImportError):
+                asyncio.run(pi.assert_public_url("https://cdn.example.com:4483/a.m4s"))
+        # localhost / 域名解析到私网：仍然拒绝
+        with patch.object(pi, "_resolved_ips", return_value=["127.0.0.1"]):
+            for host in ("localhost", "internal.example"):
+                with self.assertRaises(pi.PageImportError) as ctx:
+                    asyncio.run(pi.assert_public_url("http://" + host + ":4483/a.m4s", allow_any_port=True))
+                self.assertEqual(ctx.exception.code, "unsafe_url")
 
     def test_rejects_missing_host(self):
         with self.assertRaises(pi.PageImportError) as ctx:

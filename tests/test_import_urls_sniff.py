@@ -114,9 +114,10 @@ class FakeResponse:
 
 class FakeAsyncClient:
     response = None
+    last_kwargs = None
 
     def __init__(self, *args, **kwargs):
-        pass
+        type(self).last_kwargs = kwargs
 
     async def __aenter__(self):
         return self
@@ -169,6 +170,34 @@ class ImportUrlsEndpointTests(unittest.TestCase):
         )
         with patch.object(assets_routes.httpx, "AsyncClient", FakeAsyncClient):
             return asyncio.run(assets_routes.import_local_assets_from_urls(payload))
+
+    def test_referer_header_passed_through(self):
+        # B 站 443/4483 的 CDN 无 Referer 直接 403：请求体里的 referer 必须落到下载请求头上
+        FakeAsyncClient.response = FakeResponse(MP4_BYTES, "video/mp4")
+        payload = assets_routes.LocalAssetUrlImportRequest(
+            items=[assets_routes.LocalAssetUrlImportItem(url="https://h2i438c.edge.mountaintoys.cn:4483/x.mp4")],
+            referer="https://www.bilibili.com/video/BV1GJ411x7h7/",
+        )
+        with patch.object(assets_routes.httpx, "AsyncClient", FakeAsyncClient):
+            data = asyncio.run(assets_routes.import_local_assets_from_urls(payload))
+        self.assertTrue(data["items"][0]["ok"], data)
+        headers = FakeAsyncClient.last_kwargs["headers"]
+        self.assertEqual(headers["Referer"], "https://www.bilibili.com/video/BV1GJ411x7h7/")
+        self.assertIn("Infinite-Canvas-Asset-Importer", headers["User-Agent"])
+
+    def test_page_url_used_as_referer_and_absent_by_default(self):
+        FakeAsyncClient.response = FakeResponse(MP4_BYTES, "video/mp4")
+        with patch.object(assets_routes.httpx, "AsyncClient", FakeAsyncClient):
+            asyncio.run(assets_routes.import_local_assets_from_urls(assets_routes.LocalAssetUrlImportRequest(
+                items=[assets_routes.LocalAssetUrlImportItem(url="https://cdn.example.com/a.mp4")],
+                page_url="https://www.bilibili.com/video/BV1GJ411x7h7/",
+            )))
+        self.assertEqual(FakeAsyncClient.last_kwargs["headers"]["Referer"], "https://www.bilibili.com/video/BV1GJ411x7h7/")
+        with patch.object(assets_routes.httpx, "AsyncClient", FakeAsyncClient):
+            asyncio.run(assets_routes.import_local_assets_from_urls(assets_routes.LocalAssetUrlImportRequest(
+                items=[assets_routes.LocalAssetUrlImportItem(url="https://cdn.example.com/a.mp4")],
+            )))
+        self.assertNotIn("Referer", FakeAsyncClient.last_kwargs["headers"], "没传 referer 时不发 Referer（行为向后兼容）")
 
     def test_octet_stream_jpeg_saved_ok(self):
         FakeAsyncClient.response = FakeResponse(JPEG_BYTES, "application/octet-stream")

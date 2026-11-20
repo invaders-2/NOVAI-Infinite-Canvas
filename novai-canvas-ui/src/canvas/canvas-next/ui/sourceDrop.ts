@@ -263,12 +263,105 @@ const FMP4_TIMELINE_TIMEOUT_MS = 1500;
 /** 一次拼接最多带多少段：前端与后端上限（600）对齐，这里再收一道，防止桥返回一整页历史 */
 const FMP4_MAX_SEGMENTS = 600;
 
-/** 主进程给的「init + 有序分片」清单（浏览器模式下没有桥，返回 null） */
-type Fmp4Timeline = { init: string; segments: string[]; referer: string; pageUrl: string };
+/** 主进程给的一条「URL + 字节区间」：range 为空表示整个文件（直链 mp4 / 老桥） */
+type Fmp4TimelineItem = { url: string; range: string; contentType: string; ts: number; isInit: boolean };
+/** 分片清单：items 带 Range（DASH 的 init 是同一 URL 的前几个字节），没有桥时返回 null */
+type Fmp4Timeline = { items: Fmp4TimelineItem[]; init: string; segments: string[]; referer: string; pageUrl: string };
+
+type ByteRange = { start: number; end: number };
 
 function httpUrls(value: unknown): string[] {
   const list = Array.isArray(value) ? value : [];
   return unique(list.map((item) => String(item || "").trim()).filter((url) => /^https?:\/\//i.test(url)));
+}
+
+/** 只认闭区间：bytes=0-1011 / 0-1011 都归一成 {start, end}，开区间没法校验长度 */
+function parseByteRange(value: string): ByteRange | null {
+  const match = /^(?:bytes=)?(\d+)-(\d+)$/i.exec(String(value || "").trim());
+  if (!match) return null;
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
+  return { start, end };
+}
+
+function byteRangeSize(item: Fmp4TimelineItem): number {
+  const range = parseByteRange(item.range);
+  return range ? range.end - range.start + 1 : 0;
+}
+
+/** 桥返回的 items 归一：只留 http(s)，range 统一成 "start-end" */
+function timelineItems(value: unknown): Fmp4TimelineItem[] {
+  const list = Array.isArray(value) ? value : [];
+  const out: Fmp4TimelineItem[] = [];
+  for (const raw of list) {
+    const row = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const url = String(row.url || "").trim();
+    if (!/^https?:\/\//i.test(url)) continue;
+    const range = parseByteRange(String(row.range || ""));
+    out.push({
+      url,
+      range: range ? String(range.start) + "-" + String(range.end) : "",
+      contentType: String(row.contentType || "").trim(),
+      ts: Number(row.ts) || 0,
+      isInit: row.isInit === true,
+    });
+  }
+  return out;
+}
+
+/**
+ * 按 URL 分组挑一组 range：分片是「那一个文件」里的字节偏移，跨 URL 混拼必然拼出坏文件。
+ * 优先有 init（range 从 0 开始）的组，其次抓到的字节最多的一组（B 站视频轨通常比音频轨大）。
+ * 顺序：init 在前，其余按 range 起点升序（同起点按终点降序），对齐后端「第一段必须是 init」。
+ */
+function rangedItems(entries: Fmp4TimelineItem[]): Fmp4TimelineItem[] | null {
+  const groups = new Map<string, Fmp4TimelineItem[]>();
+  for (const entry of entries) {
+    if (!entry.range) continue;
+    const list = groups.get(entry.url);
+    if (list) list.push(entry);
+    else groups.set(entry.url, [entry]);
+  }
+  let best: Fmp4TimelineItem[] | null = null;
+  let bestBytes = -1;
+  let bestCount = -1;
+  for (const list of groups.values()) {
+    const init = list.find((entry) => {
+      const range = parseByteRange(entry.range);
+      return entry.isInit && !!range && range.start === 0;
+    });
+    if (!init) continue;
+    const rest = list.filter((entry) => entry !== init).sort((a, b) => {
+      const left = parseByteRange(a.range);
+      const right = parseByteRange(b.range);
+      return (left ? left.start : 0) - (right ? right.start : 0) || (right ? right.end : 0) - (left ? left.end : 0);
+    });
+    const ordered: Fmp4TimelineItem[] = [];
+    const seen = new Set<string>();
+    for (const entry of [init, ...rest]) {
+      const key = entry.url + "|" + entry.range;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      ordered.push(entry);
+    }
+    const bytes = ordered.reduce((sum, entry) => sum + byteRangeSize(entry), 0);
+    if (bytes > bestBytes || (bytes === bestBytes && ordered.length > bestCount)) {
+      best = ordered;
+      bestBytes = bytes;
+      bestCount = ordered.length;
+    }
+  }
+  return best;
+}
+
+/** 老桥只给 init + 分片地址（没有 Range）：按顺序拼，兼容旧桌面端 */
+function legacyItems(row: Record<string, unknown>): Fmp4TimelineItem[] | null {
+  const init = String(row.init || httpUrls(row.initSegments).pop() || "").trim();
+  const segments = httpUrls(row.segments).slice(0, FMP4_MAX_SEGMENTS);
+  if (!/^https?:\/\//i.test(init) || !segments.length) return null;
+  const toItem = (url: string): Fmp4TimelineItem => ({ url, range: "", contentType: "", ts: 0, isInit: false });
+  return [toItem(init), ...segments.map(toItem)];
 }
 
 async function fmp4Timeline(pageUrlHint: string): Promise<Fmp4Timeline | null> {
@@ -290,23 +383,43 @@ async function fmp4Timeline(pageUrlHint: string): Promise<Fmp4Timeline | null> {
     console.info("[sourceDrop] 取 fMP4 分片清单失败：" + String(row.error || "桥无响应"));
     return null;
   }
-  // 列表本身可能是有序的（items 按 ts 排序），没有 init 就拼不出来
-  const init = String(row.init || httpUrls(row.initSegments).pop() || "").trim();
-  const segments = httpUrls(row.segments).slice(0, FMP4_MAX_SEGMENTS);
-  if (!/^https?:\/\//i.test(init)) {
-    console.info("[sourceDrop] 分片清单里没有 init 段（没抓全）");
+  // DASH：同一 URL 的 init + 后续 range 才拼得起来；没有带 range 的条目时退回老桥的 init / 分片
+  const ranged = rangedItems(timelineItems(row.items));
+  let items: Fmp4TimelineItem[] | null = ranged && ranged.length > 1 ? ranged : null;
+  if (!items) items = legacyItems(row);
+  if (!items || items.length < 2) {
+    console.info("[sourceDrop] 分片清单里没有可拼接的 init + 分片（没抓全）");
     return null;
   }
-  if (!segments.length) {
-    console.info("[sourceDrop] 分片清单里没有分片（没抓全）");
-    return null;
-  }
+  const capped = items.slice(0, FMP4_MAX_SEGMENTS);
   return {
-    init,
-    segments,
+    items: capped,
+    init: capped[0].url,
+    segments: capped.slice(1).map((item) => item.url),
     referer: String(row.referer || "").trim(),
     pageUrl: String(row.pageUrl || pageUrlHint || "").trim(),
   };
+}
+
+/**
+ * 整段捷径：DASH 的 baseUrl 本身就是「一整条可播 fMP4」（B 站实测 ffprobe 852x480 / 212s），
+ * 没有 init 清单 / 只抓到一条分片时，直接整段 GET 下来当视频导入，比勉强拼半截更靠谱。
+ * 真·裸分片（styp 开头）后端会自己拒掉，这里失败就退回引导。
+ */
+async function importWholeSegments(store: CanvasStore, at: { x: number; y: number }, urls: string[], pageUrl: string, failed: string[]): Promise<boolean> {
+  for (const url of urls.slice(0, MAX_FALLBACKS)) {
+    try {
+      const result = await importUrls([url], pageUrl);
+      failed.push(...result.failed);
+      if (result.rows.length && await placeImported(store, at, result.rows)) {
+        console.info("[sourceDrop] 整段下载成功（这条分片地址本身就是一整条 fMP4）：" + url.slice(0, 120));
+        return true;
+      }
+    } catch (error) {
+      failed.push("整段下载：" + messageOf(error));
+    }
+  }
+  return false;
 }
 
 /** 分片拼接落节点：成功返回 true；没清单 / 没抓全 / 后端失败都返回 false，交给引导提示 */
@@ -316,7 +429,7 @@ async function stitchFmp4(store: CanvasStore, at: { x: number; y: number }, page
   try {
     const result = await importFmp4(timeline, "在线视频");
     if (result.rows.length && await placeImported(store, at, result.rows)) {
-      console.info("[sourceDrop] fMP4 分片拼接成功：" + timeline.segments.length + " 段");
+      console.info("[sourceDrop] fMP4 分片拼接成功：" + timeline.items.length + " 段");
       return true;
     }
     console.info("[sourceDrop] fMP4 拼接没落成节点：" + (result.failed.slice(0, 2).join("；") || "接口没有回素材"));
@@ -384,14 +497,18 @@ function errorOf(data: unknown, status: number): string {
   return "请求失败（HTTP " + status + "）";
 }
 
-/** 素材 → 本机素材文件；沿用旧版智能画布的 import-urls 报文，逐条回报成功 / 失败原因 */
-async function importItems(items: ImportItem[]): Promise<{ rows: ImportedRow[]; failed: string[] }> {
+/**
+ * 素材 → 本机素材文件；沿用旧版智能画布的 import-urls 报文，逐条回报成功 / 失败原因。
+ * referer 会作为下载请求的 Referer：B 站 CDN（443/4483）无 Referer 直接 403。
+ */
+async function importItems(items: ImportItem[], referer = ""): Promise<{ rows: ImportedRow[]; failed: string[] }> {
   let response: Response;
+  const page = /^https?:\/\//i.test(referer) ? referer : "";
   try {
     response = await fetch("/api/local-assets/import-urls", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
+      body: JSON.stringify(page ? { items, referer: page } : { items }),
     });
   } catch (error) {
     throw new Error("连不上本地服务：" + messageOf(error));
@@ -435,8 +552,9 @@ async function importFmp4(timeline: Fmp4Timeline, name: string): Promise<{ rows:
     response = await fetch("/api/local-assets/import-fmp4", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      // items 带 range：DASH 的 init 与后续分片是同一个 URL 的不同字节区间
       body: JSON.stringify({
-        urls: [timeline.init, ...timeline.segments],
+        items: timeline.items.map((item) => ({ url: item.url, range: item.range })),
         referer: timeline.referer,
         pageUrl: timeline.pageUrl,
         name,
@@ -451,8 +569,8 @@ async function importFmp4(timeline: Fmp4Timeline, name: string): Promise<{ rows:
 }
 
 /** URL 版：只有地址可交（浏览器模式 / 字节通道不可用时） */
-function importUrls(urls: string[]): Promise<{ rows: ImportedRow[]; failed: string[] }> {
-  return importItems(urls.map((url) => ({ url })));
+function importUrls(urls: string[], referer = ""): Promise<{ rows: ImportedRow[]; failed: string[] }> {
+  return importItems(urls.map((url) => ({ url })), referer);
 }
 
 type ChannelOutcome = { rows: ImportedRow[]; failed: string[]; reasons: string[] };
@@ -518,9 +636,9 @@ async function importFetched(url: string, fetched: FetchedBytes): Promise<Channe
   }
 }
 
-async function importChannel(urls: string[]): Promise<ChannelOutcome> {
+async function importChannel(urls: string[], referer = ""): Promise<ChannelOutcome> {
   try {
-    const result = await importUrls(urls);
+    const result = await importUrls(urls, referer);
     return { rows: result.rows, failed: result.failed, reasons: [] };
   } catch (error) {
     return { rows: [], failed: [], reasons: ["地址下载：" + messageOf(error)] };
@@ -624,10 +742,16 @@ export async function dropSourceUrls(store: CanvasStore, at: { x: number; y: num
   // 原生视图起拖的素材，iframe 有时只拿得到空载荷；载荷给的是「页面地址 / 缩略图地址」时同理。
   // 两种情况都要和主进程记下的那次拖拽合并（旧画布的 mergeGuestDropPayload），否则页面地址被过滤后
   // 明明主进程抓到了真视频，却直接报「拖的是页面不是素材」。
-  if (!urls.length || urls.every(isPageLikeUrl)) {
+  const fromBridge = !urls.length || urls.every(isPageLikeUrl);
+  if (fromBridge) {
     drag = await guestDragInfo();
     urls = unique([...urls, ...drag.http]);
     blobs = unique([...blobs, ...drag.blobs]);
+  } else {
+    // 直拖媒体真链（uri-list 里就是 CDN 地址）时也要拿到页面地址：防盗链靠它做 Referer
+    // （B 站 443/4483 的 CDN 无 Referer 直接 403），候选地址仍以载荷里的为准。
+    const bridge = await guestDragInfo();
+    drag = { http: [], blobs: [], video: bridge.video, pageUrl: bridge.pageUrl };
   }
   const videoIntent = drag.video || blobs.length > 0;
   // 页面地址（小红书笔记页 / Pinterest 图钉页）不是素材本身；HLS 播放列表下不了整段
@@ -668,6 +792,9 @@ export async function dropSourceUrls(store: CanvasStore, at: { x: number; y: num
   // 拼不了（没抓全 init / 桥没开）才退回可操作引导，而不是直接把分片当整段导入。
   if (urls.length && urls.every((url) => isFragmentUrl(url))) {
     if (await stitchFmp4(store, at, drag.pageUrl)) return;
+    // 拼不了（没有 init 清单 / 没抓全）时还有一条真实站点的捷径：整段 GET 这条分片地址
+    store.toast("正在整段下载素材…");
+    if (await importWholeSegments(store, at, urls, drag.pageUrl, failed)) return;
     console.info("[sourceDrop] 只拿到视频分片、没有可拼接的清单，已跳过导入并退回引导：" + urls.join(" "));
     store.toast(FRAGMENT_GUIDE_TEXT, 12000);
     return;
@@ -691,7 +818,7 @@ export async function dropSourceUrls(store: CanvasStore, at: { x: number; y: num
     } else if (bytes.reason) bytesFailure = "字节通道：" + bytes.reason;
 
     if (!placed) {
-      const channel = await importChannel(urls);
+      const channel = await importChannel(urls, drag.pageUrl);
       placed = await placeImported(store, at, channel.rows);
       failed.push(...channel.failed, ...channel.reasons);
       if (!placed) placed = await importFallbacks(store, at, urls, drag.pageUrl, failed);
@@ -707,6 +834,8 @@ export async function dropSourceUrls(store: CanvasStore, at: { x: number; y: num
     // URL 上没有后缀的分片真链，只能等后端认出来：这时同样先试拼接，拼不了再给可操作引导
     if (all.some((text) => text.indexOf("视频分片") >= 0)) {
       if (await stitchFmp4(store, at, drag.pageUrl)) return;
+      store.toast("正在整段下载素材…");
+      if (await importWholeSegments(store, at, urls, drag.pageUrl, failed)) return;
       console.info("[sourceDrop] 后端认出视频分片且没拼成，已退回引导：" + urls.join(" "));
       store.toast(FRAGMENT_GUIDE_TEXT, 12000);
       return;

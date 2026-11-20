@@ -138,11 +138,23 @@ class LocalAssetUrlImportItem(BaseModel):
 class LocalAssetUrlImportRequest(BaseModel):
     items: List[LocalAssetUrlImportItem] = []
     folder: str = ""
+    # 素材站的 CDN 多数按 Referer 做防盗链（B 站 443/4483 主机无 Referer 直接 403），可选带上
+    referer: str = ""
+    page_url: str = ""
+    pageUrl: str = ""
+
+
+class LocalAssetFmp4ImportItem(BaseModel):
+    url: str = ""
+    # DASH 的 init 常常是同一 URL 的前几个字节（B 站 playurl: segment_base.initialization = "0-1011"）
+    range: str = ""
 
 
 class LocalAssetFmp4ImportRequest(BaseModel):
-    # 桌面端采集到的顺序：urls[0] = init 段，其后 = 播放窗口里抓到的有序分片
+    # 旧报文：桌面端采集到的顺序，urls[0] = init 段，其后 = 播放窗口里抓到的有序分片
     urls: List[str] = []
+    # 新报文：带字节区间，同一 URL 可出现多次（init + 后续分片）；两者都给时以 items 为准
+    items: List[LocalAssetFmp4ImportItem] = []
     referer: str = ""
     page_url: str = ""
     pageUrl: str = ""
@@ -367,12 +379,57 @@ def _is_fmp4_init_segment(head):
     return len(head) >= 12 and head[4:8] == b"ftyp"
 
 
+_FMP4_RANGE_RE = re.compile(r"^\s*(\d+)\s*-\s*(\d+)\s*$")
+
+
+def _parse_fmp4_range(value):
+    """把 "0-1011" 解析成 (0, 1011)；空或非法返回 None（调用方按非法报错）。"""
+    match = _FMP4_RANGE_RE.match(str(value or ""))
+    if not match:
+        return None
+    start, end = int(match.group(1)), int(match.group(2))
+    return (start, end) if end >= start else None
+
+
+def _fmp4_request_specs(payload):
+    """旧 urls / 新 items 归一成 [{url, range, bounds}]，按 (url, range) 去重并保序。
+
+    去重必须带 range：DASH 的 init 与后续分片是同一个 URL 的不同字节区间，
+    只按 URL 去重会把 init 之后的分片全当重复丢掉。
+    """
+    raw = []
+    items = getattr(payload, "items", None) or []
+    if items:
+        for entry in items:
+            raw.append((str(getattr(entry, "url", "") or "").strip(), str(getattr(entry, "range", "") or "").strip()))
+    else:
+        for url in getattr(payload, "urls", None) or []:
+            raw.append((str(url or "").strip(), ""))
+    specs = []
+    seen = set()
+    for url, range_text in raw:
+        if not url or (url, range_text) in seen:
+            continue
+        seen.add((url, range_text))
+        bounds = None
+        if range_text:
+            bounds = _parse_fmp4_range(range_text)
+            if bounds is None:
+                raise HTTPException(status_code=400, detail=f"第 {len(specs) + 1} 段 range 不合法：{range_text[:40]}（应形如 0-1011）")
+        specs.append({"url": url, "range": range_text, "bounds": bounds})
+    return specs
+
+
 async def _assert_public_fmp4_url(url, index):
-    """沿用 page_import 的 SSRF 校验（只放行公网 http(s)、80/443）；失败带段号。"""
+    """沿用 page_import 的 SSRF 校验（放行公网 http(s)、任意端口）；失败带段号。
+
+    素材 CDN 常跑在非标准端口（B 站 4483 / 8082），端口不参与安全判定：
+    真正的拦截是「解析结果必须是公网地址」，私网 / 本机 / 元数据地址照样拒绝。
+    """
     from server.routes.page_import import PageImportError, assert_public_url
 
     try:
-        await assert_public_url(url)
+        await assert_public_url(url, allow_any_port=True)
     except PageImportError as exc:
         raise HTTPException(status_code=400, detail=f"第 {index} 段地址不允许访问：{exc.message}")
     except Exception as exc:
@@ -455,7 +512,11 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
     folder_rel, folder_abs = deps._local_upload_safe_folder(payload.folder)
     os.makedirs(folder_abs, exist_ok=True)
     timeout = httpx.Timeout(connect=20.0, read=120.0, write=30.0, pool=20.0)
-    async with httpx.AsyncClient(http2=False, verify=deps._SSL_CONTEXT, trust_env=deps._TRUST_ENV, timeout=timeout, follow_redirects=True, headers={"User-Agent": "Infinite-Canvas-Asset-Importer/1.0"}) as client:
+    headers = {"User-Agent": "Infinite-Canvas-Asset-Importer/1.0"}
+    referer = str(payload.referer or "").strip() or str(payload.page_url or payload.pageUrl or "").strip()
+    if referer.startswith(("http://", "https://")):
+        headers["Referer"] = referer
+    async with httpx.AsyncClient(http2=False, verify=deps._SSL_CONTEXT, trust_env=deps._TRUST_ENV, timeout=timeout, follow_redirects=True, headers=headers) as client:
         for entry in (payload.items or [])[:200]:
             src_url = str(entry.url or "").strip()
             inline_data = str(entry.data or "").strip()
@@ -543,47 +604,68 @@ async def import_local_assets_from_fmp4(payload: LocalAssetFmp4ImportRequest):
 
     站点只给 fMP4 分片时，单段 .m4s 打不开；桌面端负责「有哪些段、顺序、Referer」，
     下载与拼接走这里（签名地址通常不带 cookie 也能下），主进程不传 base64。
+
+    报文两种：旧 urls（每条一个地址）与带字节区间的 items（[{url, range}]）。
+    DASH 站的 init 常是同一 URL 的前几个字节（Range: bytes=0-1011），所以去重按 (url, range)。
     """
     if deps.local_output_readonly_name(payload.folder):
         raise HTTPException(status_code=403, detail="「画布生成」是只读目录：生成物由画布产出，不能往里导入")
-    urls = [str(item or "").strip() for item in (payload.urls or []) if str(item or "").strip()]
-    if not urls:
+    specs = _fmp4_request_specs(payload)
+    if not specs:
         raise HTTPException(status_code=400, detail="没有可拼接的分片地址：需要 init 段 + 至少一段分片")
-    if len(urls) > _FMP4_MAX_SEGMENTS:
-        raise HTTPException(status_code=400, detail=f"分片太多：{len(urls)} 段，上限 {_FMP4_MAX_SEGMENTS} 段")
-    for index, url in enumerate(urls, start=1):
-        if not url.startswith(("http://", "https://")):
-            raise HTTPException(status_code=400, detail=f"第 {index} 段不是 http(s) 地址：{url[:120]}")
-        await _assert_public_fmp4_url(url, index)
+    if len(specs) > _FMP4_MAX_SEGMENTS:
+        raise HTTPException(status_code=400, detail=f"分片太多：{len(specs)} 段，上限 {_FMP4_MAX_SEGMENTS} 段")
+    lead = specs[0]
+    if lead["bounds"] is not None and lead["bounds"][0] != 0:
+        raise HTTPException(status_code=400, detail="第一段不是 init 段：拼接要按 init → 分片的顺序传（init 的 range 从 0 开始）")
+    for index, spec in enumerate(specs, start=1):
+        if not spec["url"].startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail=f"第 {index} 段不是 http(s) 地址：{spec['url'][:120]}")
+        await _assert_public_fmp4_url(spec["url"], index)
 
     referer = str(payload.referer or "").strip() or str(payload.page_url or payload.pageUrl or "").strip()
     headers = {"User-Agent": _FMP4_BROWSER_UA, "Accept": "video/*,*/*;q=0.8"}
     if referer.startswith(("http://", "https://")):
         headers["Referer"] = referer
 
+    # 只有一条且没有 range：本身就是整段（普通 mp4 直链 / B 站 DASH 的 baseUrl 整轨），头是 ftyp 就直存
+    whole_file = len(specs) == 1 and specs[0]["bounds"] is None
     timeout = httpx.Timeout(connect=20.0, read=120.0, write=30.0, pool=20.0)
     chunks: List[bytes] = []
     total = 0
     async with httpx.AsyncClient(http2=False, verify=deps._SSL_CONTEXT, trust_env=deps._TRUST_ENV, timeout=timeout, follow_redirects=True, headers=headers) as client:
-        for index, url in enumerate(urls, start=1):
+        for index, spec in enumerate(specs, start=1):
+            request_headers = dict(headers)
+            expected = None
+            if spec["bounds"] is not None:
+                start, end = spec["bounds"]
+                expected = end - start + 1
+                request_headers["Range"] = f"bytes={start}-{end}"
             try:
-                response = await client.get(url)
-                response.raise_for_status()
+                response = await client.get(spec["url"], headers=request_headers)
             except httpx.HTTPStatusError as exc:
                 status = getattr(getattr(exc, "response", None), "status_code", 0) or 0
                 raise HTTPException(status_code=400, detail=f"第 {index} 段下载失败：HTTP {status}")
             except Exception as exc:
                 detail = str(exc).strip()
                 raise HTTPException(status_code=400, detail=f"第 {index} 段下载失败：{type(exc).__name__}{' ' + detail if detail else ''}"[:300])
+            status = int(getattr(response, "status_code", 0) or 0)
+            if status >= 400:
+                raise HTTPException(status_code=400, detail=f"第 {index} 段下载失败：HTTP {status}")
             content = response.content or b""
             if not content:
                 raise HTTPException(status_code=400, detail=f"第 {index} 段内容为空")
+            if expected is not None and len(content) != expected:
+                if status == 200:
+                    raise HTTPException(status_code=400, detail=f"第 {index} 段没按 Range 返回：HTTP 200 给回 {len(content)} 字节，期望 {expected} 字节")
+                raise HTTPException(status_code=400, detail=f"第 {index} 段 Range 长度不符：期望 {expected} 字节，实际 {len(content)} 字节")
             head = content[:_MEDIA_SNIFF_BYTES]
             if index == 1:
                 if not _is_fmp4_init_segment(head):
                     raise HTTPException(status_code=400, detail=_FMP4_INIT_ERROR)
             elif _is_fmp4_init_segment(head):
-                # init 段重复出现（同一地址被采集两次）时跳过，两张 ftyp 连排会拼出放不出来的文件
+                # init 段重复出现（同一地址被采集两次 / 同一 URL 两个 0 起点 range）时跳过：
+                # 两张 ftyp 连排会拼出放不出来的文件
                 continue
             total += len(content)
             if total > _FMP4_MAX_TOTAL_BYTES:
@@ -593,10 +675,10 @@ async def import_local_assets_from_fmp4(payload: LocalAssetFmp4ImportRequest):
                 )
             chunks.append(content)
 
-    if len(chunks) < 2:
+    if not whole_file and len(chunks) < 2:
         raise HTTPException(status_code=400, detail="只拿到 init 段，没有分片：在面板里播一遍再拖")
     content = b"".join(chunks)
-    # 拼接产物以 ftyp 开头：这里按魔数确认是视频，再落盘（分片守卫不参与，它挡的是单段 .m4s）
+    # 产物以 ftyp 开头：这里按魔数确认是视频，再落盘（分片守卫不参与，它挡的是单段 .m4s）
     sniffed = _sniff_media_ext(content[:_MEDIA_SNIFF_BYTES])
     if not sniffed or sniffed[0] != "video":
         raise HTTPException(status_code=400, detail="拼接结果不是可识别的视频（init 段可能不是 fMP4）")
@@ -616,9 +698,10 @@ async def import_local_assets_from_fmp4(payload: LocalAssetFmp4ImportRequest):
         "ok": True,
         "count": 1,
         "files": [item],
-        "items": [{"url": urls[0], "ok": True, "file": rel_name, "item": item}],
+        "items": [{"url": specs[0]["url"], "ok": True, "file": rel_name, "item": item}],
         "segments": len(chunks),
         "bytes": total,
+        "whole_file": whole_file,
         "referer": headers.get("Referer", ""),
     }
 

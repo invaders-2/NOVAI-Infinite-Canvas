@@ -13,6 +13,7 @@
 """
 import asyncio
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -61,12 +62,16 @@ class FakeAsyncClient:
     async def __aexit__(self, *exc_info):
         return False
 
-    async def get(self, url):
-        type(self).calls.append({"url": url, "headers": dict(self.headers)})
-        response = type(self).routes.get(url)
-        if response is None:
+    async def get(self, url, headers=None):
+        merged = dict(self.headers)
+        merged.update(headers or {})
+        type(self).calls.append({"url": url, "headers": merged, "range": merged.get("Range", "")})
+        route = type(self).routes.get(url)
+        if route is None:
             return FakeResponse(b"", status_code=404)
-        return response
+        if callable(route):
+            return route(merged)
+        return route
 
 
 class ImportFmp4Tests(unittest.TestCase):
@@ -115,12 +120,25 @@ class ImportFmp4Tests(unittest.TestCase):
             "kind": "video",
         }
 
-    def _run(self, urls, referer="", page_url="", name=""):
-        payload = assets_routes.LocalAssetFmp4ImportRequest(urls=urls, referer=referer, page_url=page_url, name=name)
+    def _run(self, urls=None, items=None, referer="", page_url="", name=""):
+        payload = assets_routes.LocalAssetFmp4ImportRequest(
+            urls=urls or [], items=items or [], referer=referer, page_url=page_url, name=name
+        )
         return asyncio.run(assets_routes.import_local_assets_from_fmp4(payload))
 
     def _bind_routes(self, mapping):
         FakeAsyncClient.routes = dict(mapping)
+
+    @staticmethod
+    def _serve_ranges(file_bytes):
+        """按请求头 Range 返回字节区间（模拟 CDN 的 206）。"""
+        def serve(headers):
+            match = re.match(r"^bytes=(\d+)-(\d+)$", headers.get("Range", ""))
+            if not match:
+                return FakeResponse(file_bytes, status_code=200)
+            start, end = int(match.group(1)), int(match.group(2))
+            return FakeResponse(file_bytes[start:end + 1], status_code=206)
+        return serve
 
     def test_stitch_order_and_file(self):
         urls = [
@@ -240,12 +258,152 @@ class ImportFmp4Tests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertIn("没有可拼接的分片地址", ctx.exception.detail)
 
-    def test_init_only_rejected(self):
-        urls = ["https://cdn.example.com/init.mp4"]
-        self._bind_routes({urls[0]: FakeResponse(INIT_BYTES)})
+    def test_single_fragment_url_rejected(self):
+        urls = ["https://cdn.example.com/seg_000.m4s"]
+        self._bind_routes({urls[0]: FakeResponse(SEG1_BYTES, content_type="video/iso.segment")})
         with self.assertRaises(assets_routes.HTTPException) as ctx:
             self._run(urls)
-        self.assertIn("没有分片", ctx.exception.detail)
+        self.assertIn("不是 init 段", ctx.exception.detail)
+
+    def test_whole_file_single_url_takes_shortcut(self):
+        # B 站 fnval=1 的 durl 整段直链 / DASH 的 baseUrl 整轨：一条、无 range、ftyp 开头 → 直存不拼接
+        url = "https://h2i438c.edge.mountaintoys.cn:4483/upgcxcode/99/91/137649199/137649199_da2-1-16.mp4"
+        full = INIT_BYTES + SEG1_BYTES
+        self._bind_routes({url: FakeResponse(full)})
+        data = self._run(items=[{"url": url}], name="bili-durl")
+        self.assertTrue(data["ok"], data)
+        self.assertTrue(data["whole_file"])
+        self.assertEqual(data["segments"], 1)
+        self.assertEqual(data["bytes"], len(full))
+        written = Path(self.root) / data["files"][0]["file"]
+        self.assertEqual(written.read_bytes(), full)
+        self.assertEqual(len(FakeAsyncClient.calls), 1)
+        self.assertEqual(FakeAsyncClient.calls[0]["range"], "", "整段捷径不发 Range")
+        self.assertTrue(data["files"][0]["file"].endswith(".mp4"))
+
+    def test_whole_file_without_ftyp_rejected(self):
+        url = "https://cdn.example.com/not-mp4"
+        self._bind_routes({url: FakeResponse(SEG1_BYTES, content_type="video/iso.segment")})
+        with self.assertRaises(assets_routes.HTTPException) as ctx:
+            self._run(items=[{"url": url}])
+        self.assertIn("不是 init 段", ctx.exception.detail)
+        self.assertEqual(os.listdir(self.root), [])
+
+    def test_range_items_same_url_stitch(self):
+        url = "https://85u819t.edge.mountaintoys.cn:4483/upgcxcode/99/91/137649199/137649199_da2-1-100022.m4s"
+        full = INIT_BYTES + SEG1_BYTES + SEG2_BYTES
+        init_end = len(INIT_BYTES) - 1
+        seg1_end = len(INIT_BYTES) + len(SEG1_BYTES) - 1
+        items = [
+            {"url": url, "range": "0-%d" % init_end},
+            {"url": url, "range": "%d-%d" % (init_end + 1, seg1_end)},
+            {"url": url, "range": "%d-%d" % (seg1_end + 1, len(full) - 1)},
+        ]
+        self._bind_routes({url: self._serve_ranges(full)})
+        data = self._run(items=items, referer="https://www.bilibili.com/video/BV1GJ411x7h7", name="bili-dash")
+        self.assertTrue(data["ok"], data)
+        self.assertFalse(data["whole_file"])
+        self.assertEqual(data["segments"], 3)
+        written = Path(self.root) / data["files"][0]["file"]
+        self.assertEqual(written.read_bytes(), full)
+        self.assertEqual([c["range"] for c in FakeAsyncClient.calls], ["bytes=0-%d" % init_end, "bytes=%d-%d" % (init_end + 1, seg1_end), "bytes=%d-%d" % (seg1_end + 1, len(full) - 1)])
+        self.assertEqual(FakeAsyncClient.calls[0]["headers"].get("Referer"), "https://www.bilibili.com/video/BV1GJ411x7h7")
+        self.assertIn("Mozilla", FakeAsyncClient.calls[0]["headers"].get("User-Agent", ""))
+
+    def test_items_dedupe_by_url_and_range(self):
+        url = "https://cdn.example.com/track.m4s"
+        full = INIT_BYTES + SEG1_BYTES
+        segments = [
+            {"url": url, "range": "0-%d" % (len(INIT_BYTES) - 1)},
+            {"url": url, "range": "%d-%d" % (len(INIT_BYTES), len(full) - 1)},
+        ]
+        self._bind_routes({url: self._serve_ranges(full)})
+        data = self._run(items=segments + [dict(segments[0]), dict(segments[1])])
+        self.assertEqual(data["segments"], 2, "同一 (url, range) 只下一次")
+        self.assertEqual(len(FakeAsyncClient.calls), 2)
+        self.assertEqual((Path(self.root) / data["files"][0]["file"]).read_bytes(), full)
+
+    def test_later_zero_start_init_skipped(self):
+        url = "https://cdn.example.com/track.m4s"
+        full = INIT_BYTES + SEG1_BYTES
+        self._bind_routes({url: self._serve_ranges(full)})
+        data = self._run(items=[
+            {"url": url, "range": "0-%d" % (len(INIT_BYTES) - 1)},
+            {"url": url, "range": "0-%d" % (len(INIT_BYTES) - 2)},
+            {"url": url, "range": "%d-%d" % (len(INIT_BYTES), len(full) - 1)},
+        ])
+        self.assertEqual(data["segments"], 2, "第二个 0 起点 range 也是 ftyp → 跳过，不拼两张 ftyp")
+        self.assertEqual((Path(self.root) / data["files"][0]["file"]).read_bytes(), full)
+
+    def test_first_range_not_from_zero_rejected(self):
+        url = "https://cdn.example.com/track.m4s"
+        with self.assertRaises(assets_routes.HTTPException) as ctx:
+            self._run(items=[{"url": url, "range": "1683-71791"}])
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("第一段不是 init 段", ctx.exception.detail)
+        self.assertEqual(FakeAsyncClient.calls, [], "顺序不对时一个请求都不发")
+
+    def test_invalid_range_rejected(self):
+        with self.assertRaises(assets_routes.HTTPException) as ctx:
+            self._run(items=[{"url": "https://cdn.example.com/track.m4s", "range": "abc"}])
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("range 不合法", ctx.exception.detail)
+        self.assertEqual(FakeAsyncClient.calls, [])
+
+    def test_range_length_mismatch_rejected(self):
+        url = "https://cdn.example.com/track.m4s"
+        self._bind_routes({url: lambda headers: FakeResponse(INIT_BYTES[:100], status_code=206)})
+        with self.assertRaises(assets_routes.HTTPException) as ctx:
+            self._run(items=[{"url": url, "range": "0-1011"}])
+        self.assertIn("Range 长度不符", ctx.exception.detail)
+
+    def test_range_ignored_by_server_rejected(self):
+        url = "https://cdn.example.com/track.m4s"
+        self._bind_routes({url: FakeResponse(INIT_BYTES + SEG1_BYTES)})
+        with self.assertRaises(assets_routes.HTTPException) as ctx:
+            self._run(items=[{"url": url, "range": "0-11"}])
+        self.assertIn("没按 Range 返回", ctx.exception.detail)
+
+    def test_items_override_urls(self):
+        items_url = "https://cdn.example.com/track.m4s"
+        urls_url = "https://cdn.example.com/other.m4s"
+        full = INIT_BYTES + SEG1_BYTES
+        self._bind_routes({items_url: self._serve_ranges(full)})
+        data = self._run(urls=[urls_url], items=[
+            {"url": items_url, "range": "0-%d" % (len(INIT_BYTES) - 1)},
+            {"url": items_url, "range": "%d-%d" % (len(INIT_BYTES), len(full) - 1)},
+        ])
+        self.assertTrue(data["ok"], data)
+        self.assertEqual([c["url"] for c in FakeAsyncClient.calls], [items_url, items_url])
+
+
+class Fmp4UrlGuardTests(unittest.TestCase):
+    """素材下载放行任意端口，但私网/本机照样拒绝（安全不放松）。"""
+
+    def test_guard_passes_allow_any_port(self):
+        from server.routes import page_import as pi
+        seen = []
+
+        async def fake_assert(url, allow_any_port=False):
+            seen.append((url, allow_any_port))
+            return url, "cdn.example.com", 4483
+
+        with patch.object(pi, "assert_public_url", fake_assert):
+            asyncio.run(assets_routes._assert_public_fmp4_url("https://cdn.example.com:4483/a.m4s", 1))
+        self.assertEqual(seen, [("https://cdn.example.com:4483/a.m4s", True)])
+
+    def test_guard_keeps_private_blocked(self):
+        from server.routes import page_import as pi
+        with patch.object(
+            pi,
+            "assert_public_url",
+            side_effect=pi.PageImportError("这个链接指向内网/本机地址，出于安全考虑不允许访问", "unsafe_url"),
+        ):
+            with self.assertRaises(assets_routes.HTTPException) as ctx:
+                asyncio.run(assets_routes._assert_public_fmp4_url("http://127.0.0.1:4483/a.m4s", 2))
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("第 2 段", ctx.exception.detail)
+        self.assertIn("内网", ctx.exception.detail)
 
 
 class Fmp4HelpersTests(unittest.TestCase):

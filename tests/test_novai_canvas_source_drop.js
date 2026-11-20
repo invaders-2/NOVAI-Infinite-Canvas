@@ -407,12 +407,54 @@ const importedItem = (url) => ({ items: [{ ok: true, item: { url, name: 'x.jpg',
     global.fetch = async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, json: async () => videoItem('/assets/uploads/stitched.mp4') }; };
     await srcDrop.dropSourceUrls(store18, { x: 0, y: 0 }, dt({ 'text/uri-list': segUrls.join('\r\n') }));
     ok(requests.length === 1 && requests[0].url === '/api/local-assets/import-fmp4', '分片走 import-fmp4 拼接接口');
-    ok(requests[0] && JSON.stringify(requests[0].body.urls) === JSON.stringify([initUrl].concat(segUrls)), 'urls[0] 是 init，其后按抓取顺序');
+    ok(requests[0] && JSON.stringify(requests[0].body.items) === JSON.stringify(
+        [{ url: initUrl, range: '' }].concat(segUrls.map((url) => ({ url, range: '' })))
+    ), 'items[0] 是 init，其后按抓取顺序（老桥没 Range 时 range 为空）');
     ok(requests[0] && requests[0].body.referer === videoPage && requests[0].body.pageUrl === videoPage, 'body 带 referer / pageUrl');
     ok(store18.nodes.length === 1 && store18.nodes[0].kind === 'video', '拼接成功落一个视频节点');
     ok(store18.nodes[0] && store18.nodes[0].hist[0].dur === 12.5, '视频节点带真实时长');
     ok(store18.toasts.some((t) => t.indexOf('已从在线素材添加') >= 0), '成功提示');
     ok(!store18.toasts.some((t) => t.indexOf('加密分片') >= 0), '拼接成功时不再弹分片引导');
+
+    console.log('[23b] DASH：同一 URL 的 init + 后续 Range → 按 range 起点升序发 items');
+    const store18b = fakeStore();
+    const dashUrl = 'https://85u819t.edge.mountaintoys.cn:4483/upgcxcode/99/91/137649199/137649199_da2-1-100022.m4s?e=abc';
+    const otherUrl = 'https://cdn.example.com/other.m4s';
+    global.window = { pywebview: { api: {
+        get_source_fmp4_timeline: async () => ({ ok: true, pageUrl: videoPage, referer: videoPage, items: [
+            { url: dashUrl, range: '1683-71791', ts: 3, isInit: false },
+            { url: otherUrl, range: '0-99', ts: 4, isInit: true },
+            { url: dashUrl, range: '0-1682', ts: 1, isInit: true },
+            { url: dashUrl, range: '0-1011', ts: 2, isInit: false },
+            { url: dashUrl, range: '1683-71791', ts: 5, isInit: false },
+        ] }) },
+    } };
+    requests = [];
+    global.fetch = async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, json: async () => videoItem('/assets/uploads/dash.mp4') }; };
+    await srcDrop.dropSourceUrls(store18b, { x: 0, y: 0 }, dt({ 'text/uri-list': dashUrl }));
+    ok(requests.length === 1 && requests[0].url === '/api/local-assets/import-fmp4', 'DASH 分片也走 import-fmp4');
+    ok(JSON.stringify(requests[0] && requests[0].body.items) === JSON.stringify([
+        { url: dashUrl, range: '0-1682' },
+        { url: dashUrl, range: '0-1011' },
+        { url: dashUrl, range: '1683-71791' },
+    ]), '只取有 init 的那一组，init 在前、其余按 range 起点升序（同 URL 的 range 不被当重复）');
+    ok(store18b.nodes.length === 1 && store18b.nodes[0].kind === 'video', 'DASH 拼接成功落视频节点');
+
+    console.log('[23c] DASH 没有 init 清单：这条分片地址当整段下载（B 站 baseUrl），成功落节点');
+    const store18c = fakeStore();
+    const baseUrl = 'https://xy60x190x133x132xy.mcdn.bilivideo.cn:8082/v1/resource/upgcxcode/99/91/137649199/137649199_da2-1-30032.m4s?V=v3.1.2';
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: { tagName: 'VIDEO', pageUrl: videoPage } }),
+        get_source_fmp4_timeline: async () => ({ ok: true, pageUrl: videoPage, referer: videoPage, init: '', segments: [] }),
+    } } };
+    requests = [];
+    global.fetch = async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, json: async () => videoItem('/assets/uploads/whole.mp4') }; };
+    await srcDrop.dropSourceUrls(store18c, { x: 0, y: 0 }, dt({ 'text/uri-list': baseUrl }));
+    ok(requests.length === 1 && requests[0].url === '/api/local-assets/import-urls', '没有 init 清单时走整段下载 import-urls');
+    ok(requests[0] && requests[0].body.items[0].url === baseUrl, '整段下载用的就是拖进来的那条地址');
+    ok(requests[0] && requests[0].body.referer === videoPage, '整段下载带 referer（B 站 CDN 无 Referer 403）');
+    ok(store18c.nodes.length === 1 && store18c.nodes[0].kind === 'video', '整段下载成功落视频节点');
+    ok(!store18c.toasts.some((t) => t.indexOf('加密分片') >= 0), '整段成功就不再弹分片引导');
 
     console.log('[24] 分片没抓全（桥没有 init）：退回可操作引导');
     const store19 = fakeStore();
@@ -465,7 +507,9 @@ const importedItem = (url) => ({ items: [{ ok: true, item: { url, name: 'x.jpg',
     const dropSrc2 = read(SRC + '/sourceDrop.ts');
     ok(/get_source_fmp4_timeline/.test(dropSrc2), '接上主进程 fMP4 分片清单桥');
     ok(/\/api\/local-assets\/import-fmp4/.test(dropSrc2), '调新的 import-fmp4 后端接口');
-    ok(/type Fmp4Timeline = \{ init: string; segments: string\[\]; referer: string; pageUrl: string \};/.test(dropSrc2), '清单结构（init / segments / referer / pageUrl）');
+    ok(/type Fmp4Timeline = \{ items: Fmp4TimelineItem\[\]; init: string; segments: string\[\]; referer: string; pageUrl: string \};/.test(dropSrc2), '清单结构（items / init / segments / referer / pageUrl）');
+    ok(/type Fmp4TimelineItem = \{ url: string; range: string; contentType: string; ts: number; isInit: boolean \};/.test(dropSrc2), '每条清单项带 range / isInit（DASH 同一 URL 的字节区间）');
+    ok(/function rangedItems/.test(dropSrc2) && /function legacyItems/.test(dropSrc2), '按 URL 分组挑 range，同时保留老桥 init/分片的兜底');
     ok(!/下不了整段；先在面板里把视频播完/.test(dropSrc2), '旧那句「下不了整段」已被拼接流程取代');
     const assetsPy = read('server/routes/assets.py');
     ok(/@router\.post\("\/local-assets\/import-fmp4"\)/.test(assetsPy), '后端注册 import-fmp4');

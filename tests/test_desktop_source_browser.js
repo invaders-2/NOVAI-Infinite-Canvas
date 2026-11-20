@@ -1608,14 +1608,17 @@ if (typeof captureFilter === 'function') {
 }
 const videoTypeSrc = topLevelFunction(main, 'isVideoContentType');
 const kindSrc = topLevelFunction(main, 'classifyMediaKind');
-ok(!!videoTypeSrc && !!kindSrc, 'isVideoContentType / classifyMediaKind 存在');
+const normRangeSrc = topLevelFunction(main, 'normalizeByteRange');
+ok(!!videoTypeSrc && !!kindSrc && !!normRangeSrc, 'isVideoContentType / classifyMediaKind / normalizeByteRange 存在');
 let videoTypeFn = null;
 let kindFn = null;
+let normRangeFn = null;
 try {
     videoTypeFn = new Function('return (' + videoTypeSrc + ');')();
+    normRangeFn = new Function('return (' + normRangeSrc + ');')();
     const urlReSrc2 = main.match(/const MEDIA_URL_RE = (\/.*\/i);/)[1];
     const imageReSrc = main.match(/const IMAGE_URL_RE = (\/.*\/i);/)[1];
-    kindFn = new Function('MEDIA_URL_RE', 'IMAGE_URL_RE', 'isVideoContentType', 'return (' + kindSrc + ');')(eval(urlReSrc2), eval(imageReSrc), videoTypeFn);
+    kindFn = new Function('MEDIA_URL_RE', 'IMAGE_URL_RE', 'isVideoContentType', 'normalizeByteRange', 'return (' + kindSrc + ');')(eval(urlReSrc2), eval(imageReSrc), videoTypeFn, normRangeFn);
 } catch (_) {}
 ok(typeof videoTypeFn === 'function', 'isVideoContentType 可独立执行');
 if (typeof videoTypeFn === 'function') {
@@ -1635,6 +1638,15 @@ if (typeof kindFn === 'function') {
     ok(kindFn('https://sns-video-v6.xhscdn.com/stream/abc', 'application/octet-stream') === 'video', '/stream/ + octet-stream 仍判 video（MSE 真链）');
     ok(kindFn('https://x/a', 'application/octet-stream', 'media') === 'video', 'resourceType=media + octet-stream 判 video');
     ok(kindFn('https://x/a', 'image/jpeg', 'media') === 'image', '图片类型优先，不被 resourceType 带偏');
+    // 真实 B 站：主数据流是 application/octet-stream + xhr，旧逻辑会判 other 丢掉
+    const biliMcdn = 'https://xy106x227x71x157xy.mcdn.bilivideo.cn:8082/v1/resource/upgcxcode/99/91/137649199/137649199_da2-1-30032.m4s?V=v3.1.2';
+    ok(kindFn(biliMcdn, 'application/octet-stream', 'xhr') === 'video', '/v1/resource/ + octet-stream + xhr 判 video（B 站主数据流）');
+    ok(kindFn('https://85u819t.edge.mountaintoys.cn:4483/upgcxcode/99/91/137649199/137649199_da2-1-100022.m4s', 'video/mp4', 'xhr') === 'video', '4483 端口 m4s 判 video');
+    ok(kindFn('https://x/a', 'application/octet-stream', 'xhr', 'bytes=0-1011') === 'video', '带 Range 的 xhr 判 video（DASH 按字节取媒体）');
+    ok(kindFn('https://x/a', 'text/plain', 'xhr') === 'other', '普通 xhr 文本仍判 other');
+    ok(kindFn('https://x/a', 'application/octet-stream', 'xhr') === 'other', '无 Range 无媒体特征的 octet-stream xhr 仍判 other');
+    ok(normRangeFn('bytes=0-1011') === '0-1011' && normRangeFn('bytes=1683-71791') === '1683-71791', 'Range 头归一成 start-end');
+    ok(normRangeFn('bytes=100-') === '' && normRangeFn('') === '', '开区间不认（没法校验长度）');
 }
 ok(/MEDIA_BUFFER_LIMIT = 200/.test(main) && /while \(recentMediaRequests\.length > MEDIA_BUFFER_LIMIT\) recentMediaRequests\.shift\(\)/.test(main), '环形缓冲扩大到 200');
 ok(/find\(\(item\) => item && item\.url === target\)/.test(main), '同 URL 去重（并补 contentType）');
@@ -1645,10 +1657,18 @@ ok(/headerContentType\(details\.responseHeaders\)/.test(main) && /isVideoContent
 ok(/attachMediaRequestProbe\(wc\);/.test(main), 'createSourceView 里挂 webRequest 监听');
 ok(/detachMediaRequestProbe\(\);/.test(main) && /onHeadersReceived\(null\)/.test(main), '销毁时摘掉两个 webRequest 监听');
 ok(/action === 'recent-media'/.test(handleFn) && /\(now - item\.time\) <= MEDIA_BUFFER_WINDOW_MS/.test(handleFn), 'recent-media 只返回 120 秒内');
-ok(/kind: classifyMediaKind\(item\.url, item\.contentType, item\.resourceType\)/.test(handleFn), 'recent-media 补 kind 字段（带 resourceType）');
+ok(/kind: classifyMediaKind\(item\.url, item\.contentType, item\.resourceType, \(item\.ranges \|\| \[\]\)\[0\] \|\| ''\)/.test(handleFn), 'recent-media 补 kind 字段（带 resourceType + 首条 Range）');
+ok(/ranges: \(item\.ranges \|\| \[\]\)\.slice\(\)/.test(handleFn), 'recent-media 同时带回 ranges（前端不用再猜 init）');
 ok(/const videos = fresh\.filter\(\(item\) => item\.kind === 'video'\)/.test(handleFn) && /return \{ ok: true, items: videos\.concat\(others\) \}/.test(handleFn), '视频记录优先返回');
 ok(/action === 'fmp4-timeline'/.test(handleFn), 'fmp4-timeline 动作：返回 init 段 + 有序分片 + pageUrl/referer');
 ok(/isInitSegment: info\.isInitSegment/.test(main) && /isFragment: info\.isFragment/.test(main) && /ts: now/.test(main), '记录带 ts / isInitSegment / isFragment（recent-media 旧字段不动）');
+ok(/onBeforeSendHeaders\(\{ urls: \['\*:\/\/\*\/\*'\] \}/.test(main), 'webRequest.onBeforeSendHeaders 挂载（Range 只在这里能看到）');
+ok(/headerByteRange\(details\.requestHeaders\)/.test(main) && /recordMediaRequestRange\(details\.url/.test(main), 'onBeforeSendHeaders 把 Range 记到对应 URL');
+ok(/webRequest\.onBeforeSendHeaders\(null\)/.test(main), '销毁视图时摘掉 onBeforeSendHeaders');
+ok(/ranges: \[\]/.test(main) && /existing\.ranges\.indexOf\(normalized\) < 0/.test(main), '每个媒体记录带 ranges（去重保序）');
+ok(/const MEDIA_RANGE_LIMIT = 40/.test(main) && /existing\.ranges\.length > MEDIA_RANGE_LIMIT/.test(main), 'Range 列表有上限，不会把缓冲撑爆');
+ok(/range: range,/.test(handleFn) && /isInit: rangeIndex === 0 && \/\^0-\/\.test\(range\)/.test(handleFn), 'fmp4-timeline 每条带 {url, range, isInit}（init = 首条且从 0 开始）');
+ok(/const ranges = Array\.isArray\(item\.ranges\) && item\.ranges\.length \? item\.ranges : \[''\]/.test(handleFn), '没有 Range 的条目按整段处理（老站点不破坏）');
 ok(/get_source_fmp4_timeline: \(\) => ipcRenderer\.invoke\('novai:source-view', \{ action: 'fmp4-timeline' \}\)/.test(preload), 'preload 暴露 get_source_fmp4_timeline');
 ok(/get_source_fmp4_timeline: function\(\)\{ return call\('source-view', \{action:'fmp4-timeline'\}\); \}/.test(shim), 'shim get_source_fmp4_timeline');
 {
@@ -1658,8 +1678,9 @@ ok(/get_source_fmp4_timeline: function\(\)\{ return call\('source-view', \{actio
     let segInfo = null;
     try {
         segInfo = new Function(
+            'normalizeByteRange',
             constLine('MEDIA_FRAGMENT_URL_RE') + '\n' + constLine('MEDIA_INIT_URL_RE') + '\n' + constLine('MEDIA_SEGMENT_PATH_RE') + '\n' + segFnSrc + '\nreturn mediaSegmentInfo;'
-        )();
+        )(normRangeFn);
     } catch (_) {}
     if (typeof segInfo === 'function') {
         const init = segInfo('https://sns-video-v6.xhscdn.com/stream/init.mp4', 'video/mp4');
@@ -1674,6 +1695,12 @@ ok(/get_source_fmp4_timeline: function\(\)\{ return call\('source-view', \{actio
         ok(plain.isFragment === false && plain.isInitSegment === false, '整段 mp4 既不是 init 也不是分片');
         const chunk = segInfo('https://cdn.x/media/chunk_12', 'application/octet-stream');
         ok(chunk.isFragment === true, 'chunk_12 这类路径判成分片');
+        // 真实 DASH：init 是同一个 URL 的 Range: bytes=0-1011，URL 里没有 /init
+        const biliInit = segInfo('https://85u819t.edge.mountaintoys.cn:4483/upgcxcode/99/91/137649199/137649199_da2-1-100022.m4s', 'video/mp4', 'bytes=0-1682');
+        ok(biliInit.isInitSegment === true && biliInit.isFragment === false, 'range 从 0 开始的 m4s 判成 init 段');
+        ok(biliInit.range === '0-1682', 'mediaSegmentInfo 产出归一后的 range');
+        const biliFrag = segInfo('https://85u819t.edge.mountaintoys.cn:4483/upgcxcode/99/91/137649199/137649199_da2-1-100022.m4s', 'video/mp4', 'bytes=1683-71791');
+        ok(biliFrag.isFragment === true && biliFrag.isInitSegment === false, 'range 不从 0 开始的 m4s 判成分片');
     } else {
         ok(false, 'mediaSegmentInfo 可独立执行');
     }

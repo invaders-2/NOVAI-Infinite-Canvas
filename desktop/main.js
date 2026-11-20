@@ -1173,6 +1173,8 @@ function flushSourceCookies() {
 // 只收视频类请求：避免 xhscdn 头像/图片把缓冲挤满（之前按域名收全放进来了）。
 const MEDIA_BUFFER_LIMIT = 200;
 const MEDIA_BUFFER_WINDOW_MS = 120000;
+// 每个媒体 URL 记多少条 Range（DASH 的 init / 分片是同一个 URL 的不同字节区间）
+const MEDIA_RANGE_LIMIT = 40;
 const MEDIA_URL_RE = /\.mp4|\.m3u8|\.m4s|\.ts(\?|$)/i;
 const MEDIA_PATH_HINTS = ['/video/', '/stream/', '/media/', '/play/'];
 const IMAGE_URL_RE = /\.(jpg|jpeg|png|webp|gif|avif|bmp)(\?|#|$)/i;
@@ -1189,6 +1191,22 @@ function shouldCaptureMediaRequest(url, resourceType) {
     return false;
   } catch (_) {
     return false;
+  }
+}
+
+// 只认闭区间（bytes=0-1011 / bytes=1683-71791）：开区间（bytes=100-）没法校验长度，记下来也用不了
+function normalizeByteRange(value) {
+  const match = /^bytes=(\d+)-(\d+)$/i.exec(String(value || '').trim());
+  return match ? match[1] + '-' + match[2] : '';
+}
+
+function headerByteRange(headers) {
+  try {
+    const raw = headers && (headers['Range'] || headers['range']);
+    if (Array.isArray(raw)) return String(raw[0] || '');
+    return String(raw || '');
+  } catch (_) {
+    return '';
   }
 }
 
@@ -1217,24 +1235,28 @@ const MEDIA_FRAGMENT_URL_RE = /\.(m4s|m4a|ts)(\?|#|$)/i;
 const MEDIA_INIT_URL_RE = /(?:^|\/)init(?:\.|_|-|$)/i;
 const MEDIA_SEGMENT_PATH_RE = /(?:^|\/)(?:seg|segment|chunk|frag)[-_]?\d+/i;
 
-function mediaSegmentInfo(url, contentType) {
+function mediaSegmentInfo(url, contentType, range) {
   const text = String(url || '');
   const ctype = String(contentType || '').toLowerCase();
+  const byteRange = normalizeByteRange(range) || String(range || '').trim();
   let pathname = text;
   try { pathname = new URL(text).pathname || text; } catch (_) {}
-  const isInitSegment = MEDIA_INIT_URL_RE.test(pathname) || /\/init\.mp4/i.test(pathname);
+  // 真实 DASH 的 init 是「同一 URL 的 Range: bytes=0-1011」，URL 里没有 /init 字样，
+  // 所以「该 URL 第一条 range 从 0 开始」同样算 init 段（响应头 Content-Range 由调用方换成 range 传进来）。
+  const rangeIsInit = /^0-\d+$/.test(byteRange);
+  const isInitSegment = rangeIsInit || MEDIA_INIT_URL_RE.test(pathname) || /\/init\.mp4/i.test(pathname);
   const isFragment = !isInitSegment && (
     ctype.indexOf('video/iso.segment') >= 0
     || MEDIA_FRAGMENT_URL_RE.test(text)
     || MEDIA_SEGMENT_PATH_RE.test(pathname)
   );
-  return { isInitSegment: isInitSegment, isFragment: isFragment };
+  return { isInitSegment: isInitSegment, isFragment: isFragment, range: byteRange };
 }
 
 // 只影响「最近媒体」缓冲的 kind 标注（画布只从 kind==='video' 里挑真链），不改变请求捕获条件。
 // 影响面：MSE 真链常是 /stream/ 路径 + application/octet-stream（分片），按类型会被判成 other 漏掉；
 // resourceType=media 同理。image/* 仍优先判图片，不会把头像/封面算进视频。
-function classifyMediaKind(url, contentType, resourceType) {
+function classifyMediaKind(url, contentType, resourceType, range) {
   const ctype = String(contentType || '').toLowerCase();
   if (ctype) {
     if (isVideoContentType(ctype)) return 'video';
@@ -1242,7 +1264,11 @@ function classifyMediaKind(url, contentType, resourceType) {
   }
   const text = String(url || '');
   const rtype = String(resourceType || '').toLowerCase();
-  if (rtype === 'media' || /\/stream\//i.test(text)) return 'video';
+  // B 站这类站的媒体轨（/v1/resource/ + .m4s）回的是 application/octet-stream + xhr，
+  // 只看 content-type 会被判成 other 丢掉（实测 19 条媒体请求里 16 条是这种情况，含主数据流）；
+  // 带 Range 的请求同理：按字节取媒体是 DASH 的正常形态，不是普通 xhr。
+  if (rtype === 'media' || /\/stream\//i.test(text) || /\/v1\/resource\//i.test(text) || /\.(?:m4s|m4a)(?:[?#]|$)/i.test(text)) return 'video';
+  if (normalizeByteRange(range)) return 'video';
   if (ctype) return 'other';
   if (MEDIA_URL_RE.test(text)) return 'video';
   if (IMAGE_URL_RE.test(text)) return 'image';
@@ -1268,8 +1294,9 @@ function recordMediaRequest(url, resourceType, pageUrl, contentType, force) {
       existing.time = Date.now();
       existing.ts = existing.time;
       if (type) existing.contentType = type;
-      existing.kind = classifyMediaKind(target, existing.contentType, String(resourceType || existing.resourceType || ''));
-      const info = mediaSegmentInfo(target, existing.contentType);
+      const firstRange = (existing.ranges || [])[0] || '';
+      existing.kind = classifyMediaKind(target, existing.contentType, String(resourceType || existing.resourceType || ''), firstRange);
+      const info = mediaSegmentInfo(target, existing.contentType, firstRange);
       existing.isInitSegment = info.isInitSegment;
       existing.isFragment = info.isFragment;
     } else {
@@ -1285,6 +1312,7 @@ function recordMediaRequest(url, resourceType, pageUrl, contentType, force) {
         pageUrl: String(pageUrl || ''),
         isInitSegment: info.isInitSegment,
         isFragment: info.isFragment,
+        ranges: [],
       });
       while (recentMediaRequests.length > MEDIA_BUFFER_LIMIT) recentMediaRequests.shift();
     }
@@ -1296,6 +1324,30 @@ function recordMediaRequest(url, resourceType, pageUrl, contentType, force) {
   } catch (_) {}
 }
 
+// 同一 URL 的字节区间（DASH）：init 和后续分片是同一个 m4s 的不同 Range 请求，
+// 只按 URL 记一条的话拼不出视频，所以按 URL 记有序 range 列表（去重、保序、限长）。
+function recordMediaRequestRange(url, resourceType, pageUrl, range) {
+  try {
+    const normalized = normalizeByteRange(range);
+    if (!url || !normalized) return;
+    if (!shouldCaptureMediaRequest(url, resourceType)) return;
+    recordMediaRequest(url, resourceType, pageUrl, '', false);
+    const existing = recentMediaRequests.find((item) => item && item.url === String(url));
+    if (!existing) return;
+    if (!Array.isArray(existing.ranges)) existing.ranges = [];
+    if (existing.ranges.indexOf(normalized) < 0) {
+      existing.ranges.push(normalized);
+      while (existing.ranges.length > MEDIA_RANGE_LIMIT) existing.ranges.shift();
+    }
+    // Range 是判断 DASH init / 分片的关键信息，补上后重算一次
+    const firstRange = existing.ranges[0] || '';
+    existing.kind = classifyMediaKind(existing.url, existing.contentType, existing.resourceType, firstRange);
+    const info = mediaSegmentInfo(existing.url, existing.contentType, firstRange);
+    existing.isInitSegment = info.isInitSegment;
+    existing.isFragment = info.isFragment;
+  } catch (_) {}
+}
+
 function attachMediaRequestProbe(webContents) {
   try {
     const ses = (webContents && webContents.session) || session.fromPartition(SOURCE_BROWSER_PARTITION);
@@ -1303,7 +1355,18 @@ function attachMediaRequestProbe(webContents) {
       try { return webContents && !webContents.isDestroyed() ? webContents.getURL() : ''; } catch (_) { return ''; }
     };
     try { ses.webRequest.onBeforeRequest(null); } catch (_) {}
+    try { ses.webRequest.onBeforeSendHeaders(null); } catch (_) {}
     try { ses.webRequest.onHeadersReceived(null); } catch (_) {}
+    // DASH：同一个 m4s 会按 Range 一段段取（init 0-1011、后续 1683-71791…），
+    // Range 只在发请求时能看到，必须在 onBeforeSendHeaders 里记下来。
+    ses.webRequest.onBeforeSendHeaders({ urls: ['*://*/*'] }, (details, callback) => {
+      try {
+        if (details && details.url) {
+          recordMediaRequestRange(details.url, details.resourceType, readPageUrl(), headerByteRange(details.requestHeaders));
+        }
+      } catch (_) {}
+      try { callback({}); } catch (_) {}
+    });
     ses.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
       try {
         if (details && details.url) recordMediaRequest(details.url, details.resourceType, readPageUrl(), '', false);
@@ -1327,6 +1390,7 @@ function detachMediaRequestProbe() {
   try {
     const webRequest = session.fromPartition(SOURCE_BROWSER_PARTITION).webRequest;
     try { webRequest.onBeforeRequest(null); } catch (_) {}
+    try { webRequest.onBeforeSendHeaders(null); } catch (_) {}
     try { webRequest.onHeadersReceived(null); } catch (_) {}
   } catch (_) {}
 }
@@ -2129,9 +2193,10 @@ async function handleSourceViewAction(payload) {
             url: item.url,
             resourceType: item.resourceType || '',
             contentType: item.contentType || '',
-            kind: classifyMediaKind(item.url, item.contentType, item.resourceType),
+            kind: classifyMediaKind(item.url, item.contentType, item.resourceType, (item.ranges || [])[0] || ''),
             time: item.time,
             pageUrl: item.pageUrl || '',
+            ranges: (item.ranges || []).slice(),
           }));
         const videos = fresh.filter((item) => item.kind === 'video');
         const others = fresh.filter((item) => item.kind !== 'video');
@@ -2154,18 +2219,30 @@ async function handleSourceViewAction(payload) {
         const samePage = pageUrl
           ? fresh.filter((item) => !item.pageUrl || item.pageUrl === pageUrl)
           : fresh;
-        const items = samePage.map((item) => {
-          const info = mediaSegmentInfo(item.url, item.contentType);
-          return {
-            url: item.url,
-            contentType: item.contentType || '',
-            resourceType: item.resourceType || '',
-            kind: classifyMediaKind(item.url, item.contentType, item.resourceType),
-            ts: item.ts || item.time || 0,
-            isInitSegment: info.isInitSegment,
-            isFragment: info.isFragment,
-          };
-        });
+        // 一条请求 = (url, range)。DASH 的 init 与后续分片是同一个 m4s 的不同字节区间，
+        // 所以同 URL 可能出现多次；init 判定 = 该 URL 的第一条 range 且从 0 开始。
+        const items = [];
+        const seenPairs = new Set();
+        for (const item of samePage) {
+          const ranges = Array.isArray(item.ranges) && item.ranges.length ? item.ranges : [''];
+          const info = mediaSegmentInfo(item.url, item.contentType, ranges[0]);
+          ranges.forEach((range, rangeIndex) => {
+            const key = item.url + '|' + range;
+            if (seenPairs.has(key)) return;
+            seenPairs.add(key);
+            items.push({
+              url: item.url,
+              range: range,
+              contentType: item.contentType || '',
+              resourceType: item.resourceType || '',
+              kind: classifyMediaKind(item.url, item.contentType, item.resourceType, range),
+              ts: item.ts || item.time || 0,
+              isInit: rangeIndex === 0 && /^0-/.test(range),
+              isInitSegment: info.isInitSegment,
+              isFragment: info.isFragment,
+            });
+          });
+        }
         const seen = new Set();
         const initSegments = [];
         const segments = [];
@@ -2176,7 +2253,8 @@ async function handleSourceViewAction(payload) {
           else if (item.isFragment) segments.push(item.url);
         }
         const init = initSegments.length ? initSegments[initSegments.length - 1] : '';
-        clog('source-view', 'fmp4-timeline init=' + (init ? init.slice(0, 80) : '-') + ' segments=' + segments.length + ' page=' + pageUrl.slice(0, 120));
+        const ranged = items.filter((item) => !!item.range);
+        clog('source-view', 'fmp4-timeline init=' + (init ? init.slice(0, 80) : '-') + ' segments=' + segments.length + ' ranged=' + ranged.length + ' page=' + pageUrl.slice(0, 120));
         return { ok: true, pageUrl: pageUrl, referer: pageUrl, init: init, initSegments: initSegments, segments: segments, items: items };
       } catch (err) {
         return { ok: false, error: String(err && err.message || err) };
