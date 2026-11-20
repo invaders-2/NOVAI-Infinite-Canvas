@@ -140,7 +140,8 @@ export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRo
   // 标了 excludeSelfRefs：仍然发送「更早的源图」（meta.selfSrc 记录的那张 / 上传原图），
   // 只剔除节点当前这一版结果、由它生成的结果节点、分组展开出的自己（输入层已经剔过）。
   let selfSrc: string | null = null;
-  if (!excludeSelf && selfSend && typeof selfSendUrl === "string" && selfSendUrl) {
+  // 标了 excludeSelfRefs 只剔当前这一版结果：selfSourceOf 返回的就是这一版自己时才不发（更早的源图照发）
+  if (selfSend && typeof selfSendUrl === "string" && selfSendUrl && (!excludeSelf || selfSendUrl !== curUrl)) {
     // 上游里已经有同一张图：去重，保留本节点这张作为第一参考
     for (let i = inputs.length - 1; i >= 0; i--) if (inputs[i].url && inputs[i].url === selfSendUrl) inputs.splice(i, 1);
     const role = selfInputRole(node.kind, eff, m, inputs.filter((x) => x.kind === "image").length);
