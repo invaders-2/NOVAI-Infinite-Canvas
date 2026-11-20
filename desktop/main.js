@@ -1210,14 +1210,19 @@ function isVideoContentType(value) {
     || text.indexOf('application/mpegurl') >= 0;
 }
 
-function classifyMediaKind(url, contentType) {
+// 只影响「最近媒体」缓冲的 kind 标注（画布只从 kind==='video' 里挑真链），不改变请求捕获条件。
+// 影响面：MSE 真链常是 /stream/ 路径 + application/octet-stream（分片），按类型会被判成 other 漏掉；
+// resourceType=media 同理。image/* 仍优先判图片，不会把头像/封面算进视频。
+function classifyMediaKind(url, contentType, resourceType) {
   const ctype = String(contentType || '').toLowerCase();
   if (ctype) {
     if (isVideoContentType(ctype)) return 'video';
     if (ctype.indexOf('image/') === 0) return 'image';
-    return 'other';
   }
   const text = String(url || '');
+  const rtype = String(resourceType || '').toLowerCase();
+  if (rtype === 'media' || /\/stream\//i.test(text)) return 'video';
+  if (ctype) return 'other';
   if (MEDIA_URL_RE.test(text)) return 'video';
   if (IMAGE_URL_RE.test(text)) return 'image';
   return 'other';
@@ -1234,14 +1239,14 @@ function recordMediaRequest(url, resourceType, pageUrl, contentType, force) {
     } else if (!shouldCaptureMediaRequest(target, resourceType)) {
       return;
     }
-    const kind = classifyMediaKind(target, type);
+    const kind = classifyMediaKind(target, type, resourceType);
     const existing = recentMediaRequests.find((item) => item && item.url === target);
     if (existing) {
       existing.resourceType = String(resourceType || existing.resourceType || '');
       existing.pageUrl = String(pageUrl || existing.pageUrl || '');
       existing.time = Date.now();
       if (type) existing.contentType = type;
-      existing.kind = classifyMediaKind(target, existing.contentType);
+      existing.kind = classifyMediaKind(target, existing.contentType, String(resourceType || existing.resourceType || ''));
     } else {
       recentMediaRequests.push({
         url: target,
@@ -2094,7 +2099,7 @@ async function handleSourceViewAction(payload) {
             url: item.url,
             resourceType: item.resourceType || '',
             contentType: item.contentType || '',
-            kind: classifyMediaKind(item.url, item.contentType),
+            kind: classifyMediaKind(item.url, item.contentType, item.resourceType),
             time: item.time,
             pageUrl: item.pageUrl || '',
           }));

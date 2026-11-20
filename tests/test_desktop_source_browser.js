@@ -1632,6 +1632,9 @@ if (typeof kindFn === 'function') {
     ok(kindFn('https://x/a.mp4', '') === 'video', '无 contentType 时按 URL 判 video');
     ok(kindFn('https://sns-avatar-qc.xhscdn.com/avatar/abc.jpg', '') === 'image', '头像 URL 判 image');
     ok(kindFn('https://x/api/feed', '') === 'other', '无后缀无类型判 other');
+    ok(kindFn('https://sns-video-v6.xhscdn.com/stream/abc', 'application/octet-stream') === 'video', '/stream/ + octet-stream 仍判 video（MSE 真链）');
+    ok(kindFn('https://x/a', 'application/octet-stream', 'media') === 'video', 'resourceType=media + octet-stream 判 video');
+    ok(kindFn('https://x/a', 'image/jpeg', 'media') === 'image', '图片类型优先，不被 resourceType 带偏');
 }
 ok(/MEDIA_BUFFER_LIMIT = 200/.test(main) && /while \(recentMediaRequests\.length > MEDIA_BUFFER_LIMIT\) recentMediaRequests\.shift\(\)/.test(main), '环形缓冲扩大到 200');
 ok(/find\(\(item\) => item && item\.url === target\)/.test(main), '同 URL 去重（并补 contentType）');
@@ -1642,7 +1645,7 @@ ok(/headerContentType\(details\.responseHeaders\)/.test(main) && /isVideoContent
 ok(/attachMediaRequestProbe\(wc\);/.test(main), 'createSourceView 里挂 webRequest 监听');
 ok(/detachMediaRequestProbe\(\);/.test(main) && /onHeadersReceived\(null\)/.test(main), '销毁时摘掉两个 webRequest 监听');
 ok(/action === 'recent-media'/.test(handleFn) && /\(now - item\.time\) <= MEDIA_BUFFER_WINDOW_MS/.test(handleFn), 'recent-media 只返回 120 秒内');
-ok(/kind: classifyMediaKind\(item\.url, item\.contentType\)/.test(handleFn), 'recent-media 补 kind 字段');
+ok(/kind: classifyMediaKind\(item\.url, item\.contentType, item\.resourceType\)/.test(handleFn), 'recent-media 补 kind 字段（带 resourceType）');
 ok(/const videos = fresh\.filter\(\(item\) => item\.kind === 'video'\)/.test(handleFn) && /return \{ ok: true, items: videos\.concat\(others\) \}/.test(handleFn), '视频记录优先返回');
 ok(/action === 'fetch-url'/.test(handleFn), 'fetch-url 动作');
 ok(/session\.fromPartition\(SOURCE_BROWSER_PARTITION\)\.fetch\(targetUrl, \{ headers: headers \}\)/.test(handleFn), '主进程 session.fetch 拉取');

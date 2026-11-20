@@ -329,6 +329,17 @@ def _sniff_media_ext(head):
     return None
 
 
+# fMP4 分片（MSE 播放时能抓到的 .m4s 真链）：styp/moof/sidx/mdat 开头，只有 2~6 秒，
+# 不是整段视频；按普通视频落盘只会得到放不出来的坏节点，所以单独给出可理解的提示。
+_FMP4_FRAGMENT_BOXES = (b"styp", b"moof", b"sidx", b"mdat")
+_FMP4_FRAGMENT_ERROR = "拿到的是视频分片（.m4s），不是整段视频：先在素材面板里播完整段、或换一条直链 mp4 再拖"
+
+
+def _is_fmp4_fragment(head):
+    head = head or b""
+    return len(head) >= 8 and head[4:8] in _FMP4_FRAGMENT_BOXES
+
+
 def _resolve_media_kind_ext(name_path, content_type, content):
     """决定落盘的 (kind, ext)：先按 Content-Type/扩展名，认不出再按文件头魔数。"""
     kind, ext = deps._local_upload_kind_ext(name_path, content_type)
@@ -411,6 +422,9 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
                     content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
                     content = response.content
                     name_path = urllib.parse.urlparse(src_url).path
+                # 分片只有几秒、拼不成整段：Content-Type 说是视频还是 octet-stream 都不能落节点
+                if _is_fmp4_fragment(content[:_MEDIA_SNIFF_BYTES]):
+                    raise HTTPException(status_code=400, detail=_FMP4_FRAGMENT_ERROR)
                 # Content-Type 认不出时按魔数兜底（花瓣原图常返回 application/octet-stream）
                 kind, ext = _resolve_media_kind_ext(name_path, content_type, content)
                 if kind not in ("image", "video"):

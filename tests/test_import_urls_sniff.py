@@ -33,6 +33,8 @@ MP4_BYTES = b"\x00\x00\x00\x20ftypisom" + b"\x00" * 40
 MOV_BYTES = b"\x00\x00\x00\x14ftypqt  " + b"\x00" * 40
 WEBM_BYTES = b"\x1aE\xdf\xa3" + b"\x9f\x42\x86\x81\x01\x42\xf7\x81\x01" + b"webm" + b"\x00" * 20
 HTML_BYTES = b"<!doctype html><html><body>not an image</body></html>"
+# fMP4 分片：styp/moof 开头（MSE 播放时能抓到的 .m4s 真链），只有几秒，不是整段视频
+MP4_FRAGMENT_BYTES = b"\x00\x00\x00\x18stypmsdh" + b"\x00" * 40 + b"\x00\x00\x00\x10moof" + b"\x00" * 40
 
 
 class SniffMediaExtTests(unittest.TestCase):
@@ -71,6 +73,11 @@ class SniffMediaExtTests(unittest.TestCase):
         for content, expected_ext in cases:
             kind, ext = assets_routes._resolve_media_kind_ext("", "application/octet-stream", content)
             self.assertEqual((kind, ext), ("video", expected_ext), expected_ext)
+
+    def test_fmp4_fragment_detected(self):
+        self.assertTrue(assets_routes._is_fmp4_fragment(MP4_FRAGMENT_BYTES))
+        self.assertFalse(assets_routes._is_fmp4_fragment(MP4_BYTES))
+        self.assertFalse(assets_routes._is_fmp4_fragment(b""))
 
     def test_unknown_bytes_keeps_unknown(self):
         kind, _ext = assets_routes._resolve_media_kind_ext("/hbimg/abc123", "application/octet-stream", HTML_BYTES)
@@ -187,6 +194,18 @@ class ImportUrlsEndpointTests(unittest.TestCase):
         result = data["items"][0]
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"], "不是图片或视频资源：application/octet-stream")
+
+    def test_fmp4_fragment_rejected_with_clear_message(self):
+        # 分片不能当整段视频落盘：octet-stream 和 video/mp4 两种声明都要给出同一句可理解的提示
+        for content_type in ("application/octet-stream", "video/mp4"):
+            FakeAsyncClient.response = FakeResponse(MP4_FRAGMENT_BYTES, content_type)
+            data = self._run([{"url": "https://sns-video-v6.xhscdn.com/stream/seg_000.m4s"}])
+            self.assertEqual(data["count"], 0, content_type)
+            result = data["items"][0]
+            self.assertFalse(result["ok"], result)
+            self.assertIn("视频分片", result["error"], result)
+            self.assertIn(".m4s", result["error"], result)
+            self.assertEqual(os.listdir(self.root), [], "分片不能落盘")
 
     def test_inline_base64_octet_stream_jpeg(self):
         encoded = base64.b64encode(JPEG_BYTES).decode("ascii")

@@ -36,7 +36,8 @@ function fakeStore() {
     return {
         nodes,
         toasts: [],
-        toast(text) { this.toasts.push(String(text)); },
+        toastMs: [],
+        toast(text, ms) { this.toasts.push(String(text)); this.toastMs.push(Number(ms) || 0); },
         newNode(kind, x, y, patch) { const node = Object.assign({ id: 'n' + (++seq), kind, x, y }, patch || {}); nodes.push(node); return node; },
         addNodes(list) { void list; },
         setUI() {},
@@ -308,6 +309,7 @@ const importedItem = (url) => ({ items: [{ ok: true, item: { url, name: 'x.jpg',
     await srcDrop.dropSourceUrls(store12, { x: 0, y: 0 }, dt({}));
     ok(store12.nodes.length === 0, 'm3u8 不落节点');
     ok(store12.toasts.some((t) => t.indexOf('m3u8') >= 0), '提示里点明是 m3u8 流');
+    ok(store12.toastMs.some((ms) => ms === 12000), 'm3u8 提示时长 12s（有足够时间读完）');
 
     console.log('[18] 载荷只有页面地址：不当素材导入');
     const store13 = fakeStore();
@@ -333,6 +335,61 @@ const importedItem = (url) => ({ items: [{ ok: true, item: { url, name: 'x.jpg',
     await srcDrop.dropSourceUrls(store14, { x: 0, y: 0 }, dt({}));
     ok(requests.length === 1 && requests[0].body.items[0].url === 'https://sns-video-v6.xhscdn.com/stream/from-html.mp4', 'HTML 里的视频源被捞出来');
     ok(store14.nodes.length === 1 && store14.nodes[0].kind === 'video', 'HTML 兜底也能落视频节点');
+
+    console.log('[20] 只拿到 fMP4 分片（.m4s）：不 import，给可操作引导');
+    const store15 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: videoDrag }),
+        get_recent_source_media: async () => ({ ok: true, items: [
+            { url: 'https://sns-video-v6.xhscdn.com/stream/seg_000.m4s', kind: 'video', pageUrl: videoPage, time: 900 },
+        ] }),
+    } } };
+    global.fetch = async () => { throw new Error('只剩分片时不该发 import 请求'); };
+    const infoCalls = [];
+    const prevInfo = console.info;
+    console.info = (...args) => infoCalls.push(args.join(' '));
+    try {
+        await srcDrop.dropSourceUrls(store15, { x: 0, y: 0 }, dt({}));
+    } finally {
+        console.info = prevInfo;
+    }
+    ok(store15.nodes.length === 0, '分片不落节点');
+    ok(store15.toasts.some((t) => t.indexOf('加密分片') >= 0 && t.indexOf('.m4s') >= 0), '提示说明拿到的是加密分片（.m4s）');
+    ok(store15.toasts.some((t) => t.indexOf('播完') >= 0 && t.indexOf('直链 mp4') >= 0), '提示给出可操作引导（播完再拖 / 换直链）');
+    ok(store15.toastMs.some((ms) => ms === 12000), '引导提示时长 12s');
+    ok(infoCalls.some((m) => m.indexOf('跳过导入') >= 0), '控制台留一行诊断');
+
+    console.log('[21] 同批真链里有整段：整段优先，不导分片');
+    const store16 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: videoDrag }),
+        get_recent_source_media: async () => ({ ok: true, items: [
+            { url: 'https://sns-video-v6.xhscdn.com/stream/seg_000.m4s', kind: 'video', pageUrl: videoPage, time: 900 },
+            { url: 'https://sns-video-v6.xhscdn.com/stream/full.mp4', kind: 'video', pageUrl: videoPage, time: 100 },
+        ] }),
+    } } };
+    requests = [];
+    global.fetch = async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, json: async () => videoItem('/assets/uploads/full2.mp4') }; };
+    await srcDrop.dropSourceUrls(store16, { x: 0, y: 0 }, dt({}));
+    ok(requests.length === 1 && requests[0].body.items[0].url === 'https://sns-video-v6.xhscdn.com/stream/full.mp4', '更旧的整段排在更新的分片前面');
+    ok(store16.nodes.length === 1 && store16.nodes[0].kind === 'video', '整段正常落视频节点');
+
+    console.log('[22] URL 看不出、后端认出分片：同样给引导，不甩 400 原文');
+    const store17 = fakeStore();
+    global.window = { pywebview: { api: {
+        get_last_guest_drag: async () => ({ ok: true, drag: {
+            tagName: 'VIDEO', pageUrl: videoPage,
+            uriList: 'https://sns-video-v6.xhscdn.com/stream/abc',
+            bestUrl: 'https://sns-video-v6.xhscdn.com/stream/abc',
+            videoUrls: ['https://sns-video-v6.xhscdn.com/stream/abc'],
+        } }),
+    } } };
+    requests = [];
+    global.fetch = async (url, init) => { requests.push({ url: String(url), body: JSON.parse(init.body) }); return { ok: true, json: async () => ({ items: [{ ok: false, error: '拿到的是视频分片（.m4s），不是整段视频' }] }) }; };
+    await srcDrop.dropSourceUrls(store17, { x: 0, y: 0 }, dt({}));
+    ok(store17.nodes.length === 0, '后端认出分片时不落节点');
+    ok(store17.toasts.some((t) => t.indexOf('加密分片') >= 0 && t.indexOf('直链 mp4') >= 0), '失败提示换成可操作引导');
+    ok(store17.toastMs.some((ms) => ms === 12000), '后端分片提示也是 12s');
 
     console.log('');
     if (fails.length) {

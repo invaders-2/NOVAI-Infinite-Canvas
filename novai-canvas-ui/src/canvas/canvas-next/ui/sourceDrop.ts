@@ -9,6 +9,9 @@
  * 视频比图片多一层坑：小红书这类播放器用 MSE 播放，拖拽载荷里的地址是 blob:（甚至压根没有地址），
  * 后端下载不了。所以「没有 http 地址」时先回主进程抓到的最近视频请求里找真链，再按
  * 地址下载 → 页面内取字节 → 主进程带登录态下载 三条通道依次兜底。
+ *
+ * 桌面桥的真实返回形状是 { ok: true, drag: {...} }（desktop/main.js 的 last-drag），
+ * 不是 { http, blobs, video } —— 本文件里的 GuestDragInfo 只是解析后的内部结构，别照它改桥。
  */
 import { fitSourceBox } from "../mediaFit";
 import type { CanvasStore } from "../store";
@@ -138,6 +141,19 @@ function isHlsUrl(value: string): boolean {
   return /\.m3u8(?:[?#]|$)/i.test(String(value || ""));
 }
 
+/** fMP4 / HLS 分片：只有 2~6 秒的一小段（或 init 索引段），拼不成整段视频 */
+function isFragmentUrl(value: string, contentType = ""): boolean {
+  if (/video\/iso\.segment/i.test(String(contentType || ""))) return true;
+  const text = String(value || "");
+  if (/\.(?:m4s|m4a|ts)(?:[?#]|$)/i.test(text)) return true;
+  return /\/init\.mp4(?:[?#]|$)/i.test(text);
+}
+
+/** 分片排在整段后面：同一批候选里有整段时先用整段，别拿碎片去导 */
+function fragmentsLast(urls: string[]): string[] {
+  return urls.filter((url) => !isFragmentUrl(url)).concat(urls.filter((url) => isFragmentUrl(url)));
+}
+
 function candidateUrls(list: GuestDrag["imageCandidates"], out: string[], blobs: string[] = []) {
   for (const item of list || []) {
     const url = typeof item === "string" ? item : item && item.url;
@@ -187,7 +203,7 @@ async function guestDragInfo(): Promise<GuestDragInfo> {
     if (!http.length && !blobs.length) candidateUrls(drag.videoCandidates, http, blobs);
     if (!http.length && !blobs.length) for (const url of drag.videoUrls || []) add(url);
   }
-  return { http: unique(http), blobs: unique(blobs), pageUrl: String(drag.pageUrl || ""), video };
+  return { http: fragmentsLast(unique(http)), blobs: unique(blobs), pageUrl: String(drag.pageUrl || ""), video };
 }
 
 const RECENT_MEDIA_TIMEOUT_MS = 900;
@@ -204,7 +220,7 @@ async function recentVideoUrls(pageUrl: string): Promise<string[]> {
   const row = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
   const list = row.items ?? row.media ?? row.urls ?? row.list;
   const entries = Array.isArray(list) ? (list as unknown[]) : [];
-  const picked: Array<{ url: string; time: number; same: boolean; hls: boolean }> = [];
+  const picked: Array<{ url: string; time: number; same: boolean; hls: boolean; fragment: boolean }> = [];
   for (const entry of entries) {
     const obj = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null;
     const url = String(obj ? obj.url ?? obj.src ?? obj.mediaUrl ?? "" : entry ?? "").trim();
@@ -216,10 +232,11 @@ async function recentVideoUrls(pageUrl: string): Promise<string[]> {
       // 同一页面拖下来的才最可能是刚拖的那一条
       same: !pageUrl || String((obj && obj.pageUrl) || "") === pageUrl,
       hls: /\.m3u8(?:[?#]|$)/i.test(url),
+      fragment: isFragmentUrl(url),
     });
   }
-  // 同页面优先 → mp4 优先于 m3u8（m3u8 后端下不了整段视频） → 越新越优先
-  picked.sort((a, b) => Number(b.same) - Number(a.same) || Number(a.hls) - Number(b.hls) || b.time - a.time);
+  // 整段优先于分片 → 同页面优先 → mp4 优先于 m3u8（m3u8 后端下不了整段视频） → 越新越优先
+  picked.sort((a, b) => Number(a.fragment) - Number(b.fragment) || Number(b.same) - Number(a.same) || Number(a.hls) - Number(b.hls) || b.time - a.time);
   return unique(picked.map((item) => item.url)).slice(0, RECENT_MEDIA_MAX);
 }
 
@@ -375,6 +392,8 @@ async function sessionBytes(url: string, referer: string): Promise<FetchedBytes>
 /** 字节内联进 import-urls：后端不用再下载，站点防盗链也拦不住 */
 async function importFetched(url: string, fetched: FetchedBytes): Promise<ChannelOutcome> {
   if (fetched.ok !== true) return { rows: [], failed: [], reasons: fetched.reason ? [fetched.reason] : [] };
+  // 地址上看不出、响应头是分支片（video/iso.segment）时同样不导：后端只会回同一句拒收
+  if (isFragmentUrl(url, fetched.contentType)) return { rows: [], failed: [], reasons: ["拿到的是视频分片（.m4s），不是整段视频"] };
   try {
     const result = await importItems([{ url, data: fetched.dataUrl, content_type: fetched.contentType }]);
     return { rows: result.rows, failed: result.failed, reasons: [] };
@@ -396,6 +415,8 @@ async function importChannel(urls: string[]): Promise<ChannelOutcome> {
 const MAX_FALLBACKS = 3;
 async function importFallbacks(store: CanvasStore, at: { x: number; y: number }, urls: string[], pageUrl: string, failed: string[]): Promise<boolean> {
   for (const url of urls.slice(0, MAX_FALLBACKS)) {
+    // 分片走三条兜底拿到的还是同一段字节，别让用户看三遍「不是图片或视频资源」
+    if (isFragmentUrl(url)) continue;
     const page = await importFetched(url, await pageBytes(url));
     failed.push(...page.reasons, ...page.failed);
     if (page.rows.length && await placeImported(store, at, page.rows)) return true;
@@ -497,9 +518,11 @@ export async function dropSourceUrls(store: CanvasStore, at: { x: number; y: num
   const hlsHits = urls.filter(isHlsUrl);
   urls = urls.filter((url) => !isHlsUrl(url));
   if (!urls.length && !blobs.length && (pageHits.length || hlsHits.length)) {
-    store.toast(hlsHits.length
-      ? "这条视频是 HLS（m3u8）流，只能拿到播放列表、下不了整段；换一条直链视频再拖"
-      : "拖进来的是页面地址而不是素材，请在面板里直接按住图片/视频再拖", 5200);
+    if (hlsHits.length) {
+      store.toast("这条视频是 HLS（m3u8）流，只能拿到播放列表、下不了整段；换一条直链视频再拖", 12000);
+      return;
+    }
+    store.toast("拖进来的是页面地址而不是素材，请在面板里直接按住图片/视频再拖", 5200);
     return;
   }
   if (!urls.length && !blobs.length) {
@@ -519,6 +542,15 @@ export async function dropSourceUrls(store: CanvasStore, at: { x: number; y: num
         ? "页面用的是加密流（blob）播放，没抓到可下载的视频地址"
         : "浏览器模式读不到这类加密流视频的地址，请在桌面版里拖，或换一条能直接下载的视频");
     }
+  }
+  // 同一批候选里有整段时先导整段，分片排后面
+  urls = fragmentsLast(urls);
+
+  // 只剩 fMP4 / HLS 分片：每片只有 2~6 秒，后端既拼不成整段也认不出类型，别静默 import
+  if (urls.length && urls.every((url) => isFragmentUrl(url))) {
+    console.info("[sourceDrop] 只拿到视频分片，已跳过导入：" + urls.join(" "));
+    store.toast("这条视频拿到的是加密分片（.m4s），下不了整段；先在面板里把视频播完、或换一条直链 mp4 再拖", 12000);
+    return;
   }
 
   if (urls.length) {
@@ -552,6 +584,12 @@ export async function dropSourceUrls(store: CanvasStore, at: { x: number; y: num
 
   if (!placed) {
     const all = [...(bytesFailure ? [bytesFailure] : []), ...reasons, ...failed];
+    // URL 上没有后缀的分片真链，只能等后端认出来：同样给可操作引导，别只甩一句 400
+    if (all.some((text) => text.indexOf("视频分片") >= 0)) {
+      console.info("[sourceDrop] 后端认出视频分片，已跳过导入：" + urls.join(" "));
+      store.toast("这条视频拿到的是加密分片（.m4s），下不了整段；先在面板里把视频播完、或换一条直链 mp4 再拖", 12000);
+      return;
+    }
     store.toast("在线素材导入失败：" + (all.slice(0, 2).join("；") || "未知原因"), 6000);
   } else if (failed.length) {
     store.toast("有 " + failed.length + " 个没导入：" + failed.slice(0, 2).join("；"), 6000);

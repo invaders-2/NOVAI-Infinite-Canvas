@@ -630,12 +630,14 @@ const { ipcRenderer } = require('electron');
         const anchor = el.closest ? el.closest('a') : null;
         if (anchor) payload.anchorHref = String(anchor.href || attr(anchor, 'href') || '');
       } catch (_) {}
-      // 图片/<a> 内图片：不放 preventDefault（否则原生拖拽不会启动，画布收不到 drop）。
+      // 图片/视频/<a> 内图片：不放 preventDefault（否则原生拖拽不会启动，画布收不到 drop）。
       // 只拦截页面自己的 drag handler，并把最高清 URL 写进 dataTransfer 供画布 drop 使用。
       const mediaTag = tagOf(media);
       const imageDrag = !!media && (mediaTag === 'IMG' || mediaTag === 'PICTURE');
+      // 视频跟图片同一层保护：播放器/站点在 dragstart 里 preventDefault 会掐掉原生拖拽，画布连 drop 都收不到
+      const videoDrag = !!media && mediaTag === 'VIDEO';
       const linkImageDrag = targetTag === 'A' && imageDrag;
-      if (imageDrag || linkImageDrag || !!bgMedia) {
+      if (imageDrag || videoDrag || linkImageDrag || !!bgMedia) {
         if (typeof event.stopPropagation === 'function') event.stopPropagation();
         if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
       }
