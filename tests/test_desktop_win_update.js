@@ -16,6 +16,8 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 
 let pass = 0;
 const fails = [];
+/* 环境缺省导致的跳过（例如 CI 没装 desktop/node_modules）：既不算 passed，也不算 failed。 */
+const skips = [];
 const ok = (cond, label) => { if (cond) pass += 1; else fails.push(label); };
 const samePids = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 
@@ -375,9 +377,15 @@ function loadFreeBackendPort(options) {
     ok(applyCallAt >= 0 && checkingAt > applyCallAt, '安装目录在 updateStage = checking 之前设置');
     ok(/if \(updateInstallDir\) clog\('updater', '静默升级安装目录=' \+ updateInstallDir\);/.test(setupWithDir), '拿到目录才写日志（mac / dev 不刷屏）');
 
-    const nsisUpdaterSrc = read('desktop/node_modules/electron-updater/out/NsisUpdater.js');
-    ok(nsisUpdaterSrc.indexOf('installDirectory') >= 0, 'electron-updater 仍支持 installDirectory');
-    ok(nsisUpdaterSrc.indexOf('/D=${this.installDirectory}') >= 0, 'electron-updater 仍把 installDirectory 拼成 /D=（依赖升级改掉这行 → 本修复会静默失效，这条负责红灯）');
+    const nsisUpdaterFile = 'desktop/node_modules/electron-updater/out/NsisUpdater.js';
+    if (fs.existsSync(path.join(root, nsisUpdaterFile))) {
+        const nsisUpdaterSrc = read(nsisUpdaterFile);
+        ok(nsisUpdaterSrc.indexOf('installDirectory') >= 0, 'electron-updater 仍支持 installDirectory');
+        ok(nsisUpdaterSrc.indexOf('/D=${this.installDirectory}') >= 0, 'electron-updater 仍把 installDirectory 拼成 /D=（依赖升级改掉这行 → 本修复会静默失效，这条负责红灯）');
+    } else {
+        skips.push('读不到 ' + nsisUpdaterFile);
+        console.log('  [skip] 本机没装 desktop/node_modules/electron-updater，跳过对 NsisUpdater 源码的断言（CI 就是这样）');
+    }
 
     console.log('[8] 安装向导默认目录：启动时校正 InstallLocation 登记');
     const syncSrc = topLevelFunction(main, 'syncInstallLocationRegistry');
@@ -388,7 +396,13 @@ function loadFreeBackendPort(options) {
 
     let uuidLib = null;
     try { uuidLib = require(path.join(root, 'desktop/node_modules/builder-util-runtime')); } catch (_) {}
-    ok(!!(uuidLib && uuidLib.UUID), '能加载 builder-util-runtime 的 UUID（校验 NSIS GUID 用）');
+    const uuidAvailable = !!(uuidLib && uuidLib.UUID);
+    if (uuidAvailable) {
+        ok(!!(uuidLib && uuidLib.UUID), '能加载 builder-util-runtime 的 UUID（校验 NSIS GUID 用）');
+    } else {
+        skips.push('读不到 desktop/node_modules/builder-util-runtime');
+        console.log('  [skip] 本机没装 desktop/node_modules/builder-util-runtime，跳过 UUID v5 相关断言（CI 就是这样）');
+    }
     let expectedGuid = '';
     try {
         if (uuidLib && uuidLib.UUID && pkg.build && pkg.build.appId) {
@@ -397,7 +411,9 @@ function loadFreeBackendPort(options) {
     } catch (_) {}
     const expectedKey = 'Software\\' + expectedGuid;
     const constValue = keyConstSrc ? vm.runInNewContext(keyConstSrc + '\nNSIS_INSTALL_REGISTRY_KEY', {}) : '';
-    ok(!!expectedGuid && constValue === expectedKey, 'NSIS_INSTALL_REGISTRY_KEY 等于 appId 现算的 UUID v5（appId 一改就红灯）');
+    if (uuidAvailable) {
+        ok(!!expectedGuid && constValue === expectedKey, 'NSIS_INSTALL_REGISTRY_KEY 等于 appId 现算的 UUID v5（appId 一改就红灯）');
+    }
 
     /* 真跑 syncInstallLocationRegistry：path/process/app/fs/spawnSync/clog 全注入，reg 调用序列与参数可断言。 */
     function loadSyncRegistry(options) {
@@ -436,10 +452,10 @@ function loadFreeBackendPort(options) {
     const freshResult = fresh.run();
     ok(freshResult === true, 'HKLM/HKCU 都没登记：写入成功返回 true');
     ok(fresh.calls.length === 3, '依次执行 HKLM 查询 → HKCU 查询 → reg add');
-    ok(fresh.calls[0][0] === 'reg' && fresh.calls[0][1] === 'query' && fresh.calls[0][2] === 'HKLM\\' + expectedKey, '先查 HKLM 的 InstallLocation');
-    ok(fresh.calls[1][0] === 'reg' && fresh.calls[1][1] === 'query' && fresh.calls[1][2] === 'HKCU\\' + expectedKey, '再查 HKCU 的同一个值');
+    ok(fresh.calls[0][0] === 'reg' && fresh.calls[0][1] === 'query' && fresh.calls[0][2] === 'HKLM\\' + constValue, '先查 HKLM 的 InstallLocation');
+    ok(fresh.calls[1][0] === 'reg' && fresh.calls[1][1] === 'query' && fresh.calls[1][2] === 'HKCU\\' + constValue, '再查 HKCU 的同一个值');
     const addCall = fresh.calls[2] || [];
-    ok(addCall[1] === 'add' && addCall[2] === 'HKCU\\' + expectedKey, 'reg add 写 HKCU 同一个键');
+    ok(addCall[1] === 'add' && addCall[2] === 'HKCU\\' + constValue, 'reg add 写 HKCU 同一个键');
     ok(addCall.indexOf('/d') >= 0 && addCall[addCall.indexOf('/d') + 1] === 'D:\\NOVAI' && addCall.indexOf('/f') >= 0, 'add 参数带当前程序目录 D:\\NOVAI 与 /f');
     ok(fresh.logs.some((m) => m.indexOf('安装位置登记已校正') >= 0 && m.indexOf('D:\\NOVAI') >= 0), '写入成功写日志');
     ok(fresh.timeouts.length === 3 && fresh.timeouts.every((t) => t === 5000), '每个 reg 调用都带 timeout: 5000');
@@ -493,13 +509,14 @@ function loadFreeBackendPort(options) {
     ok(!!syncLine && syncLine.index < main.indexOf('createSplashWindow(boot)', readyAt), '启动动画之前就完成校正（不阻塞窗口）');
 
     console.log('');
+    const skipNote = skips.length ? '，跳过 ' + skips.length + ' 处（' + skips.join('；') + '）' : '';
     if (fails.length) {
         console.error('失败 ' + fails.length + ' 项：');
         fails.forEach((f) => console.error('  ✗ ' + f));
-        console.error('通过 ' + pass + ' 项');
+        console.error('通过 ' + pass + ' 项' + skipNote);
         process.exit(1);
     }
-    console.log('全部通过（' + pass + ' 项）');
+    console.log('全部通过（' + pass + ' 项' + skipNote + '）');
 })().catch((err) => {
     console.error('测试异常：', err && err.stack || err);
     process.exit(1);
