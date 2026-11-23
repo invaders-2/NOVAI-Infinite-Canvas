@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import time
+
+from .media_bin import ffprobe_path
 
 MAX_SECONDS = 300.0
 
@@ -21,10 +22,7 @@ def available(ffmpeg: str = "") -> tuple[bool, str]:
 
 
 def _ffprobe(ffmpeg: str) -> str:
-    probe = os.path.join(os.path.dirname(ffmpeg), "ffprobe") if ffmpeg else "ffprobe"
-    if not os.path.isfile(probe):
-        probe = shutil.which("ffprobe") or ""
-    return probe
+    return ffprobe_path(ffmpeg)
 
 
 def _duration(ffmpeg: str, path: str, stream: str = "v:0") -> float:

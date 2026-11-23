@@ -11,6 +11,7 @@ from typing import Callable
 import numpy as np
 
 from . import config
+from .media_bin import ffprobe_path
 
 MODEL_FILENAME = "depth_anything_v2_small_int8.onnx"
 INFER_SIZE = 518
@@ -90,13 +91,16 @@ def reset_session() -> None:
         _LOAD_REASON = ""
 
 
-def available(ffmpeg: str = "") -> tuple[bool, str]:
-    """给前端/接口探测用：模型和推理组件是否就绪。ffmpeg 由调用方传（安装版走内置那份）。"""
+def available(ffmpeg: str = "", ffprobe: str = "") -> tuple[bool, str]:
+    """给前端/接口探测用：模型和推理组件是否就绪。ffmpeg/ffprobe 由调用方传（安装版走内置那份）。"""
     session, reason = _session()
     if session is None:
         return False, reason
-    if not (ffmpeg or _ffmpeg()):
+    ffmpeg = ffmpeg or _ffmpeg()
+    if not ffmpeg:
         return False, "本机没有找到 ffmpeg，无法处理视频（安装 ffmpeg 或设置 FFMPEG_PATH）"
+    if not (ffprobe or ffprobe_path(ffmpeg)):
+        return False, "本机没有找到 ffprobe，读不出视频分辨率和时长（安装 ffmpeg 或设置 FFPROBE_PATH）"
     return True, ""
 
 
@@ -107,16 +111,14 @@ def _ffmpeg() -> str:
     return shutil.which("ffmpeg") or ""
 
 
-def probe(ffmpeg: str, path: str) -> dict:
+def probe(ffmpeg: str, path: str, ffprobe: str = "") -> dict:
     """读时长/分辨率/帧率，供上层决定是否放行（时长上限、结果分辨率）。"""
-    ffprobe = os.path.join(os.path.dirname(ffmpeg), "ffprobe") if ffmpeg else "ffprobe"
-    if not os.path.isfile(ffprobe):
-        ffprobe = shutil.which("ffprobe") or ""
-    if not ffprobe:
+    probe_bin = ffprobe or ffprobe_path(ffmpeg)
+    if not probe_bin:
         return {}
     try:
         out = subprocess.run(
-            [ffprobe, "-v", "error", "-select_streams", "v:0",
+            [probe_bin, "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=width,height,r_frame_rate:format=duration",
              "-of", "default=nw=1", path],
             capture_output=True, text=True, timeout=60,
@@ -171,7 +173,8 @@ def _normalize(depth: np.ndarray, low: float | None = None, high: float | None =
 
 def capture_video(ffmpeg: str, src: str, dst: str, *, max_seconds: float = 0.0,
                   out_size: tuple[int, int] | None = None, keep_audio: bool = True,
-                  on_progress: Callable[[int, int], None] | None = None) -> tuple[dict | None, str]:
+                  on_progress: Callable[[int, int], None] | None = None,
+                  ffprobe: str = "") -> tuple[dict | None, str]:
     """把源视频逐帧转成深度视频（灰度，越近越亮），返回 (结果, 失败原因)。
 
     失败只返回人能看懂的原因，不抛异常：这是画布上的一个动作，不能把异常冒到接口层。
@@ -183,7 +186,7 @@ def capture_video(ffmpeg: str, src: str, dst: str, *, max_seconds: float = 0.0,
         return None, "本机没有找到 ffmpeg，无法处理视频（安装 ffmpeg 或设置 FFMPEG_PATH）"
     if not os.path.isfile(src):
         return None, "源视频不存在（%s）" % src
-    info = probe(ffmpeg, src)
+    info = probe(ffmpeg, src, ffprobe)
     duration = float(info.get("duration") or 0)
     # max_seconds=0 表示不设上限：整条视频照做（长片只是慢，不拦）
     if max_seconds and duration > max_seconds + 0.05:
@@ -211,7 +214,7 @@ def capture_video(ffmpeg: str, src: str, dst: str, *, max_seconds: float = 0.0,
         "-f", "rawvideo", "-pix_fmt", "gray", "-s", "%dx%d" % (INFER_SIZE, INFER_SIZE),
         "-r", "%0.3f" % fps, "-i", "-",
     ]
-    if keep_audio and _has_audio(ffmpeg, src):
+    if keep_audio and _has_audio(ffmpeg, src, ffprobe):
         encode += ["-i", src, "-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "128k", "-shortest"]
     encode += ["-vf", "scale=%d:%d" % (width, height), "-c:v", "libx264",
                "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", dst]
@@ -278,13 +281,13 @@ def capture_video(ffmpeg: str, src: str, dst: str, *, max_seconds: float = 0.0,
     }, ""
 
 
-def _has_audio(ffmpeg: str, path: str) -> bool:
-    ffprobe = shutil.which("ffprobe") or (os.path.join(os.path.dirname(ffmpeg), "ffprobe") if ffmpeg else "")
-    if not ffprobe or not os.path.isfile(ffprobe):
+def _has_audio(ffmpeg: str, path: str, ffprobe: str = "") -> bool:
+    probe_bin = ffprobe or ffprobe_path(ffmpeg)
+    if not probe_bin:
         return False
     try:
         out = subprocess.run(
-            [ffprobe, "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
+            [probe_bin, "-v", "error", "-select_streams", "a", "-show_entries", "stream=index",
              "-of", "csv=p=0", path], capture_output=True, text=True, timeout=30,
         ).stdout.strip()
     except Exception:  # noqa: BLE001
