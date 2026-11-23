@@ -10,6 +10,7 @@ AI 创作工具：无限画布 + 多模型调用（OpenAI API、ComfyUI、火山
 - 依赖：`pip install -r requirements.txt`。
 - 测试：`node tests/run-all.js` 跑全部 node 测试。**自动化 / 手动验证一律用独立数据目录**：`NOVAI_DATA_DIR=/tmp/novai-test python main.py`，不要在日常数据里建 `TEMP-*` / `VERIFY-*` 画布（清理见 `tools/cleanup_test_canvases.py`）。
 - 允许自行改文件、起服务、反复重试，不需要每步问我；只有对外发布（git push / 发版 / 改远端数据）时才先问。
+- **做完不推，先进待推送清单（2026-11-23 用户定的长期规则）**：任何改动收尾时一律**不 `git commit` 以外的发布动作**——不 `git push`、不发版、不改远端；把条目按格式写进 `docs/待推送清单.md`，状态写「已改完，未提交、未 push」，附改动文件、验收命令与真实输出、发版文案建议。然后停下等用户说「推送」；用户说了才把清单里尚未推送的条目一次性提交并 push，推完把状态改 ✅ 并写上版本号。
 - **预览 / 验收在后台跑，不要弹窗**（用户明确要求）：不要启动 GUI 窗口、不要抢前台；预览只连自己那个独立端口的后端，**3000（正式安装版）一律不碰**。渲染与截图用无头浏览器 + CDP（`Page.captureScreenshot`），日志写到 /tmp 再看，不要在会话里等窗口。
   - 关缓存：每次用全新 `--user-data-dir=/tmp/xxx`，别复用。
   - 关进程：脚本自己 `proc.kill()` 收尾，别用 `pkill -f "..."`——模式串会匹配到执行命令本身的 shell，把自己杀掉、输出全丢（踩过）。

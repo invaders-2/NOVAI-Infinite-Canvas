@@ -295,6 +295,203 @@ function loadFreeBackendPort(options) {
     const availableBlock = setupSrc.slice(setupSrc.indexOf("autoUpdater.on('update-available'"), setupSrc.indexOf("autoUpdater.on('download-progress'"));
     ok(/startUpdateDownload\(info\)/.test(availableBlock), '切源后重新发现更新会自动续下（不再让用户点一次）');
 
+    console.log('[7] 静默升级装回当前程序目录（NsisUpdater /D=）');
+    const installDirSrc = topLevelFunction(main, 'windowsUpdateInstallDir');
+    const applyDirSrc = topLevelFunction(main, 'applyUpdateInstallDir');
+    ok(!!installDirSrc, 'main.js 里有 windowsUpdateInstallDir');
+    ok(!!applyDirSrc, 'main.js 里有 applyUpdateInstallDir');
+    ok(!/require\(/.test(installDirSrc) && !/require\(/.test(applyDirSrc), '两个函数用模块顶层 path/fs，函数内不 require（回归测试可注入）');
+
+    /* 抽出两个函数真跑：path 用 win32 变体注入，platform / execPath / app.isPackaged / 可写性都可控。 */
+    function loadInstallDir(options) {
+        const opts = options || {};
+        const sandbox = {
+            path: opts.path || path.win32,
+            process: {
+                platform: opts.platform || 'win32',
+                execPath: opts.execPath === undefined ? 'D:\\NOVAI\\NOVAI.exe' : opts.execPath,
+            },
+            app: opts.app === undefined ? { isPackaged: true } : opts.app,
+            fs: opts.fs || { accessSync() {}, constants: { W_OK: 2 } },
+        };
+        return vm.runInNewContext(
+            [installDirSrc, applyDirSrc, '({ windowsUpdateInstallDir: windowsUpdateInstallDir, applyUpdateInstallDir: applyUpdateInstallDir })'].join('\n'),
+            sandbox,
+        );
+    }
+
+    const winDirApi = loadInstallDir({});
+    ok(winDirApi.windowsUpdateInstallDir() === 'D:\\NOVAI', 'win32 + 已打包 + 目录可写 → 返回当前程序目录 D:\\NOVAI');
+
+    const devDirApi = loadInstallDir({ app: { isPackaged: false } });
+    ok(devDirApi.windowsUpdateInstallDir() === '', 'app.isPackaged 明确为 false 时返回空串（开发态不指定目录）');
+
+    const macDirApi = loadInstallDir({
+        platform: 'darwin',
+        path: path.posix,
+        execPath: '/Applications/NOVAI.app/Contents/MacOS/NOVAI',
+    });
+    ok(macDirApi.windowsUpdateInstallDir() === '', 'platform=darwin 返回空串（mac 不走 NSIS /D=）');
+
+    const noExecApi = loadInstallDir({ execPath: '' });
+    ok(noExecApi.windowsUpdateInstallDir() === '', 'process.execPath 取不到时返回空串');
+
+    const readOnlyApi = loadInstallDir({ fs: { accessSync() { throw new Error('EACCES'); }, constants: { W_OK: 2 } } });
+    ok(readOnlyApi.windowsUpdateInstallDir() === '', '目录不可写（accessSync 抛错）返回空串，交给 updateInstallBlockedDir 报错');
+
+    let dirThrew = false;
+    let dirThrewResult = 'x';
+    try {
+        dirThrewResult = vm.runInNewContext(installDirSrc + '\nwindowsUpdateInstallDir', {
+            path: { dirname() { throw new Error('boom'); } },
+            process: { platform: 'win32', execPath: 'D:\\NOVAI\\NOVAI.exe' },
+            app: { isPackaged: true },
+            fs: { accessSync() {}, constants: { W_OK: 2 } },
+        })();
+    } catch (_) { dirThrew = true; }
+    ok(!dirThrew && dirThrewResult === '', '任何异常都吞掉返回空串，绝不抛');
+
+    const winApplyDirApi = loadInstallDir({});
+    const winUpdater = {};
+    const appliedWinDir = winApplyDirApi.applyUpdateInstallDir(winUpdater);
+    ok(appliedWinDir === 'D:\\NOVAI' && winUpdater.installDirectory === 'D:\\NOVAI', 'applyUpdateInstallDir 把当前程序目录写进 updater.installDirectory 并返回');
+
+    const macUpdaterStub = {};
+    const macApplyDirApi = loadInstallDir({
+        platform: 'darwin',
+        path: path.posix,
+        execPath: '/Applications/NOVAI.app/Contents/MacOS/NOVAI',
+    });
+    const appliedMacDir = macApplyDirApi.applyUpdateInstallDir(macUpdaterStub);
+    ok(appliedMacDir === '' && macUpdaterStub.installDirectory === undefined, '非 win32 不设置 installDirectory（保持 undefined）');
+    ok(winApplyDirApi.applyUpdateInstallDir(null) === '', 'updater 为空返回空串，不抛');
+
+    const setupWithDir = topLevelFunction(main, 'setupAutoUpdate');
+    const applyCallAt = setupWithDir.indexOf('applyUpdateInstallDir(');
+    const checkingAt = setupWithDir.indexOf("updateStage = 'checking'");
+    const autoQuitAt = setupWithDir.indexOf('autoUpdater.autoInstallOnAppQuit = true;');
+    ok(applyCallAt >= 0, 'setupAutoUpdate 里调用了 applyUpdateInstallDir');
+    ok(autoQuitAt >= 0 && applyCallAt > autoQuitAt, '安装目录在设完 autoInstallOnAppQuit 之后设置');
+    ok(applyCallAt >= 0 && checkingAt > applyCallAt, '安装目录在 updateStage = checking 之前设置');
+    ok(/if \(updateInstallDir\) clog\('updater', '静默升级安装目录=' \+ updateInstallDir\);/.test(setupWithDir), '拿到目录才写日志（mac / dev 不刷屏）');
+
+    const nsisUpdaterSrc = read('desktop/node_modules/electron-updater/out/NsisUpdater.js');
+    ok(nsisUpdaterSrc.indexOf('installDirectory') >= 0, 'electron-updater 仍支持 installDirectory');
+    ok(nsisUpdaterSrc.indexOf('/D=${this.installDirectory}') >= 0, 'electron-updater 仍把 installDirectory 拼成 /D=（依赖升级改掉这行 → 本修复会静默失效，这条负责红灯）');
+
+    console.log('[8] 安装向导默认目录：启动时校正 InstallLocation 登记');
+    const syncSrc = topLevelFunction(main, 'syncInstallLocationRegistry');
+    const keyConstSrc = (main.match(/^const NSIS_INSTALL_REGISTRY_KEY = '[^']*';$/m) || [''])[0];
+    ok(!!syncSrc, 'main.js 里有 syncInstallLocationRegistry');
+    ok(!!keyConstSrc, 'main.js 里有 NSIS_INSTALL_REGISTRY_KEY 顶层常量');
+    ok(!!syncSrc && !/require\(/.test(syncSrc), '函数内不 require（回归测试可注入 spawnSync）');
+
+    let uuidLib = null;
+    try { uuidLib = require(path.join(root, 'desktop/node_modules/builder-util-runtime')); } catch (_) {}
+    ok(!!(uuidLib && uuidLib.UUID), '能加载 builder-util-runtime 的 UUID（校验 NSIS GUID 用）');
+    let expectedGuid = '';
+    try {
+        if (uuidLib && uuidLib.UUID && pkg.build && pkg.build.appId) {
+            expectedGuid = String(uuidLib.UUID.v5(pkg.build.appId, uuidLib.UUID.parse('50e065bc-3134-11e6-9bab-38c9862bdaf3')));
+        }
+    } catch (_) {}
+    const expectedKey = 'Software\\' + expectedGuid;
+    const constValue = keyConstSrc ? vm.runInNewContext(keyConstSrc + '\nNSIS_INSTALL_REGISTRY_KEY', {}) : '';
+    ok(!!expectedGuid && constValue === expectedKey, 'NSIS_INSTALL_REGISTRY_KEY 等于 appId 现算的 UUID v5（appId 一改就红灯）');
+
+    /* 真跑 syncInstallLocationRegistry：path/process/app/fs/spawnSync/clog 全注入，reg 调用序列与参数可断言。 */
+    function loadSyncRegistry(options) {
+        const opts = options || {};
+        const calls = [];
+        const timeouts = [];
+        const logs = [];
+        const responses = (opts.responses || []).slice();
+        const sandbox = {
+            path: opts.path || path.win32,
+            process: {
+                platform: opts.platform || 'win32',
+                execPath: opts.execPath === undefined ? 'D:\\NOVAI\\NOVAI.exe' : opts.execPath,
+            },
+            app: opts.app === undefined ? { isPackaged: true } : opts.app,
+            fs: opts.fs || { accessSync() {}, constants: { W_OK: 2 } },
+            spawnSync: (cmd, args, spawnOpts) => {
+                calls.push([cmd].concat(args));
+                timeouts.push(spawnOpts && spawnOpts.timeout);
+                if (opts.spawnThrows) throw new Error('spawnSync reg ENOENT');
+                if (responses.length) return responses.shift();
+                return { status: 1, stdout: '', stderr: '' };
+            },
+            clog: (area, msg) => logs.push('[' + area + '] ' + msg),
+        };
+        const api = vm.runInNewContext(
+            [keyConstSrc, installDirSrc, syncSrc, '({ run: syncInstallLocationRegistry, key: NSIS_INSTALL_REGISTRY_KEY })'].join('\n'),
+            sandbox,
+        );
+        return { run: api.run, key: api.key, calls, timeouts, logs };
+    }
+
+    const fresh = loadSyncRegistry({
+        responses: [{ status: 1, stdout: '' }, { status: 1, stdout: '' }, { status: 0, stdout: 'SUCCESS: The specified value was written.' }],
+    });
+    const freshResult = fresh.run();
+    ok(freshResult === true, 'HKLM/HKCU 都没登记：写入成功返回 true');
+    ok(fresh.calls.length === 3, '依次执行 HKLM 查询 → HKCU 查询 → reg add');
+    ok(fresh.calls[0][0] === 'reg' && fresh.calls[0][1] === 'query' && fresh.calls[0][2] === 'HKLM\\' + expectedKey, '先查 HKLM 的 InstallLocation');
+    ok(fresh.calls[1][0] === 'reg' && fresh.calls[1][1] === 'query' && fresh.calls[1][2] === 'HKCU\\' + expectedKey, '再查 HKCU 的同一个值');
+    const addCall = fresh.calls[2] || [];
+    ok(addCall[1] === 'add' && addCall[2] === 'HKCU\\' + expectedKey, 'reg add 写 HKCU 同一个键');
+    ok(addCall.indexOf('/d') >= 0 && addCall[addCall.indexOf('/d') + 1] === 'D:\\NOVAI' && addCall.indexOf('/f') >= 0, 'add 参数带当前程序目录 D:\\NOVAI 与 /f');
+    ok(fresh.logs.some((m) => m.indexOf('安装位置登记已校正') >= 0 && m.indexOf('D:\\NOVAI') >= 0), '写入成功写日志');
+    ok(fresh.timeouts.length === 3 && fresh.timeouts.every((t) => t === 5000), '每个 reg 调用都带 timeout: 5000');
+
+    const allUsers = loadSyncRegistry({
+        responses: [{ status: 0, stdout: 'HKEY_LOCAL_MACHINE\\Software\\guid\r\n    InstallLocation    REG_SZ    C:\\Program Files\\NOVAI' }],
+    });
+    ok(allUsers.run() === false, 'HKLM 已登记（所有用户安装）返回 false');
+    ok(allUsers.calls.length === 1 && !allUsers.calls.some((c) => c[1] === 'add'), '所有用户安装不动 HKCU：没有 reg add');
+
+    const macSync = loadSyncRegistry({ platform: 'darwin', path: path.posix, execPath: '/Applications/NOVAI.app/Contents/MacOS/NOVAI' });
+    ok(macSync.run() === false && macSync.calls.length === 0, 'platform=darwin 一次 spawnSync 都没有');
+
+    const readOnlySync = loadSyncRegistry({ fs: { accessSync() { throw new Error('EACCES'); }, constants: { W_OK: 2 } } });
+    ok(readOnlySync.run() === false && readOnlySync.calls.length === 0, '安装目录不可写：一次 spawnSync 都没有');
+
+    const already = loadSyncRegistry({
+        responses: [{ status: 1 }, { status: 0, stdout: 'HKEY_CURRENT_USER\\... InstallLocation REG_SZ D:\\NOVAI' }],
+    });
+    ok(already.run() === true, 'HKCU 已登记成同一个目录：返回 true');
+    ok(already.calls.length === 2 && !already.calls.some((c) => c[1] === 'add'), 'HKCU 一致时不重复写注册表');
+
+    const alreadyLoose = loadSyncRegistry({
+        responses: [{ status: 1 }, { status: 0, stdout: 'InstallLocation REG_SZ "d:\\novai\\\\"' }],
+    });
+    ok(alreadyLoose.run() === true && alreadyLoose.calls.length === 2, '大小写 / 引号 / 结尾反斜杠不同也判定已登记（不重复写）');
+
+    const addFailed = loadSyncRegistry({
+        responses: [{ status: 1 }, { status: 1 }, { status: 1, stdout: '', stderr: '拒绝访问。' }],
+    });
+    let addThrew = false;
+    let addResult = null;
+    try { addResult = addFailed.run(); } catch (_) { addThrew = true; }
+    ok(!addThrew && addResult === false, 'reg add 返回 status 1：函数返回 false，不抛');
+    ok(addFailed.logs.some((m) => m.indexOf('安装位置登记写入失败（不影响使用）') >= 0 && m.indexOf('拒绝访问') >= 0), '写入失败写日志（含简短原因）');
+
+    const devSync = loadSyncRegistry({ app: { isPackaged: false } });
+    ok(devSync.run() === false && devSync.calls.length === 0, '开发态（未打包）一次 spawnSync 都没有');
+
+    const noReg = loadSyncRegistry({ spawnThrows: true });
+    let noRegThrew = false;
+    let noRegResult = null;
+    try { noRegResult = noReg.run(); } catch (_) { noRegThrew = true; }
+    ok(!noRegThrew && noRegResult === false, 'reg 不存在 / 被杀软拦（spawnSync 抛错）：不抛，返回 false');
+
+    const readyAt = main.indexOf('app.whenReady().then(async () => {');
+    const dataDirAt = main.indexOf('dataDir = resolveDataDir();', readyAt);
+    const syncLine = /^ {4}syncInstallLocationRegistry\(\);$/m.exec(main);
+    ok(readyAt >= 0 && dataDirAt > readyAt && !!syncLine && syncLine.index > dataDirAt, 'whenReady 引导里在 dataDir = resolveDataDir() 之后调用 syncInstallLocationRegistry()');
+    ok(!/await\s+syncInstallLocationRegistry/.test(main), '调用不 await（启动不被注册表查询拖住）');
+    ok(!!syncLine && syncLine.index < main.indexOf('createSplashWindow(boot)', readyAt), '启动动画之前就完成校正（不阻塞窗口）');
+
     console.log('');
     if (fails.length) {
         console.error('失败 ' + fails.length + ' 项：');

@@ -6302,6 +6302,31 @@ def read_canvas_version(canvas_id, version):
 # 内容相同就跳过写盘（此前每次保存都写一份最多 1.2MB 的快照）。
 _LAST_SNAPSHOT_DIGEST = {}
 
+def _remove_canvas_versions(canvas_id):
+    """彻底删除画布时连它的历史版本快照目录一起删（软删除不调用：回收站 30 天内还能恢复，版本要保留）。
+    「每画布保留 N 版」的裁剪只在下次保存时触发，画布删掉后再也不会保存，不在这里清就永远冻结。
+    失败只打印、不抛异常：不能让删画布 / 30 天回收站清理因为版本目录的问题中断。返回删掉的快照文件数。"""
+    try:
+        vdir = canvas_versions_dir(canvas_id)
+    except HTTPException:
+        return 0
+    try:
+        if not os.path.isdir(vdir) or not is_within_dir(vdir, CANVAS_VERSIONS_DIR):
+            return 0
+        removed = 0
+        for _root, _dirs, filenames in os.walk(vdir):
+            removed += len(filenames)
+        shutil.rmtree(vdir, ignore_errors=True)
+        for stale in [p for p in _VERSION_META_CACHE if p.startswith(vdir + os.sep)]:
+            _VERSION_META_CACHE.pop(stale, None)
+        # 快照去重缓存按原始 id 记，目录名是清洗后的 id：两种键都清
+        _LAST_SNAPSHOT_DIGEST.pop(canvas_id, None)
+        _LAST_SNAPSHOT_DIGEST.pop(os.path.basename(vdir), None)
+        return removed
+    except Exception as exc:
+        print(f"清理画布版本快照失败（不影响删除） {canvas_id}: {exc}")
+        return 0
+
 def snapshot_canvas_version(canvas, note="", force=False):
     """把完整画布状态存为版本快照，并裁剪到最近 N 个版本。
     force=False 时内容与上一个快照相同就不写（去重）；force=True 用于显式恢复版本。
@@ -6676,6 +6701,7 @@ def cleanup_expired_canvas_trash():
                 _invalidate_canvas_record(filename)
             except OSError:
                 continue
+            _remove_canvas_versions(record.get("id") or filename[:-len(".json")])
 
 def iter_canvas_records(include_deleted=False, owner_id=None):
     cleanup_expired_canvas_trash()
@@ -20403,7 +20429,7 @@ async def video_depth_capture_status():
         return {"ready": False, "downloaded": True, "runtime_ready": False,
                 "available": False, "message": _depth_runtime_missing_message()}
     from server.split_engine import depth_capture
-    ready, reason = depth_capture.available(ffmpeg_binary())
+    ready, reason = depth_capture.available(ffmpeg_binary() or "", ffprobe_binary() or "")
     if ready:
         _DEPTH_LOAD_ERROR["msg"] = ""
     elif reason:
@@ -20432,8 +20458,8 @@ async def video_depth_capture(payload: DepthCaptureRequest):
     if not _depth_runtime_ready():
         raise HTTPException(status_code=400, detail=_depth_runtime_missing_message())
     from server.split_engine import depth_capture
-    ffmpeg = ffmpeg_binary()
-    ready, reason = depth_capture.available(ffmpeg)
+    ffmpeg = ffmpeg_binary() or ""
+    ready, reason = depth_capture.available(ffmpeg, ffprobe_binary() or "")
     if not ready:
         _DEPTH_LOAD_ERROR["msg"] = reason or "本地深度模型加载失败"
         raise HTTPException(status_code=400, detail=reason or "本地深度模型加载失败")
@@ -20442,6 +20468,7 @@ async def video_depth_capture(payload: DepthCaptureRequest):
     output_path = output_path_for(filename, "output")
     result, error = await asyncio.to_thread(
         depth_capture.capture_video, ffmpeg, src, output_path, keep_audio=bool(payload.keep_audio),
+        ffprobe=ffprobe_binary() or "",
     )
     if error or not result:
         raise HTTPException(status_code=500, detail=error or "深度视频生成失败")
@@ -32254,6 +32281,7 @@ async def purge_canvas(canvas_id: str, request: Request):
     except Exception as exc:
         print(f"[Agent] 清理画布线程失败 {canvas_id}: {exc}")
     _agent_v2_memory_forget_canvas(canvas_id)      # 档案 / 开关 / 候选 / 索引条目一起清
+    _remove_canvas_versions(canvas_id)             # 历史版本快照跟着画布一起删（软删/回收站不清，恢复后版本还在）
     return {"ok": True}
 
 # --- V2 Phase 2: 画布版本化 API ---
@@ -47226,9 +47254,10 @@ async def _agent_tool_depth_capture_run(args):
     """复用 /api/video/depth-capture 的同一条链路：只接受画布里的本地视频。"""
     module, reason = _agent_depth_capture_module()
     ffmpeg = ffmpeg_binary() or ""
+    ffprobe = ffprobe_binary() or ""
     ready = False
     if module is not None:
-        ready, reason = module.available(ffmpeg)
+        ready, reason = module.available(ffmpeg, ffprobe)
     download = None
     # 安装包不打模型（按需下载）：首次调用时本地没有 —— 自动下再等，别让助手静默失败。
     # check_only 只查状态，不起下载（用户没让它动本机文件）。
@@ -47241,7 +47270,7 @@ async def _agent_tool_depth_capture_run(args):
         download = await _depth_ensure_model()
         if download.get("ok"):
             _depth_reset_session()
-            ready, reason = module.available(ffmpeg)
+            ready, reason = module.available(ffmpeg, ffprobe)
             _DEPTH_LOAD_ERROR["msg"] = "" if ready else (reason or "")
         else:
             return {"ready": False, "reason": download.get("message") or reason,
@@ -47277,7 +47306,7 @@ async def _agent_tool_depth_capture_run(args):
     result, error = await asyncio.to_thread(
         module.capture_video, ffmpeg, src, output_path,
         max_seconds=float(args.get("max_seconds") or 0.0),
-        keep_audio=bool(args.get("keep_audio")))
+        keep_audio=bool(args.get("keep_audio")), ffprobe=ffprobe)
     if error or not result:
         raise AgentToolError(error or "深度视频生成失败", code="depth_capture_failed")
     seconds = round(float(result.get("elapsed") or (time.time() - started)), 2)

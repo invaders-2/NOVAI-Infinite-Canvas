@@ -3524,6 +3524,77 @@ function updateInstallBlockedDir() {
   return '';
 }
 
+// 静默升级必须装回「当前程序所在目录」。不给 electron-updater 指定目录时，NSIS 安装器读不到
+// 上次的 InstallLocation 就退回编译期默认目录（%LOCALAPPDATA%\Programs\NOVAI，也就是 C 盘），
+// 用户装在 D 盘（或搬过目录）时升级就会在 C 盘另装一份，数据根又跟着安装目录走 → 看起来「全被搬到 C 盘」。
+// NsisUpdater 会把它拼成 /D=<dir> 交给安装器（必须是最后一个参数）。
+function windowsUpdateInstallDir() {
+  try {
+    if (process.platform !== 'win32') return '';
+    if (!app || app.isPackaged === false) return '';
+    if (!process.execPath) return '';
+    const dir = path.dirname(process.execPath);
+    if (!dir) return '';
+    // 不可写时不指定：交给 updateInstallBlockedDir() 的报错路径，别把包指到写不进去的地方。
+    fs.accessSync(dir, fs.constants.W_OK);
+    return dir;
+  } catch (_) {
+    return '';
+  }
+}
+
+function applyUpdateInstallDir(updater) {
+  if (!updater) return '';
+  const dir = windowsUpdateInstallDir();
+  if (!dir) return '';
+  updater.installDirectory = dir;
+  return dir;
+}
+
+// electron-builder 用 appId 的 UUID v5 生成 NSIS 的 INSTALL_REGISTRY_KEY（Software\<guid>），
+// 安装向导和静默升级都靠它找「上次装在哪」。appId 改了这里必须跟着改（有回归测试盯着）。
+const NSIS_INSTALL_REGISTRY_KEY = 'Software\\94629f1f-bcbf-5561-8409-a0d164c8b41c';
+
+// 用户自己双击安装包时（不走自动更新），NSIS 向导的默认目录只认这条登记；
+// 缺了它就退回编译期默认的 %LOCALAPPDATA%\Programs\NOVAI（C 盘），用户顺手下一步又装出一份。
+// 每次启动把它校正成当前程序目录，向导的默认目录自然就是用户原来的位置。
+function syncInstallLocationRegistry() {
+  try {
+    if (process.platform !== 'win32') return false;
+    if (!app || app.isPackaged === false) return false;
+    const dir = windowsUpdateInstallDir();
+    if (!dir) return false;
+    // HKLM 有登记说明是「所有用户安装」：再写一份 HKCU 会让安装器当成两套都装了，
+    // 可能把 Program Files 里那份搬到用户目录，所以这里直接不动。
+    const machine = spawnSync('reg', ['query', 'HKLM\\' + NSIS_INSTALL_REGISTRY_KEY, '/v', 'InstallLocation'], { windowsHide: true, encoding: 'utf8', timeout: 5000 });
+    if (machine && machine.status === 0) return false;
+    const current = spawnSync('reg', ['query', 'HKCU\\' + NSIS_INSTALL_REGISTRY_KEY, '/v', 'InstallLocation'], { windowsHide: true, encoding: 'utf8', timeout: 5000 });
+    if (current && current.status === 0 && typeof current.stdout === 'string') {
+      const at = current.stdout.indexOf('REG_SZ');
+      if (at >= 0) {
+        let registered = current.stdout.slice(at + 6).trim();
+        if (registered.length >= 2 && registered.charAt(0) === '"' && registered.charAt(registered.length - 1) === '"') {
+          registered = registered.slice(1, -1);
+        }
+        // 中文路径可能被控制台代码页弄乱，比较不成立就宁可多写一次，别把「已登记」判断错。
+        const normalize = (value) => String(value || '').replace(/\\+$/, '').toLowerCase();
+        if (registered && normalize(registered) === normalize(dir)) return true;
+      }
+    }
+    const written = spawnSync('reg', ['add', 'HKCU\\' + NSIS_INSTALL_REGISTRY_KEY, '/v', 'InstallLocation', '/t', 'REG_SZ', '/d', dir, '/f'], { windowsHide: true, encoding: 'utf8', timeout: 5000 });
+    if (!written || written.status !== 0) {
+      const why = written ? ('exit=' + String(written.status) + (written.stderr ? ' ' + String(written.stderr).trim().slice(0, 120) : '')) : 'reg 无法执行';
+      clog('updater', '安装位置登记写入失败（不影响使用）: ' + why);
+      return false;
+    }
+    clog('updater', '安装位置登记已校正: ' + dir);
+    return true;
+  } catch (err) {
+    clog('updater', '安装位置登记跳过: ' + (err && err.message || err));
+    return false;
+  }
+}
+
 // 下载完成：更新状态文件、推 downloaded、必要时系统通知一次、空闲时备份旧版。
 async function onUpdatePackageReady(version, info) {
   const ver = String(version || stageVersion || '');
@@ -4448,6 +4519,8 @@ function setupAutoUpdate() {
     saveUpdateState({ pendingVersion: '' });
     clog('updater', '自动安装已连续失败 ' + updatePersist.installAttempts + ' 次，本次启动不再退出安装');
   }
+  const updateInstallDir = applyUpdateInstallDir(autoUpdater);
+  if (updateInstallDir) clog('updater', '静默升级安装目录=' + updateInstallDir);
   updateStage = 'checking';
   // 测试版（版本号含 -，如 1.0.112-beta.1）允许接收 prerelease 更新；正式版只看正式 Release。
   autoUpdater.allowPrerelease = app.getVersion().includes('-');
@@ -4903,6 +4976,8 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     dataDir = resolveDataDir();
+    // 用户手动双击安装包时（不走自动更新），向导默认目录取自这条登记，启动即校正成当前程序目录。
+    syncInstallLocationRegistry();
     // 启动自检：升级后首启标记 applied、累加 bootAttempts、判断要不要回滚；新版起不来时先回滚再继续。
     const boot = beginUpdateBoot();
     if (boot && boot.rollback) await performUpdateRollback();
