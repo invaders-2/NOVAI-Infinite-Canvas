@@ -559,6 +559,8 @@ async function taskCommand(input: Row): Promise<Row> {
       renderer: "beat",
       // 面板选了「自动」：直接执行，不出方案卡
       auto_execute: context.mode === "run",
+      // 自治档位（协作 / 自动推进 / 托管）：明确传，后端不再从 auto_execute 猜
+      autonomy: context.autonomy === "auto" || context.autonomy === "managed" ? context.autonomy : "collab",
       // 步数不再由思考强度决定（思考强度只影响提示/追问）：0 = 不限步数，长任务靠服务端时长/轮次刹车
       max_steps: 0,
       focus: {
