@@ -1220,3 +1220,51 @@ async function applyVideoToCanvas(store: CanvasStore, n: CanvasNode) {
   const made = await frameNode(store, n, "first", "应用到画布", { link: false });
   if (made) store.toast("已把视频画面放到画布上");
 }
+
+/* ---------- 画布助手交来的组件编辑（data.agentAction）：和「更多」菜单同一套 runEdit 逻辑 ---------- */
+export type AgentImageAction = { op?: string; params?: Record<string, unknown>; source_url?: string };
+const AGENT_ACTION_LABEL: Record<string, string> = { angle: "多角度", relight: "重打光", whitemodel: "白膜", enhance: "增强" };
+
+/**
+ * 在节点 id 上执行助手指定的模型编辑（节点建好时结果 = 原图占位，编辑结果作为新版本写进同一个节点）。
+ * 源图固定用 action.source_url：重跑时不会拿上一次的编辑结果再编辑一遍。
+ * 返回 { ok, url?, err? } 给 autorun 写 agentDone。
+ */
+export async function runAgentImageAction(store: CanvasStore, id: string, action: AgentImageAction): Promise<{ ok: boolean; url?: string; err?: string }> {
+  const op = String(action?.op || "");
+  const label = AGENT_ACTION_LABEL[op];
+  const n = store.node(id);
+  if (!n) return { ok: false, err: "节点已被删除" };
+  if (!label) return { ok: false, err: `画布不认识这个组件操作：${op || "空"}` };
+  const p = (action.params || {}) as Record<string, unknown>;
+  const num = (v: unknown, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const note = typeof p.note === "string" && p.note.trim() ? p.note.trim() : "";
+  let prompt = "";
+  let params: Record<string, unknown> = {};
+  if (op === "angle") {
+    const yaw = Math.round(num(p.yaw, 30)), pitch = Math.round(num(p.pitch, 0)), zoom = num(p.zoom, 1), wide = !!p.wide;
+    params = { yaw, pitch, zoom, wide };
+    prompt = `水平旋转 ${yaw}°，俯仰 ${pitch}°，缩放 ${zoom.toFixed(1)} 倍${wide ? "，广角镜头" : ""}`;
+  } else if (op === "relight") {
+    const lx = clamp(num(p.lx, .25), 0, 1), ly = clamp(num(p.ly, .3), 0, 1), inten = Math.round(clamp(num(p.intensity, 70), 10, 100)), temp = Math.round(clamp(num(p.temp, 40), 0, 100));
+    params = { lx, ly, intensity: inten, temp };
+    const ct = colorTemp(temp);
+    prompt = `保持画面内容、构图和主体完全不变，只重新打光：主光从${lightDir(lx, ly)}打来，光照强度 ${inten}%，色温${ct.label}（约 ${ct.kelvin}K）；阴影和高光随光源方向自然变化，不要新增、删除或替换任何内容。`;
+  } else if (op === "whitemodel") {
+    const tier = p.tier === "clear" || p.tier === "mannequin" ? p.tier : "blockout";
+    params = { tier };
+  } else if (op === "enhance") {
+    prompt = enhancePrompt(n);
+  }
+  if (note) prompt = prompt ? `${prompt}。${note}` : note;
+  const source = typeof action.source_url === "string" && action.source_url ? action.source_url : outOf(n)?.url || "";
+  if (!source) return { ok: false, err: "没有可编辑的原图" };
+  let err = "";
+  await runEdit(store, id, op as EditOp, label, { params, ...(prompt ? { prompt } : {}), sourceUrl: source }, id, (e) => { err = e.message; });
+  const after = store.node(id);
+  if (!after) return { ok: false, err: "节点已被删除" };
+  const out = outOf(after); const g = genOf(after);
+  if (err || g.err) return { ok: false, err: err || g.err || label + "失败" };
+  if (!out?.url || out.url === source) return { ok: false, err: label + "没有产出新图片" };
+  return { ok: true, url: out.url };
+}

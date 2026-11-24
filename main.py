@@ -45996,6 +45996,8 @@ def _agent_step_modality(tool, args=None):
     args = args if isinstance(args, dict) else {}
     if tool in ("generate_image", "image_generate"):
         return "image"
+    if tool == "canvas_action":
+        return "image" if str(args.get("action") or "").strip().lower() in _CANVAS_ACTION_MODEL else ""
     if tool in ("generate_video", "video_generate"):
         return "video"
     if tool in ("generate_audio", "generate_voice", "tts", "voiceover", "generate_music"):
@@ -47852,6 +47854,432 @@ AGENT_TOOLS["edit_timeline"] = {
     "validate": _agent_tool_edit_timeline_validate,
     "run": _agent_tool_edit_timeline_run,
     "preview": _agent_tool_edit_timeline_preview,
+    "mutates_canvas": True,
+}
+
+
+# ---------------------------------------------------------------------------
+# 画布组件统一入口：canvas_action（助手也能用画布上的组件，而不是只会建生成节点）
+#   · 本机处理（不花额度，服务端直接做完、落新节点）：分组 / 堆叠、旋转翻转、裁剪、宫格切分、本地高清放大、本地抠图
+#   · 模型编辑（走待生成卡片选模型，画布按「更多」菜单同一套逻辑执行）：多角度、重打光、白膜、AI 增强
+# 结果一律落成新节点并从原图连线过来，原节点不动。
+# ---------------------------------------------------------------------------
+
+_CANVAS_ACTION_LOCAL = ("group", "stack", "rotate", "crop", "split", "upscale", "cutout")
+_CANVAS_ACTION_MODEL = ("angle", "relight", "whitemodel", "enhance")
+_CANVAS_ACTION_LABEL = {"group": "分组", "stack": "堆叠", "rotate": "旋转", "crop": "裁剪", "split": "切分",
+                        "upscale": "高清放大", "cutout": "抠图", "angle": "多角度", "relight": "重打光",
+                        "whitemodel": "白膜", "enhance": "AI 增强"}
+_CANVAS_ACTION_ROTATE = {"cw": "向右旋转", "ccw": "向左旋转", "flip_h": "水平翻转", "flip_v": "垂直翻转"}
+_CANVAS_ACTION_WHITE_TIERS = ("blockout", "mannequin", "clear")
+_CANVAS_ACTION_GROUP_PAD = 28          # 与前端 groupFit.ts 的 GROUP_PAD 一致
+_CANVAS_ACTION_SPLIT_MAX = 8
+
+
+def _canvas_action_num(value, name, low, high, default=None):
+    if value is None or value == "":
+        if default is None:
+            raise AgentToolError(f"{name} 必填", code="invalid_args")
+        return default
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        raise AgentToolError(f"{name} 必须是数字", code="invalid_args")
+    if not low <= num <= high:
+        raise AgentToolError(f"{name} 要在 {low}–{high} 之间", code="invalid_args")
+    return num
+
+
+def _canvas_action_light_dir(direction):
+    """光源方向的人话 → 前端光点坐标（0–1，左上为原点）。"""
+    table = {"左上": (.2, .2), "上": (.5, .15), "右上": (.8, .2), "左": (.15, .5), "正前": (.5, .5), "前": (.5, .5),
+             "右": (.85, .5), "左下": (.2, .8), "下": (.5, .85), "右下": (.8, .8)}
+    text = str(direction or "").replace("方", "").replace("侧", "").strip()
+    return table.get(text)
+
+
+def _agent_tool_canvas_action_validate(args):
+    args = dict(args or {})
+    action = str(args.get("action") or "").strip().lower()
+    if action not in _CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL:
+        raise AgentToolError("action 只能是：" + " / ".join(_CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL),
+                             code="invalid_args")
+    canvas_id = str(args.get("canvas_id") or "").strip() or str(_AGENT_RUN_CANVAS_ID.get() or "").strip()
+    if not canvas_id:
+        raise AgentToolError("canvas_id 必填", code="invalid_args")
+    params = args.get("params") if isinstance(args.get("params"), dict) else {}
+    out = {"canvas_id": canvas_id, "action": action, "title": str(args.get("title") or "").strip()[:60]}
+    if action in ("group", "stack"):
+        raw = args.get("node_ids") if isinstance(args.get("node_ids"), list) else params.get("node_ids")
+        ids = []
+        for item in raw if isinstance(raw, list) else []:
+            nid = str(item or "").strip()
+            if nid and nid not in ids:
+                ids.append(nid)
+        if len(ids) < 2:
+            raise AgentToolError("node_ids 至少给 2 个节点", code="invalid_args")
+        if len(ids) > 50:
+            raise AgentToolError("一次最多 50 个节点", code="invalid_args")
+        out["node_ids"] = ids
+        return out
+    node_id = str(args.get("node_id") or "").strip()
+    if not node_id:
+        raise AgentToolError("node_id 必填（要处理的图片节点）", code="invalid_args")
+    out["node_id"] = node_id
+    clean = {}
+    if action == "rotate":
+        op = str(params.get("direction") or params.get("op") or "cw").strip().lower()
+        op = {"right": "cw", "left": "ccw", "fh": "flip_h", "fv": "flip_v", "horizontal": "flip_h",
+              "vertical": "flip_v"}.get(op, op)
+        if op not in _CANVAS_ACTION_ROTATE:
+            raise AgentToolError("rotate 的 direction 只能是 cw / ccw / flip_h / flip_v", code="invalid_args")
+        clean["direction"] = op
+    elif action == "crop":
+        ratio = str(params.get("ratio") or "").strip()
+        box = params.get("box") if isinstance(params.get("box"), dict) else None
+        if box:
+            clean["box"] = {k: _canvas_action_num(box.get(k), "box." + k, 0, 1) for k in ("x", "y", "w", "h")}
+            if clean["box"]["w"] <= 0 or clean["box"]["h"] <= 0:
+                raise AgentToolError("box.w / box.h 必须大于 0", code="invalid_args")
+        elif re.fullmatch(r"\d{1,2}:\d{1,2}", ratio):
+            a, b = (int(x) for x in ratio.split(":"))
+            if not a or not b:
+                raise AgentToolError("ratio 写成 4:5 这种形式", code="invalid_args")
+            clean["ratio"] = ratio
+        else:
+            raise AgentToolError("crop 要给 ratio（如 1:1、4:5，居中裁）或 box（x/y/w/h，0–1 的比例）", code="invalid_args")
+    elif action == "split":
+        clean["cols"] = int(_canvas_action_num(params.get("cols"), "cols", 1, _CANVAS_ACTION_SPLIT_MAX))
+        clean["rows"] = int(_canvas_action_num(params.get("rows"), "rows", 1, _CANVAS_ACTION_SPLIT_MAX))
+        if clean["cols"] * clean["rows"] < 2:
+            raise AgentToolError("至少切成 2 张", code="invalid_args")
+    elif action == "upscale":
+        target = str(params.get("target") or "2k").strip().lower()
+        if target not in _UPSCALE_TARGET_LONG:
+            raise AgentToolError("upscale 的 target 只能是 2k / 4k", code="invalid_args")
+        clean["target"] = target
+    elif action == "angle":
+        clean["yaw"] = int(_canvas_action_num(params.get("yaw"), "yaw", -180, 180, 30))
+        clean["pitch"] = int(_canvas_action_num(params.get("pitch"), "pitch", -90, 90, 0))
+        clean["zoom"] = round(_canvas_action_num(params.get("zoom"), "zoom", .5, 2, 1), 2)
+        clean["wide"] = bool(params.get("wide"))
+    elif action == "relight":
+        spot = _canvas_action_light_dir(params.get("direction"))
+        clean["lx"] = round(_canvas_action_num(params.get("lx"), "lx", 0, 1, spot[0] if spot else .25), 2)
+        clean["ly"] = round(_canvas_action_num(params.get("ly"), "ly", 0, 1, spot[1] if spot else .3), 2)
+        clean["intensity"] = int(_canvas_action_num(params.get("intensity"), "intensity", 10, 100, 70))
+        clean["temp"] = int(_canvas_action_num(params.get("temp"), "temp", 0, 100, 40))
+    elif action == "whitemodel":
+        tier = str(params.get("tier") or "blockout").strip().lower()
+        tier = {"product": "blockout", "产品": "blockout", "person": "mannequin", "人物": "mannequin",
+                "人台": "mannequin", "清空商品": "clear", "remove": "clear"}.get(tier, tier)
+        if tier not in _CANVAS_ACTION_WHITE_TIERS:
+            raise AgentToolError("whitemodel 的 tier 只能是 blockout（产品白模）/ mannequin（人物人台）/ clear（清空商品）",
+                                 code="invalid_args")
+        clean["tier"] = tier
+    if action in _CANVAS_ACTION_MODEL:
+        note = str(params.get("note") or params.get("prompt") or "").strip()
+        if note:
+            clean["note"] = note[:300]
+    out["params"] = clean
+    return out
+
+
+def _canvas_action_source(canvas, node_id):
+    node = _agent_find_node(canvas, node_id)
+    if node is None:
+        raise AgentToolError(f"节点 {node_id} 不存在", code="node_not_found", status_code=404)
+    if str(node.get("kind") or "") != "image":
+        raise AgentToolError(f"{_agent_node_ref(node)} 不是图片节点：这个组件只处理图片", code="invalid_args")
+    url = _agent_beat_url(node)
+    if not url:
+        raise AgentToolError(f"{_agent_node_ref(node)} 还没有图片（未上传 / 未生成）", code="invalid_args")
+    return node, url
+
+
+def _canvas_action_local_path(url, label):
+    path = _agent_local_image_path(url)
+    if not path or not os.path.isfile(path):
+        raise AgentToolError(f"{label}只支持画布里的本地图片（上传或生成到本机的），这张是外链", code="invalid_args")
+    return path
+
+
+def _canvas_action_save(image, stem, keep_png=False):
+    """PIL 图存进 output，返回 (url, w, h)。"""
+    from PIL import Image as _PILImage
+    png = keep_png or image.mode in ("RGBA", "LA", "P")
+    filename = f"{stem}_{uuid.uuid4().hex[:12]}.{'png' if png else 'jpg'}"
+    path = output_path_for(filename, "output")
+    if png:
+        image.save(path, "PNG")
+    else:
+        image.convert("RGB").save(path, "JPEG", quality=93)
+    return output_url_for(filename, "output"), image.width, image.height
+
+
+def _canvas_action_place_results(canvas_id, source_id, items, label, group_title=""):
+    """items=[{url, title}] → 落成新图片节点（原图 → 新节点连线），返回新节点 id 列表。"""
+    made = {}
+
+    def _mutate(canvas):
+        nodes = canvas.setdefault("nodes", [])
+        conns = canvas.setdefault("connections", [])
+        ids = []
+        anchor = [source_id]
+        for index, item in enumerate(items):
+            probe = _agent_beat_new_node("image", 0, 0, title=item["title"], url=item["url"], manual=True)
+            w, h = int(probe.get("w") or 240), int(probe.get("h") or 240)
+            x, y = _agent_beat_place(canvas, anchor if index == 0 else [ids[-1]], w, h)
+            if index and items[index].get("row_start"):
+                first = _agent_find_node(canvas, ids[0])
+                x = float(first.get("x") or 0)
+                y = max(float(n.get("y") or 0) + float(n.get("h") or 0) for n in nodes if n.get("id") in ids) + 28
+                x, y = _agent_free_position(canvas, x, y, w, h)
+            probe["x"], probe["y"] = x, y
+            nodes.append(probe)
+            conns.append(_agent_beat_edge(source_id, probe["id"]))
+            ids.append(probe["id"])
+        made["ids"] = ids
+        return None
+
+    _agent_mutate_canvas(canvas_id, _mutate)
+    return made["ids"]
+
+
+def _canvas_action_group(args):
+    state = {}
+
+    def _mutate(canvas):
+        by_id = _agent_nodes_by_id(canvas)
+        missing = [nid for nid in args["node_ids"] if nid not in by_id]
+        if missing:
+            raise AgentToolError("这些节点不存在：" + "、".join(missing[:6]), code="node_not_found", status_code=404)
+        members = [by_id[nid] for nid in args["node_ids"]]
+        if any(str(n.get("kind") or "") == "group" for n in members):
+            raise AgentToolError("分组 / 堆叠不能再放进分组或堆叠里", code="invalid_args")
+        owned = {}
+        for n in canvas.get("nodes") or []:
+            if isinstance(n, dict) and str(n.get("kind") or "") == "group":
+                for cid in n.get("children") or []:
+                    owned[str(cid)] = n
+        taken = [m for m in members if str(m.get("id")) in owned]
+        if taken:
+            raise AgentToolError("「%s」已经在别的分组 / 堆叠里了，先取消那个分组" % _agent_beat_title(taken[0]),
+                                 code="invalid_args")
+        stack = args["action"] == "stack"
+        if stack:
+            members.sort(key=lambda n: (float(n.get("y") or 0), float(n.get("x") or 0)))
+            first = members[0]
+            box = {"x": first.get("x") or 0, "y": first.get("y") or 0,
+                   "w": first.get("w") or 240, "h": first.get("h") or 240}
+        else:
+            pad = _CANVAS_ACTION_GROUP_PAD
+            x = min(float(n.get("x") or 0) for n in members) - pad
+            y = min(float(n.get("y") or 0) for n in members) - pad - 10
+            w = max(float(n.get("x") or 0) + float(n.get("w") or 0) for n in members) - x + pad
+            h = max(float(n.get("y") or 0) + float(n.get("h") or 0) + 24 for n in members) - y + pad - 24
+            box = {"x": round(x), "y": round(y), "w": round(w), "h": round(h)}
+        node = {"id": ("s" if stack else "g") + uuid.uuid4().hex[:10], "kind": "group", **box,
+                "text": args.get("title") or ("堆叠" if stack else "分组"),
+                "children": [str(n.get("id")) for n in members]}
+        if stack:
+            node["data"] = {"stack": True}
+        canvas.setdefault("nodes", []).append(node)
+        state["node"] = node
+        return None
+
+    _agent_mutate_canvas(args["canvas_id"], _mutate)
+    node = state["node"]
+    label = "堆叠" if args["action"] == "stack" else "分组"
+    return {"node_id": node["id"], "title": node["text"], "status": "done", "action": args["action"],
+            "member_ids": list(node["children"]),
+            "message": f"已把 {len(node['children'])} 个节点收成{label}「{node['text']}」；"
+                       f"之后生成时把这个{label}节点本身当输入（inputs 写它的 id），就是整组参考"}
+
+
+async def _canvas_action_local(args):
+    from PIL import Image as _PILImage, ImageOps as _PILImageOps
+    canvas = load_canvas(args["canvas_id"])
+    source, url = _canvas_action_source(canvas, args["node_id"])
+    title = _agent_beat_title(source) or args["node_id"]
+    action, params = args["action"], args.get("params") or {}
+    label = _CANVAS_ACTION_LABEL[action]
+    items = []
+    extra = {}
+    if action in ("rotate", "crop", "split"):
+        path = _canvas_action_local_path(url, label)
+        with _PILImage.open(path) as raw:
+            img = _PILImageOps.exif_transpose(raw)
+            img.load()
+        keep_png = img.mode in ("RGBA", "LA", "P") or path.lower().endswith(".png")
+        if action == "rotate":
+            op = params["direction"]
+            out = {"cw": lambda i: i.transpose(_PILImage.ROTATE_270), "ccw": lambda i: i.transpose(_PILImage.ROTATE_90),
+                   "flip_h": lambda i: i.transpose(_PILImage.FLIP_LEFT_RIGHT),
+                   "flip_v": lambda i: i.transpose(_PILImage.FLIP_TOP_BOTTOM)}[op](img)
+            new_url, _, _ = _canvas_action_save(out, "rotate", keep_png)
+            items.append({"url": new_url, "title": f"{title} · {_CANVAS_ACTION_ROTATE[op]}"})
+        elif action == "crop":
+            W, H = img.size
+            if params.get("box"):
+                b = params["box"]
+                left, top = round(b["x"] * W), round(b["y"] * H)
+                right, bottom = min(W, round((b["x"] + b["w"]) * W)), min(H, round((b["y"] + b["h"]) * H))
+            else:
+                a, c = (int(x) for x in params["ratio"].split(":"))
+                if W / H > a / c:
+                    cw, ch = round(H * a / c), H
+                else:
+                    cw, ch = W, round(W * c / a)
+                left, top = (W - cw) // 2, (H - ch) // 2
+                right, bottom = left + cw, top + ch
+            if right - left < 8 or bottom - top < 8:
+                raise AgentToolError("裁剪区域太小", code="invalid_args")
+            out = img.crop((left, top, right, bottom))
+            new_url, _, _ = _canvas_action_save(out, "crop", keep_png)
+            items.append({"url": new_url, "title": f"{title} · 裁剪{(' ' + params['ratio']) if params.get('ratio') else ''}"})
+        else:
+            cols, rows = params["cols"], params["rows"]
+            W, H = img.size
+            cw, ch = W / cols, H / rows
+            for r in range(rows):
+                for c in range(cols):
+                    tile = img.crop((round(c * cw), round(r * ch), round((c + 1) * cw), round((r + 1) * ch)))
+                    new_url, _, _ = _canvas_action_save(tile, "split", keep_png)
+                    items.append({"url": new_url, "title": f"{title} {r + 1}-{c + 1}", "row_start": c == 0 and r > 0})
+    elif action == "upscale":
+        path = _canvas_action_local_path(url, label)
+        if not _upscale_runtime_installed():
+            raise AgentToolError("本地高清放大组件还没装：打开图片节点「更多 → 增强 → 本地 2K」按提示安装后再试；"
+                                 "或改用 action=enhance（在线模型增强）", code="tool_unavailable")
+        filename = f"hd_{uuid.uuid4().hex}.png"
+        out_path = os.path.join(ASSETS_DIR, "output", filename)
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        try:
+            info = await asyncio.to_thread(run_local_upscale, path, out_path, _UPSCALE_TARGET_LONG[params["target"]])
+        except Exception as exc:
+            raise AgentToolError(f"高清放大失败：{exc}", code="tool_failed")
+        if info.get("skipped"):
+            return {"node_id": args["node_id"], "title": title, "status": "skipped", "action": action,
+                    "message": f"「{title}」已经是 {params['target'].upper()} 精度，不用再放大"}
+        items.append({"url": output_url_for(filename, "output"), "title": f"{title} · {params['target'].upper()}"})
+        extra = {"width": info.get("width"), "height": info.get("height")}
+    elif action == "cutout":
+        path = _canvas_action_local_path(url, label)
+        if not _matting_model_downloaded():
+            raise AgentToolError("本地抠图模型还没下载：打开图片节点「更多 → 抠图」下载（约 170MB，免费离线）后再试",
+                                 code="tool_unavailable")
+        if _matting_session() is None:
+            raise AgentToolError(_matting_unavailable_reason(), code="tool_unavailable")
+        filename = f"matting_{uuid.uuid4().hex}.png"
+        out_path = os.path.join(ASSETS_DIR, "output", filename)
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        try:
+            await asyncio.to_thread(run_image_matting, path, out_path)
+        except Exception as exc:
+            raise AgentToolError(f"抠图失败：{exc}", code="tool_failed")
+        items.append({"url": output_url_for(filename, "output"), "title": f"{title} · 抠图"})
+    if args.get("title") and len(items) == 1:
+        items[0]["title"] = args["title"]
+    ids = _canvas_action_place_results(args["canvas_id"], args["node_id"], items, label)
+    result = {"node_id": ids[0] if len(ids) == 1 else "", "node_ids": ids, "title": items[0]["title"],
+              "status": "done", "action": action, "source_node_id": args["node_id"],
+              "image_urls": [it["url"] for it in items],
+              "message": (f"已对「{title}」做{label}，结果是 {len(ids)} 个新图片节点（原图不动，已连线）")}
+    result.update({k: v for k, v in extra.items() if v})
+    return result
+
+
+def _canvas_action_model_title(action, params, title):
+    if action == "angle":
+        return f"{title} · 多角度 {params.get('yaw')}°"
+    if action == "whitemodel":
+        return f"{title} · " + {"blockout": "产品白模", "mannequin": "人台", "clear": "清空商品"}[params["tier"]]
+    return f"{title} · {_CANVAS_ACTION_LABEL[action]}"
+
+
+def _canvas_action_model(args):
+    """模型编辑：建目标节点（初始结果 = 原图），打上 data.agentAction；
+    待生成卡片里选好模型后，画布用「更多」菜单同一套编辑逻辑在这个节点上执行。"""
+    action, params = args["action"], dict(args.get("params") or {})
+    deferred = bool(_AGENT_BEAT_DEFER_GEN.get())
+    state = {}
+
+    def _mutate(canvas):
+        source, url = _canvas_action_source(canvas, args["node_id"])
+        title = _agent_beat_title(source) or args["node_id"]
+        # manual：这个节点的结果只能由组件编辑产生，「运行下游」之类的链式重跑不能把它当普通生图节点跑
+        node = _agent_beat_new_node("image", 0, 0, title=args.get("title") or _canvas_action_model_title(action, params, title),
+                                    url=url, manual=True, autorun=False)
+        x, y = _agent_beat_place(canvas, [args["node_id"]], int(node.get("w") or 240), int(node.get("h") or 240))
+        node["x"], node["y"] = x, y
+        data = node.setdefault("data", {})
+        data["agentAction"] = {"op": action, "params": params, "source_url": url,
+                               "source_node_id": args["node_id"], "at": now_ms()}
+        if deferred:
+            data["agentPending"] = True
+        else:
+            data["agentRun"] = {"at": now_ms()}
+        canvas.setdefault("nodes", []).append(node)
+        canvas.setdefault("connections", []).append(_agent_beat_edge(args["node_id"], node["id"]))
+        state.update({"node": node, "source_title": title})
+        return None
+
+    _agent_mutate_canvas(args["canvas_id"], _mutate)
+    node, label = state["node"], _CANVAS_ACTION_LABEL[action]
+    title = node["data"]["gen"]["title"]
+    if deferred:
+        return {"node_id": node["id"], "title": title, "status": "ready_to_generate", "kind": "image",
+                "action": action, "source_node_id": args["node_id"], "generation_units": 0,
+                "message": (f"已在「{state['source_title']}」旁边建好{label}节点「{title}」（先放原图占位），"
+                            "等用户在待生成卡片里选好图片模型后，画布按这个组件的逻辑执行")}
+    return {"node_id": node["id"], "title": title, "status": "queued_on_canvas", "kind": "image",
+            "action": action, "source_node_id": args["node_id"], "generation_units": 1,
+            "message": f"已让画布对「{state['source_title']}」做{label}，结果会出现在新节点「{title}」上"}
+
+
+async def _agent_tool_canvas_action_run(args):
+    if args["action"] in ("group", "stack"):
+        return _canvas_action_group(args)
+    if args["action"] in _CANVAS_ACTION_MODEL:
+        return _canvas_action_model(args)
+    return await _canvas_action_local(args)
+
+
+def _agent_tool_canvas_action_preview(args, canvas=None):
+    label = _CANVAS_ACTION_LABEL.get(args.get("action"), args.get("action"))
+    if args.get("action") in ("group", "stack"):
+        return {"summary": f"把 {len(args.get('node_ids') or [])} 个节点收成{label}"}
+    return {"summary": f"对节点 {args.get('node_id')} 做{label}",
+            "generation": args.get("action") in _CANVAS_ACTION_MODEL}
+
+
+AGENT_TOOLS["canvas_action"] = {
+    "description": (
+        "使用画布上的组件（智能画布 BEAT）。结果落成新节点并从原图连线，原节点不动。action：\n"
+        "· 本机处理，不花额度、立刻完成：group（把 node_ids 收成分组）/ stack（收成堆叠：同产品多角度、同一批素材）；"
+        "rotate（params.direction=cw/ccw/flip_h/flip_v）；crop（params.ratio=\"1:1\" 居中裁，或 params.box={x,y,w,h} 0–1 比例）；"
+        "split（宫格切分，params.cols/rows 1–8，九宫格就是 3×3）；upscale（本地高清放大，params.target=2k/4k）；"
+        "cutout（本地抠图成透明 PNG）。\n"
+        "· 模型编辑，进待生成卡片由用户选图片模型后画布执行：angle（多角度换机位，params.yaw -180~180 / pitch -90~90 / "
+        "zoom 0.5~2 / wide）；relight（重打光，params.direction=左上/右/正前…，或 lx/ly 0–1，intensity 10–100，"
+        "temp 0 暖~100 冷）；whitemodel（params.tier=blockout 产品石膏白模 / mannequin 人物白色人台 / clear 清空商品只留场景）；"
+        "enhance（AI 高清增强 2×）。可选 params.note 补一句要求。\n"
+        "什么时候用：同一商品要多个机位→angle（每个角度一次），不要用 generate_image 硬写「换个角度」；"
+        "换背景 / 换品前先 whitemodel(tier=clear) 清掉旧商品；九宫格分镜图拆开当参考→split；"
+        "一组参考图要整体喂给下游→stack 后把堆叠节点当 inputs。视频截帧不用这个：用 analyze_video 的 frames / "
+        "first_frame_url / last_frame_url，再 create_node(type=image, url=…)。"),
+    "schema": {"type": "object", "properties": {
+        "canvas_id": {"type": "string", "description": "不填就用当前画布"},
+        "action": {"type": "string", "enum": list(_CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL)},
+        "node_id": {"type": "string", "description": "要处理的图片节点 id（group / stack 不用填）"},
+        "node_ids": {"type": "array", "items": {"type": "string"}, "description": "group / stack：要收进去的节点 id"},
+        "params": {"type": "object", "description": "该 action 的参数，见上面说明"},
+        "title": {"type": "string", "description": "可选：新节点 / 分组的标题"}},
+        "required": ["action"]},
+    "validate": _agent_tool_canvas_action_validate,
+    "run": _agent_tool_canvas_action_run,
+    "preview": _agent_tool_canvas_action_preview,
     "mutates_canvas": True,
 }
 
@@ -51923,6 +52351,9 @@ def _agent_step_generation_units(tool, args, canvas_id=""):
         return 1
     if tool == "create_node" and str(args.get("type") or "") == "audio":
         return 0 if args.get("run") is False else 1
+    if tool == "canvas_action":
+        # 只有模型编辑（多角度 / 重打光 / 白膜 / AI 增强）花额度；分组、裁剪、本地放大这些本机处理不算
+        return 1 if str(args.get("action") or "").strip().lower() in _CANVAS_ACTION_MODEL else 0
     if tool == "batch_generate":
         rows = args.get("rows") if isinstance(args.get("rows"), list) else []
         return 0 if args.get("run") is False else len(rows)
@@ -55482,6 +55913,10 @@ _AGENT_BEAT_SYSTEM_PROMPT = (
     '- 不要提前对还没出结果的节点建时间线。\n'
     '- 改已有节点：提示词 / 标题用 update_node（prompt / title），参数用 update_node.settings；重新出图用 run_generation。用户只说改参数 / 改提示词时只改不跑（跑会花钱），回复里提醒一句「要按新设置重新生成跟我说」。\n'
     '- 新建节点要接上游时用 create_node 的 inputs 一步连好；连线一律「上游 → 下游」。\n'
+    '- **画布组件用 canvas_action**，别拿 generate_image 硬写：同一商品换机位 → angle（每个角度一次）；改光线 → relight；'
+    '产品白模 / 人物人台 / 清掉旧商品只留场景 → whitemodel（tier=blockout / mannequin / clear）；要更清晰 → upscale（本地免费）或 enhance（在线模型）；'
+    '抠透明底 → cutout；九宫格 / 宫格图拆开 → split；改比例 → crop；旋转翻转 → rotate；一组素材要整体当参考 → stack（或 group）后把它当 inputs。'
+    '本机处理当场完成；模型编辑和生成一样进待生成卡片，由用户选模型。视频截帧用 analyze_video 的帧地址再 create_node(type=image, url=…)。\n'
     '- 用户说「记住 / 以后都 / 默认」时用 remember；上下文里有项目记忆时默认照做。\n'
     '- 多阶段任务每个阶段做完都会停下来等用户确认，下一条消息里用户确认满意后再推进下一阶段（整体方案会一直带着）。\n'
     '- 卖货 / 短视频成片的标准流程（用户要成片时按这个拆 roadmap）：① 策划与分镜写进文本节点（每个镜头：画面、景别、运镜、时长、口播、字幕；口播按每秒约 4 个字控制，不超过镜头时长）；② 每个镜头一个 generate_video（参考产品图，时长按分镜，同一轮全部发出）；③ 镜头出结果后，每个镜头的口播用 create_node(type=audio, prompt=口播原文) 生成配音（同一轮全部发出）；④ 配音出结果后 create_node(type=timeline, video_nodes=按顺序的镜头, audio_nodes=对齐的配音, subtitles=对齐的字幕, export=true) 自动导出成片；⑤ 成片出来后告诉用户成片节点和时长。\n'

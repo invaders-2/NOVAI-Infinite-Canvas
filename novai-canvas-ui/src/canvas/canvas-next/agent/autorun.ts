@@ -121,6 +121,15 @@ export function runAgentQueued(store: CanvasStore): number {
               return { ...x, kind: media, data: { ...data, gen } };
             });
           }
+          // 助手交来的组件编辑（多角度 / 重打光 / 白膜 / 增强）：走「更多」菜单同一套编辑逻辑，不当普通生图跑
+          const action = n0 && n0.kind === "image" && n0.data && typeof n0.data === "object"
+            ? (n0.data as { agentAction?: unknown }).agentAction : undefined;
+          if (action && typeof action === "object") {
+            const { runAgentImageAction } = await import("../ui/editors/registry");
+            const r = await runAgentImageAction(store, id, action as { op?: string; params?: Record<string, unknown>; source_url?: string });
+            markDone(store, id, r.ok ? { ok: true, url: r.url } : { ok: false, err: r.err || "组件编辑失败" });
+            return r.ok;
+          }
           if (n0?.kind === "timeline") {
             const r = await exportTimelineNode(store, id);
             markDone(store, id, { ok: r.ok, url: r.url, node_id: r.nodeId, dur: r.dur, err: r.err });
