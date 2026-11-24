@@ -679,7 +679,9 @@ def main() -> int:
     check("媒体 url 是局域网绝对地址",
           str(media.get("url")).startswith("http://") and "/api/lan/media/" in str(media.get("url")),
           str(media.get("url")))
-    check("局域网口令开启时 url 带 token", ("token=" + MEDIA_TOKEN) in str(media.get("url")), str(media.get("url")))
+    check("局域网口令开启时 url 不再带整机口令", MEDIA_TOKEN not in str(media.get("url")), str(media.get("url")))
+    sig_match = re.search(r"[?&]sig=([0-9a-f]{32})", str(media.get("url")))
+    check("局域网口令开启时 url 带单文件签名", bool(sig_match), str(media.get("url")))
     check("媒体类型 image", media.get("kind") == "image", str(media.get("kind")))
     check("媒体 mime 原样返回", media.get("mime") == "image/png", str(media.get("mime")))
     check("媒体大小等于字节数", media.get("size") == len(png), str(media.get("size")))
@@ -696,6 +698,15 @@ def main() -> int:
           client.get("/api/lan/media/" + media_id, headers={"X-NOVAI-Friend-Token": own_token}).status_code == 200)
     check("无口令下载 401", client.get("/api/lan/media/" + media_id).status_code == 401)
     check("错口令下载 401", client.get("/api/lan/media/" + media_id, params={"token": "bad"}).status_code == 401)
+    sig = sig_match.group(1) if sig_match else ""
+    check("带单文件签名下载 200", client.get("/api/lan/media/" + media_id, params={"sig": sig}).status_code == 200)
+    check("错签名下载 401", client.get("/api/lan/media/" + media_id, params={"sig": "0" * 32}).status_code == 401)
+    other_id = "f" * 24
+    with open(os.path.join(data_dir, lan.MEDIA_DIR, other_id + ".png"), "wb") as handle:
+        handle.write(png)
+    check("签名只对自己那个文件有效",
+          client.get("/api/lan/media/" + other_id, params={"sig": sig}).status_code == 401)
+    os.remove(os.path.join(data_dir, lan.MEDIA_DIR, other_id + ".png"))
     check("不存在的媒体 404",
           client.get("/api/lan/media/" + "0" * 24, params={"token": MEDIA_TOKEN}).status_code == 404)
     check("媒体扩展名不在白名单 404",

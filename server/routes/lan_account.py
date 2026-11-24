@@ -1196,18 +1196,33 @@ def _media_kind_ext(content_type: Any) -> Tuple[str, str]:
     return MEDIA_TYPES.get(value, ("", ""))
 
 
+def _media_sig(media_id: Any) -> str:
+    """单个聊天媒体的访问签名：HMAC(本机局域网口令, media_id)。只能取这一个文件，
+    以前直接把整机口令拼在 ?token= 上，拿到图片地址的人能调本机全部接口。"""
+    loader = deps.get("LOAD_LAN_TOKEN")
+    secret = ""
+    if callable(loader):
+        try:
+            secret = str(loader() or "")
+        except Exception:
+            secret = ""
+    if not secret:
+        return ""
+    stem = str(media_id or "").strip().lower().split(".", 1)[0]
+    return hmac.new(secret.encode("utf-8"), ("lan-media:" + stem).encode("utf-8"), "sha256").hexdigest()[:32]
+
+
 def _media_url(media_id: str) -> str:
     """给聊天用的绝对地址：对方浏览器不在本机，必须带 IP 和端口。
-    开了局域网口令时再追一个 token，和 canvas_share.share_url 同一套取法。"""
+    开了局域网口令时再追一个只对这个文件有效的 sig（不再带整机口令）。"""
     url = "http://%s:%s/api/lan/media/%s" % (_lan_ip(), _port(), urllib.parse.quote(str(media_id)))
     enabled = deps.get("LAN_AUTH_ENABLED")
-    loader = deps.get("LOAD_LAN_TOKEN")
-    if callable(enabled) and callable(loader):
+    if callable(enabled):
         try:
             if enabled():
-                token = str(loader() or "")
-                if token:
-                    url += "?token=" + urllib.parse.quote(token)
+                sig = _media_sig(media_id)
+                if sig:
+                    url += "?sig=" + sig
         except Exception:
             pass
     return url
@@ -3216,8 +3231,19 @@ def get_media(media_id: str, request: Request,
                 allowed.append(str(loader() or ""))
             except Exception:
                 pass
+        # 换口令前发出去的聊天图片地址带的是旧口令：旧口令只在这里还认（只读单个媒体文件）
+        retired_loader = deps.get("LOAD_RETIRED_LAN_TOKENS")
+        if callable(retired_loader):
+            try:
+                allowed.extend(str(item or "") for item in (retired_loader() or []))
+            except Exception:
+                pass
         candidates = [str(request.query_params.get("token") or ""), str(x_novai_friend_token or "")]
         matched = False
+        given_sig = str(request.query_params.get("sig") or "")
+        expected_sig = _media_sig(media_id) if given_sig else ""
+        if expected_sig and hmac.compare_digest(given_sig, expected_sig):
+            matched = True
         for given in candidates:
             if not given:
                 continue
