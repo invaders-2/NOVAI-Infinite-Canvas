@@ -66,6 +66,7 @@ class GenerationCardTests(unittest.TestCase):
             return {"ok": True, "result": {"status": "queued_on_canvas", "node_id": "n1"}}
 
         req = agent_request(0, renderer="beat")
+        req["autonomy"] = "collab"      # 面板默认「协作」档：出结果后停下来问用户（自动档会接着推进）
         req["approved_steps"] = [{"tool": "run_generation", "args": {"canvas_id": "c1", "node_id": "n1"},
                                   "description": "生成海报"}]
         review = {"summary": "杯身有点变形", "model": "vm",

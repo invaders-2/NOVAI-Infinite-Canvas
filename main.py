@@ -45953,8 +45953,8 @@ def _agent_v2_runstate_enabled():
 
 
 def _agent_v2_autonomy_enabled():
-    """阶段四：自治档位（collab / auto / managed）。默认关——关着时三档都退回 collab 现状。"""
-    return _agent_v2_flag("AUTONOMY")
+    """阶段四：自治档位（collab / auto / managed）。默认开（面板的协作 / 自动推进 / 托管切换靠它生效）；NOVAI_AGENT_V2_AUTONOMY=0 时三档都退回 collab。"""
+    return _agent_v2_flag("AUTONOMY", default=True)
 
 
 _AGENT_AUTONOMY_TIERS = ("collab", "auto", "managed")
