@@ -37854,6 +37854,10 @@ def _agent_beat_node_summary(node, canvas, max_text=160):
         summary["image_urls"] = [url]
     elif kind == "video" and url:
         summary["video_urls"] = [url]
+    if kind in ("image", "video") and _agent_read_tools is not None:
+        visual = _agent_read_tools.CanvasAccess().caption(node)
+        if visual:
+            summary["visual"] = visual
     elif kind == "audio" and url:
         summary["audio_urls"] = [url]
     if kind == "text":
@@ -53913,7 +53917,7 @@ async def agent_thread_clear(canvas_id: str):
 AGENT_VISION_MAX_IMAGES = 12
 AGENT_VISION_MAX_SIDE = 1024
 AGENT_CAPTIONS_FILE = os.path.join(DATA_DIR, "agent_image_captions.json")
-AGENT_CAPTIONS_LIMIT = 600
+AGENT_CAPTIONS_LIMIT = 3000
 _AGENT_VISION_HINTS = ("gpt-4o", "gpt-4.1", "gpt-5", "o3", "o4", "claude", "gemini", "-vl", "vl-", "vision", "glm-4v",
                        "glm-4.5v", "glm-4.6v", "qwen-vl", "qwen2.5-vl", "qwen3-vl", "qvq", "doubao-seed", "doubao-1.5-vision",
                        "seed-1.6", "kimi-vl", "pixtral", "llava", "grok-4", "step-1v", "internvl", "minicpm-v", "fake-vision")
@@ -54378,6 +54382,129 @@ async def _agent_run_vision_setup(images, chat, emit):
                     "text": f"当前对话模型看不了图{detail}：{labels}只能按节点信息理解。换一个能看图的对话模型效果会更好"})
     return "none", (f"参考图说明：系统没法让你看到 {labels} 的画面（{detail.strip('，')}），"
                     "只知道它们是哪个节点、地址是什么；不要假装看过图。")
+
+
+# ---------------------------------------------------------------------------
+# 画布画面描述：助手以前只看得到图片节点的地址和标题（上传图连提示词都没有），只能按标题猜。
+# 运行开始时给缺描述的图片 / 视频封面补一句描述（按文件缓存，同一张图只描述一次），
+# 之后画布快照、画布地图、read_node 都带上「画面里实际是什么」。只读缓存的地方绝不调模型。
+# ---------------------------------------------------------------------------
+
+AGENT_AUTO_CAPTION_MAX_NEW = 8          # 每次运行最多新描述几张（防止一张大画布第一次就烧很多次看图调用）
+AGENT_AUTO_CAPTION_WAIT = 8.0           # 运行开始最多等几秒；没描述完的在后台接着做，后面几轮 / 下次运行用得上
+AGENT_AUTO_CAPTION_CONCURRENCY = 4
+AGENT_CAPTION_SHORT = 120
+_AGENT_CAPTIONS_MEMO = {"mtime": None, "data": {}}
+_AGENT_CAPTION_INFLIGHT = set()
+
+
+def _agent_auto_caption_enabled():
+    return str(os.environ.get("NOVAI_AGENT_AUTO_CAPTION", "1")).strip().lower() not in ("0", "false", "off", "no")
+
+
+def _agent_captions_cached():
+    """看图缓存的内存副本（文件 mtime 变了才重读）：画布地图每个节点都要查，不能每次读盘。"""
+    try:
+        mtime = os.path.getmtime(AGENT_CAPTIONS_FILE)
+    except OSError:
+        mtime = None
+    if mtime != _AGENT_CAPTIONS_MEMO["mtime"]:
+        _AGENT_CAPTIONS_MEMO["data"] = _agent_captions_load() if mtime is not None else {}
+        _AGENT_CAPTIONS_MEMO["mtime"] = mtime
+    return _AGENT_CAPTIONS_MEMO["data"]
+
+
+def _agent_canvas_caption_lookup(url):
+    """一张图的画面描述（只查缓存）；压成一行、截短，给地图和快照用。"""
+    url = str(url or "").strip()
+    if not url:
+        return ""
+    try:
+        hit = _agent_captions_cached().get(_agent_caption_key(url))
+    except Exception:
+        return ""
+    text = " ".join(str((hit or {}).get("caption") or "").split())
+    return text[:AGENT_CAPTION_SHORT] + ("…" if len(text) > AGENT_CAPTION_SHORT else "")
+
+
+def _agent_canvas_caption_targets(canvas, focus=None, limit=AGENT_AUTO_CAPTION_MAX_NEW):
+    """还没描述过的图片 / 视频封面：选中 / 引用的优先，其次没有提示词的（上传素材），再按新旧。"""
+    if not isinstance(canvas, dict) or _agent_read_tools is None:
+        return []
+    access = _agent_read_tools.CanvasAccess()
+    nodes = [n for n in (canvas.get("nodes") or []) if isinstance(n, dict) and n.get("id")]
+    focus_ids = [str(i) for i in ((focus or {}).get("selected_node_ids") or [])]
+    focus_ids += [str(r.get("id") or "") for r in ((focus or {}).get("references") or []) if isinstance(r, dict)]
+    by_id = {str(n.get("id")): n for n in nodes}
+    for gid in list(focus_ids):
+        group = by_id.get(gid)
+        if group is not None and str(group.get("kind") or "") == "group":
+            focus_ids += [str(c) for c in (group.get("children") or [])]
+
+    def rank(node):
+        nid = str(node.get("id"))
+        in_focus = nid in focus_ids
+        no_prompt = not access.raw_prompt(node).strip()
+        created, right = _agent_place_newness(node)
+        return (0 if in_focus else 1, 0 if no_prompt else 1, -created, -right)
+
+    out, seen = [], set()
+    for node in sorted(nodes, key=rank):
+        url = access.caption_url(node)
+        if not url or url in seen or url in _AGENT_CAPTION_INFLIGHT:
+            continue
+        seen.add(url)
+        if _agent_canvas_caption_lookup(url):
+            continue
+        out.append({"url": url, "label": _agent_node_ref(node) or str(node.get("id"))})
+        if len(out) >= limit:
+            break
+    return out
+
+
+async def _agent_canvas_caption_batch(targets):
+    sem = asyncio.Semaphore(AGENT_AUTO_CAPTION_CONCURRENCY)
+    done = []
+
+    async def one(img):
+        async with sem:
+            _AGENT_CAPTION_INFLIGHT.add(img["url"])
+            try:
+                caps, _ = await _agent_caption_images([img])
+                if caps:
+                    done.append(img["url"])
+            except Exception as exc:
+                print(f"[Agent] 画面描述失败（不影响运行）{img['label']}: {exc}", flush=True)
+            finally:
+                _AGENT_CAPTION_INFLIGHT.discard(img["url"])
+
+    await asyncio.gather(*(one(img) for img in targets))
+    return done
+
+
+async def _agent_run_auto_caption(canvas, focus=None, emit=None, wait=AGENT_AUTO_CAPTION_WAIT):
+    """运行开始时补画面描述：最多等 wait 秒，剩下的在后台继续（不取消）。返回这次等到的张数。"""
+    if not _agent_auto_caption_enabled():
+        return 0
+    targets = _agent_canvas_caption_targets(canvas, focus)
+    if not targets:
+        return 0
+    if not _agent_vision_candidates(None, ""):
+        return 0          # 没有能看图的模型：画布地图照旧，不报错
+    if emit:
+        emit("thought", {"kind": "auto_caption", "text": "先看一眼画布上 %d 张还没看过的图" % len(targets)})
+    task = asyncio.create_task(_agent_canvas_caption_batch(targets))
+    finished, _ = await asyncio.wait({task}, timeout=wait)
+    if task in finished:
+        try:
+            return len(task.result() or [])
+        except Exception:
+            return 0
+    return 0
+
+
+if _agent_read_tools is not None:
+    _agent_read_tools.set_caption_lookup(_agent_canvas_caption_lookup)
 
 
 def _agent_run_resolve_chat(provider, model, ms_model):
@@ -58146,6 +58273,12 @@ async def _agent_run_producer(req, queue, bus=None):
             if video_grids:
                 keep = max(0, AGENT_VISION_MAX_IMAGES - len(video_grids))
                 vision_images = list(vision_images[:keep]) + list(video_grids)
+        if ctx.kind == "canvas" and _agent_is_beat_canvas(first_snapshot):
+            # 画面描述：缺描述的图片 / 视频封面先补一句（最多等几秒，没完的后台继续），地图里就不再只有标题
+            try:
+                await _agent_run_auto_caption(first_snapshot, focus, emit)
+            except Exception as exc:
+                print(f"[Agent] run {run_id} 补画面描述失败（不影响运行）: {exc}", flush=True)
         vision_mode, vision_text = "", ""
         if vision_images:
             if _agent_model_maybe_vision(chat.get("model")) and _agent_chat_vision_key(chat) not in _AGENT_VISION_DENY:
