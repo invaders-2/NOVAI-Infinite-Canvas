@@ -46001,7 +46001,8 @@ def _agent_step_modality(tool, args=None):
     if tool in ("generate_image", "image_generate"):
         return "image"
     if tool == "canvas_action":
-        return "image" if str(args.get("action") or "").strip().lower() in _CANVAS_ACTION_MODEL else ""
+        act = str(args.get("action") or "").strip().lower()
+        return "image" if act in _CANVAS_ACTION_MODEL else ("video" if act in _CANVAS_ACTION_VIDEO else "")
     if tool in ("generate_video", "video_generate"):
         return "video"
     if tool in ("generate_audio", "generate_voice", "tts", "voiceover", "generate_music"):
@@ -47869,11 +47870,19 @@ AGENT_TOOLS["edit_timeline"] = {
 # 结果一律落成新节点并从原图连线过来，原节点不动。
 # ---------------------------------------------------------------------------
 
-_CANVAS_ACTION_LOCAL = ("group", "stack", "rotate", "crop", "split", "upscale", "cutout")
-_CANVAS_ACTION_MODEL = ("angle", "relight", "whitemodel", "enhance")
+_CANVAS_ACTION_LOCAL = ("group", "stack", "rotate", "crop", "split", "upscale", "cutout", "adjust")
+_CANVAS_ACTION_MODEL = ("angle", "relight", "whitemodel", "enhance", "outpaint", "erase", "redraw")
+# 视频 AI 编辑（与视频工具栏 videoTools.ts 同一套提示词）：落成「视频编辑 / 视频延长」方式的视频节点，走正常生成
+_CANVAS_ACTION_VIDEO = ("video_replace", "video_remove", "video_extend", "video_retake")
+_CANVAS_ACTION_VIDEO_MODE = {"video_replace": "video_edit", "video_remove": "video_edit",
+                             "video_extend": "video_extend", "video_retake": "video_edit"}
 _CANVAS_ACTION_LABEL = {"group": "分组", "stack": "堆叠", "rotate": "旋转", "crop": "裁剪", "split": "切分",
-                        "upscale": "高清放大", "cutout": "抠图", "angle": "多角度", "relight": "重打光",
-                        "whitemodel": "白膜", "enhance": "AI 增强"}
+                        "upscale": "高清放大", "cutout": "抠图", "adjust": "调色", "angle": "多角度",
+                        "relight": "重打光", "whitemodel": "白膜", "enhance": "AI 增强", "outpaint": "扩图",
+                        "erase": "擦除", "redraw": "局部重绘", "video_replace": "视频替换",
+                        "video_remove": "视频移除", "video_extend": "视频续写", "video_retake": "视频重拍"}
+_CANVAS_ACTION_ADJUST_KEYS = ("brightness", "contrast", "saturation", "warmth", "sharpness")
+_CANVAS_ACTION_OUTPAINT_MAX_SIDE = 2048     # 补完透明边后的长边上限（太大的图先缩，和前端 EDIT_MAX 同量级）
 _CANVAS_ACTION_ROTATE = {"cw": "向右旋转", "ccw": "向左旋转", "flip_h": "水平翻转", "flip_v": "垂直翻转"}
 _CANVAS_ACTION_WHITE_TIERS = ("blockout", "mannequin", "clear")
 _CANVAS_ACTION_GROUP_PAD = 28          # 与前端 groupFit.ts 的 GROUP_PAD 一致
@@ -47905,8 +47914,9 @@ def _canvas_action_light_dir(direction):
 def _agent_tool_canvas_action_validate(args):
     args = dict(args or {})
     action = str(args.get("action") or "").strip().lower()
-    if action not in _CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL:
-        raise AgentToolError("action 只能是：" + " / ".join(_CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL),
+    if action not in _CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL + _CANVAS_ACTION_VIDEO:
+        raise AgentToolError("action 只能是：" + " / ".join(_CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL
+                                                          + _CANVAS_ACTION_VIDEO),
                              code="invalid_args")
     canvas_id = str(args.get("canvas_id") or "").strip() or str(_AGENT_RUN_CANVAS_ID.get() or "").strip()
     if not canvas_id:
@@ -47973,6 +47983,77 @@ def _agent_tool_canvas_action_validate(args):
         clean["ly"] = round(_canvas_action_num(params.get("ly"), "ly", 0, 1, spot[1] if spot else .3), 2)
         clean["intensity"] = int(_canvas_action_num(params.get("intensity"), "intensity", 10, 100, 70))
         clean["temp"] = int(_canvas_action_num(params.get("temp"), "temp", 0, 100, 40))
+    elif action == "adjust":
+        for key in _CANVAS_ACTION_ADJUST_KEYS:
+            val = params.get(key)
+            if val not in (None, ""):
+                clean[key] = int(_canvas_action_num(val, key, -100, 100))
+        if not any(clean.values()):
+            raise AgentToolError("adjust 至少给一个非 0 的参数：brightness / contrast / saturation / warmth / sharpness"
+                                 "（-100~100，0 不变）", code="invalid_args")
+    elif action == "outpaint":
+        ratio = str(params.get("ratio") or "").strip()
+        sides = {k: params.get(k) for k in ("top", "bottom", "left", "right") if params.get(k) not in (None, "")}
+        if ratio:
+            if not re.fullmatch(r"\d{1,2}:\d{1,2}", ratio) or ratio.startswith("0") or ratio.endswith(":0"):
+                raise AgentToolError("outpaint 的 ratio 写成 16:9 这种形式", code="invalid_args")
+            clean["ratio"] = ratio
+        elif sides:
+            for key in ("top", "bottom", "left", "right"):
+                clean[key] = round(_canvas_action_num(sides.get(key), key, 0, 1, 0), 3)
+            if not any(clean[k] for k in ("top", "bottom", "left", "right")):
+                raise AgentToolError("outpaint 至少有一边要扩（top/bottom/left/right 是相对原图边长的比例，0–1）",
+                                     code="invalid_args")
+        else:
+            clean.update({"top": .25, "bottom": .25, "left": .25, "right": .25})
+    elif action in ("erase", "redraw"):
+        region = params.get("region") if isinstance(params.get("region"), dict) else None
+        if not region:
+            raise AgentToolError(f"{action} 要给 params.region={{x,y,w,h}}（0–1 的比例，左上为原点）圈出要处理的区域；"
+                                 "拿不准位置先 view_image 看图", code="invalid_args")
+        box = {k: _canvas_action_num(region.get(k), "region." + k, 0, 1) for k in ("x", "y", "w", "h")}
+        if box["w"] < .01 or box["h"] < .01:
+            raise AgentToolError("region 太小", code="invalid_args")
+        box["w"], box["h"] = min(box["w"], 1 - box["x"]), min(box["h"], 1 - box["y"])
+        clean["region"] = {k: round(v, 4) for k, v in box.items()}
+        shape = str(params.get("shape") or "ellipse").strip().lower()
+        clean["shape"] = "rect" if shape in ("rect", "box", "矩形", "方") else "ellipse"
+        if action == "redraw":
+            ref = str(params.get("ref_node_id") or "").strip()
+            if ref:
+                clean["ref_node_id"] = ref
+            if not str(params.get("note") or params.get("prompt") or "").strip() and not ref:
+                raise AgentToolError("redraw 要在 params.note 写清这块改成什么（换品就给 ref_node_id 指向新品图）",
+                                     code="invalid_args")
+    elif action in _CANVAS_ACTION_VIDEO:
+        def text(*keys):
+            for key in keys:
+                val = str(params.get(key) or "").strip()
+                if val:
+                    return val[:200]
+            return ""
+        if action == "video_replace":
+            clean["target"], clean["replacement"] = text("target", "from"), text("replacement", "to")
+            if not clean["target"] or not clean["replacement"]:
+                raise AgentToolError("video_replace 要给 params.target（换掉什么）和 params.replacement（换成什么）",
+                                     code="invalid_args")
+        elif action == "video_remove":
+            clean["target"] = text("target")
+            if not clean["target"]:
+                raise AgentToolError("video_remove 要给 params.target（移除什么）", code="invalid_args")
+        elif action == "video_extend":
+            clean["direction"] = "before" if str(params.get("direction") or "").strip().lower() in (
+                "before", "前", "开头", "start") else "after"
+        else:
+            clean["camera"] = text("camera")
+            if not clean["camera"]:
+                raise AgentToolError("video_retake 要给 params.camera（新机位，如 推近特写 / 拉远全景 / 环绕运镜 / 俯拍 / "
+                                     "仰拍 / 侧面机位 / 跟拍 / 手持晃动）", code="invalid_args")
+        if params.get("duration") not in (None, ""):
+            clean["duration"] = int(_canvas_action_num(params.get("duration"), "duration", 1, 15))
+        note = text("note", "prompt")
+        if note:
+            clean["note"] = note
     elif action == "whitemodel":
         tier = str(params.get("tier") or "blockout").strip().lower()
         tier = {"product": "blockout", "产品": "blockout", "person": "mannequin", "人物": "mannequin",
@@ -48151,6 +48232,15 @@ async def _canvas_action_local(args):
                     tile = img.crop((round(c * cw), round(r * ch), round((c + 1) * cw), round((r + 1) * ch)))
                     new_url, _, _ = _canvas_action_save(tile, "split", keep_png)
                     items.append({"url": new_url, "title": f"{title} {r + 1}-{c + 1}", "row_start": c == 0 and r > 0})
+    elif action == "adjust":
+        path = _canvas_action_local_path(url, label)
+        with _PILImage.open(path) as raw:
+            img = _PILImageOps.exif_transpose(raw)
+            img.load()
+        out = _canvas_action_adjust_image(img, params)
+        keep_png = out.mode in ("RGBA", "LA") or path.lower().endswith(".png")
+        new_url, _, _ = _canvas_action_save(out, "adjust", keep_png)
+        items.append({"url": new_url, "title": f"{title} · 调色"})
     elif action == "upscale":
         path = _canvas_action_local_path(url, label)
         if not _upscale_runtime_installed():
@@ -48194,6 +48284,63 @@ async def _canvas_action_local(args):
     return result
 
 
+def _canvas_action_adjust_image(img, params):
+    """调色（本机）：各项 -100~100，0 不变；warmth 正数偏暖（红黄）负数偏冷（蓝）。透明通道原样保留。"""
+    from PIL import Image as _PILImage, ImageEnhance as _PILImageEnhance
+    alpha = img.getchannel("A") if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info) else None
+    rgb = img.convert("RGB")
+    for key, enhancer in (("brightness", _PILImageEnhance.Brightness), ("contrast", _PILImageEnhance.Contrast),
+                          ("saturation", _PILImageEnhance.Color), ("sharpness", _PILImageEnhance.Sharpness)):
+        val = int(params.get(key) or 0)
+        if val:
+            factor = 1 + val / 100.0 if key != "sharpness" else 1 + val / 50.0
+            rgb = enhancer(rgb).enhance(max(0.0, factor))
+    warmth = int(params.get("warmth") or 0)
+    if warmth:
+        k = warmth / 100.0 * 0.12
+        r, g, b = rgb.split()
+        r = r.point(lambda v: max(0, min(255, round(v * (1 + k)))))
+        g = g.point(lambda v: max(0, min(255, round(v * (1 + k * .35)))))
+        b = b.point(lambda v: max(0, min(255, round(v * (1 - k)))))
+        rgb = _PILImage.merge("RGB", (r, g, b))
+    if alpha is not None:
+        rgb = rgb.convert("RGBA")
+        rgb.putalpha(alpha.convert("L") if alpha.mode != "L" else alpha)
+    return rgb
+
+
+def _canvas_action_outpaint_source(url, params):
+    """扩图：在服务端把原图四周补成透明边（或补到目标比例），返回补好的 PNG 地址；画布原样用这张图（prepadded）。"""
+    from PIL import Image as _PILImage, ImageOps as _PILImageOps
+    path = _canvas_action_local_path(url, "扩图")
+    with _PILImage.open(path) as raw:
+        img = _PILImageOps.exif_transpose(raw)
+        img.load()
+    img = img.convert("RGBA")
+    W, H = img.size
+    if params.get("ratio"):
+        a, c = (int(x) for x in params["ratio"].split(":"))
+        if W / H < a / c:
+            nw, nh = round(H * a / c), H
+        else:
+            nw, nh = W, round(W * c / a)
+        if (nw, nh) == (W, H):
+            raise AgentToolError(f"原图已经是 {params['ratio']}，不用扩；要更大的画面改用 top/bottom/left/right",
+                                 code="invalid_args")
+        left, top = (nw - W) // 2, (nh - H) // 2
+    else:
+        left, top = round(W * params["left"]), round(H * params["top"])
+        nw, nh = W + left + round(W * params["right"]), H + top + round(H * params["bottom"])
+    scale = min(1.0, _CANVAS_ACTION_OUTPAINT_MAX_SIDE / float(max(nw, nh)))
+    if scale < 1:
+        img = img.resize((max(1, round(W * scale)), max(1, round(H * scale))), _PILImage.LANCZOS)
+        left, top, nw, nh = round(left * scale), round(top * scale), max(1, round(nw * scale)), max(1, round(nh * scale))
+    canvas_img = _PILImage.new("RGBA", (nw, nh), (0, 0, 0, 0))
+    canvas_img.paste(img, (left, top))
+    new_url, _, _ = _canvas_action_save(canvas_img, "outpaint_src", keep_png=True)
+    return new_url
+
+
 def _canvas_action_model_title(action, params, title):
     if action == "angle":
         return f"{title} · 多角度 {params.get('yaw')}°"
@@ -48218,7 +48365,18 @@ def _canvas_action_model(args):
         x, y = _agent_beat_place(canvas, [args["node_id"]], int(node.get("w") or 240), int(node.get("h") or 240))
         node["x"], node["y"] = x, y
         data = node.setdefault("data", {})
-        data["agentAction"] = {"op": action, "params": params, "source_url": url,
+        source_url = url
+        if action == "outpaint":
+            source_url = _canvas_action_outpaint_source(url, params)
+            params["prepadded"] = True
+        if params.get("ref_node_id"):
+            ref = _agent_find_node(canvas, params["ref_node_id"])
+            ref_url = _agent_beat_url(ref) if ref is not None and str(ref.get("kind") or "") == "image" else ""
+            if not ref_url:
+                raise AgentToolError(f"ref_node_id {params['ref_node_id']} 不是有图片的图片节点", code="invalid_args")
+            params["ref_url"] = ref_url
+            canvas.setdefault("connections", []).append(_agent_beat_edge(params["ref_node_id"], node["id"]))
+        data["agentAction"] = {"op": action, "params": params, "source_url": source_url,
                                "source_node_id": args["node_id"], "at": now_ms()}
         if deferred:
             data["agentPending"] = True
@@ -48242,7 +48400,50 @@ def _canvas_action_model(args):
             "message": f"已让画布对「{state['source_title']}」做{label}，结果会出现在新节点「{title}」上"}
 
 
+def _canvas_action_video_prompt(action, params):
+    """与前端 videoTools.ts aiPrompt 逐句一致。"""
+    note = params.get("note") or ""
+    if action == "video_replace":
+        text = f"把视频里的「{params['target']}」替换成「{params['replacement']}」，其余画面、人物动作、运镜和时长保持不变。"
+    elif action == "video_remove":
+        text = f"从视频里移除「{params['target']}」，用周围环境自然补全被遮挡的背景，其余画面、动作、运镜和时长保持不变。"
+    elif action == "video_extend" and params.get("direction") == "before":
+        return (f"在视频的第一帧之前补拍一段开头，结尾要自然衔接到原视频的第一帧{('：' + note) if note else ''}。"
+                "人物、场景、光线和风格与原视频一致。")
+    elif action == "video_extend":
+        return (f"接着视频的最后一帧继续往后拍：{note}。人物、场景、光线和风格与原视频一致。" if note
+                else "接着视频的最后一帧自然地继续往后拍，人物、场景、光线和风格与原视频一致。")
+    else:
+        return f"按「{params['camera']}」的机位重新拍摄这一段，人物、动作、场景、光线和时长保持不变。{note}"
+    return text + (note if note else "")
+
+
+async def _canvas_action_video(args):
+    """视频 AI 编辑：在原视频右边建一个「视频编辑 / 视频延长」方式的视频节点（接上原视频），和 generate_video 一样进待生成卡片。"""
+    action, params = args["action"], args.get("params") or {}
+    canvas = load_canvas(args["canvas_id"])
+    source = _agent_find_node(canvas, args["node_id"])
+    if source is None:
+        raise AgentToolError(f"节点 {args['node_id']} 不存在", code="node_not_found", status_code=404)
+    if str(source.get("kind") or "") != "video" or not _agent_beat_url(source):
+        raise AgentToolError(f"{_agent_node_ref(source)} 不是有结果的视频节点：{_CANVAS_ACTION_LABEL[action]}只处理视频",
+                             code="invalid_args")
+    base_title = re.sub(r" · .*$", "", _agent_beat_title(source) or args["node_id"])
+    suffix = "补开头" if action == "video_extend" and params.get("direction") == "before" else _CANVAS_ACTION_LABEL[action][2:]
+    gen_args = {"canvas_id": args["canvas_id"], "prompt": _canvas_action_video_prompt(action, params),
+                "mode": _CANVAS_ACTION_VIDEO_MODE[action], "inputs": [args["node_id"]],
+                "title": args.get("title") or f"{base_title} · {suffix}"}
+    if params.get("duration"):
+        gen_args["duration"] = params["duration"]
+    result = await _agent_tool_generate_video_run(_agent_tool_generate_video_validate(gen_args))
+    if isinstance(result, dict):
+        result.update({"action": action, "source_node_id": args["node_id"]})
+    return result
+
+
 async def _agent_tool_canvas_action_run(args):
+    if args["action"] in _CANVAS_ACTION_VIDEO:
+        return await _canvas_action_video(args)
     if args["action"] in ("group", "stack"):
         return _canvas_action_group(args)
     if args["action"] in _CANVAS_ACTION_MODEL:
@@ -48255,7 +48456,7 @@ def _agent_tool_canvas_action_preview(args, canvas=None):
     if args.get("action") in ("group", "stack"):
         return {"summary": f"把 {len(args.get('node_ids') or [])} 个节点收成{label}"}
     return {"summary": f"对节点 {args.get('node_id')} 做{label}",
-            "generation": args.get("action") in _CANVAS_ACTION_MODEL}
+            "generation": args.get("action") in _CANVAS_ACTION_MODEL + _CANVAS_ACTION_VIDEO}
 
 
 AGENT_TOOLS["canvas_action"] = {
@@ -48264,18 +48465,27 @@ AGENT_TOOLS["canvas_action"] = {
         "· 本机处理，不花额度、立刻完成：group（把 node_ids 收成分组）/ stack（收成堆叠：同产品多角度、同一批素材）；"
         "rotate（params.direction=cw/ccw/flip_h/flip_v）；crop（params.ratio=\"1:1\" 居中裁，或 params.box={x,y,w,h} 0–1 比例）；"
         "split（宫格切分，params.cols/rows 1–8，九宫格就是 3×3）；upscale（本地高清放大，params.target=2k/4k）；"
-        "cutout（本地抠图成透明 PNG）。\n"
+        "cutout（本地抠图成透明 PNG）；adjust（调色，params.brightness / contrast / saturation / warmth 冷暖 / "
+        "sharpness，各 -100~100，0 不变）。\n"
         "· 模型编辑，进待生成卡片由用户选图片模型后画布执行：angle（多角度换机位，params.yaw -180~180 / pitch -90~90 / "
         "zoom 0.5~2 / wide）；relight（重打光，params.direction=左上/右/正前…，或 lx/ly 0–1，intensity 10–100，"
         "temp 0 暖~100 冷）；whitemodel（params.tier=blockout 产品石膏白模 / mannequin 人物白色人台 / clear 清空商品只留场景）；"
-        "enhance（AI 高清增强 2×）。可选 params.note 补一句要求。\n"
+        "enhance（AI 高清增强 2×）；outpaint（扩图，params.ratio=\"16:9\" 补到目标比例，或 top/bottom/left/right "
+        "相对原图边长的比例 0–1，不给就四周各扩 25%）；erase（擦除，params.region={x,y,w,h} 0–1 圈出要去掉的东西，"
+        "shape=ellipse/rect）；redraw（局部重绘，region 同上 + params.note 写改成什么；换品时给 ref_node_id=新品图节点）。"
+        "region 拿不准就先 view_image 看图再估。可选 params.note 补一句要求。\n"
+        "· 视频 AI 编辑（node_id 是视频节点，进待生成卡片选支持该方式的视频模型，如 Seedance）：video_replace（params.target "
+        "换掉什么 + replacement 换成什么）/ video_remove（params.target）/ video_extend（续写，params.direction=after 往后接 / "
+        "before 补开头，note 写接下来拍什么）/ video_retake（换机位重拍，params.camera=推近特写/拉远全景/环绕运镜/俯拍/仰拍/"
+        "侧面机位/跟拍/手持晃动）。可选 params.duration 1–15。\n"
         "什么时候用：同一商品要多个机位→angle（每个角度一次），不要用 generate_image 硬写「换个角度」；"
-        "换背景 / 换品前先 whitemodel(tier=clear) 清掉旧商品；九宫格分镜图拆开当参考→split；"
+        "换背景 / 换品前先 whitemodel(tier=clear) 清掉旧商品；画面里局部换一件商品→redraw+ref_node_id；"
+        "横图改竖版 / 竖图改横版→outpaint(ratio)；九宫格分镜图拆开当参考→split；"
         "一组参考图要整体喂给下游→stack 后把堆叠节点当 inputs。视频截帧不用这个：用 analyze_video 的 frames / "
         "first_frame_url / last_frame_url，再 create_node(type=image, url=…)。"),
     "schema": {"type": "object", "properties": {
         "canvas_id": {"type": "string", "description": "不填就用当前画布"},
-        "action": {"type": "string", "enum": list(_CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL)},
+        "action": {"type": "string", "enum": list(_CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL + _CANVAS_ACTION_VIDEO)},
         "node_id": {"type": "string", "description": "要处理的图片节点 id（group / stack 不用填）"},
         "node_ids": {"type": "array", "items": {"type": "string"}, "description": "group / stack：要收进去的节点 id"},
         "params": {"type": "object", "description": "该 action 的参数，见上面说明"},
@@ -52357,7 +52567,7 @@ def _agent_step_generation_units(tool, args, canvas_id=""):
         return 0 if args.get("run") is False else 1
     if tool == "canvas_action":
         # 只有模型编辑（多角度 / 重打光 / 白膜 / AI 增强）花额度；分组、裁剪、本地放大这些本机处理不算
-        return 1 if str(args.get("action") or "").strip().lower() in _CANVAS_ACTION_MODEL else 0
+        return 1 if str(args.get("action") or "").strip().lower() in _CANVAS_ACTION_MODEL + _CANVAS_ACTION_VIDEO else 0
     if tool == "batch_generate":
         rows = args.get("rows") if isinstance(args.get("rows"), list) else []
         return 0 if args.get("run") is False else len(rows)
