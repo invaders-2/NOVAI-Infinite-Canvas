@@ -28,6 +28,15 @@ STATUS_CODES = ("empty", "done", "failed", "pending", "uploaded")
 STATUS_LABEL = {"empty": "空", "done": "有结果", "failed": "失败", "pending": "等待生成", "uploaded": "已上传"}
 MEDIA_KINDS = ("image", "video", "audio")
 
+# 图片 / 视频的「画面内容」一句话描述：由宿主（main.py 的看图缓存）注入，只读缓存、不在这里调模型。
+# 没注入时一律返回空串，读取工具行为与原来一致。
+_CAPTION_LOOKUP: Optional[Callable[[str], str]] = None
+
+
+def set_caption_lookup(fn: Optional[Callable[[str], str]]) -> None:
+    global _CAPTION_LOOKUP
+    _CAPTION_LOOKUP = fn
+
 
 class ReadToolError(Exception):
     """参数 / 目标不对。code 与 main.AgentToolError 的口径一致，接线时会被换成它。"""
@@ -137,6 +146,24 @@ class CanvasAccess:
     def members(self, node: Dict[str, Any], by_id: Dict[str, Dict[str, Any]]) -> List[str]:
         return [str(c) for c in (node.get("children") or []) if str(c) in by_id]
 
+    def caption_url(self, node: Dict[str, Any]) -> str:
+        """拿来描述画面的那张图：图片节点用结果图，视频节点用封面帧。"""
+        kind = self.kind(node)
+        if kind == "image":
+            return self.url(node)
+        if kind == "video":
+            return str(self.out(node).get("frame") or "").strip()
+        return ""
+
+    def caption(self, node: Dict[str, Any]) -> str:
+        url = self.caption_url(node)
+        if not url or _CAPTION_LOOKUP is None:
+            return ""
+        try:
+            return str(_CAPTION_LOOKUP(url) or "").strip()
+        except Exception:
+            return ""
+
     # --- 给上下文引擎用 ---
     def map_line(self, node: Dict[str, Any], upstream: int = 0) -> str:
         kind = self.kind(node)
@@ -150,8 +177,10 @@ class CanvasAccess:
             data = node.get("data") if isinstance(node.get("data"), dict) else {}
             head = "%s，成员 %d 个" % ("堆叠" if data.get("stack") else "分组", len(children))
         else:
-            head = self.raw_prompt(node)
-        head = " ".join(_MENTION_RE.sub("@", head).split())[:40]
+            # 图片 / 视频：有画面描述就写画面里实际是什么（上传图没有提示词，以前这里是空的）
+            caption = self.caption(node) if kind in ("image", "video") else ""
+            head = ("画面：" + caption) if caption else self.raw_prompt(node)
+        head = " ".join(_MENTION_RE.sub("@", head).split())[:64 if head.startswith("画面：") else 40]
         status = STATUS_LABEL.get(self.status(node), "")
         return "- %s | %s | %s | %s | %d | %s" % (node.get("id"), kind, self.title(node)[:30] or "（无标题）",
                                                  status or "-", upstream, head)
@@ -177,6 +206,9 @@ class CanvasAccess:
         url = self.url(node)
         if url and kind in MEDIA_KINDS:
             out["%s_urls" % kind] = [url]
+        caption = self.caption(node) if kind in ("image", "video") else ""
+        if caption:
+            out["visual"] = caption
         versions = self.versions(node)
         if len(versions) > 1:
             out["versions"] = len(versions)
@@ -203,8 +235,13 @@ class CanvasAccess:
         if kind == "group":
             data = node.get("data") if isinstance(node.get("data"), dict) else {}
             out["group_kind"] = "stack" if data.get("stack") else "group"
-            out["members"] = [{"id": m, "kind": self.kind(by_id[m]), "title": self.title(by_id[m]),
-                               "url": self.url(by_id[m])} for m in self.members(node, by_id)][:40]
+            out["members"] = []
+            for m in self.members(node, by_id)[:40]:
+                row = {"id": m, "kind": self.kind(by_id[m]), "title": self.title(by_id[m]), "url": self.url(by_id[m])}
+                caption = self.caption(by_id[m])
+                if caption:
+                    row["visual"] = caption[:80]
+                out["members"].append(row)
         if kind == "table":
             table = self.table(node)
             out["columns"] = table["columns"]
