@@ -512,6 +512,12 @@ MODELSCOPE_TREE_URL = "https://modelscope.cn/api/v1/models/bllack/NOVAI-releases
 async def startup_event():
     global GLOBAL_LOOP
     GLOBAL_LOOP = asyncio.get_running_loop()
+    # 分享链接改用分享令牌后，升级首次启动换一次局域网口令，让旧链接里带出去的整机口令作废
+    try:
+        if lan_auth_enabled() and migrate_share_scope_once():
+            print("[lan-auth] 已更换局域网口令：旧版分享链接里带出去的口令已失效（手机扫码访问需重新扫码）")
+    except Exception as exc:
+        print(f"[lan-auth] 局域网口令迁移失败（不影响启动）：{exc}")
     # 本地抠图依赖自检：模型已下载但当前解释器没有 onnxruntime 时，启动日志就说清楚，
     # 别等用户点抠图才看到「缺少推理组件」。
     try:
@@ -1290,6 +1296,10 @@ from server.routes.community import lan_api_public_without_token as _community_p
 from server.routes.canvas_share import (  # noqa: E402
     localize_private_media_url as _localize_private_media_url,
     localize_private_reference_urls as _localize_private_reference_urls,
+    share_scoped_request_allowed as _share_scoped_request_allowed,
+    share_scoped_denied_detail as _share_scoped_denied_detail,
+    share_snapshot_path_public as _share_snapshot_path_public,
+    SHARE_COOKIE_NAME as _SHARE_COOKIE_NAME,
 )
 
 
@@ -1304,6 +1314,27 @@ def lan_path_public_for_unauthenticated(path, method="GET") -> bool:
     return any(value.startswith(prefix) for prefix in LAN_PUBLIC_GET_PREFIXES)
 
 
+def _read_security_file() -> Dict[str, Any]:
+    try:
+        if os.path.isfile(SECURITY_FILE):
+            with open(SECURITY_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def _write_security_file(data: Dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(SECURITY_FILE) or DATA_DIR, exist_ok=True)
+    write_json_atomic(SECURITY_FILE, data)
+    try:
+        os.chmod(SECURITY_FILE, 0o600)
+    except Exception:
+        pass
+
+
 def load_lan_token() -> str:
     """取局域网口令：环境变量 > data/security.json > 首次生成并落盘（0600）。"""
     global _lan_token_cache
@@ -1314,23 +1345,71 @@ def load_lan_token() -> str:
         return _lan_token_cache
     token = ""
     try:
-        if os.path.isfile(SECURITY_FILE):
-            with open(SECURITY_FILE, "r", encoding="utf-8") as f:
-                token = str((json.load(f) or {}).get("lan_token", "")).strip()
+        data = _read_security_file()
+        token = str(data.get("lan_token", "")).strip()
         if not token:
             token = secrets.token_urlsafe(24)
-            os.makedirs(DATA_DIR, exist_ok=True)
-            write_json_atomic(SECURITY_FILE, {"lan_token": token})
-            try:
-                os.chmod(SECURITY_FILE, 0o600)
-            except Exception:
-                pass
+            data["lan_token"] = token
+            _write_security_file(data)
     except Exception as e:
         print(f"[lan-auth] 口令读写失败，改用本进程临时口令：{e}")
         if not token:
             token = secrets.token_urlsafe(24)
     _lan_token_cache = token
     return token
+
+
+# 换下来的旧口令只再认「聊天图片 / 视频」这一个只读用途（旧聊天记录里的图片地址带的是旧口令），
+# 不再能进任何其它接口。最多留 RETIRED_LAN_TOKENS_MAX 个。
+RETIRED_LAN_TOKENS_MAX = 5
+# 2026-11：分享链接改用分享令牌。以前发出去的链接里带着整机口令，升级后第一次启动换一次口令让它们作废。
+SHARE_SCOPE_MIGRATION_KEY = "share_scope_rotated_at"
+
+
+def retired_lan_tokens() -> List[str]:
+    values = _read_security_file().get("retired_lan_tokens")
+    if not isinstance(values, list):
+        return []
+    return [str(item) for item in values if isinstance(item, str) and item][:RETIRED_LAN_TOKENS_MAX]
+
+
+def rotate_lan_token() -> str:
+    """换一个新的局域网口令；旧口令进 retired 列表（只给旧聊天媒体用）。
+    NOVAI_LAN_TOKEN 环境变量固定口令时不动，原样返回。"""
+    global _lan_token_cache
+    env_token = os.getenv("NOVAI_LAN_TOKEN", "").strip()
+    if env_token:
+        return env_token
+    data = _read_security_file()
+    old = str(data.get("lan_token", "")).strip()
+    token = secrets.token_urlsafe(24)
+    retired = [old] if old else []
+    for item in data.get("retired_lan_tokens") or []:
+        if isinstance(item, str) and item and item not in retired and item != token:
+            retired.append(item)
+    data["lan_token"] = token
+    data["retired_lan_tokens"] = retired[:RETIRED_LAN_TOKENS_MAX]
+    _write_security_file(data)
+    _lan_token_cache = token
+    return token
+
+
+def migrate_share_scope_once() -> bool:
+    """升级后首次启动：旧版本把整机口令拼进过分享链接 / 聊天图片地址，换一次口令让它们失效。
+    全新安装（还没有口令）只打标记不换。返回这次是否真的换了。"""
+    if os.getenv("NOVAI_LAN_TOKEN", "").strip():
+        return False
+    data = _read_security_file()
+    if data.get(SHARE_SCOPE_MIGRATION_KEY):
+        return False
+    rotated = False
+    if str(data.get("lan_token", "")).strip():
+        rotate_lan_token()
+        data = _read_security_file()
+        rotated = True
+    data[SHARE_SCOPE_MIGRATION_KEY] = int(time.time())
+    _write_security_file(data)
+    return rotated
 
 
 @app.middleware("http")
@@ -1352,7 +1431,22 @@ async def lan_access_guard(request: Request, call_next):
         # 局域网社区公开接口：visible=false 时路由自己返回 404，事件要好友凭据
         if _community_public_without_token(request.url.path, request.method):
             return await call_next(request)
-        return JSONResponse(status_code=401, content={"detail": "需要局域网访问口令"})
+        # 画布分享令牌：只读这条分享的快照和它引用的媒体（不是整机口令，见 canvas_share 模块说明）
+        share_cookie = request.cookies.get(_SHARE_COOKIE_NAME, "")
+        share_key = _share_scoped_request_allowed(
+            request.url.path, request.method,
+            (query_token, header_token, request.headers.get("x-novai-share", ""), share_cookie),
+        )
+        if share_key:
+            response = await call_next(request)
+            # 浏览器直接打开分享页时，页面里的 <img src="/output/…"> 不带 query，靠这个 cookie 认领范围
+            if share_cookie != share_key:
+                response.set_cookie(_SHARE_COOKIE_NAME, share_key, httponly=True, samesite="lax", path="/")
+            return response
+        if _share_snapshot_path_public(request.url.path, request.method):
+            return await call_next(request)
+        denied = _share_scoped_denied_detail(request.url.path, request.method)
+        return JSONResponse(status_code=401, content={"detail": denied or "需要局域网访问口令"})
     response = await call_next(request)
     # 用 query 带对口令进来的，种一个 cookie，后续 /api 请求自动带上。
     if query_token and not cookie_token and hmac.compare_digest(str(query_token), str(expected)):
@@ -19193,6 +19287,16 @@ async def build_chat_text_reply(payload, conversation):
     return message
 
 # --- 路由接口 ---
+
+@app.post("/api/lan-token/rotate")
+async def rotate_lan_token_api(request: Request):
+    """手动更换局域网口令（只许本机调用）：旧口令立刻失效，扫码访问的设备要重新扫码。"""
+    client_host = request.client.host if request.client else ""
+    if not is_loopback_host(client_host):
+        raise HTTPException(status_code=403, detail="只能在本机更换局域网口令")
+    rotate_lan_token()
+    return {"ok": True}
+
 
 @app.get("/api/lan-info")
 async def lan_info():
@@ -59513,6 +59617,7 @@ app.include_router(_assets_router)
 # --- 局域网画布分享（T49）：链接 / 权限 / 只读快照 / 克隆，数据落 DATA_DIR/canvas_shares.json ---
 _deps.bind(LOAD_CANVAS=load_canvas, SAVE_CANVAS=save_canvas, REQUIRE_CANVAS_ACCESS=require_canvas_access,
            REQUEST_AUTH_USER=request_auth_user, LAN_AUTH_ENABLED=lan_auth_enabled, LOAD_LAN_TOKEN=load_lan_token,
+           LOAD_RETIRED_LAN_TOKENS=retired_lan_tokens,
            ASSET_LIBRARY_DIR=ASSET_LIBRARY_DIR)
 from server.routes.canvas_share import router as _canvas_share_router
 app.include_router(_canvas_share_router)
