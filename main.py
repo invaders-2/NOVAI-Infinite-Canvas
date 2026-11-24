@@ -47869,11 +47869,14 @@ AGENT_TOOLS["edit_timeline"] = {
 # 结果一律落成新节点并从原图连线过来，原节点不动。
 # ---------------------------------------------------------------------------
 
-_CANVAS_ACTION_LOCAL = ("group", "stack", "rotate", "crop", "split", "upscale", "cutout")
-_CANVAS_ACTION_MODEL = ("angle", "relight", "whitemodel", "enhance")
+_CANVAS_ACTION_LOCAL = ("group", "stack", "rotate", "crop", "split", "upscale", "cutout", "adjust")
+_CANVAS_ACTION_MODEL = ("angle", "relight", "whitemodel", "enhance", "outpaint", "erase", "redraw")
 _CANVAS_ACTION_LABEL = {"group": "分组", "stack": "堆叠", "rotate": "旋转", "crop": "裁剪", "split": "切分",
-                        "upscale": "高清放大", "cutout": "抠图", "angle": "多角度", "relight": "重打光",
-                        "whitemodel": "白膜", "enhance": "AI 增强"}
+                        "upscale": "高清放大", "cutout": "抠图", "adjust": "调色", "angle": "多角度",
+                        "relight": "重打光", "whitemodel": "白膜", "enhance": "AI 增强", "outpaint": "扩图",
+                        "erase": "擦除", "redraw": "局部重绘"}
+_CANVAS_ACTION_ADJUST_KEYS = ("brightness", "contrast", "saturation", "warmth", "sharpness")
+_CANVAS_ACTION_OUTPAINT_MAX_SIDE = 2048     # 补完透明边后的长边上限（太大的图先缩，和前端 EDIT_MAX 同量级）
 _CANVAS_ACTION_ROTATE = {"cw": "向右旋转", "ccw": "向左旋转", "flip_h": "水平翻转", "flip_v": "垂直翻转"}
 _CANVAS_ACTION_WHITE_TIERS = ("blockout", "mannequin", "clear")
 _CANVAS_ACTION_GROUP_PAD = 28          # 与前端 groupFit.ts 的 GROUP_PAD 一致
@@ -47973,6 +47976,48 @@ def _agent_tool_canvas_action_validate(args):
         clean["ly"] = round(_canvas_action_num(params.get("ly"), "ly", 0, 1, spot[1] if spot else .3), 2)
         clean["intensity"] = int(_canvas_action_num(params.get("intensity"), "intensity", 10, 100, 70))
         clean["temp"] = int(_canvas_action_num(params.get("temp"), "temp", 0, 100, 40))
+    elif action == "adjust":
+        for key in _CANVAS_ACTION_ADJUST_KEYS:
+            val = params.get(key)
+            if val not in (None, ""):
+                clean[key] = int(_canvas_action_num(val, key, -100, 100))
+        if not any(clean.values()):
+            raise AgentToolError("adjust 至少给一个非 0 的参数：brightness / contrast / saturation / warmth / sharpness"
+                                 "（-100~100，0 不变）", code="invalid_args")
+    elif action == "outpaint":
+        ratio = str(params.get("ratio") or "").strip()
+        sides = {k: params.get(k) for k in ("top", "bottom", "left", "right") if params.get(k) not in (None, "")}
+        if ratio:
+            if not re.fullmatch(r"\d{1,2}:\d{1,2}", ratio) or ratio.startswith("0") or ratio.endswith(":0"):
+                raise AgentToolError("outpaint 的 ratio 写成 16:9 这种形式", code="invalid_args")
+            clean["ratio"] = ratio
+        elif sides:
+            for key in ("top", "bottom", "left", "right"):
+                clean[key] = round(_canvas_action_num(sides.get(key), key, 0, 1, 0), 3)
+            if not any(clean[k] for k in ("top", "bottom", "left", "right")):
+                raise AgentToolError("outpaint 至少有一边要扩（top/bottom/left/right 是相对原图边长的比例，0–1）",
+                                     code="invalid_args")
+        else:
+            clean.update({"top": .25, "bottom": .25, "left": .25, "right": .25})
+    elif action in ("erase", "redraw"):
+        region = params.get("region") if isinstance(params.get("region"), dict) else None
+        if not region:
+            raise AgentToolError(f"{action} 要给 params.region={{x,y,w,h}}（0–1 的比例，左上为原点）圈出要处理的区域；"
+                                 "拿不准位置先 view_image 看图", code="invalid_args")
+        box = {k: _canvas_action_num(region.get(k), "region." + k, 0, 1) for k in ("x", "y", "w", "h")}
+        if box["w"] < .01 or box["h"] < .01:
+            raise AgentToolError("region 太小", code="invalid_args")
+        box["w"], box["h"] = min(box["w"], 1 - box["x"]), min(box["h"], 1 - box["y"])
+        clean["region"] = {k: round(v, 4) for k, v in box.items()}
+        shape = str(params.get("shape") or "ellipse").strip().lower()
+        clean["shape"] = "rect" if shape in ("rect", "box", "矩形", "方") else "ellipse"
+        if action == "redraw":
+            ref = str(params.get("ref_node_id") or "").strip()
+            if ref:
+                clean["ref_node_id"] = ref
+            if not str(params.get("note") or params.get("prompt") or "").strip() and not ref:
+                raise AgentToolError("redraw 要在 params.note 写清这块改成什么（换品就给 ref_node_id 指向新品图）",
+                                     code="invalid_args")
     elif action == "whitemodel":
         tier = str(params.get("tier") or "blockout").strip().lower()
         tier = {"product": "blockout", "产品": "blockout", "person": "mannequin", "人物": "mannequin",
@@ -48151,6 +48196,15 @@ async def _canvas_action_local(args):
                     tile = img.crop((round(c * cw), round(r * ch), round((c + 1) * cw), round((r + 1) * ch)))
                     new_url, _, _ = _canvas_action_save(tile, "split", keep_png)
                     items.append({"url": new_url, "title": f"{title} {r + 1}-{c + 1}", "row_start": c == 0 and r > 0})
+    elif action == "adjust":
+        path = _canvas_action_local_path(url, label)
+        with _PILImage.open(path) as raw:
+            img = _PILImageOps.exif_transpose(raw)
+            img.load()
+        out = _canvas_action_adjust_image(img, params)
+        keep_png = out.mode in ("RGBA", "LA") or path.lower().endswith(".png")
+        new_url, _, _ = _canvas_action_save(out, "adjust", keep_png)
+        items.append({"url": new_url, "title": f"{title} · 调色"})
     elif action == "upscale":
         path = _canvas_action_local_path(url, label)
         if not _upscale_runtime_installed():
@@ -48194,6 +48248,63 @@ async def _canvas_action_local(args):
     return result
 
 
+def _canvas_action_adjust_image(img, params):
+    """调色（本机）：各项 -100~100，0 不变；warmth 正数偏暖（红黄）负数偏冷（蓝）。透明通道原样保留。"""
+    from PIL import Image as _PILImage, ImageEnhance as _PILImageEnhance
+    alpha = img.getchannel("A") if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info) else None
+    rgb = img.convert("RGB")
+    for key, enhancer in (("brightness", _PILImageEnhance.Brightness), ("contrast", _PILImageEnhance.Contrast),
+                          ("saturation", _PILImageEnhance.Color), ("sharpness", _PILImageEnhance.Sharpness)):
+        val = int(params.get(key) or 0)
+        if val:
+            factor = 1 + val / 100.0 if key != "sharpness" else 1 + val / 50.0
+            rgb = enhancer(rgb).enhance(max(0.0, factor))
+    warmth = int(params.get("warmth") or 0)
+    if warmth:
+        k = warmth / 100.0 * 0.12
+        r, g, b = rgb.split()
+        r = r.point(lambda v: max(0, min(255, round(v * (1 + k)))))
+        g = g.point(lambda v: max(0, min(255, round(v * (1 + k * .35)))))
+        b = b.point(lambda v: max(0, min(255, round(v * (1 - k)))))
+        rgb = _PILImage.merge("RGB", (r, g, b))
+    if alpha is not None:
+        rgb = rgb.convert("RGBA")
+        rgb.putalpha(alpha.convert("L") if alpha.mode != "L" else alpha)
+    return rgb
+
+
+def _canvas_action_outpaint_source(url, params):
+    """扩图：在服务端把原图四周补成透明边（或补到目标比例），返回补好的 PNG 地址；画布原样用这张图（prepadded）。"""
+    from PIL import Image as _PILImage, ImageOps as _PILImageOps
+    path = _canvas_action_local_path(url, "扩图")
+    with _PILImage.open(path) as raw:
+        img = _PILImageOps.exif_transpose(raw)
+        img.load()
+    img = img.convert("RGBA")
+    W, H = img.size
+    if params.get("ratio"):
+        a, c = (int(x) for x in params["ratio"].split(":"))
+        if W / H < a / c:
+            nw, nh = round(H * a / c), H
+        else:
+            nw, nh = W, round(W * c / a)
+        if (nw, nh) == (W, H):
+            raise AgentToolError(f"原图已经是 {params['ratio']}，不用扩；要更大的画面改用 top/bottom/left/right",
+                                 code="invalid_args")
+        left, top = (nw - W) // 2, (nh - H) // 2
+    else:
+        left, top = round(W * params["left"]), round(H * params["top"])
+        nw, nh = W + left + round(W * params["right"]), H + top + round(H * params["bottom"])
+    scale = min(1.0, _CANVAS_ACTION_OUTPAINT_MAX_SIDE / float(max(nw, nh)))
+    if scale < 1:
+        img = img.resize((max(1, round(W * scale)), max(1, round(H * scale))), _PILImage.LANCZOS)
+        left, top, nw, nh = round(left * scale), round(top * scale), max(1, round(nw * scale)), max(1, round(nh * scale))
+    canvas_img = _PILImage.new("RGBA", (nw, nh), (0, 0, 0, 0))
+    canvas_img.paste(img, (left, top))
+    new_url, _, _ = _canvas_action_save(canvas_img, "outpaint_src", keep_png=True)
+    return new_url
+
+
 def _canvas_action_model_title(action, params, title):
     if action == "angle":
         return f"{title} · 多角度 {params.get('yaw')}°"
@@ -48218,7 +48329,18 @@ def _canvas_action_model(args):
         x, y = _agent_beat_place(canvas, [args["node_id"]], int(node.get("w") or 240), int(node.get("h") or 240))
         node["x"], node["y"] = x, y
         data = node.setdefault("data", {})
-        data["agentAction"] = {"op": action, "params": params, "source_url": url,
+        source_url = url
+        if action == "outpaint":
+            source_url = _canvas_action_outpaint_source(url, params)
+            params["prepadded"] = True
+        if params.get("ref_node_id"):
+            ref = _agent_find_node(canvas, params["ref_node_id"])
+            ref_url = _agent_beat_url(ref) if ref is not None and str(ref.get("kind") or "") == "image" else ""
+            if not ref_url:
+                raise AgentToolError(f"ref_node_id {params['ref_node_id']} 不是有图片的图片节点", code="invalid_args")
+            params["ref_url"] = ref_url
+            canvas.setdefault("connections", []).append(_agent_beat_edge(params["ref_node_id"], node["id"]))
+        data["agentAction"] = {"op": action, "params": params, "source_url": source_url,
                                "source_node_id": args["node_id"], "at": now_ms()}
         if deferred:
             data["agentPending"] = True
@@ -48264,13 +48386,18 @@ AGENT_TOOLS["canvas_action"] = {
         "· 本机处理，不花额度、立刻完成：group（把 node_ids 收成分组）/ stack（收成堆叠：同产品多角度、同一批素材）；"
         "rotate（params.direction=cw/ccw/flip_h/flip_v）；crop（params.ratio=\"1:1\" 居中裁，或 params.box={x,y,w,h} 0–1 比例）；"
         "split（宫格切分，params.cols/rows 1–8，九宫格就是 3×3）；upscale（本地高清放大，params.target=2k/4k）；"
-        "cutout（本地抠图成透明 PNG）。\n"
+        "cutout（本地抠图成透明 PNG）；adjust（调色，params.brightness / contrast / saturation / warmth 冷暖 / "
+        "sharpness，各 -100~100，0 不变）。\n"
         "· 模型编辑，进待生成卡片由用户选图片模型后画布执行：angle（多角度换机位，params.yaw -180~180 / pitch -90~90 / "
         "zoom 0.5~2 / wide）；relight（重打光，params.direction=左上/右/正前…，或 lx/ly 0–1，intensity 10–100，"
         "temp 0 暖~100 冷）；whitemodel（params.tier=blockout 产品石膏白模 / mannequin 人物白色人台 / clear 清空商品只留场景）；"
-        "enhance（AI 高清增强 2×）。可选 params.note 补一句要求。\n"
+        "enhance（AI 高清增强 2×）；outpaint（扩图，params.ratio=\"16:9\" 补到目标比例，或 top/bottom/left/right "
+        "相对原图边长的比例 0–1，不给就四周各扩 25%）；erase（擦除，params.region={x,y,w,h} 0–1 圈出要去掉的东西，"
+        "shape=ellipse/rect）；redraw（局部重绘，region 同上 + params.note 写改成什么；换品时给 ref_node_id=新品图节点）。"
+        "region 拿不准就先 view_image 看图再估。可选 params.note 补一句要求。\n"
         "什么时候用：同一商品要多个机位→angle（每个角度一次），不要用 generate_image 硬写「换个角度」；"
-        "换背景 / 换品前先 whitemodel(tier=clear) 清掉旧商品；九宫格分镜图拆开当参考→split；"
+        "换背景 / 换品前先 whitemodel(tier=clear) 清掉旧商品；画面里局部换一件商品→redraw+ref_node_id；"
+        "横图改竖版 / 竖图改横版→outpaint(ratio)；九宫格分镜图拆开当参考→split；"
         "一组参考图要整体喂给下游→stack 后把堆叠节点当 inputs。视频截帧不用这个：用 analyze_video 的 frames / "
         "first_frame_url / last_frame_url，再 create_node(type=image, url=…)。"),
     "schema": {"type": "object", "properties": {

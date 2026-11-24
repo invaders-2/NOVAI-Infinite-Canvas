@@ -1223,7 +1223,18 @@ async function applyVideoToCanvas(store: CanvasStore, n: CanvasNode) {
 
 /* ---------- 画布助手交来的组件编辑（data.agentAction）：和「更多」菜单同一套 runEdit 逻辑 ---------- */
 export type AgentImageAction = { op?: string; params?: Record<string, unknown>; source_url?: string };
-const AGENT_ACTION_LABEL: Record<string, string> = { angle: "多角度", relight: "重打光", whitemodel: "白膜", enhance: "增强" };
+const AGENT_ACTION_LABEL: Record<string, string> = { angle: "多角度", relight: "重打光", whitemodel: "白膜", enhance: "增强", outpaint: "扩图", erase: "擦除", redraw: "局部重绘" };
+type AgentRegion = { x?: unknown; y?: unknown; w?: unknown; h?: unknown };
+/** 助手给的是 0–1 的区域框（没有手画笔迹）：按原图尺寸画一张遮罩（透明底 + 不透明区域，椭圆 / 矩形，略带羽化） */
+async function agentRegionMask(store: CanvasStore, source: string, region: AgentRegion, shape: unknown): Promise<string> {
+  const im = await loadImg(await srcData(store, source)); const W = im.naturalWidth, H = im.naturalHeight;
+  const f = (v: unknown) => clamp(Number(v) || 0, 0, 1);
+  const x = f(region.x) * W, y = f(region.y) * H, w = Math.max(2, f(region.w) * W), h = Math.max(2, f(region.h) * H);
+  const c = cv(W, H); const g = c.getContext("2d")!; g.fillStyle = "#ffffff";
+  if (shape === "rect") g.fillRect(x, y, w, h);
+  else { g.beginPath(); g.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2); g.fill(); }
+  return c.toDataURL("image/png");
+}
 
 /**
  * 在节点 id 上执行助手指定的模型编辑（节点建好时结果 = 原图占位，编辑结果作为新版本写进同一个节点）。
@@ -1255,12 +1266,30 @@ export async function runAgentImageAction(store: CanvasStore, id: string, action
     params = { tier };
   } else if (op === "enhance") {
     prompt = enhancePrompt(n);
+  } else if (op === "outpaint") {
+    // 服务端已经把原图补好透明边（source_url），画布原样用、不再加边
+    params = { prepadded: true };
+    prompt = "把透明区域自然延展补全成完整画面：延续原图的场景、透视、光影和风格，原图部分保持不变，不要加边框、文字和水印";
   }
   if (note) prompt = prompt ? `${prompt}。${note}` : note;
   const source = typeof action.source_url === "string" && action.source_url ? action.source_url : outOf(n)?.url || "";
   if (!source) return { ok: false, err: "没有可编辑的原图" };
   let err = "";
-  await runEdit(store, id, op as EditOp, label, { params, ...(prompt ? { prompt } : {}), sourceUrl: source }, id, (e) => { err = e.message; });
+  let extra: Record<string, unknown> = { params, ...(prompt ? { prompt } : {}), sourceUrl: source };
+  let runLabel = label;
+  if (op === "erase" || op === "redraw") {
+    const region = (p.region && typeof p.region === "object" ? p.region : {}) as AgentRegion;
+    let mask = "";
+    try { mask = await agentRegionMask(store, source, region, p.shape); } catch (e) { return { ok: false, err: (e as Error).message || "遮罩生成失败" }; }
+    const ref = typeof p.ref_url === "string" && p.ref_url ? p.ref_url : "";
+    const body = op === "erase"
+      ? `把遮罩标记区域里的内容完整移除，用周围画面自然补全背景、纹理和光影，不要留下痕迹${note ? `（补充：${note}）` : ""}`
+      : `按说明重绘遮罩标记的区域：${note || "换成参考图里的新品"}`;
+    if (ref && op === "redraw") runLabel = "换品";
+    // 源图走节点当前结果（占位 = 原图），遮罩按原图尺寸画
+    extra = { maskDataUrl: mask, prompt: `${body}。${MASK_NOTE}`, ...(ref && op === "redraw" ? { refUrl: ref } : {}) };
+  }
+  await runEdit(store, id, op as EditOp, runLabel, extra as Parameters<typeof runEdit>[4], id, (e) => { err = e.message; });
   const after = store.node(id);
   if (!after) return { ok: false, err: "节点已被删除" };
   const out = outOf(after); const g = genOf(after);
