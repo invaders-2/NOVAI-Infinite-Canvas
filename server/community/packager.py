@@ -29,7 +29,12 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from server.community import store
 from server.routes.canvas_share import canvas_snapshot, sanitize_local_path
 
-MAX_PACKAGE_BYTES = 200 * 1024 * 1024
+# 视频多的画布以前被 200MB 整包上限挡在发布这一步；接收端已改成流式写盘，整包放宽到 2GB，
+# 单个媒体文件 500MB（与 transport / canvas_share 的单文件下载上限一致，发得出去就拉得下来）。
+MAX_PACKAGE_BYTES = 2 * 1024 * 1024 * 1024
+MAX_PACKAGE_LABEL = "2GB"
+MAX_MEDIA_FILE_BYTES = 500 * 1024 * 1024
+MAX_MEDIA_FILE_LABEL = "500MB"
 MAX_PACKAGE_JSON_BYTES = 20 * 1024 * 1024
 MAX_MEDIA_FILES = 200
 MAX_DATA_URL_BYTES = 4096
@@ -48,7 +53,7 @@ SKILL_FIELDS = ("id", "name", "category", "icon", "description", "tags", "input_
 
 
 class PackageTooLarge(Exception):
-    """单包超过上限（200MB）。"""
+    """单包超过上限（MAX_PACKAGE_LABEL）或单个媒体超过 MAX_MEDIA_FILE_LABEL。"""
 
 
 def _deferred(name: str, default: Any) -> Any:
@@ -327,10 +332,15 @@ def build_package(item_id: str, kind: str, source: Dict[str, Any], options: Dict
                 filename = media_file_name(url)
                 target = os.path.join(media_dir, filename)
                 try:
-                    if os.path.getsize(source_path) + total_bytes > MAX_PACKAGE_BYTES:
+                    file_size = os.path.getsize(source_path)
+                    if file_size > MAX_MEDIA_FILE_BYTES:
                         raise PackageTooLarge(
-                            "发布包超过 200MB（%s 太大）。可以关掉「包含生成结果」只发工作流结构，"
-                            "或者先删掉画布里的大视频再发布。" % os.path.basename(source_path))
+                            "单个素材超过 %s（%s 太大）。可以关掉「包含生成结果」只发工作流结构，"
+                            "或者先压缩 / 删掉这个大视频再发布。" % (MAX_MEDIA_FILE_LABEL, os.path.basename(source_path)))
+                    if file_size + total_bytes > MAX_PACKAGE_BYTES:
+                        raise PackageTooLarge(
+                            "发布包超过 %s（加上 %s 后超了）。可以关掉「包含生成结果」只发工作流结构，"
+                            "或者先删掉画布里的大视频再发布。" % (MAX_PACKAGE_LABEL, os.path.basename(source_path)))
                     shutil.copyfile(source_path, target)
                     total_bytes += os.path.getsize(target)
                     mapping[url] = MEDIA_URL_PREFIX + item_id + "/" + filename

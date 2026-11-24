@@ -324,6 +324,14 @@ async def _report_view(item_id: str) -> None:
         pass
 
 
+async def _item_detail_call(transport_ref: Any, item_id: str, lite: bool) -> Optional[Dict[str, Any]]:
+    """自定义传输层（测试 / 以后的云端）可能还是老签名，不认 lite 就按老方式调。"""
+    try:
+        return await transport_ref.item_detail(item_id, lite=lite)
+    except TypeError:
+        return await transport_ref.item_detail(item_id)
+
+
 async def resolve_item(item_id: str, for_clone: bool = False) -> Dict[str, Any]:
     """统一解析：我的 / 在线节点 / 本机缓存。返回 {item, mine, online, package, payload}。"""
     if not store.valid_item_id(item_id):
@@ -336,7 +344,8 @@ async def resolve_item(item_id: str, for_clone: bool = False) -> Dict[str, Any]:
                 "package": package, "payload": _local_media_urls(payload, item_id) if payload else {}}
 
     transport_ref = transport.get_transport()
-    body = await transport_ref.item_detail(item_id)
+    # 先只取元数据（lite），画布数据只经 package 传一次；大画布以前要整份传两遍，还卡在 1.5s 超时里
+    body = await _item_detail_call(transport_ref, item_id, lite=True)
     if body:
         item = body.get("item") if isinstance(body.get("item"), dict) else {}
         if store.valid_item_id(str(item.get("id") or "")):
@@ -354,6 +363,11 @@ async def resolve_item(item_id: str, for_clone: bool = False) -> Dict[str, Any]:
                 package.get("payload") if isinstance(package.get("payload"), dict) else {})
             if package and not payload:
                 payload = package.get("payload") or {}
+            if not payload and "payload" not in body:
+                # 不开放克隆 / 包没拉到：再要一次带画布数据的详情（老节点本来就带）
+                full = await _item_detail_call(transport_ref, item_id, lite=False)
+                if full and isinstance(full.get("payload"), dict):
+                    payload = full.get("payload") or {}
             if package:
                 asyncio.create_task(_prefetch_after_detail(item_id, package))
             if not for_clone:
@@ -449,11 +463,13 @@ async def _serve_media(item_id: str, filename: str, cover: bool = False) -> File
         cached = _cache_cover_path(item_id)
     if cached:
         return _media_response(cached, name)
-    # 作者在线：按需下载并缓存（封面在包根目录，走专用接口）
-    if cover:
-        content = await transport.get_transport().download_cover(item_id)
-    else:
-        content = await transport.get_transport().download_media(item_id, name)
+    # 作者在线：按需下载并缓存（封面在包根目录，走专用接口；其它媒体流式写缓存文件）
+    if not cover:
+        path = await transport.fetch_media_to_cache(item_id, name)
+        if not path:
+            raise HTTPException(status_code=404, detail="作者离线，素材没有缓存")
+        return _media_response(path, name)
+    content = await transport.get_transport().download_cover(item_id)
     if not content:
         raise HTTPException(status_code=404, detail="作者离线，素材没有缓存")
     directory = store.cache_item_dir(item_id)
@@ -872,47 +888,48 @@ def _ensure_prompt_library() -> Dict[str, Any]:
     return library
 
 
-async def _media_bytes(item_id: str, filename: str) -> Tuple[Optional[bytes], str]:
-    path = transport.cached_media_path(item_id, filename)
-    if path:
-        try:
-            with open(path, "rb") as handle:
-                return handle.read(), transport.media_content_type(filename)
-        except OSError:
-            return None, transport.media_content_type(filename)
-    content = await transport.get_transport().download_media(item_id, filename)
-    if not content:
-        return None, transport.media_content_type(filename)
-    directory = transport.cache_media_dir(item_id)
-    try:
-        os.makedirs(directory, exist_ok=True)
-        with open(os.path.join(directory, filename), "wb") as handle:
-            handle.write(content)
-    except OSError:
-        pass
-    return content, transport.media_content_type(filename)
+CLONE_MEDIA_CONCURRENCY = 4
+
+
+async def _media_path(item_id: str, filename: str) -> Tuple[Optional[str], str]:
+    """素材在本机缓存的路径（没有就从作者那里流式拉到缓存）。"""
+    path = await transport.fetch_media_to_cache(item_id, filename)
+    return path, transport.media_content_type(filename)
 
 
 async def _clone_canvas(item: Dict[str, Any], package: Dict[str, Any], payload: Dict[str, Any],
                         owner_id: Optional[int] = None) -> Dict[str, Any]:
-    from server.routes.canvas_share import _store_media
+    from server.routes.canvas_share import _store_media_file
     item_id = str(item.get("id") or "")
     mapping: Dict[str, str] = {}
     copied = 0
     failed: List[Dict[str, str]] = []
-    for url in packager.collect_canvas_media(payload):
-        text = str(url or "")
+    semaphore = asyncio.Semaphore(CLONE_MEDIA_CONCURRENCY)
+
+    async def one(text: str) -> Tuple[str, str, str]:
+        """返回 (url, 本地地址, 错误)；视频多的画布以前逐个串行下载，这里 4 路并行。"""
         filename = packager.media_filename_of(text, item_id)
-        content, content_type = await _media_bytes(item_id, filename)
-        if not content:
-            failed.append({"url": text, "error": "作者离线，素材没有缓存"})
-            continue
-        ok, local, error = _store_media(text, content, content_type)
+        async with semaphore:
+            path, content_type = await _media_path(item_id, filename)
+        if not path:
+            return text, "", "作者离线，素材没有缓存"
+        ok, local, error = _store_media_file(text, path, content_type, keep_source=True)
         if ok and local:
+            return text, local, ""
+        return text, "", error or "本机落盘失败"
+
+    urls = [str(url or "") for url in packager.collect_canvas_media(payload)]
+    results = await asyncio.gather(*[one(text) for text in urls], return_exceptions=True)
+    for text, result in zip(urls, results):
+        if isinstance(result, BaseException):
+            failed.append({"url": text, "error": "下载失败"})
+            continue
+        _url, local, error = result
+        if local:
             mapping[text] = local
             copied += 1
         else:
-            failed.append({"url": text, "error": error or "本机落盘失败"})
+            failed.append({"url": text, "error": error})
     new_payload = packager._rewrite_strings(payload, mapping)
     nodes = new_payload.get("nodes") if isinstance(new_payload.get("nodes"), list) else []
     connections = new_payload.get("connections") if isinstance(new_payload.get("connections"), list) else []
@@ -1627,10 +1644,12 @@ async def public_item(item_id: str, request: Request) -> Dict[str, Any]:
     item = store.find_item(_my_items(), item_id)
     if not item or item.get("status") != "published":
         raise HTTPException(status_code=404, detail="作品不存在")
-    package = packager.read_package(item_id) or {}
-    payload = package.get("payload") if isinstance(package.get("payload"), dict) else {}
-    return {"item": store.item_public(item, online=True), "payload": payload,
-            "package_url": "/api/community/public/items/" + item_id + "/package"}
+    result: Dict[str, Any] = {"item": store.item_public(item, online=True),
+                              "package_url": "/api/community/public/items/" + item_id + "/package"}
+    if str(request.query_params.get("lite") or "") not in ("1", "true"):
+        package = packager.read_package(item_id) or {}
+        result["payload"] = package.get("payload") if isinstance(package.get("payload"), dict) else {}
+    return result
 
 
 @router.get("/public/items/{item_id}/package")

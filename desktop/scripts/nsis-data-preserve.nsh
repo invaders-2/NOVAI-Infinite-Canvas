@@ -157,8 +157,36 @@ Var novaiKeepPending
     !insertmacro NOVAI_KEEP_BEGIN install
   !macroend
 
+  ; ---- 局域网防火墙放行 ----
+  ; 局域网好友 / 社区 / 画布分享都要别的电脑直连本机后端（TCP，默认 3000）+ UDP 47823 广播发现。
+  ; 安装包是按用户安装、不提权的，Windows 第一次弹「允许访问」时点了取消 / 网络被识别成「公用」，
+  ; 就会被挡住：表现为「我能加别人，别人加不了我、给我发不了消息、打不开我的分享」。
+  ; 这里在手动安装时（非静默）检查一次，没有规则才弹一次 UAC 加上：
+  ;   1) 先删掉这个后端程序名下的全部旧规则（包括点「取消」时系统生成的阻止规则，阻止规则优先级更高）；
+  ;   2) 按程序放行入站（端口换了也有效），任何网络类型都生效；
+  ;   3) 再按端口放行 UDP 47823。
+  ; 静默安装 / 在线更新（/S）不弹任何窗口，照旧跳过。
+  !define NOVAI_FW_RULE "NOVAI LAN (backend)"
+  !define NOVAI_FW_UDP_RULE "NOVAI LAN Discovery (UDP 47823)"
+  !macro NOVAI_FIREWALL_ALLOW
+    ${IfNot} ${Silent}
+      Push $0
+      Push $1
+      nsExec::ExecToStack 'netsh advfirewall firewall show rule name="${NOVAI_FW_RULE}"'
+      Pop $0
+      Pop $1
+      ${If} $0 != "0"
+        DetailPrint "[NOVAI] 添加局域网防火墙放行规则（需要管理员确认一次）"
+        ExecShellWait "runas" "$SYSDIR\cmd.exe" '/c netsh advfirewall firewall delete rule name=all program="$INSTDIR\resources\backend\NOVAI.exe" & netsh advfirewall firewall add rule name="${NOVAI_FW_RULE}" dir=in action=allow program="$INSTDIR\resources\backend\NOVAI.exe" enable=yes profile=any & netsh advfirewall firewall delete rule name="${NOVAI_FW_UDP_RULE}" & netsh advfirewall firewall add rule name="${NOVAI_FW_UDP_RULE}" dir=in action=allow protocol=UDP localport=47823 profile=any' SW_HIDE
+      ${EndIf}
+      Pop $1
+      Pop $0
+    ${EndIf}
+  !macroend
+
   !macro customInstall
     !insertmacro NOVAI_KEEP_RESTORE
+    !insertmacro NOVAI_FIREWALL_ALLOW
   !macroend
 
   ; 用户取消安装 / 安装失败退出时，把已经挪走的数据放回原位

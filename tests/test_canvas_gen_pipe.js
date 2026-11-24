@@ -179,11 +179,30 @@ assert(!/[\r\n]/.test(mjCleaned), 'MJ 提示词必须单行');
 assert(!mjCleaned.includes('#'), '去 markdown 标题');
 assert(!mjCleaned.includes('**'), '去 markdown 强调');
 assert(!mjCleaned.includes('|'), '去表格竖线');
-assert(!/--/.test(mjCleaned), '不能留下 --（MJ 会当参数解析）');
+assert(!/--/.test(mjCleaned), 'body 有等价字段的参数（--v）要摘掉，不留 --');
 assert(mjCleaned.includes('系红绸的礼盒'), '内容要保留（上游文本仍然进提示词）');
 assert(mjCleaned.length <= mj.MJ_PROMPT_LIMIT);
 assert.strictEqual(mj.midjourneyPrompt('') , '');
 void mjSource;
+
+// 规范化 + 映射：ar / v / s 摘给 body，其余参数写回 --flag 原样保留
+const arV = mj.midjourneyPromptParams('masterpiece --ar 16:9 --v 6.0');
+assert.strictEqual(arV.text, 'masterpiece', '双横杠 ar/v 从提示词摘掉：' + arV.text);
+assert.strictEqual(arV.params.aspect, '16:9');
+assert.strictEqual(arV.params.version, '6.0');
+const singleDash = mj.midjourneyPromptParams('masterpiece -ar 16:9 -v 6.0');
+assert.strictEqual(singleDash.text, 'masterpiece', '单横杠残留同样被识别并摘掉：' + singleDash.text);
+assert.strictEqual(singleDash.params.aspect, '16:9');
+const keepParams = mj.midjourneyPromptParams('poster -iw 1.2 -tile -weird 500 --chaos 10 -style raw');
+assert.strictEqual(keepParams.text, 'poster --iw 1.2 --tile --weird 500 --chaos 10 --style raw',
+    '面板没有对应字段的参数：规范化成 --flag 后原样保留');
+const negNo = mj.midjourneyPromptParams('poster --no ugly, blurry');
+assert.strictEqual(negNo.text, 'poster --no ugly, blurry', '--no 原样保留（交给上游 MJ 自己解析）');
+assert.strictEqual(mj.midjourneyPrompt('a black slip dress, e-commerce photo'),
+    'a black slip dress, e-commerce photo', '正文里的普通连字符一个字都不许动');
+assert.strictEqual(mj.midjourneyPrompt('第一段\n---\n第二段'), '第一段 第二段', 'markdown --- 只变空格');
+const mjCjk = '参考图顺序：图1=「红裙」——根据「国潮」生成海报';
+assert.strictEqual(mj.midjourneyPrompt(mjCjk), mjCjk, '中英混排 / 「」/ 图1= 前缀原样保留');
 
 // ── 9. 已有结果的媒体节点再生成：新节点同时连上「原输入」和「被点的节点自己」 ──
 function fakeStore(d) {
@@ -421,6 +440,10 @@ assert(editorSrc.includes('selfRefOf(node)'), '@ 面板用 selfRefOf 判断本�
 assert(editorSrc.includes('本节点 · '), '@ 列表里给出「本节点」条目');
 assert(!/connect\(store, id, node\.id/.test(editorSrc.split('id === node.id')[0].slice(-400)), '自引用胶囊不能去连一条自己到自己的边');
 
+const mjParityPrompts = [dirty, 'masterpiece --ar 16:9 --v 6.0', 'masterpiece -ar 16:9 -v 6.0',
+    'poster -iw 1.2 -tile -weird 500 --chaos 10 -style raw', 'poster --no ugly, blurry',
+    'a black slip dress, e-commerce photo', '第一段\n---\n第二段', mjCjk];
+
 // ── 8. 与后端 main.py 对拍（没有可用 python 环境时跳过） ────────────────────
 function pythonProbe() {
     const script = [
@@ -439,7 +462,7 @@ function pythonProbe() {
             if (probe.error || probe.status !== 0) continue;
         } else if (!fs.existsSync(bin)) continue;
         const result = spawnSync(bin, ['-c', script], {
-            cwd: ROOT, input: JSON.stringify({ sizes: ['4096x2304', '4096x4096', '16384x16384', '1024x1024'], prompts: [dirty] }),
+            cwd: ROOT, input: JSON.stringify({ sizes: ['4096x2304', '4096x4096', '16384x16384', '1024x1024'], prompts: mjParityPrompts }),
             encoding: 'utf8', timeout: 180000, env: Object.assign({}, process.env, { PYTHONDONTWRITEBYTECODE: '1', NOVAI_DATA_DIR: '/tmp/novai-gen-pipe-test' }),
         });
         if (result.error || result.status !== 0) continue;
@@ -455,7 +478,10 @@ if (!backendProbe) {
         assert.strictEqual(caps.clampImageSize(size, GPT_LIMITS).size, backendProbe.data.normalize[size],
             '前端与后端 main.py 的尺寸口径一致：' + size + '（' + backendProbe.bin + '）');
     }
-    assert.strictEqual(mj.midjourneyPrompt(dirty), backendProbe.data.mj[dirty], '前端与后端 main.py 的 MJ 清洗规则一致（' + backendProbe.bin + '）');
+    for (const prompt of mjParityPrompts) {
+        assert.strictEqual(mj.midjourneyPrompt(prompt), backendProbe.data.mj[prompt],
+            '前端与后端 main.py 的 MJ 清洗规则一致：' + JSON.stringify(prompt) + '（' + backendProbe.bin + '）');
+    }
 }
 
 console.log('[gen-pipe] 全部通过' + (backendProbe ? '（含 main.py 对拍：' + backendProbe.bin + '）' : ''));

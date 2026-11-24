@@ -61,6 +61,11 @@ export type UIState = {
   themePref: "dark" | "light" | "system";
   /** 左键拖动空白：select = 框选（TapNow 默认，中键 / 空格拖动平移）；pan = 平移（旧习惯，Shift 拖动框选） */
   leftDrag: "select" | "pan";
+  /**
+   * 正在「解析」画面的节点 id（点工具条那颗「解析」按钮）：纯界面态，只让节点显示文本生成中的骨架 / 脉冲点。
+   * 刻意不进文档，也不伪造 runtime 的 run——run 会牵出停止按钮、Escape、排队、并发这些生成通道的逻辑。
+   */
+  parsing: Set<string>;
 };
 
 export type CanvasState = {
@@ -135,7 +140,7 @@ export class CanvasStore {
     this.state = {
       canvasId, name, doc: { nodes: [], edges: [], comments: [] }, version: null, saving: "idle", loaded: false,
       view: { x: 0, y: 0, k: 1 },
-      ui: { sel: new Set(), edge: null, drawer: null, filesOpen: false, agentOpen: typeof innerWidth === "number" ? innerWidth > 760 : true, agentFull: false, mini: null, hideEdges: false, snap: false, guides: true, cmtMode: false, pick: null, replace: null, agentPick: false, conn: null, editText: null, editCell: null, hlEdge: null, hlNode: null, preview: false, batchMode: "stack", dragging: false, theme: "dark", themePref: pref, leftDrag },
+      ui: { sel: new Set(), edge: null, drawer: null, filesOpen: false, agentOpen: typeof innerWidth === "number" ? innerWidth > 760 : true, agentFull: false, mini: null, hideEdges: false, snap: false, guides: true, cmtMode: false, pick: null, replace: null, agentPick: false, conn: null, editText: null, editCell: null, hlEdge: null, hlNode: null, preview: false, batchMode: "stack", dragging: false, theme: "dark", themePref: pref, leftDrag, parsing: new Set<string>() },
       runtime: {}, batches: {}, runs: [], models: [], toasts: [], undo: [], redo: [],
       collab: { clientId: null, transport: null, peers: [] },
     };

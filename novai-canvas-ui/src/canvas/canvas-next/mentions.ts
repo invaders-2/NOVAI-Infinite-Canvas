@@ -9,7 +9,7 @@
  * 已连接但没被 @ 的输入在面板里变灰并提示。旧画布没有这个标记，行为不变（所有连线都发送）。
  */
 import type { CanvasDoc, CanvasNode } from "../react-canvas/reactCanvasStore";
-import { genOf, isGenKind, outOf, sectionsOf, textOf, type GenKind, type InputRef } from "./model";
+import { expandGroupInputs, genOf, inputsOf, isGenKind, outOf, sectionsOf, textOf, type GenKind, type GenOutput, type InputRef } from "./model";
 
 export const MENTION_RE = /@\{([A-Za-z0-9_-]+)(?:#([^}\n]{1,40}))?\}/g;
 export type Mention = { id: string; section?: string; start: number; end: number; raw: string };
@@ -80,6 +80,147 @@ export function selfSourceOf(node: CanvasNode): string | null | undefined {
   const g = genOf(node);
   if (g.uploaded && g.hi > 0 && g.hist[0]?.url) return g.hist[0].url;
   return own;
+}
+
+/* ---------- 重新生成时带哪张「本节点参考」：只带原始素材（产品规则 R1/R2） ---------- */
+/**
+ * 一个版本是不是模型生成的：后端回来的结果带 meta.runId；上传 / 拖入 / 外部导入 / 本地编辑产物都没有。
+ * 产品规则：模型生成的上一版结果不再自动当参考图，只有「原始素材」才自动带上。
+ */
+export function isModelVersion(o: GenOutput | null | undefined): boolean {
+  const runId = o?.meta?.runId;
+  return typeof runId === "string" && !!runId;
+}
+
+const normPrompt = (s: unknown) => String(s == null ? "" : s).replace(/\s+/g, " ").trim();
+
+/**
+ * 当前提示词是否和「出这一版时用的提示词」一样（按空白归一）。
+ * meta.prompt 缺失 = 这次改动之前的旧数据：判成「改过」，维持原来的迭代手感（旧画布行为不变）。
+ */
+export function samePromptAsVersion(version: GenOutput | null | undefined, prompt: string): boolean {
+  const recorded = version?.meta?.prompt;
+  return typeof recorded === "string" && normPrompt(recorded) === normPrompt(prompt);
+}
+
+/** 结果节点的来源节点（data.sourceNodeId）；没有就是空串 */
+export function sourceIdOf(node: CanvasNode | undefined): string {
+  const id = node && node.data && typeof node.data === "object" ? (node.data as { sourceNodeId?: unknown }).sourceNodeId : undefined;
+  return typeof id === "string" ? id : "";
+}
+
+/** 沿 data.sourceNodeId 往回找到最初的源节点（防环：链上重复出现就停在那里） */
+export function rootOriginOf(doc: CanvasDoc, node: CanvasNode): CanvasNode {
+  let cur = node; const seen = new Set<string>();
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    const upId = sourceIdOf(cur);
+    const up = upId ? doc.nodes.find((n) => n.id === upId) : undefined;
+    if (!up) return cur;
+    cur = up;
+  }
+  return cur;
+}
+
+/** 上传节点最初的那张素材（hist[0] 不是模型生成时用它）；拿不到就是 undefined */
+function uploadOriginOf(node: CanvasNode): string | undefined {
+  const first = genOf(node).hist[0];
+  if (!first || isModelVersion(first)) return undefined;
+  return first.url || (node.kind === "video" ? first.frame : undefined);
+}
+
+/**
+ * 用户最初放上画布的那张素材（上传 / 拖入 / 外部导入 / 本地编辑产物），没有就 null。
+ *   · 根节点是上传素材 → 最初上传的那张（上传后原地改过也回到 hist[0]）；
+ *   · 根节点当前版本不是模型生成的（没有 runId）→ 那一版本身就是素材；
+ *   · 根节点就是模型生成的图 → 没有原始素材，返回 null（不带上一版结果）。
+ */
+export function materialUrlOf(doc: CanvasDoc, node: CanvasNode): string | null {
+  if (!node) return null;
+  const root = rootOriginOf(doc, node);
+  const g = genOf(root);
+  // 上传素材一直回到最初那张：原地重生成过、当前版记了 selfSrc=null 时 selfSourceOf 会返回 null，hist[0] 兜住
+  if (g.uploaded) return uploadOriginOf(root) || selfSourceOf(root) || null;
+  const cur = outOf(root);
+  if (!cur || isModelVersion(cur)) return null;
+  return cur.url || (root.kind === "video" ? cur.frame : undefined) || null;
+}
+
+/** 本地运行历史里用到的字段（store.ts 的 RunLog；纯模块不 import store，只取这几项） */
+type RunRow = { node?: unknown; type?: unknown; status?: unknown; prompt?: unknown };
+
+/**
+ * 老数据（出这一版时还没记录 meta.prompt）的兜底：看本地运行历史。
+ * 历史里这个节点最近一次成功生成用的提示词和当前提示词一致 = 同一条流水线重抽 → 不该带上一版结果；
+ * 提示词不同 / 查不到记录 = 维持原回退（判成「改过」），老画布的迭代手感不变。
+ * 只用在这个节点「没有 meta.prompt」的时候，新版本有记录就不会走到这里。
+ */
+export function legacyPromptUnchanged(runs: RunRow[] | undefined | null, doc: CanvasDoc, node: CanvasNode): boolean {
+  const list = Array.isArray(runs) ? runs : [];
+  const hit = list.find((r) => r && r.node === node.id && (r.type === "image" || r.type === "video") && r.status === "done" && typeof r.prompt === "string" && !!String(r.prompt).trim());
+  if (!hit) return false;
+  const then = normPrompt(hit.prompt);
+  if (!then) return false;
+  // 历史里的提示词记录的是显示口径（@{id} 已换成 @标题）
+  const now = normPrompt(plainPrompt(genOf(node).prompt, doc));
+  if (then === now) return true;
+  // 历史只留前 500 字（store.compactRun 截断）：当前提示词是它的延长版时仍算同一条
+  return String(hit.prompt).length >= 500 && now.startsWith(then);
+}
+
+/**
+ * 这次生成自动带上的「本节点参考」（没 @ 本节点、不是表格行时用它）：
+ *   1) 提示词显式 @ 了本节点 → 这一版记录的源图（既有能力，不变）；
+ *   2) 上传素材 → 最初上传的那张（一直带，不随生成次数漂移）；
+ *   3) 提示词相对出这一版时改过 → 当前这一版当第一参考（保留迭代手感）；老数据用运行历史判断；
+ *   4) 其余 → 原始素材（materialUrlOf）；没有原始素材就是 null，不带上一版结果。
+ */
+export function autoSelfUrl(store: { state: { doc: CanvasDoc; runs?: RunRow[] } }, node: CanvasNode): string | null {
+  if (!node) return null;
+  const g = genOf(node);
+  if ((node.kind === "image" || node.kind === "video") && mentionedIds(g.prompt).has(node.id)) return selfSourceOf(node) || null;
+  if (g.uploaded) return materialUrlOf(store.state.doc, node);
+  const cur = outOf(node);
+  const curUrl = cur ? (cur.url || (node.kind === "video" ? cur.frame : undefined)) : undefined;
+  if (curUrl) {
+    // 这一版记录了出图时的提示词：按记录判断改没改；老数据没有记录，用本地运行历史兜底（否则「第一次还是像」）
+    const unchanged = typeof cur?.meta?.prompt === "string" ? samePromptAsVersion(cur, g.prompt) : legacyPromptUnchanged(store.state.runs, store.state.doc, node);
+    if (!unchanged) return curUrl;
+  }
+  return materialUrlOf(store.state.doc, node);
+}
+
+/**
+ * 一个节点自己的输入，沿它的 sourceNodeId 链展开（来源节点是结果节点时继续往上走），按节点去重。
+ * 「结果节点 → 它的来源」这条边只表示来源，不发送；发送的是来源节点真正连着的那些输入。
+ */
+export function sourceInputsOf(doc: CanvasDoc, id: string, seen: Set<string> = new Set()): InputRef[] {
+  const node = doc.nodes.find((n) => n.id === id);
+  if (!node || seen.has(id)) return [];
+  seen.add(id);
+  const src = sourceIdOf(node);
+  // 这个节点自己标了 keepSourceInput（出成片 / 重拍 / 延长）：它的来源是真实输入，继续往下展开会把它弄丢
+  const keep = (node.data as { keepSourceInput?: unknown } | undefined)?.keepSourceInput === true;
+  const own = node.kind === "text" ? inputsOf(doc, id) : expandGroupInputs(doc, inputsOf(doc, id));
+  const out: InputRef[] = []; const used = new Set<string>();
+  const push = (x: InputRef) => { if (used.has(x.node.id)) return; used.add(x.node.id); out.push(x); };
+  for (const x of own) {
+    if (src && !keep && x.node.id === src) { for (const up of sourceInputsOf(doc, src, seen)) push(up); continue; }
+    push(x);
+  }
+  return out;
+}
+
+/** 请求组装用：来源连线不发送，改成来源节点自己的输入（原位替换、按节点去重） */
+export function replaceSourceInput(doc: CanvasDoc, inputs: InputRef[], sourceId: string): InputRef[] {
+  if (!sourceId || !inputs.some((x) => x.node.id === sourceId)) return inputs;
+  const out: InputRef[] = []; const used = new Set<string>();
+  const push = (x: InputRef) => { if (used.has(x.node.id)) return; used.add(x.node.id); out.push(x); };
+  for (const x of inputs) {
+    if (x.node.id === sourceId) { for (const up of sourceInputsOf(doc, sourceId)) push(up); continue; }
+    push(x);
+  }
+  return out;
 }
 
 /** 引用模式下没被 @ 的输入（不发送）；分组被整体 @ 时保留全部组员，只 @ 组员时保留该组员。 */

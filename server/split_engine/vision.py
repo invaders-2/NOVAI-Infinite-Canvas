@@ -11,6 +11,8 @@ import requests
 from PIL import Image
 from scipy import ndimage
 
+from server import upstream_user
+
 from . import config, fonts, inpaint, matting, ocr, regions, semantics, text
 from .heuristic import Draft
 from .image_io import LoadedImage
@@ -481,10 +483,10 @@ def split(
     url = cfg["base_url"].rstrip("/") + "/chat/completions"
     response = requests.post(
         url,
-        headers={
+        headers=upstream_user.apply_upstream_user_header({
             "Authorization": f"Bearer {cfg['api_key']}",
             "Content-Type": "application/json",
-        },
+        }, url),
         json=payload,
         timeout=90,
     )

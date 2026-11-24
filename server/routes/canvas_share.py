@@ -17,8 +17,8 @@
     POST   /api/canvas-share/localize-media        {urls, share_url} -> {items, copied, failed, skipped}
 
 媒体本地化（T52）：克隆 / 保存模板时把远端媒体下载到本机 <资产上传目录>，
-地址改成 /assets/uploads/…（不带 token）。单文件 >50MB 跳过、单请求累计 >200MB 停止、
-并发 ≤4、单个超时 10s、总预算 60s；同一 URL 命中已存在文件时直接复用（文件名按 URL 哈希，幂等）。
+地址改成 /assets/uploads/…（不带 token）。单文件 >500MB 跳过、单请求累计 >4GB 停止、
+并发 ≤4、15s 无数据算断、单文件时长按体量放宽、总预算 30 分钟（见 MEDIA_* 常量）；同一 URL 命中已存在文件时直接复用（文件名按 URL 哈希，幂等）。
 
 环境变量：
     NOVAI_SHARE_PAGE_URL  整体覆盖分享页面地址（dev / 反向代理 / 测试用），默认按局域网 IP 拼。
@@ -57,11 +57,18 @@ VALID_EXPIRES_IN_DAYS = (0, 1, 7, 30)
 DEFAULT_OWNER_NAME = "本机用户"
 TOKEN_BYTES = 24
 
-# 媒体本地化预算（T52）：单个 10s / 单文件 50MB / 单请求累计 200MB / 总预算 60s / 并发 4
-MEDIA_TIMEOUT_SECONDS = 10.0
-MEDIA_MAX_FILE_BYTES = 50 * 1024 * 1024
-MEDIA_MAX_TOTAL_BYTES = 200 * 1024 * 1024
-MEDIA_BUDGET_SECONDS = 60.0
+# 媒体本地化预算：视频多的画布以前被「单个 10s / 单文件 50MB / 累计 200MB / 总 60s」卡死，
+# 现在改成按体量放宽：连接 / 无数据 15s 才算断；单文件时长按大小给（30s 起，每 5MB +10s，
+# 即平均不低于 0.5MB/s，封顶 15 分钟）；单文件上限与社区发布一致 500MB；单次累计 4GB；总预算 30 分钟。
+# 下载边收边写临时文件，不再整段读进内存。
+MEDIA_TIMEOUT_SECONDS = 15.0           # 连接超时 + 两次收到数据之间的最长间隔
+MEDIA_MAX_FILE_BYTES = 500 * 1024 * 1024    # 与社区发布单个素材上限一致
+MEDIA_MAX_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
+MEDIA_BUDGET_SECONDS = 1800.0
+MEDIA_FILE_BASE_SECONDS = 30.0
+MEDIA_FILE_STEP_BYTES = 5 * 1024 * 1024
+MEDIA_FILE_STEP_SECONDS = 10.0
+MEDIA_FILE_MAX_SECONDS = 900.0
 MEDIA_CONCURRENCY = 4
 MEDIA_MAX_URLS = 200
 MEDIA_PATH_RE = re.compile(r"^/(?:output|assets|apps)/")
@@ -585,8 +592,8 @@ def _uploads_dir() -> Tuple[str, str]:
     return "", root
 
 
-def _store_media(url: str, content: bytes, content_type: str) -> Tuple[bool, str, str]:
-    """把媒体写进 /assets/uploads，返回 (ok, 本地 url, 错误)。已存在则直接复用（幂等）。"""
+def _store_target(url: str, content_type: str, head: bytes) -> Tuple[bool, str, str, str]:
+    """算落盘位置：返回 (ok, 绝对路径, 本地 url, 错误)。"""
     stem, name_path = _media_target(url)
     kind = None
     ext = ""
@@ -595,27 +602,83 @@ def _store_media(url: str, content: bytes, content_type: str) -> Tuple[bool, str
         kind, ext = kind_ext(name_path, content_type)
     if kind not in ("image", "video", "audio"):
         sniff = deps.get("_sniff_image_ext_bytes")
-        real = sniff(content[:16]) if callable(sniff) and content else ""
+        real = sniff(head[:16]) if callable(sniff) and head else ""
         if real:
             kind, ext = "image", real
     if kind not in ("image", "video", "audio"):
-        return False, "", "不是图片 / 视频 / 音频资源"
+        return False, "", "", "不是图片 / 视频 / 音频资源"
     folder_rel, folder_abs = _uploads_dir()
     try:
         os.makedirs(folder_abs, exist_ok=True)
     except OSError:
-        return False, "", "本机落盘目录不可写"
+        return False, "", "", "本机落盘目录不可写"
     filename = stem + (ext or ".bin")
     path = os.path.join(folder_abs, filename)
     rel_name = (folder_rel.rstrip("/") + "/" + filename).lstrip("/") if folder_rel else filename
+    return True, path, _local_upload_url(rel_name), ""
+
+
+def _store_media(url: str, content: bytes, content_type: str) -> Tuple[bool, str, str]:
+    """把媒体写进 /assets/uploads，返回 (ok, 本地 url, 错误)。已存在则直接复用（幂等）。"""
+    ok, path, local, error = _store_target(url, content_type, content[:16] if content else b"")
+    if not ok:
+        return False, "", error
     if os.path.isfile(path) and os.path.getsize(path) > 0:
-        return True, _local_upload_url(rel_name), ""
+        return True, local, ""
     try:
         with open(path, "wb") as handle:
             handle.write(content)
     except OSError:
         return False, "", "本机落盘失败"
-    return True, _local_upload_url(rel_name), ""
+    return True, local, ""
+
+
+def _store_media_file(url: str, temp_path: str, content_type: str,
+                      keep_source: bool = False) -> Tuple[bool, str, str]:
+    """把已下载到临时文件的媒体挪进 /assets/uploads（同盘 rename，不复制大文件）。
+    keep_source=True 时复制一份、源文件留着（社区克隆：源是本机缓存，要继续用）。"""
+    head = b""
+    try:
+        with open(temp_path, "rb") as handle:
+            head = handle.read(16)
+    except OSError:
+        head = b""
+    ok, path, local, error = _store_target(url, content_type, head)
+    if not ok:
+        if not keep_source:
+            _remove_quiet(temp_path)
+        return False, "", error
+    if os.path.isfile(path) and os.path.getsize(path) > 0:
+        if not keep_source:
+            _remove_quiet(temp_path)
+        return True, local, ""
+    if keep_source:
+        try:
+            import shutil as _shutil
+            part = path + ".%s.part" % uuid.uuid4().hex[:8]
+            _shutil.copyfile(temp_path, part)
+            os.replace(part, path)
+            return True, local, ""
+        except OSError:
+            return False, "", "本机落盘失败"
+    try:
+        os.replace(temp_path, path)
+    except OSError:
+        try:
+            import shutil as _shutil
+            _shutil.move(temp_path, path)
+        except OSError:
+            _remove_quiet(temp_path)
+            return False, "", "本机落盘失败"
+    return True, local, ""
+
+
+def _remove_quiet(path: str) -> None:
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
 
 
 def _cached_media_local(url: str) -> str:
@@ -651,40 +714,99 @@ def _local_upload_url(rel_name: str) -> str:
     return "/assets/uploads/" + urllib.parse.quote(str(rel_name).lstrip("/"), safe="/")
 
 
-async def _download_media(client: "httpx.AsyncClient", url: str, token: str,
-                         max_bytes: int = MEDIA_MAX_FILE_BYTES) -> Tuple[bool, bytes, str, str]:
-    """下载单个媒体：返回 (ok, 字节, content-type, 错误)。max_bytes 同时受单文件与剩余总预算约束。"""
+def media_file_deadline(size_bytes: int) -> float:
+    """单个素材允许的总时长：30s 起，每 5MB 多给 10s（平均 ≥0.5MB/s），封顶 15 分钟。"""
+    steps = max(0, int(size_bytes or 0)) / float(MEDIA_FILE_STEP_BYTES)
+    return min(MEDIA_FILE_MAX_SECONDS, MEDIA_FILE_BASE_SECONDS + steps * MEDIA_FILE_STEP_SECONDS)
+
+
+def _too_large_text(limit: int) -> str:
+    if limit >= MEDIA_MAX_FILE_BYTES:
+        return "文件过大（超过 %dMB）" % (MEDIA_MAX_FILE_BYTES // (1024 * 1024))
+    return "超过本次累计下载上限"
+
+
+def _temp_media_path() -> str:
+    """临时文件放在落盘目录里，下载完同盘 rename 进去。"""
+    _rel, folder_abs = _uploads_dir()
+    try:
+        os.makedirs(folder_abs, exist_ok=True)
+        directory = folder_abs
+    except OSError:
+        directory = tempfile.gettempdir()
+    handle, path = tempfile.mkstemp(prefix=".novai-dl-", suffix=".part", dir=directory)
+    os.close(handle)
+    return path
+
+
+async def _download_media_file(client: "httpx.AsyncClient", url: str, token: str,
+                               max_bytes: int = MEDIA_MAX_FILE_BYTES) -> Tuple[bool, str, int, str, str]:
+    """流式下载单个媒体到临时文件：返回 (ok, 临时路径, 字节数, content-type, 错误)。
+    超时规则：连接 / 两次收到数据间隔超过 MEDIA_TIMEOUT_SECONDS 算断；总时长按体量给（media_file_deadline）。"""
     limit = max(1, min(MEDIA_MAX_FILE_BYTES, int(max_bytes or MEDIA_MAX_FILE_BYTES)))
     target = _with_media_token(url, token)
     headers = {"X-NOVAI-Token": token} if token else {}
+    started = time.monotonic()
+    temp_path = ""
     try:
         async with client.stream("GET", target, headers=headers, follow_redirects=True) as response:
             if response.status_code in (401, 403):
-                return False, b"", "", "对方分享口令失效，请让对方重新分享"
+                return False, "", 0, "", "对方分享口令失效，请让对方重新分享"
             if response.status_code == 404:
-                return False, b"", "", "对方素材已不存在（HTTP 404）"
+                return False, "", 0, "", "对方素材已不存在（HTTP 404）"
             if response.status_code >= 400:
-                return False, b"", "", "对方资源不可用（HTTP %s）" % response.status_code
+                return False, "", 0, "", "对方资源不可用（HTTP %s）" % response.status_code
             length = 0
             try:
                 length = int(response.headers.get("content-length") or 0)
             except (TypeError, ValueError):
                 length = 0
             if length > limit:
-                return False, b"", "", "文件过大（超过 50MB）" if limit >= MEDIA_MAX_FILE_BYTES else "超过本次 200MB 下载上限"
-            content = bytearray()
-            async for chunk in response.aiter_bytes():
-                if not chunk:
-                    continue
-                content.extend(chunk)
-                if len(content) > limit:
-                    return False, b"", "", "文件过大（超过 50MB）" if limit >= MEDIA_MAX_FILE_BYTES else "超过本次 200MB 下载上限"
+                return False, "", 0, "", _too_large_text(limit)
+            temp_path = _temp_media_path()
+            received = 0
+            with open(temp_path, "wb") as handle:
+                async for chunk in response.aiter_bytes(256 * 1024):
+                    if not chunk:
+                        continue
+                    received += len(chunk)
+                    if received > limit:
+                        handle.close()
+                        _remove_quiet(temp_path)
+                        return False, "", 0, "", _too_large_text(limit)
+                    handle.write(chunk)
+                    if time.monotonic() - started > media_file_deadline(max(length, received)):
+                        handle.close()
+                        _remove_quiet(temp_path)
+                        return False, "", 0, "", "下载太慢，超出这个文件的时间预算（网速低于 0.5MB/s）"
             content_type = str(response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
-            return True, bytes(content), content_type, ""
+            return True, temp_path, received, content_type, ""
     except httpx.TimeoutException:
-        return False, b"", "", "下载超时（超过 10 秒）"
+        _remove_quiet(temp_path)
+        return False, "", 0, "", "下载超时（%d 秒没有收到数据）" % int(MEDIA_TIMEOUT_SECONDS)
     except Exception:
+        _remove_quiet(temp_path)
+        return False, "", 0, "", "下载失败"
+
+
+async def _download_media(client: "httpx.AsyncClient", url: str, token: str,
+                         max_bytes: int = MEDIA_MAX_FILE_BYTES) -> Tuple[bool, bytes, str, str]:
+    """兼容旧调用：下载到内存，返回 (ok, 字节, content-type, 错误)。"""
+    ok, temp_path, _size, content_type, error = await _download_media_file(client, url, token, max_bytes)
+    if not ok:
+        return False, b"", "", error
+    try:
+        with open(temp_path, "rb") as handle:
+            return True, handle.read(), content_type, ""
+    except OSError:
         return False, b"", "", "下载失败"
+    finally:
+        _remove_quiet(temp_path)
+
+
+def _media_client_timeout() -> "httpx.Timeout":
+    return httpx.Timeout(MEDIA_TIMEOUT_SECONDS, connect=MEDIA_TIMEOUT_SECONDS,
+                         read=MEDIA_TIMEOUT_SECONDS, write=MEDIA_TIMEOUT_SECONDS, pool=None)
 
 
 def _local_lan_token() -> str:
@@ -732,7 +854,7 @@ async def localize_media_urls(urls: List[str], share_url: str = "", request: Opt
     if pending:
         ssl_context = deps.get("_SSL_CONTEXT", True)
         trust_env = bool(deps.get("_TRUST_ENV", False))
-        timeout = httpx.Timeout(MEDIA_TIMEOUT_SECONDS, connect=MEDIA_TIMEOUT_SECONDS)
+        timeout = _media_client_timeout()
         semaphore = asyncio.Semaphore(MEDIA_CONCURRENCY)
         budget = {"bytes": 0}
 
@@ -740,25 +862,26 @@ async def localize_media_urls(urls: List[str], share_url: str = "", request: Opt
             async with semaphore:
                 remaining = MEDIA_MAX_TOTAL_BYTES - budget["bytes"]
                 if remaining <= 0:
-                    return _media_fail(url, "超过本次 200MB 下载上限")
+                    return _media_fail(url, "超过本次累计下载上限")
                 try:
                     # 局域网素材强制直连：系统代理只对公网地址生效
                     trust_env_here = trust_env and not is_private_media_url(url)
                     async with httpx.AsyncClient(http2=False, verify=ssl_context,
                                                  trust_env=trust_env_here, timeout=timeout) as client:
-                        ok, content, content_type, error = await asyncio.wait_for(
-                            _download_media(client, url, token, remaining), MEDIA_TIMEOUT_SECONDS + 2)
+                        ok, temp_path, size, content_type, error = await asyncio.wait_for(
+                            _download_media_file(client, url, token, remaining),
+                            media_file_deadline(MEDIA_MAX_FILE_BYTES) + MEDIA_TIMEOUT_SECONDS)
                 except asyncio.TimeoutError:
-                    return _media_fail(url, "下载超时（超过 10 秒）")
+                    return _media_fail(url, "下载超时")
                 except Exception:
                     return _media_fail(url, "下载失败")
                 if not ok:
                     return _media_fail(url, error)
-                budget["bytes"] += len(content)
-                stored, local, store_error = _store_media(url, content, content_type)
+                budget["bytes"] += size
+                stored, local, store_error = _store_media_file(url, temp_path, content_type)
                 if not stored:
                     return _media_fail(url, store_error or "本机落盘失败")
-                return {"url": url, "local": local, "ok": True, "error": "", "size": len(content), "cached": False}
+                return {"url": url, "local": local, "ok": True, "error": "", "size": size, "cached": False}
 
         tasks = [asyncio.create_task(handle(url, token)) for url, token in pending]
         done, still = await asyncio.wait(tasks, timeout=MEDIA_BUDGET_SECONDS)
@@ -774,7 +897,7 @@ async def localize_media_urls(urls: List[str], share_url: str = "", request: Opt
         for task, (url, _token) in zip(tasks, pending):
             item = by_url.get(url)
             if item is None:
-                item = _media_fail(url, "超出 60 秒总预算，未完成")
+                item = _media_fail(url, "超出本次总时间预算（%d 分钟），未完成" % int(MEDIA_BUDGET_SECONDS // 60))
             results.append(item)
 
     order = {_canonical_media_url(str(url)): index for index, url in enumerate(urls or [])}
@@ -858,21 +981,23 @@ async def localize_private_media_url(url: str) -> str:
         return cached
     ssl_context = deps.get("_SSL_CONTEXT", True)
     trust_env = bool(deps.get("_TRUST_ENV", False))
-    timeout = httpx.Timeout(MEDIA_TIMEOUT_SECONDS, connect=MEDIA_TIMEOUT_SECONDS)
+    timeout = _media_client_timeout()
+    temp_path = ""
     try:
         # 私网素材强制直连：系统代理只对公网地址生效
         trust_env_here = trust_env and not is_private_media_url(text)
         async with httpx.AsyncClient(http2=False, verify=ssl_context,
                                      trust_env=trust_env_here, timeout=timeout) as client:
-            status, content, content_type, error = await asyncio.wait_for(
-                _download_media(client, text, _url_token(text)), MEDIA_TIMEOUT_SECONDS + 2)
+            status, temp_path, _size, content_type, error = await asyncio.wait_for(
+                _download_media_file(client, text, _url_token(text)),
+                media_file_deadline(MEDIA_MAX_FILE_BYTES) + MEDIA_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
-        status, content, content_type, error = False, b"", "", "下载超时（超过 10 秒）"
+        status, temp_path, content_type, error = False, "", "", "下载超时"
     except Exception:
-        status, content, content_type, error = False, b"", "", "下载失败"
+        status, temp_path, content_type, error = False, "", "", "下载失败"
     if not status:
         raise HTTPException(status_code=502, detail=_private_media_error(text, error))
-    stored, local, store_error = _store_media(text, content, content_type)
+    stored, local, store_error = _store_media_file(text, temp_path, content_type)
     if not stored:
         raise HTTPException(status_code=502, detail="参考素材已取到但本机落盘失败：%s" % (store_error or "未知原因"))
     with _PRIVATE_MEDIA_LOCK:

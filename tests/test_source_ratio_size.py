@@ -140,7 +140,9 @@ class DirectImageChainTests(unittest.TestCase):
         captured = {}
 
         async def fake_generate(prompt, size, quality, model, refs, provider_id, background, notice, n,
-                                midjourney_version="", midjourney_hd=False):
+                                midjourney_version="", midjourney_hd=False, thinking_mode=None,
+                                output_format="", frame_count=0, frame_duration_ms=0, svg_model="",
+                                midjourney_speed="", midjourney_stylize=0):
             captured["size"] = size
             notice["size_notice"] = ""
             return ({"type": "url", "value": "/assets/output/x.png"}, {"data": [{"url": "/assets/output/x.png"}]})

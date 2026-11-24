@@ -19,8 +19,19 @@ import type { CanvasStore } from "../store";
 import { exportTimelineNode } from "../timelineAuto";
 
 const running = new WeakMap<CanvasStore, Set<string>>();
-type Flag = { at?: number; export?: boolean; params?: Record<string, unknown>; /** 这次生成不拿节点自己的产物当参考图 */ excludeSelfRefs?: boolean };
+type Flag = { at?: number; export?: boolean; params?: Record<string, unknown>; /** 这次生成不拿节点自己的产物当参考图 */ excludeSelfRefs?: boolean; /** 「在这张基础上改」：后端指定要带上的参考图地址 */ referenceImages?: unknown };
 const flagOf = (n: { data?: unknown }) => (n.data && typeof n.data === "object" ? (n.data as { agentRun?: Flag }).agentRun : undefined);
+/**
+ * 画布助手「在这张基础上改」的参考图（后端契约，名字固定）：
+ * 立即跑写在 data.agentRun.referenceImages，待生成卡片 defer 时写在 data.agentPendingReferenceImages。
+ * 读下来交给 runNode → buildRequest 当参考图输入；两者都没有就是空。
+ */
+function referenceImagesOf(data: unknown): string[] {
+  if (!data || typeof data !== "object") return [];
+  const row = data as { agentRun?: Flag; agentPendingReferenceImages?: unknown };
+  const list = row.agentRun && Array.isArray(row.agentRun.referenceImages) ? row.agentRun.referenceImages : row.agentPendingReferenceImages;
+  return Array.isArray(list) ? list.map((u) => String(u || "").trim()).filter(Boolean) : [];
+}
 /** 同节点多组：待生成卡片批准时写进 data.agentRunQueue 的按序任务（按 countGroup 标记建的队列） */
 const queueOf = (n: { data?: unknown }): QueueItem[] => (n.data && typeof n.data === "object" && Array.isArray((n.data as { agentRunQueue?: unknown }).agentRunQueue) ? (n.data as { agentRunQueue: QueueItem[] }).agentRunQueue : []);
 const queuedOf = (store: CanvasStore) => {
@@ -82,19 +93,22 @@ export function runAgentQueued(store: CanvasStore): number {
   const excludeSelf = new Map<string, boolean>();
   /** 同节点多组：清标记前先记下按序队列（没有队列 = 旧路径，仍按节点去重只跑一次） */
   const queues = new Map<string, QueueItem[]>();
+  /** 助手「在这张基础上改」的参考图：清标记前先读下来，跑的时候当额外参考图输入 */
+  const references = new Map<string, string[]>();
   // 先清标记（不进撤销历史），避免保存 / 刷新后被重复执行；
   // agentPendingExcludeSelfRefs 也在这里一起清掉，避免残留影响之后的手动重跑
   for (const n of queued) {
     mine.add(n.id);
     const flag = flagOf(n);
     excludeSelf.set(n.id, flag?.excludeSelfRefs === true || excludeSelfRefsFlag(n.data));
+    references.set(n.id, referenceImagesOf(n.data));
     // 内存队列优先（approve 时放的，刷新不会丢）；没有就回落到节点 data.agentRunQueue
     const memory = takeCountQueue(store.state.canvasId, n.id);
     if (memory && memory.length) queues.set(n.id, memory);
     else if (queueOf(n).length) queues.set(n.id, queueOf(n).slice());
     // 标记里带了用户在待生成卡片选的模型 / 参数：先套到节点上再跑（以它为准，不用节点上可能残留的默认模型）
     if (flag?.params && isGenKind(n.kind)) store.patchGen(n.id, (g) => ({ params: { ...g.params, ...flag.params } as typeof g.params }));
-    store.updateNode(n.id, (x) => { const d = { ...((x.data as Record<string, unknown>) || {}) }; delete d.agentRun; delete d.agentDone; delete d.agentPending; delete d.agentPendingExcludeSelfRefs; delete d.agentRunQueue; return { ...x, data: d }; });
+    store.updateNode(n.id, (x) => { const d = { ...((x.data as Record<string, unknown>) || {}) }; delete d.agentRun; delete d.agentDone; delete d.agentPending; delete d.agentPendingExcludeSelfRefs; delete d.agentPendingReferenceImages; delete d.agentRunQueue; return { ...x, data: d }; });
   }
   const doc = store.state.doc;
   const waitsFor = (id: string) => inputsOf(doc, id).map((x) => x.node.id).filter((up) => ids.has(up));
@@ -140,7 +154,7 @@ export function runAgentQueued(store: CanvasStore): number {
                   : normalizeModelParams(store.state.models || [], n0.kind as GenKind, raw as { model?: unknown; provider?: unknown });
                 store.patchGen(id, (g) => ({ params: { ...g.params, ...(settings as Record<string, unknown>) } as typeof g.params }));
               }
-              const okOne = await runNode(store, id, { inPlace: true, chain: true, excludeSelfRefs: excludeSelf.get(id) === true });
+              const okOne = await runNode(store, id, { inPlace: true, chain: true, excludeSelfRefs: excludeSelf.get(id) === true, referenceImages: references.get(id) || [] });
               const n2 = store.node(id); const g2 = n2 ? genOf(n2) : null; const o2 = n2 ? outOf(n2) : null;
               const ok = !!okOne && !g2?.err && !!(o2?.url || o2?.text);
               return { ok, url: o2?.url, dur: o2?.dur, err: ok ? "" : (g2?.err || "画布没有拿到生成结果") };
@@ -188,7 +202,7 @@ export function runAgentQueued(store: CanvasStore): number {
             markDone(store, id, { ok: true, node_id: first.nodeId, url: out.url, dur: out.dur });
             return true;
           }
-          const ok = await runNode(store, id, { inPlace: true, chain: true, excludeSelfRefs: excludeSelf.get(id) === true });
+          const ok = await runNode(store, id, { inPlace: true, chain: true, excludeSelfRefs: excludeSelf.get(id) === true, referenceImages: references.get(id) || [] });
           autorunLog({ stage: "single-done", nodeId: id, ok, err: store.node(id)?.data ? (genOf(store.node(id)!).err || "") : "" });
           const n = store.node(id); const g = n ? genOf(n) : null; const o = n ? outOf(n) : null;
           const good = !!ok && !!n && !g?.err && !!(o?.url || o?.text);

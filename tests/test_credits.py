@@ -188,6 +188,47 @@ class PricingTests(unittest.TestCase):
         self.assertEqual(quote["cost"], 0.5)  # 0.05 USD / 0.1
         self.assertGreater(quote["price"], quote["cost"])
 
+    def test_midjourney_per_call_split_across_candidates(self):
+        """Midjourney imagine：一次提交回 4 张候选、上游只收一次钱 → 画布按张卖就把这次的钱摊到 4 张上。
+        回归点：修之前 rows=4 按「单次价 × 4」收 0.18016 USD（把一次的钱收四遍）。"""
+        one = pricing.estimate("image", "midjourney", {"rows": 1})
+        two = pricing.estimate("image", "midjourney", {"rows": 2})
+        four = pricing.estimate("image", "midjourney", {"rows": 4})
+        for quote in (one, two, four):
+            self.assertEqual(quote["unit"], "per_call")
+            self.assertEqual(quote["matched_spec"], "default")
+            self.assertFalse(quote["pricing_fallback"])
+        self.assertAlmostEqual(one["cost_usd"], 0.01126, places=6)
+        self.assertAlmostEqual(two["cost_usd"], 0.02252, places=6)
+        # 「4 张的总价 == 一次调用的价」：一张只扣一次
+        self.assertAlmostEqual(four["cost_usd"], 0.04504, places=6)
+        self.assertAlmostEqual(four["cost"], 0.4504, places=6)
+        self.assertAlmostEqual(two["cost_usd"], four["cost_usd"] / 2, places=6)
+        # 结算兜底（conservative）也必须落在同一档：这张价目把 imagine / video 共用一个 record，
+        # 取「全表最高 per_call」会把 video 的 0.4 USD 当成 imagine 最高成本，结算时把 0.59 抬到 5.2。
+        floor = pricing.estimate("image", "midjourney", {"rows": 4}, conservative=True)
+        self.assertAlmostEqual(floor["cost_usd"], 0.04504, places=6)
+
+    def test_midjourney_split_only_touches_imagine_per_call(self):
+        """分摊只对 imagine（image + per_call）生效：同表的 video 档、per_image 分支都不许动。"""
+        # midjourney@video 是单次价（不是 4 张候选），不能被除 4
+        video_one = pricing.estimate("image", "midjourney@video", {"rows": 1})
+        video_two = pricing.estimate("image", "midjourney@video", {"rows": 2})
+        self.assertEqual(video_one["unit"], "per_call")
+        self.assertAlmostEqual(video_one["cost_usd"], 0.2, places=6)
+        self.assertAlmostEqual(video_two["cost_usd"], 0.4, places=6)
+        # per_image：flux 1K 4 张仍是 4 × 0.0072
+        flux_one = pricing.estimate("image", "flux-3-image-klein", {"rows": 1, "width": 1024, "height": 1024})
+        flux_four = pricing.estimate("image", "flux-3-image-klein", {"rows": 4, "width": 1024, "height": 1024})
+        self.assertEqual(flux_four["unit"], "per_image")
+        self.assertAlmostEqual(flux_four["cost_usd"], flux_one["cost_usd"] * 4, places=6)
+        self.assertAlmostEqual(flux_four["cost_usd"], 0.0288, places=6)
+        # proxy 最高档的对照模型也没被碰（gpt-image-2 走 max:4K，4 张 = 4 × 0.022）
+        gpt_one = pricing.estimate("image", "gpt-image-2", {"rows": 1, "width": 1024, "height": 1024})
+        gpt_four = pricing.estimate("image", "gpt-image-2", {"rows": 4, "width": 1024, "height": 1024})
+        self.assertAlmostEqual(gpt_four["cost_usd"], gpt_one["cost_usd"] * 4, places=6)
+        self.assertAlmostEqual(gpt_four["cost_usd"], 0.088, places=6)
+
     def test_text_per_token(self):
         quote = pricing.estimate("text", "gpt-4o-mini", {"tokens_in": 100000, "tokens_out": 10000})
         bigger = pricing.estimate("text", "gpt-4o-mini", {"tokens_in": 200000, "tokens_out": 20000})
@@ -337,6 +378,25 @@ class ChargeLifecycleTests(unittest.TestCase):
         refunded = service.charge_refund(charge2["id"], "test")
         self.assertEqual(refunded["status"], "refunded")
         self.assertAlmostEqual(store.balance(uid), before + charge2["charged"])
+
+    def test_midjourney_four_images_precharge_and_settle_stay_at_one_call_price(self):
+        """MJ 4 张：预扣与结算都停在一次调用的成本上（0.4504 积分），不会因为 4 张变成 1.8016。
+        上游 MJ 回报只有 quota、没有 cost/credits_cost，所以结算沿用预扣（不退不加）。"""
+        uid = unique_user(10.0)
+        params = {"rows": 4}
+        quote = pricing.estimate("image", "midjourney", params)
+        self.assertAlmostEqual(quote["cost_usd"], 0.04504, places=6)
+        charge = integration.credits_charge_start("image", "midjourney", params, user_id=uid)
+        self.assertIsNotNone(charge)
+        # 预扣按售价（成本 × 1.3 后向上取到 0.01 积分）→ 0.59；成本仍是 0.4504
+        self.assertAlmostEqual(charge["charged"], quote["price"], places=4)
+        self.assertAlmostEqual(charge["cost_usd"], 0.04504, places=6)
+        settled = integration.credits_charge_settle(charge, result={"images": ["/assets/output/mj_%d.png" % i for i in range(4)]})
+        self.assertIsNotNone(settled)
+        detail = service.charges(user_id=uid, limit=1)[0]
+        self.assertEqual(detail["status"], "settled")
+        self.assertAlmostEqual(detail["charged"], charge["charged"], places=4)
+        self.assertAlmostEqual(detail["cost_usd"], 0.04504, places=6)
 
     def test_task_delete_does_not_deadlock(self):
         """task_delete 在 TASK_STORE_LOCK 内不能回读 task（不可重入）；有/无扣费单都要能删。"""

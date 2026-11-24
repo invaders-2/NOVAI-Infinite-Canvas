@@ -14,6 +14,17 @@ from typing import Any, Dict, Optional, Tuple
 from server.credits import config, model_map, pricing
 
 
+# 一次调用产出多张候选、但上游只收一次钱的模型：画布按张卖，所以把这一次的价摊到每张候选上。
+# midjourney imagine 一次提交返回 4 张单图（image_urls），上游只扣一次 midjourney@imagine。
+# 只对「image + per_call」生效：midjourney@video / upscale 等动作档是单张/单次价，不能除。
+PER_CALL_CANDIDATES = {"midjourney": 4}
+
+
+def _per_call_model_key(record: Dict[str, Any], target: str = "", model: str = "") -> str:
+    """取价目 record 的 id（或 model_map 的 target / 原始模型名）作为分摊表的 key。"""
+    return str((record or {}).get("id") or target or model or "").strip().lower()
+
+
 def _conservative_record(category: str) -> Dict[str, Any]:
     values = model_map.conservative(category)
     if category == "chat":
@@ -206,7 +217,13 @@ def estimate(kind: str, model: Any = "", params: Optional[Dict[str, Any]] = None
     extra: Dict[str, Any] = {}
 
     if category == "image":
-        tier = _best_tier(record, ("per_image", "per_call")) if max_mode else pricing.pick_image_tier(record, params)
+        if max_mode and _per_call_model_key(record, target, model) in PER_CALL_CANDIDATES:
+            # 这张价目把 imagine / upscale / video 塞在同一个 record 里：取「全表最高 per_call」
+            # 会把 video 档（0.4 USD）当成 imagine 的最高成本，结算兜底随即把一次 0.045 的任务抬十倍。
+            # 画布请求没有 action 参数 → 就按它自己那一档（default/imagine）算，再照常按候选张数摊。
+            tier = pricing.pick_image_tier(record, params)
+        else:
+            tier = _best_tier(record, ("per_image", "per_call")) if max_mode else pricing.pick_image_tier(record, params)
         if tier is None and (record.get("token_rates") or {}):
             input_gold, output_gold = pricing._image_token_rates(record)
             tokens_in, _ignored = pricing._text_tokens(params)
@@ -221,6 +238,12 @@ def estimate(kind: str, model: Any = "", params: Optional[Dict[str, Any]] = None
             if max_mode:
                 matched_spec = "max:" + matched_spec
             usd = float(pricing._tier_usd(tier, tier_name) or 0.0) * rows
+            if unit == "per_call":
+                candidates = PER_CALL_CANDIDATES.get(_per_call_model_key(record, target, model))
+                if candidates and candidates > 1:
+                    # 一次提交只扣一次费，但一次出 N 张候选：按张卖就是「这一次的钱 ÷ N × 张数」。
+                    # 不除的话 4 张会按「单次价 × 4」收，等于把一次的钱收四遍。
+                    usd = usd / candidates
         else:
             record = _conservative_record("image")
             pricing_source = "conservative"

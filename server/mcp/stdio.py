@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""MCP stdio 传输：起子进程、按行读写 JSON、initialize 握手、tools/list、tools/call。
+"""MCP stdio 传输：起子进程、按行读写 JSON、initialize 握手、tools/list、tools/call、prompts。
 
 握手顺序（MCP stdio）：
-    initialize（协议版本本端先提 2025-03-26；被拒绝就回退 2024-11-05，最终采用服务端返回的版本）
+    initialize（协议版本本端先提 2025-03-26；被拒绝就回退 2024-11-05，最终采用服务端返回的版本；
+               顺带记下服务端在 initialize 里给的 instructions 工作流契约）
     → notifications/initialized
     → tools/list（支持 cursor 翻页）
     → tools/call
+    → prompts/list / prompts/get（服务端支持才有；不支持时当没有，不影响 tools）
 
 约束：
 - 单条消息上限 4MB（jsonrpc.MAX_MESSAGE_BYTES）；
@@ -198,6 +200,8 @@ class StdioMcpSession:
         self.protocol_version = protocol_version
         self.negotiated_version = ""
         self.server_info: Dict[str, Any] = {}
+        # 服务端在 initialize 里自带的工具使用契约（Photoshop MCP 有 7 千多字硬规则），缺省空串
+        self.instructions = ""
         self.transport = StdioTransport(self.server_name, self.command, self.args, self.env, self.timeout)
         self.peer: Optional[jsonrpc.JsonRpcPeer] = None
 
@@ -258,6 +262,8 @@ class StdioMcpSession:
                            stderr=self.stderr_tail())
         self.negotiated_version = str(result.get("protocolVersion") or jsonrpc.FALLBACK_PROTOCOL_VERSION)
         self.server_info = result.get("serverInfo") if isinstance(result.get("serverInfo"), dict) else {}
+        raw_instructions = result.get("instructions")
+        self.instructions = raw_instructions if isinstance(raw_instructions, str) else ""
         self.peer.notify("notifications/initialized", {})
         return result
 
@@ -294,5 +300,41 @@ class StdioMcpSession:
         if not isinstance(result, dict):
             raise McpError("MCP %s 的 tools/call 返回不是对象" % self.server_name,
                            code="mcp_call_failed", server=self.server_name,
+                           stderr=self.stderr_tail())
+        return result
+
+    def list_prompts(self, max_pages: int = 50) -> List[Dict[str, Any]]:
+        """列模板。服务端不支持（-32601）或报错时返回已拿到的部分/空列表：
+        模板只是增强项，不能因为它把 tools 发现一起拖垮。"""
+        assert self.peer is not None
+        prompts: List[Dict[str, Any]] = []
+        cursor = ""
+        for _page in range(max(1, int(max_pages))):
+            params = {"cursor": cursor} if cursor else {}
+            try:
+                result = self.peer.request("prompts/list", params)
+            except jsonrpc.JsonRpcError:
+                return prompts
+            if not isinstance(result, dict):
+                return prompts
+            page = result.get("prompts")
+            if isinstance(page, list):
+                prompts.extend([item for item in page if isinstance(item, dict)])
+            next_cursor = result.get("nextCursor")
+            if not isinstance(next_cursor, str) or not next_cursor:
+                break
+            cursor = next_cursor
+        return prompts
+
+    def get_prompt(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        assert self.peer is not None
+        try:
+            result = self.peer.request("prompts/get",
+                                       {"name": str(name), "arguments": dict(arguments or {})})
+        except jsonrpc.JsonRpcError as exc:
+            raise self._wrap(exc, "prompt")
+        if not isinstance(result, dict):
+            raise McpError("MCP %s 的 prompts/get 返回不是对象" % self.server_name,
+                           code="mcp_prompt_failed", server=self.server_name,
                            stderr=self.stderr_tail())
         return result

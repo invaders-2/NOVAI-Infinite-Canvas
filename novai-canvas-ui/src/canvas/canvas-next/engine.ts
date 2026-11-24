@@ -12,11 +12,11 @@ import type { CanvasDoc, CanvasEdge, CanvasNode } from "../react-canvas/reactCan
 import { GenError, type CanvasTask, type GenInput, type GenRequest } from "./backend/types";
 import { fitMediaBox, isAdaptiveRatio, ratioOf, refitNodeBox } from "./mediaFit";
 import { batchSourceSize, sourceBoxInDoc, sourceSizeForTier, wantedRatio } from "./originalRatio";
-import { applyElements, elementInputs } from "./elements";
+import { applyElements, elementInputs, referenceInputs } from "./elements";
 import { nodeError } from "./errorText";
 import { excludeSelfRefsFlag, filterSelfRefs } from "./agent/selfRefs";
-import { mentionedIds, plainPrompt, remapMention, resolveMentions, selfSourceOf, unmentionedInputs, type SentRef } from "./mentions";
-import { autoVideoMode, clamp, cloneParams, draftRes, expandGroupInputs, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoMode, type VideoParams } from "./model";
+import { autoSelfUrl, materialUrlOf, mentionedIds, plainPrompt, remapMention, replaceSourceInput, resolveMentions, selfSourceOf, sourceIdOf, sourceInputsOf, unmentionedInputs, type SentRef } from "./mentions";
+import { autoVideoMode, clamp, cloneParams, draftRes, expandGroupInputs, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, videoModeForCounts, videoModeMissingInput, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type InputRef, type ModelSpec, type TextParams, type VideoMode, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
 import { batchOf, batchRows, channelIndexFromId, channelModesOf, CHANNEL_MODE_LABEL, groupInputs, groupNote, growRowsPrompt, inferChannelModesFromRows, keepMediaCells, mergeInputGroups, ownRefCount, padTableRows, parseListPlan, parseTableReply, perRowRowCount, planRepairPrompt, plannedChannelMode, planPrompt, planTextOf, refOrderText, tableChannels, tableInputWarnings, trimTableRows, withStoryboardMedia, emptyRunHint, fillTargetOf, planRow, repairPrompt, rowHasFirst, rowsToRun, STORYBOARD_COLUMNS, tableAutoSize, tableGenKindOf, tableOf, tablePrompt, withBatch, withTable, type BatchJournal, type BatchRow, type ChannelMode, type FillTarget, type InputGroupPlan, type ListPlan, type TableChannel, type TableData } from "./table";
 
@@ -68,7 +68,7 @@ function selfBoxOf(node: CanvasNode, src: string | null | undefined) {
   return hit && Number(hit.w) > 0 && Number(hit.h) > 0 ? { url: src, w: Number(hit.w), h: Number(hit.h) } : null;
 }
 
-export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRow, flags?: { excludeSelfRefs?: boolean; selfSrcSeed?: string | null; selfSrcBox?: { w: number; h: number } | null }): GenRequest | null {
+export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRow, flags?: { excludeSelfRefs?: boolean; selfSrcSeed?: string | null; selfSrcBox?: { w: number; h: number } | null; /** 画布助手「在这张基础上改」：后端写在标记里的参考图（data.agentRun.referenceImages / agentPendingReferenceImages） */ referenceImages?: string[] }): GenRequest | null {
   if (!isGenKind(node.kind)) return null;
   /** 这次生成是否剔除自产物（缺省 false = 既有行为：@ 本节点 / 自己的历史结果照常可以当参考） */
   const excludeSelf = flags?.excludeSelfRefs === true;
@@ -79,12 +79,20 @@ export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRo
   const selfSeedBox = flags?.selfSrcBox !== undefined ? flags.selfSrcBox : null;
   const cur = outOf(node);
   const curUrl = cur ? (cur.url || (node.kind === "video" ? cur.frame : undefined)) : undefined;
-  // 普通生成默认把当前结果当第一参考（旧智能画布语义）；表格批量 / agent excludeSelfRefs / 无结果不送。
-  // 新结果节点首跑没有 hist，但父节点会把 current 结果通过 selfSrcSeed 递过来，同样要算第一参考。
+  // 结果节点与来源节点之间的自动连线只表示「来源」，不作为参考图发送；改为沿用来源节点自己连的输入
+  // （展开、去重、递归处理 sourceNodeId 链）。keepSourceInput 是真正要拿来源当输入的功能（出成片 / 重拍 / 视频延长）；
+  // 提示词里显式 @ 了来源节点时也照旧发送（@ 的语义优先）。这类节点来源本身就是真实输入，不再额外自动加「本节点参考」。
+  const sourceId = sourceIdOf(node);
+  const keepSource = (node.data as { keepSourceInput?: unknown } | undefined)?.keepSourceInput === true
+    || (!!sourceId && mentionedIds(g.prompt).has(sourceId));
+  // 「自动带上的本节点参考」只认原始素材 / 改过提示词的当前这一版（mentions.autoSelfUrl）：
+  // 模型生成的上一版结果不再自动当参考图，否则「再来一张 / 再做一张」会把上一版喂回去、越生成越像。
+  // 表格批量（每行自带素材）照旧不带；agent 的 excludeSelfRefs（这次不用自己的产物）只留原始素材。
   const seedProvided = flags?.selfSrcSeed !== undefined && typeof selfSeed === "string" && !!selfSeed;
-  const autoSelf = !selfMentioned && !excludeSelf && !row && (node.kind === "image" || node.kind === "video") && ((typeof curUrl === "string" && !!curUrl) || seedProvided);
+  const autoSeed = seedProvided ? selfSeed : (excludeSelf ? materialUrlOf(doc, node) : autoSelfUrl(store, node));
+  const autoSelf = !selfMentioned && !row && !keepSource && (node.kind === "image" || node.kind === "video") && typeof autoSeed === "string" && !!autoSeed;
   const selfSend = selfMentioned || autoSelf;
-  const selfSendUrl = selfMentioned ? selfSeed : (autoSelf ? (curUrl || selfSeed) : null);
+  const selfSendUrl = selfMentioned ? selfSeed : (autoSelf ? autoSeed : null);
   // 表格的一行：时长 / 比例 / 首尾帧按行定（planRow），这一行自带图时生成节点自己连的图片不再发送；
   // 图片批量时生成节点自身连的图也会发送，必须先把名额留出来，否则「自身图 + 行素材」会超过模型 maxRefs。
   const plan = row ? planRow(node.kind, g.params, m, row, ownRefCount(doc, node.id, node.kind)) : null;
@@ -124,15 +132,35 @@ export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRo
   const allIns = inputsOf(doc, node.id);
   const skip = unmentionedInputs(node, allIns);
   const directIns = allIns.filter((x) => x.node.kind !== "table" && !skip.has(x.edge.id) && !(plan?.ownImages && x.node.kind === "image"));
-  const expandedIns = node.kind === "text" ? directIns : expandGroupInputs(doc, directIns);
+  const expanded0 = node.kind === "text" ? directIns : expandGroupInputs(doc, directIns);
+  const expandedIns = sourceId && !keepSource ? replaceSourceInput(doc, expanded0, sourceId) : expanded0;
   const expandedSkip = unmentionedInputs(node, expandedIns, allIns);
   // 标了 excludeSelfRefs：分组展开出来的自己 / 由它生成的结果节点都不进参考图；上游连线和用户手加的引用照旧
   const ins = filterSelfRefs(expandedIns.filter((x) => !expandedSkip.has(x.edge.id)), node.id, excludeSelf);
+  // 来源连线被剔除后，依赖视频 / 音频输入的视频方式就落空了：按 autoVideoMode 的同一条 want 规则，
+  // 用剩下的有效输入重选一个模型支持的方式（只在这次请求里生效；runNode 新建结果节点时会跟着 madeResult 写回）。
+  // 有对应输入时不动，用户显式选的方式照原样。
+  if (node.kind === "video") {
+    // 「@ 本节点 / 带原始素材」那条自我参考本身也是一段视频输入（按 source_video / reference_video 发），要算进有效输入
+    const selfVid = selfSend && typeof selfSendUrl === "string" && !!selfSendUrl ? 1 : 0;
+    const counts = {
+      images: ins.filter((x) => x.node.kind === "image").length,
+      videos: ins.filter((x) => x.node.kind === "video").length + selfVid,
+      audios: ins.filter((x) => x.node.kind === "audio").length,
+    };
+    if (videoModeMissingInput((eff as VideoParams).mode, counts)) {
+      const next = videoModeForCounts(m.modes, counts);
+      if (next) eff = { ...(eff as VideoParams), mode: next };
+    }
+  }
   const { roles, ignored } = rolesFor(node.kind, eff, m, ins);
   const inputs: GenInput[] = ins.filter((x) => !ignored.has(x.edge.id)).map((x) => ({ nodeId: x.node.id, title: genOf(x.node).title, kind: x.node.kind as GenKind, order: x.order + 1, role: roles.get(x.edge.id) || "context", url: outOf(x.node)?.url || (x.node.kind === "video" ? outOf(x.node)?.frame : undefined), text: x.node.kind === "text" ? textOf(x.node) : undefined }));
   if (plan) plan.inputs.forEach((ri) => { if (!inputs.some((i) => i.nodeId === ri.nodeId)) inputs.push({ ...ri, order: inputs.length + 1 }); });
   // 元素（@名字）：参考图按模型剩余的参考名额加进来
   inputs.push(...elementInputs(g.prompt, node.kind, m, eff, inputs));
+  // 画布助手「在这张基础上改」：后端写在 data.agentRun.referenceImages / agentPendingReferenceImages 里的参考图，
+  // 按剩余参考名额加进请求（和元素图同一条路：受模型 maxRefs 限制、去重）
+  inputs.push(...referenceInputs(flags?.referenceImages, node.kind, m, eff, inputs));
   // @本节点：提示词里 @ 到自己、且这一版有可用的自我参考源时，把那张图加在末尾（self 没有连线，直接 push）。
   // 源图取值见 selfSourceOf：这一版 meta.selfSrc 优先（null = 生成这一版时就没发，重新生成也不补上一版结果），
   // 旧数据没有记录才走原来的回退。实际发出去的是哪张（没有就是 null）随请求带给写回，写回时原样记到新版本上——
@@ -188,7 +216,7 @@ const frozenOf = (node: CanvasNode) => (node.data as { frozen?: GenRequest } | u
  * 行节点带 frozen 时只沿用它的**输入快照**（这一行的表格素材行），提示词 / 参数 / 模型一律取节点当前值——
  * 否则用户改了提示词再点生成，发出去的还是上一次的旧请求。
  */
-export function requestForNode(store: CanvasStore, node: CanvasNode, row?: BatchRow, flags?: { excludeSelfRefs?: boolean; selfSrcSeed?: string | null; selfSrcBox?: { w: number; h: number } | null }): GenRequest | null {
+export function requestForNode(store: CanvasStore, node: CanvasNode, row?: BatchRow, flags?: { excludeSelfRefs?: boolean; selfSrcSeed?: string | null; selfSrcBox?: { w: number; h: number } | null; referenceImages?: string[] }): GenRequest | null {
   const frozen = frozenOf(node);
   if (!frozen) return buildRequest(store, node, row, flags);
   const g = genOf(node); const m = store.modelOf(node); if (!m) return null;
@@ -241,6 +269,8 @@ export type RunOpts = {
   inPlace?: boolean;
   /** 这次生成剔除节点自己的产物（后端 agentRun.excludeSelfRefs / agentPendingExcludeSelfRefs 标记；手动重跑不传 = 保持原有行为） */
   excludeSelfRefs?: boolean;
+  /** 画布助手「在这张基础上改」：后端写在 data.agentRun.referenceImages / data.agentPendingReferenceImages 里的参考图 */
+  referenceImages?: string[];
 };
 
 export async function runNode(store: CanvasStore, id: string, opts: RunOpts = {}): Promise<boolean> {
@@ -307,9 +337,9 @@ export async function runNode(store: CanvasStore, id: string, opts: RunOpts = {}
         const from = node.id;
         const hasSelfMention = mentionedIds(genOf(node).prompt).has(from);
         const cur = outOf(node);
-        const curUrl = cur ? (cur.url || (node.kind === "video" ? cur.frame : undefined)) : undefined;
-        // @本节点用这一版记录的源图；普通生成用当前结果（旧智能画布语义）
-        const seed = hasSelfMention ? selfSourceOf(node) : curUrl;
+        // @本节点用这一版记录的源图；其余按「只带原始素材」：模型生成的上一版结果不再当 seed，
+        // 只有提示词相对出这一版改过时才带当前结果（mentions.autoSelfUrl 的同一套规则）
+        const seed = hasSelfMention ? selfSourceOf(node) : autoSelfUrl(store, node);
         const seedBox = selfBoxOf(node, seed) || (cur && Number(cur.w) > 0 && Number(cur.h) > 0 ? { w: Number(cur.w), h: Number(cur.h) } : null);
         const srcTitle = genOf(node).title;
         node = regenAsNew(store, node, box ? { w: box.w, h: box.h } : undefined, { linkSelf: false, quiet: true }); id = node.id;
@@ -342,7 +372,7 @@ export async function runNode(store: CanvasStore, id: string, opts: RunOpts = {}
       }
     }
   }
-  const req = requestForNode(store, node, undefined, { excludeSelfRefs, ...(selfSrcSeed !== undefined ? { selfSrcSeed } : {}), ...(selfSrcBox !== undefined ? { selfSrcBox } : {}) });
+  const req = requestForNode(store, node, undefined, { excludeSelfRefs, ...(selfSrcSeed !== undefined ? { selfSrcSeed } : {}), ...(selfSrcBox !== undefined ? { selfSrcBox } : {}), ...(opts.referenceImages?.length ? { referenceImages: opts.referenceImages } : {}) });
   if (!req) return false;
   // 新建结果节点时把这次请求实际用的 params（含原图比例 sourceSize）写回，和源节点面板最终值一致
   if (madeResult) { store.patchGen(node.id, { params: JSON.parse(JSON.stringify(req.params)) }, { history: false }); node = store.node(node.id)!; }
@@ -375,7 +405,7 @@ async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, la
     // 生成期间节点被删除 / 撤销掉：结果无处可写，按「已停止」记录，不当成报错
     if (!store.node(id)) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
     const isDraft = req.kind === "video" && !!(req.params as VideoParams).draft;
-    const measured = await applyRunResult(store, id, req.kind, res.outputs, { draft: isDraft, selfSrc: req.selfSrc });
+    const measured = await applyRunResult(store, id, req.kind, res.outputs, { draft: isDraft, selfSrc: req.selfSrc, prompt: req.prompt });
     store.patchGen(id, { taskId: undefined });
     store.setRun(id, null);
     const cur = store.node(id)!;
@@ -399,14 +429,16 @@ async function execute(store: CanvasStore, node: CanvasNode, req: GenRequest, la
 }
 
 /** 结果的写回（首次生成 / 回到画布续跑共用）：落资源库 → 量真实尺寸 → 追加版本 */
-async function applyRunResult(store: CanvasStore, id: string, kind: GenKind, outputs: GenOutput[], opts: { draft?: boolean; /** 这次请求实际发出去的自我参考图（字符串 / 明确没有 = null）；缺失 = 旧请求快照，不写记录 */ selfSrc?: string | null } = {}): Promise<GenOutput[]> {
+async function applyRunResult(store: CanvasStore, id: string, kind: GenKind, outputs: GenOutput[], opts: { draft?: boolean; /** 这次请求实际发出去的自我参考图（字符串 / 明确没有 = null）；缺失 = 旧请求快照，不写记录 */ selfSrc?: string | null; /** 出这一版时用的提示词：下次按它判断「提示词改没改」（决定还带不带当前这一版当参考） */ prompt?: string } = {}): Promise<GenOutput[]> {
   if (!store.node(id)) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
   const before = store.node(id)!;
   // 新版本记下这次请求实际发出去的「@ 本节点」源图（null = 没发），下次重新生成优先读它，
   // 不拿这一版的结果再喂回去。旧请求快照没有这个字段时不写，读取时按旧数据回退。
   const selfSrc = kind === "image" || kind === "video" ? opts.selfSrc : undefined;
+  // 同时记下出这一版时的提示词（meta.prompt）：同提示词重复生成不再带这一版；改过提示词才把这一版当第一参考。
+  const prompt = typeof opts.prompt === "string" ? opts.prompt : undefined;
   const outs = (await persistOutputs(store, outputs, genOf(before).title)).map((o) => (opts.draft ? { ...o, draft: true } : o))
-    .map((o) => (selfSrc !== undefined ? { ...o, meta: { ...o.meta, selfSrc } } : o));
+    .map((o) => (selfSrc !== undefined || prompt !== undefined ? { ...o, meta: { ...o.meta, ...(selfSrc !== undefined ? { selfSrc } : {}), ...(prompt !== undefined ? { prompt } : {}) } } : o));
   if (!store.node(id)) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
   // 后端没返回像素宽高时用真实文件兜底（失败 / 超时都只是原样返回，不阻塞写回）
   const measured = await Promise.all(outs.map((o) => measureOutput(store, kind, o)));
@@ -526,9 +558,26 @@ export function preferSourceVideoMode(store: CanvasStore, id: string) {
   if (mode && (genOf(n).params as VideoParams).mode !== mode) store.patchGen(id, (gg) => ({ params: { ...(gg.params as VideoParams), mode } }));
 }
 
+/**
+ * 「再来一张 / 再来一条」的输入：不复制与来源节点的那条连线（结果只表示来源，不当上游），
+ * 改为复制来源节点自己的输入（展开、去重）。被点的节点没有来源时保持它自己的输入。
+ */
+function freshInputsOf(doc: CanvasDoc, n: CanvasNode): InputRef[] {
+  const src = sourceIdOf(n);
+  const own = inputsOf(doc, n.id);
+  // 自己标了 keepSourceInput（出成片 / 重拍 / 延长）：来源是真实输入，照抄，不当「只表示来源」剔掉
+  if (!src || (n.data as { keepSourceInput?: unknown } | undefined)?.keepSourceInput === true) return own;
+  const out: InputRef[] = []; const used = new Set<string>();
+  const push = (x: InputRef) => { if (used.has(x.node.id)) return; used.add(x.node.id); out.push(x); };
+  for (const x of own) if (x.node.id !== src) push(x);
+  for (const x of sourceInputsOf(doc, src)) push(x);
+  return out;
+}
+
 /** 已有结果的节点再生成：右侧新建「原名 · N」，复制提示词、参数和全部输入连线 */
-export function regenAsNew(store: CanvasStore, n: CanvasNode, size?: { w: number; h: number }, opts: { linkSelf?: boolean; quiet?: boolean } = {}): CanvasNode {
+export function regenAsNew(store: CanvasStore, n: CanvasNode, size?: { w: number; h: number }, opts: { linkSelf?: boolean; quiet?: boolean; /** 「再来一张 / 再来一条」：不复制来源连线，改为复制来源节点自己的输入 */ fresh?: boolean } = {}): CanvasNode {
   const linkSelf = opts.linkSelf !== false;
+  const fresh = opts.fresh === true;
   const doc = store.state.doc; const g = genOf(n);
   const { x, y } = freeSpotRight(doc, n);
   const base = g.title.replace(/ · \d+$/, "");
@@ -536,8 +585,10 @@ export function regenAsNew(store: CanvasStore, n: CanvasNode, size?: { w: number
   const frozen = (n.data as { frozen?: unknown } | undefined)?.frozen; const rowText = (n.data as { rowText?: string } | undefined)?.rowText;
   // sourceNodeId 记着「点生成的那个节点」：全屏查看的「对比原图」靠它找到生成前的那张图
   // 提示词复制过去，引用模式（refMode）也要一起复制：否则新节点不认 @ 过滤，已连接但没 @ 的图也会发出去
-  const c = withGen({ id: uid("n"), kind: n.kind, x, y, w: size?.w ?? n.w, h: size?.h ?? n.h, text: "", data: { ...(frozen ? { frozen, ...(rowText ? { rowText } : {}) } : {}), sourceNodeId: n.id } }, { title: `${base} · ${sibs + 1}`, prompt: g.prompt, params: JSON.parse(JSON.stringify(g.params)), hist: [], hi: 0, order: [], ...(g.refMode ? { refMode: g.refMode } : {}) });
-  const edges = inputsOf(doc, n.id).map((x) => ({ id: uid("e"), from: x.node.id, to: c.id }));
+  // keepSourceInput：linkSelf 分支真的把来源节点当输入（出成片 / 时间线重拍 / 视频延长），请求里不能把它当「只表示来源」剔掉
+  const c = withGen({ id: uid("n"), kind: n.kind, x, y, w: size?.w ?? n.w, h: size?.h ?? n.h, text: "", data: { ...(frozen ? { frozen, ...(rowText ? { rowText } : {}) } : {}), sourceNodeId: n.id, ...(linkSelf ? { keepSourceInput: true } : {}) } }, { title: `${base} · ${sibs + 1}`, prompt: g.prompt, params: JSON.parse(JSON.stringify(g.params)), hist: [], hi: 0, order: [], ...(g.refMode ? { refMode: g.refMode } : {}) });
+  // fresh（再来一张 / 再来一条）：不复制来源那条边，改为复制来源节点自己的输入；其余保持原样复制输入连线
+  const edges = (fresh ? freshInputsOf(doc, n) : inputsOf(doc, n.id)).map((x) => ({ id: uid("e"), from: x.node.id, to: c.id }));
   // 被点的这个图片 / 视频 / 音频节点自己也是新节点的输入（媒体当参考 / 来源）。三种情况不连：
   // 文本节点（文本本身是提示词，连过去只会变成上下文）、没有结果的节点（留下一条取不到东西的空边）、
   // 表格批量行节点（请求由冻结的行输入决定，这条媒体边不会进请求，连上只会显示成一条不生效的输入）。
@@ -619,8 +670,9 @@ async function resumeRun(store: CanvasStore, node: CanvasNode, task: CanvasTask)
     const draft = cur.kind === "video" && !!(genOf(cur).params as VideoParams).draft;
     // 续跑拿不到当初的请求对象：按同一条组装路径以节点当前状态重建（任务发起后结果还没写回，口径一致），
     // 让新版本记录当初实际发出去的自我参考图，而不是等写回时从结果反推。
+    // 提示词取节点当前值（任务发起后没改过，同一条组装路径），和首次生成写回的口径一致。
     const selfSrc = requestForNode(store, cur)?.selfSrc;
-    await applyRunResult(store, id, kind, outputs, { draft, selfSrc });
+    await applyRunResult(store, id, kind, outputs, { draft, selfSrc, prompt: genOf(cur).prompt });
     store.patchGen(id, { taskId: undefined });
     store.setRun(id, null);
     const done = store.node(id)!;

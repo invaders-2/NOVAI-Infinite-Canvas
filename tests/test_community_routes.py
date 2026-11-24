@@ -308,8 +308,8 @@ def main() -> int:
         })
     finally:
         packager.MAX_PACKAGE_BYTES = original_max
-    check("包超 200MB 报 413", too_big.status_code == 413, too_big.text[:200])
-    check("超限错误说明原因", "200MB" in str((too_big.json() or {}).get("detail") or ""))
+    check("包超上限报 413", too_big.status_code == 413, too_big.text[:200])
+    check("超限错误说明原因", packager.MAX_PACKAGE_LABEL in str((too_big.json() or {}).get("detail") or ""))
 
     # 16. 删除发布（不删源画布）
     deleted = client.delete("/api/community/mine/" + item_id)

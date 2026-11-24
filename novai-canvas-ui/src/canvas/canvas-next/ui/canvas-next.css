@@ -2859,7 +2859,7 @@
 .cn-root .tle-tb:hover{color:var(--fg);background:var(--hover)}
 .cn-root .tle-tb.off{color:var(--fg3);opacity:.55}
 .cn-root .tle-track.off .tle-lab{opacity:.45}
-.cn-root .tle-clip.on{box-shadow:inset 0 0 0 999px rgba(255,255,255,.26);filter:brightness(1.22)}
+.cn-root .tle-clip.on{filter:none;opacity:1}
 .cn-root .tle-clip.on .tle-cl{font-weight:600}
 /* 选中再加一道顶部实心色条：时间线上片段很矮，只靠提亮分不出来（这是状态标记，不是描边） */
 .cn-root .tle-clip.on:after{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--hi);opacity:.92;pointer-events:none}
@@ -3009,14 +3009,16 @@ html.tle-scrubbing,html.tle-scrubbing *{cursor:ew-resize!important;user-select:n
 .cn-root .tle-track:hover .tle-tb.add{opacity:1}
 .cn-root .tle-tb.lk{margin-left:0}
 .cn-root .tle-ruler-lab{position:sticky;left:0;z-index:2;display:inline-block;width:104px;height:20px;padding-left:8px;line-height:20px;font-size:10px;color:var(--fg3);background:var(--sunken);pointer-events:none}
-.cn-root .tle-lanes-empty{position:absolute;left:108px;right:0;top:24px;bottom:0;display:flex;align-items:center;justify-content:center;gap:10px;font-size:12px;color:var(--fg2);pointer-events:none}
+.cn-root .tle-lanes-empty{position:absolute;left:116px;right:0;top:24px;bottom:0;display:flex;align-items:center;justify-content:center;gap:10px;font-size:12px;color:var(--fg2);pointer-events:none}
 .cn-root .tle-lanes-empty .pill{pointer-events:auto;background:var(--hover)}
 /* 原声轨：视频自带的声音，跟着画面片段走 */
-.cn-root .tle-va{position:absolute;top:0;bottom:0;border-radius:5px;overflow:hidden;cursor:pointer;display:flex;align-items:center;background:#344d40;transition:filter var(--d-quick) var(--e-std),opacity var(--d-quick) var(--e-std)}
-.cn-root .tle-va:hover{filter:brightness(1.12)}
-.cn-root .tle-va.on{box-shadow:inset 0 0 0 999px rgba(255,255,255,.2)}
-.cn-root .tle-va.on:after{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--hi);opacity:.9}
+.cn-root .tle-va{position:absolute;top:0;bottom:0;border-radius:5px;overflow:hidden;cursor:pointer;display:flex;align-items:center;background:var(--clip-vaudio);filter:var(--clip-dim);opacity:.82;transition:filter var(--d-quick) var(--e-std),opacity var(--d-quick) var(--e-std)}
+.cn-root .tle-va:hover{filter:var(--clip-dim)}
+.cn-root .tle-va.on{filter:var(--clip-dim);opacity:.82;box-shadow:0 6px 18px rgba(0,0,0,.28)}
+.cn-root[data-theme=light] .tle-va.on{box-shadow:0 6px 16px rgba(0,0,0,.16)}
+.cn-root .tle-va.on:after{content:"";position:absolute;left:0;right:0;top:0;height:3px;background:var(--hi);opacity:.92}
 .cn-root .tle-va.muted{opacity:.45}
+.cn-root .tle-va.on.muted{opacity:.45}
 .cn-root .tle-va.none{background:repeating-linear-gradient(135deg,rgba(var(--ink),.08) 0 6px,transparent 6px 12px)}
 .cn-root .tle-va-t{padding:0 6px;font-size:10px;color:var(--fg3)}
 .cn-root .tle-va .tle-badge{top:50%;transform:translateY(-50%)}
@@ -3114,7 +3116,169 @@ html.tle-scrubbing,html.tle-scrubbing *{cursor:ew-resize!important;user-select:n
 .cn-root .modal.tle-rt{-webkit-backdrop-filter:none;backdrop-filter:none}
 /* 轨道头 / 刻度尺左上角：不透明、盖在播放头和横向滚动过来的片段上面，不再和 0:00、播放头重叠 */
 .cn-root .tle-ruler{z-index:auto}
-.cn-root .tle-lab{width:108px;z-index:8}
-.cn-root .tle-ruler-lab{width:108px;z-index:8;background:linear-gradient(var(--sunken),var(--sunken)),var(--card)}
+.cn-root .tle-lab{width:116px;z-index:8}
+.cn-root .tle-ruler-lab{width:116px;z-index:8;background:linear-gradient(var(--sunken),var(--sunken)),var(--card)}
 .cn-root .tle-full .tle-lab,.cn-root .tle-full .tle-ruler-lab{background:linear-gradient(var(--sunken),var(--sunken)),var(--canvas-bg,var(--bg))}
+/* ================= 定稿视觉（设计稿 C · NOVAI 时间线 / AI 导演台） ================= */
+/* 1) 去色相：五条轨只靠行高 + 轨头线性图标区分，底色统一走 ink 灰阶；深浅色由 --ink 自动翻转 */
+.cn-root{
+  --clip-video:rgba(var(--ink),.12);
+  --clip-overlay:rgba(var(--ink),.135);
+  --clip-audio:rgba(var(--ink),.11);
+  --clip-vaudio:rgba(var(--ink),.09);
+  --clip-sub:rgba(var(--ink),.07);
+  --clip-dim:brightness(.72);
+  --clip-name:#f5f5f7;
+  --wave:rgba(255,255,255,.55);
+  --chip-bg:rgba(0,0,0,.42);
+  --chip-fg:#ffffff;
+  --scrim-a:rgba(0,0,0,.55);
+  --lane-bg:rgba(255,255,255,.03);
+  --preview-bg:#0b0b0c;
+}
+.cn-root[data-theme=light]{
+  --clip-dim:brightness(.94);
+  --clip-name:#1d1d1f;
+  --wave:rgba(0,0,0,.38);
+  --chip-bg:rgba(255,255,255,.84);
+  --chip-fg:#1d1d1f;
+  --scrim-a:rgba(255,255,255,.92);
+  --scrim-b:rgba(255,255,255,.55);
+  --lane-bg:rgba(0,0,0,.035);
+}
+.cn-root .tle-mon{background:var(--preview-bg)}
+.cn-root .tle .tle-clip{background-color:var(--clip-video);filter:var(--clip-dim);opacity:.82}
+.cn-root .tle .tle-clip.k-video,.cn-root .tle .tle-clip.k-image{background-color:var(--clip-video)}
+.cn-root .tle .tle-clip.k-overlay{background-color:var(--clip-overlay)}
+.cn-root .tle .tle-clip.k-audio{background-color:var(--clip-audio);background-image:repeating-linear-gradient(90deg,rgba(var(--ink),.2) 0 2px,transparent 2px 5px);background-size:auto 56%;background-position:0 50%}
+.cn-root .tle .tle-clip.k-subtitle{background-color:var(--clip-sub)}
+.cn-root .tle .tle-clip:hover{filter:var(--clip-dim)}
+.cn-root .tle .tle-clip.muted{opacity:.6}
+.cn-root .tle .tle-clip.on{filter:var(--clip-dim);opacity:.82;box-shadow:0 6px 18px rgba(0,0,0,.28)}
+.cn-root[data-theme=light] .tle .tle-clip.on{box-shadow:0 6px 16px rgba(0,0,0,.16)}
+.cn-root .tle .tle-clip.on.muted{opacity:.72}
+.cn-root .tle .tle-clip.drag,.cn-root .tle .tle-clip.on.drag{opacity:.85}
+.cn-root .tle .tle-track.locked .tle-clip{filter:saturate(.4) brightness(.85)}
+/* 2) 选中不再洗白：不再提亮、不叠白色软底，只靠顶部 3px 状态条 + 名字 600 + 柔和投影；
+      深色底部渐隐到黑、浅色到白，名字颜色跟着主题走（深 #f5f5f7 / 浅 #1d1d1f） */
+.cn-root .tle-lanes{background:var(--lane-bg)}
+/* 片段内层级：胶片 0 < 底部渐隐 2 < 波形 3 < 名字 / 角标 4（渐隐压在胶片上，浅色下深字才读得清） */
+.cn-root .tle-fs{z-index:0}
+.cn-root .tle-clip:before{height:22px;z-index:2;background:linear-gradient(transparent,var(--scrim-a))}
+.cn-root[data-theme=light] .tle-clip:before{background:linear-gradient(transparent,var(--scrim-b) 40%,var(--scrim-a))}
+.cn-root .tle-wavewrap{z-index:3}
+.cn-root .tle-cl{position:relative;z-index:4}
+.cn-root .tle-badge{z-index:4}
+.cn-root .tle-kfd{z-index:4}
+.cn-root .tle-cl{color:var(--clip-name);text-shadow:0 1px 2px rgba(0,0,0,.45)}
+.cn-root[data-theme=light] .tle-cl{text-shadow:none}
+.cn-root .tle .tle-badge{color:var(--chip-fg);background:var(--chip-bg)}
+.cn-root .tle .tle-badge.dis{color:var(--chip-fg);background:var(--chip-bg)}
+.cn-root .tle-wavewrap{mix-blend-mode:normal;opacity:1}
+.cn-root .tle-clip:hover .tle-h,.cn-root .tle-clip.on .tle-h{background:rgba(var(--ink),.18)}
+/* 3) 工具组：线性图标 + 12px 文字；当前项 = 软底 + --hi + 600 + 右上 4px 圆点 */
+.cn-root .tle-tools{gap:2px}
+.cn-root .tle-tools button{position:relative;display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:8px;font-size:12px;color:var(--fg2);background:transparent;transition:background-color var(--d-quick) var(--e-std),color var(--d-quick) var(--e-std)}
+.cn-root .tle-tools button svg.i{opacity:.8}
+.cn-root .tle-tools button:hover{background:var(--hover);color:var(--fg)}
+.cn-root .tle-tools button.on{background:rgba(var(--ink),.1);color:var(--hi);font-weight:600;box-shadow:none}
+.cn-root .tle-tools button.on svg.i{opacity:1}
+.cn-root .tle-tools button.on:before{content:"";position:absolute;right:4px;top:4px;width:4px;height:4px;border-radius:50%;background:var(--hi)}
+.cn-root .tle-tool-t{font-size:12px;line-height:1}
+/* 4) 轨道头：线性轨型图标（行高本身区分轨道），悬停才提亮 */
+.cn-root .tle-lab-i{flex:none;display:grid;place-items:center;width:12px;color:var(--fg3);opacity:.8}
+.cn-root .tle-track:hover .tle-lab-i{color:var(--fg2);opacity:1}
+/* 5) 属性面板：区段标题 11px/500/--fg3、行高 30、面板底 --sunken / 圆角 12；滑杆轨道 14% ink + 白 thumb */
+.cn-root .tle-side{gap:12px}
+.cn-root .tle-sec-h{font-size:11px;font-weight:500;color:var(--fg3)}
+.cn-root .tle-row{min-height:30px}
+.cn-root .tle input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:18px;background:transparent;cursor:pointer}
+.cn-root .tle input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:rgba(var(--ink),.14)}
+.cn-root .tle input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;margin-top:-4px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.cn-root .tle input[type=range]::-moz-range-track{height:4px;border-radius:2px;background:rgba(var(--ink),.14)}
+.cn-root .tle input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+/* 6) 分隔只靠间距：刻度是标尺图形，改用背景刻度（明度差）画，不再用 1px border */
+.cn-root .tle-tick{border-left:0;padding-left:5px;background:linear-gradient(rgba(var(--ink),.16),rgba(var(--ink),.16)) left top/1px 100% no-repeat}
+/* 窄容器：工具组只留图标 + title（悬停看说明），文字收起 */
+@container (max-width:760px){
+  .cn-root .tle-tools button{padding:0 7px}
+  .cn-root .tle-tools .tle-tool-t{display:none}
+}
 .cn-root .tle-tick:first-of-type{padding-left:3px}
+
+/* ── 片段重拍节点（SegRetake.tsx）：没出片时正文播来源视频；选中时节点和生成面板之间一条胶片条 ── */
+.cn-root .node .segr-src{position:absolute;inset:0;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;border-radius:inherit}
+.cn-root .node .segr-src video{display:block;width:100%;height:100%;object-fit:contain;background:#000}
+.cn-root .node .segr-tag{position:absolute;left:10px;top:10px;display:inline-flex;align-items:center;gap:5px;max-width:calc(100% - 20px);padding:4px 9px;border-radius:9px;background:#000000a6;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);color:#fff;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
+.cn-root .segr-strip{position:absolute;z-index:25;padding:8px;border-radius:20px;background:color-mix(in srgb,var(--panel) 88%,transparent);-webkit-backdrop-filter:blur(44px) saturate(190%);backdrop-filter:blur(44px) saturate(190%);box-shadow:var(--glass-shadow);box-sizing:border-box}
+.cn-root .segr-strip .tle-segpick{margin:0;gap:0}
+.cn-root .segr-strip .tle-segpick-row{background:transparent;box-shadow:none;padding:0}
+.cn-root .segr-strip .tle-segpick-bar{height:56px}
+.cn-root .segr-strip .segr-none{padding:10px 12px;font-size:13px;color:var(--fg2)}
+
+/* ================= 建议轨（设计稿 C）：AI 剪辑先给建议，点 ✓ 才真的改时间线 ================= */
+/* 卡片和片段同圆角、低一档对比度；层级靠底色 + 投影 + 顶部 2px 状态条，不描边（浅色 / 深色都成立） */
+.cn-root{--sug-bg:rgba(var(--ink),.08);--sug-shadow:0 1px 2px rgba(0,0,0,.16);--sug-shadow-hi:0 8px 20px rgba(0,0,0,.28)}
+.cn-root[data-theme=light]{--sug-bg:rgba(var(--ink),.06);--sug-shadow:0 1px 2px rgba(0,0,0,.06);--sug-shadow-hi:0 8px 18px rgba(0,0,0,.12)}
+.cn-root .tle-track.k-sug{cursor:default}
+.cn-root .tle-lab-c{margin-left:auto;margin-right:8px;padding:0 5px;border-radius:6px;font-size:10px;line-height:15px;background:rgba(var(--ink),.1);color:var(--fg2)}
+.cn-root .tle-sug{position:absolute;height:32px;border-radius:8px;display:flex;align-items:center;gap:7px;padding:0 4px 0 8px;overflow:hidden;cursor:pointer;background:var(--sug-bg);box-shadow:var(--sug-shadow);transition:transform .16s cubic-bezier(.2,0,0,1),box-shadow .16s cubic-bezier(.2,0,0,1)}
+.cn-root .tle-sug:hover{transform:translateY(-1px);box-shadow:var(--sug-shadow-hi)}
+.cn-root .tle-sug-sb{position:absolute;left:0;right:0;top:0;height:2px;background:color-mix(in srgb,var(--fg) 30%,transparent);pointer-events:none}
+.cn-root .tle-sug-i{flex:none;display:grid;place-items:center;color:var(--fg3)}
+.cn-root .tle-sug:hover .tle-sug-i{color:var(--fg2)}
+.cn-root .tle-sug-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;padding-bottom:1px}
+.cn-root .tle-sug-t b{font-size:11px;font-weight:500;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15}
+.cn-root .tle-sug-t em{font-style:normal;font-size:10px;line-height:1.1;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em}
+.cn-root .tle-sug-acts{flex:none;display:flex;gap:4px;position:relative;z-index:2}
+.cn-root .tle-sug-a{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:rgba(var(--ink),.1);color:var(--fg2);transition:background-color .16s cubic-bezier(.2,0,0,1),color .16s cubic-bezier(.2,0,0,1),transform .16s cubic-bezier(.2,0,0,1)}
+.cn-root .tle-sug-a:active{transform:scale(.9)}
+.cn-root .tle-sug-a.yes:hover{background:color-mix(in srgb,var(--ok) 24%,transparent);color:var(--ok)}
+.cn-root .tle-sug-a.no:hover{background:rgba(var(--ink),.16);color:var(--fg)}
+@media (prefers-reduced-motion:reduce){
+  .cn-root .tle-sug,.cn-root .tle-sug-a{transition:none}
+  .cn-root .tle-sug:hover{transform:none}
+}
+/* 带「撤销」的 toast 要能点：#toasts 默认 pointer-events:none，只有可操作的这条例外 */
+.cn-root .toast.is-action{pointer-events:auto;cursor:pointer}
+.cn-root .toast.is-action:hover{background:var(--s4)}
+
+/* ================= 建议轨打磨：批量操作 / 自适应卡片 / 角标 / 键盘 ================= */
+/* 1) AI 剪辑按钮右上角的待确认角标（16px 圆点 + 数字，最多 9+） */
+.cn-root .tle-top .tle-ai{position:relative}
+.cn-root .tle-ai-badge{position:absolute;right:-4px;top:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:600;line-height:1;background:var(--hi);color:var(--on-solid);pointer-events:none;box-shadow:0 1px 3px rgba(0,0,0,.28)}
+.cn-root[data-theme=light] .tle-ai-badge{box-shadow:0 1px 3px rgba(0,0,0,.14)}
+/* 2) 建议轨头：全部采纳 / 全部忽略（线性图标 + title，高度 22 / 圆角 8 / 软底） */
+.cn-root .tle-track.k-sug .tle-lab{gap:3px;align-items:flex-start;padding-top:2px}
+.cn-root .tle-track.k-sug .tle-lab-n{flex:1;min-width:0;padding-left:1px;line-height:22px}
+.cn-root .tle-track.k-sug .tle-lab-c{margin-left:auto;margin-right:0;padding:0 4px}
+.cn-root .tle-sug-batch{flex:none;display:flex;align-items:center;gap:2px;pointer-events:auto}
+.cn-root .tle-sb{width:20px;height:22px;border-radius:8px;display:grid;place-items:center;color:var(--fg2);background:rgba(var(--ink),.1);transition:background-color .16s cubic-bezier(.2,0,0,1),color .16s cubic-bezier(.2,0,0,1)}
+.cn-root .tle-sb:hover{background:rgba(var(--ink),.18);color:var(--fg)}
+.cn-root .tle-sb svg{opacity:.9}
+/* 3) 窄卡片：<152 时两个圆钮悬停 / 聚焦才浮出来，绝对定位不占布局 */
+.cn-root .tle-sug.mini{padding-right:24px}
+.cn-root .tle-sug.mini .tle-sug-acts{position:absolute;right:3px;top:50%;transform:translateY(-50%);opacity:0;pointer-events:none;transition:opacity .16s cubic-bezier(.2,0,0,1)}
+.cn-root .tle-sug.mini:hover .tle-sug-acts,.cn-root .tle-sug.mini:focus-within .tle-sug-acts{opacity:1;pointer-events:auto}
+/* 窄卡静止时右侧留一个 1.4px 线性 ✓ 轮廓（告诉用户这里能操作），悬停 / 聚焦后换成完整的 ✓ ✕ */
+.cn-root .tle-sug-hint{position:absolute;right:9px;top:50%;transform:translateY(-50%);display:grid;place-items:center;color:var(--fg3);opacity:.35;pointer-events:none;transition:opacity .16s cubic-bezier(.2,0,0,1)}
+.cn-root .tle-sug-hint svg{stroke-width:1.4}
+.cn-root .tle-sug.mini:hover .tle-sug-hint,.cn-root .tle-sug.mini:focus-within .tle-sug-hint{opacity:0}
+.cn-root .tle-sug.mini .tle-sug-a{background:color-mix(in srgb,var(--card) 88%,transparent);box-shadow:0 1px 4px rgba(0,0,0,.18)}
+/* 放不下的建议：最后一行末尾的「+N 更多」聚合卡 */
+.cn-root .tle-sug.more{justify-content:center;gap:4px;padding:0 8px;font-size:11px;font-weight:500;color:var(--fg2);white-space:nowrap}
+.cn-root .tle-sug.more:hover{color:var(--fg)}
+/* 「更多建议」浮层：磨砂玻璃（大面板配方），逐条采纳 / 忽略 */
+.cn-root .tle-sug-more-pop{position:fixed;z-index:80;width:320px;max-height:380px;overflow:auto;padding:8px;border-radius:14px;background:color-mix(in srgb,var(--panel) 78%,transparent);-webkit-backdrop-filter:blur(44px) saturate(190%);backdrop-filter:blur(44px) saturate(190%);box-shadow:var(--glass-shadow)}
+.cn-root .tle-sug-more-h{padding:2px 6px 6px;font-size:11px;color:var(--fg3)}
+.cn-root .tle-sug-more-row{display:flex;align-items:center;gap:8px;padding:6px;border-radius:10px}
+.cn-root .tle-sug-more-row:hover{background:rgba(var(--ink),.06)}
+.cn-root .tle-sug-more-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.cn-root .tle-sug-more-t b{font-size:11px;font-weight:500;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cn-root .tle-sug-more-t em{font-style:normal;font-size:10px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em}
+/* 4) 键盘焦点：软底提亮，不描边（鼠标按下会 preventDefault，所以只有键盘会把焦点落到卡片上） */
+.cn-root .tle-sug:focus{outline:0;background:rgba(var(--ink),.14)}
+.cn-root[data-theme=light] .tle-sug:focus{background:rgba(var(--ink),.1)}
+@media (prefers-reduced-motion:reduce){
+  .cn-root .tle-sb,.cn-root .tle-sug.mini .tle-sug-acts{transition:none}
+}

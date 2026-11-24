@@ -3,7 +3,9 @@
 """社区传输层：CommunityTransport 抽象 + LanTransport（局域网）。
 
 节点发现复用 lan_account：UDP 47823 广播出来的 peers_snapshot() + 好友列表（base_url / token）。
-并发拉取，单节点超时 1.5s，结果缓存 30s；拉不到的节点用本机 cache 顶替并标 online:false。
+并发拉取作品列表：单节点 4s 超时、失败重试一次；结果缓存 30s（有节点失败时只缓存 5s）。
+某个节点一次没拉到，不让它的作品立刻从列表里消失：10 分钟内沿用上次拉到的列表并标 online:false。
+详情只取元数据（?lite=1），画布数据只走 package 拉一次；媒体边收边写到缓存文件，单文件上限 500MB。
 以后上云端只要再写一个 CloudTransport，前端和本地接口形状不变。
 
 测试注入（deps）：
@@ -21,6 +23,7 @@ import os
 import shutil
 import time
 import urllib.parse
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -28,11 +31,17 @@ import httpx
 from server.community import packager, store
 from server.routes.deps import deps
 
-NODE_TIMEOUT = 1.5
+NODE_TIMEOUT = 1.5                 # 点赞 / 浏览等小事件
+FEED_NODE_TIMEOUT = 4.0            # 拉作品列表：对方在生图 / 跑视频时 1.5s 太紧，会被误判离线
+FEED_NODE_ATTEMPTS = 2             # 第一次失败同一超时再试一次
 FEED_CACHE_MS = 30 * 1000
-MEDIA_TIMEOUT = 10.0
-MEDIA_MAX_FILE_BYTES = 50 * 1024 * 1024
-MEDIA_MAX_TOTAL_BYTES = 200 * 1024 * 1024
+FEED_CACHE_PARTIAL_MS = 5 * 1000   # 有节点没拉到时只缓存 5s，下次刷新很快会重试
+FEED_STALE_KEEP_MS = 10 * 60 * 1000  # 节点暂时拉不到：10 分钟内沿用它上次的作品列表
+DETAIL_TIMEOUT = 15.0              # 详情 / 发布包：httpx 的读超时是「两次收到数据的间隔」，不是总时长
+PACKAGE_TIMEOUT = 30.0
+MEDIA_TIMEOUT = 15.0
+MEDIA_MAX_FILE_BYTES = packager.MAX_MEDIA_FILE_BYTES    # 与发布时单个素材上限一致（500MB）
+MEDIA_MAX_TOTAL_BYTES = 4 * 1024 * 1024 * 1024
 MEDIA_CONCURRENCY = 4
 PROFILE_TIMEOUT = 3.0
 
@@ -98,6 +107,14 @@ async def _fetch_bytes(method: str, url: str, token: str = "",
         return 0, b""
 
 
+def _remove_quiet(path: str) -> None:
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
 def _json_of(content: bytes) -> Any:
     try:
         return json.loads(content.decode("utf-8") or "{}")
@@ -154,7 +171,8 @@ def discover_nodes() -> List[Dict[str, Any]]:
         friend_id = str(friend.get("id") or "")
         if not base or not friend_id or friend_id == own:
             continue
-        node = nodes.setdefault(friend_id, {
+        # UDP 30s 内刚发现的地址比好友表里存的新（对方换了 IP / 端口），已有就不拿旧地址覆盖
+        nodes.setdefault(friend_id, {
             "id": friend_id,
             "nickname": str(friend.get("nickname") or "好友"),
             "avatar": str(friend.get("avatar") or ""),
@@ -162,7 +180,6 @@ def discover_nodes() -> List[Dict[str, Any]]:
             "token": str(friend.get("token") or ""),
             "online": True,
         })
-        node["base"] = base
     return list(nodes.values())
 
 
@@ -215,12 +232,15 @@ class LanTransport(CommunityTransport):
     name = "lan"
 
     def __init__(self) -> None:
-        self._feed_cache: Dict[str, Any] = {"at": 0, "data": None}
+        self._feed_cache: Dict[str, Any] = {"at": 0, "data": None, "ttl": FEED_CACHE_MS}
+        # 节点 id -> {"at": 最近一次拉到的时间, "items": [...]}：节点抖一下时作品不消失
+        self._last_good: Dict[str, Dict[str, Any]] = {}
 
     async def aggregate(self, force: bool = False) -> Dict[str, Any]:
         stamp = store.now_ms()
         cached = self._feed_cache.get("data")
-        if cached and not force and stamp - int(self._feed_cache.get("at") or 0) < FEED_CACHE_MS:
+        ttl = int(self._feed_cache.get("ttl") or FEED_CACHE_MS)
+        if cached and not force and stamp - int(self._feed_cache.get("at") or 0) < ttl:
             return cached
 
         nodes = discover_nodes()
@@ -228,13 +248,25 @@ class LanTransport(CommunityTransport):
         items: List[Dict[str, Any]] = []
         reachable: List[Dict[str, Any]] = []
         seen = set()
+        partial = False
         for node, result in zip(nodes, results):
+            node_id = str(node.get("id") or "")
+            online = True
             if isinstance(result, Exception) or result is None:
-                # 发现到但拉不到：节点照样进列表并标 offline，前端才能显示「发现到但连不上」
-                reachable.append({**node, "item_count": 0, "online": False})
-                continue
-            node_items = result
-            reachable.append({**node, "item_count": len(node_items), "online": True})
+                partial = True
+                online = False
+                last = self._last_good.get(node_id) or {}
+                if last and stamp - int(last.get("at") or 0) <= FEED_STALE_KEEP_MS:
+                    node_items = list(last.get("items") or [])
+                else:
+                    # 发现到但拉不到：节点照样进列表并标 offline，前端才能显示「发现到但连不上」
+                    reachable.append({**node, "item_count": 0, "online": False})
+                    continue
+            else:
+                node_items = result
+                if node_id:
+                    self._last_good[node_id] = {"at": stamp, "items": list(node_items)}
+            reachable.append({**node, "item_count": len(node_items), "online": online})
             for raw in node_items:
                 if not isinstance(raw, dict):
                     continue
@@ -243,9 +275,9 @@ class LanTransport(CommunityTransport):
                     continue
                 seen.add(item_id)
                 remember_item_node(item_id, node)
-                public = store.item_public(raw, online=True)
+                public = store.item_public(raw, online=online)
                 public["node"] = {"id": node.get("id"), "nickname": node.get("nickname"),
-                                  "avatar": node.get("avatar"), "online": True}
+                                  "avatar": node.get("avatar"), "online": online}
                 items.append(public)
         data = {
             "items": items,
@@ -253,15 +285,25 @@ class LanTransport(CommunityTransport):
             "creators_online": sum(1 for node in reachable if node.get("online")),
             "at": stamp,
         }
-        self._feed_cache = {"at": stamp, "data": data}
+        self._feed_cache = {"at": stamp, "data": data,
+                            "ttl": FEED_CACHE_PARTIAL_MS if partial else FEED_CACHE_MS}
         return data
 
     async def _node_items(self, node: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
         base = str(node.get("base") or "").rstrip("/")
         if not base:
             return None
-        status, content = await _fetch_bytes("GET", base + "/api/community/public/items",
-                                             str(node.get("token") or ""), timeout=NODE_TIMEOUT)
+        status, content = 0, b""
+        for _attempt in range(FEED_NODE_ATTEMPTS):
+            status, content = await _fetch_bytes("GET", base + "/api/community/public/items",
+                                                 str(node.get("token") or ""), timeout=FEED_NODE_TIMEOUT)
+            # 只对「连不上 / 超时」重试；对方明确回了 4xx（没开可见 / 限流）就不再打扰
+            if status != 0:
+                break
+        if status == 404:
+            # 对方明确关了「局域网社区可见」：作品就该下架，不沿用旧列表
+            self._last_good.pop(str(node.get("id") or ""), None)
+            return []
         if status != 200:
             return None
         body = _json_of(content)
@@ -280,13 +322,14 @@ class LanTransport(CommunityTransport):
             remember_item_node(item_id, candidate)
         return node_of(item_id)
 
-    async def item_detail(self, item_id: str) -> Optional[Dict[str, Any]]:
+    async def item_detail(self, item_id: str, lite: bool = False) -> Optional[Dict[str, Any]]:
+        """lite=True 只要元数据（画布数据走 package 拉一次，不重复传）；老版本节点忽略参数照样带 payload。"""
         node = self._node_for_item(item_id)
         if not node:
             return None
         status, content = await _fetch_bytes(
-            "GET", str(node["base"]) + "/api/community/public/items/" + item_id,
-            str(node.get("token") or ""), timeout=NODE_TIMEOUT)
+            "GET", str(node["base"]) + "/api/community/public/items/" + item_id + ("?lite=1" if lite else ""),
+            str(node.get("token") or ""), timeout=DETAIL_TIMEOUT)
         if status != 200:
             return None
         body = _json_of(content)
@@ -301,7 +344,7 @@ class LanTransport(CommunityTransport):
             return None
         status, content = await _fetch_bytes(
             "GET", str(node["base"]) + "/api/community/public/items/" + item_id + "/package",
-            str(node.get("token") or ""), timeout=NODE_TIMEOUT * 4)
+            str(node.get("token") or ""), timeout=PACKAGE_TIMEOUT)
         if status != 200:
             return None
         body = _json_of(content)
@@ -322,6 +365,57 @@ class LanTransport(CommunityTransport):
         if len(content) > MEDIA_MAX_FILE_BYTES:
             return None
         return content
+
+    async def download_media_to(self, item_id: str, filename: str, dest_path: str) -> bool:
+        """媒体流式写到 dest_path（先写 .part 再改名），不整段读进内存；成功返回 True。"""
+        node = self._node_for_item(item_id)
+        if not node or not store.valid_file_name(filename):
+            return False
+        url = str(node["base"]) + "/api/community/public/media/" + item_id + "/" + filename
+        token = str(node.get("token") or "")
+        # 后台预取和克隆可能同时拉同一个文件：临时名各自唯一，改名是原子的
+        # 点开头：不会被 cached_media_names 的文件名白名单当成素材
+        temp_path = os.path.join(os.path.dirname(dest_path) or ".",
+                                 ".%s.%s.part" % (os.path.basename(dest_path), uuid.uuid4().hex[:8]))
+        os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
+        if _http_hook():
+            status, content = await _fetch_bytes("GET", url, token, timeout=MEDIA_TIMEOUT)
+            if status != 200 or not content or len(content) > MEDIA_MAX_FILE_BYTES:
+                return False
+            try:
+                with open(temp_path, "wb") as handle:
+                    handle.write(content)
+                os.replace(temp_path, dest_path)
+                return True
+            except OSError:
+                _remove_quiet(temp_path)
+                return False
+        headers = {"X-NOVAI-Friend-Token": token} if token else {}
+        timeout = httpx.Timeout(MEDIA_TIMEOUT, connect=MEDIA_TIMEOUT, read=MEDIA_TIMEOUT,
+                                write=MEDIA_TIMEOUT, pool=None)
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True,
+                                         trust_env=not _is_lan_url(url)) as client:
+                async with client.stream("GET", url, headers=headers) as response:
+                    if response.status_code != 200:
+                        return False
+                    received = 0
+                    with open(temp_path, "wb") as handle:
+                        async for chunk in response.aiter_bytes(256 * 1024):
+                            if not chunk:
+                                continue
+                            received += len(chunk)
+                            if received > MEDIA_MAX_FILE_BYTES:
+                                raise ValueError("too large")
+                            handle.write(chunk)
+            if received <= 0:
+                _remove_quiet(temp_path)
+                return False
+            os.replace(temp_path, dest_path)
+            return True
+        except Exception:
+            _remove_quiet(temp_path)
+            return False
 
     async def download_cover(self, item_id: str) -> Optional[bytes]:
         """封面在发布包根目录，/public/media 只服务 media/ 子目录，得走专门的封面路由。"""
@@ -385,7 +479,7 @@ def set_transport(transport: CommunityTransport) -> None:
 def clear_feed_cache() -> None:
     transport = get_transport()
     if isinstance(transport, LanTransport):
-        transport._feed_cache = {"at": 0, "data": None}
+        transport._feed_cache = {"at": 0, "data": None, "ttl": FEED_CACHE_MS}
 
 
 # ---------------------------------------------------------------- 缓存（作者离线时仍可浏览 / 克隆）
@@ -451,38 +545,52 @@ def cached_media_names(item_id: str) -> List[str]:
         return []
 
 
+async def fetch_media_to_cache(item_id: str, filename: str) -> Optional[str]:
+    """确保媒体在本机缓存里，返回缓存路径（已在缓存直接返回）；拉不到返回 None。"""
+    cached = cached_media_path(item_id, filename)
+    if cached:
+        return cached
+    if not store.valid_file_name(filename):
+        return None
+    transport = get_transport()
+    target = os.path.join(cache_media_dir(item_id), filename)
+    saver = getattr(transport, "download_media_to", None)
+    if callable(saver):
+        ok = await saver(item_id, filename, target)
+        return target if ok and os.path.isfile(target) else None
+    content = await transport.download_media(item_id, filename)
+    if not content:
+        return None
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as handle:
+            handle.write(content)
+    except OSError:
+        return None
+    return target
+
+
 async def prefetch_media(item_id: str, filenames: List[str]) -> int:
     """把作品媒体拉到本机缓存（打开详情后调用），成功的返回条数。"""
-    transport = get_transport()
-    transport_ref = transport
     semaphore = asyncio.Semaphore(MEDIA_CONCURRENCY)
     budget = {"bytes": 0}
-    saved = {"count": 0, "lock": asyncio.Lock()}
-    directory = cache_media_dir(item_id)
-    os.makedirs(directory, exist_ok=True)
+    saved = {"count": 0}
 
     async def one(filename: str) -> None:
         if cached_media_path(item_id, filename):
-            async with saved["lock"]:
-                saved["count"] += 1
+            saved["count"] += 1
             return
         async with semaphore:
             if budget["bytes"] >= MEDIA_MAX_TOTAL_BYTES:
                 return
-            content = await transport_ref.download_media(item_id, filename)
-        if not content:
+            path = await fetch_media_to_cache(item_id, filename)
+        if not path:
             return
-        if budget["bytes"] + len(content) > MEDIA_MAX_TOTAL_BYTES:
-            return
-        budget["bytes"] += len(content)
-        target = os.path.join(directory, filename)
         try:
-            with open(target, "wb") as handle:
-                handle.write(content)
+            budget["bytes"] += os.path.getsize(path)
         except OSError:
-            return
-        async with saved["lock"]:
-            saved["count"] += 1
+            pass
+        saved["count"] += 1
 
     await asyncio.gather(*[one(name) for name in (filenames or [])[:packager.MAX_MEDIA_FILES]],
                          return_exceptions=True)

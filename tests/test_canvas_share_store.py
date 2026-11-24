@@ -38,7 +38,7 @@ MEDIA_TOKEN = "peer-lan-token-1234567890"
 
 
 class MediaHandler(BaseHTTPRequestHandler):
-    """模拟分享者的机器：/output/a.png 要口令；/output/missing.png 404；/output/big.png 报 60MB。"""
+    """模拟分享者的机器：/output/a.png 要口令；/output/missing.png 404；/output/big.png 报 600MB（超过 500MB 单文件上限）。"""
 
     def log_message(self, *args):  # 安静
         pass
@@ -65,7 +65,7 @@ class MediaHandler(BaseHTTPRequestHandler):
                 return
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
-            self.send_header("Content-Length", str(60 * 1024 * 1024))
+            self.send_header("Content-Length", str(600 * 1024 * 1024))
             self.end_headers()
             return
         self.send_response(404)

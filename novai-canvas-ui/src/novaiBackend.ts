@@ -296,10 +296,16 @@ async function createImageTask(req: GenRequest | EditRequest, prompt: string, pa
   const outputFormat = transparent ? "" : outputFormatForRequest(params.outputFormat);
   // GIF 帧参数只在 outputFormat=gif 时下发（后端 0/缺省 = 9 帧 / 200ms；这里先按 caps 夹成合法值）
   const gifFrameFields = transparent ? {} : gifFrameFieldsForRequest(params, req.model);
-  // Midjourney 的版本 / HD 是独立字段（后端 OnlineImageRequest 只认这两个，速度与风格化走提示词 flag）
+  // Midjourney 的版本 / HD / 速度 / 风格化都是独立 body 字段（后端 OnlineImageRequest 认这几个）；
+  // 提示词里塞 --fast / --s 没用：后端清洗规则会把 -- 压成 -，flag 到不了上游
   const isMidjourneyModel = !!req.model?.mj;
   const mjVersion = isMidjourneyModel ? String(params.mj?.version || "").trim() : "";
   const mjHd = isMidjourneyModel && params.mj?.hd === true;
+  // 面板没选速度时高亮的就是 fast（后端能力表 speeds 只有 fast），必须按同一个值下发：
+  // 不发 = 上游默认 relax，任务会一直卡在 RELAX 通道提交失败（upstream code=9）
+  const mjSpeed = isMidjourneyModel ? String(params.mj?.speed || "fast") : "";
+  // 0 = 未指定，不发；只有面板上真选过数字才下发
+  const mjStylize = isMidjourneyModel && typeof params.mj?.stylize === "number" ? params.mj.stylize : 0;
   const body = {
     prompt: prompt || "编辑参考图片",
     provider_id: selected.provider,
@@ -316,6 +322,8 @@ async function createImageTask(req: GenRequest | EditRequest, prompt: string, pa
     ...gifFrameFields,
     ...(mjVersion ? { midjourney_version: mjVersion } : {}),
     ...(mjHd ? { midjourney_hd: true } : {}),
+    ...(mjSpeed ? { midjourney_speed: mjSpeed } : {}),
+    ...(mjStylize ? { midjourney_stylize: mjStylize } : {}),
     // 任务和画布节点绑定：离开画布回来按 node_id 接上（后端存进任务记录）
     ...(req.canvasId ? { canvas_id: req.canvasId } : {}),
     ...(req.nodeId ? { node_id: req.nodeId } : {}),

@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """MCP Streamable HTTP 传输（P1）：POST JSON-RPC 到 url，兼容 JSON 与 SSE 两种响应。
 
-流程与 stdio 一致：initialize → notifications/initialized → tools/list（cursor 分页）→ tools/call。
+流程与 stdio 一致：initialize → notifications/initialized → tools/list（cursor 分页）→ tools/call，
+加一条 prompts/list + prompts/get（服务端不支持就当没有）。initialize 里的 instructions 也一起记下。
 差异：
 - 每次请求都是 POST 到配置里的 url；
 - 响应头出现 Mcp-Session-Id 时，后续请求都带这个头（服务端要求时也带 MCP-Protocol-Version）；
@@ -44,6 +45,8 @@ class HttpMcpSession:
         self.protocol_version = protocol_version
         self.negotiated_version = ""
         self.server_info: Dict[str, Any] = {}
+        # 服务端在 initialize 里自带的工具使用契约（与 stdio 同口径），缺省空串
+        self.instructions = ""
         self.session_id = ""
         self._next_id = 0
         self.notifications: List[int] = []
@@ -103,6 +106,8 @@ class HttpMcpSession:
                            code="mcp_http_protocol", server=self.server_name)
         self.negotiated_version = str(result.get("protocolVersion") or jsonrpc.FALLBACK_PROTOCOL_VERSION)
         self.server_info = result.get("serverInfo") if isinstance(result.get("serverInfo"), dict) else {}
+        raw_instructions = result.get("instructions")
+        self.instructions = raw_instructions if isinstance(raw_instructions, str) else ""
         self._notify("notifications/initialized", {})
         return result
 
@@ -128,6 +133,34 @@ class HttpMcpSession:
         result = self._request("tools/call", {"name": str(name), "arguments": dict(arguments or {})})
         if not isinstance(result, dict):
             raise McpError("MCP 服务 %s 的 tools/call 返回不是对象" % self.server_name,
+                           code="mcp_http_protocol", server=self.server_name)
+        return result
+
+    def list_prompts(self, max_pages: int = 50) -> List[Dict[str, Any]]:
+        """列模板。服务端不支持/报错时返回已拿到的部分：模板只是增强项，不能拖垮 tools 发现。"""
+        prompts: List[Dict[str, Any]] = []
+        cursor = ""
+        for _page in range(max(1, int(max_pages))):
+            params = {"cursor": cursor} if cursor else {}
+            try:
+                result = self._request("prompts/list", params)
+            except (jsonrpc.JsonRpcError, McpError):
+                return prompts
+            if not isinstance(result, dict):
+                return prompts
+            page = result.get("prompts")
+            if isinstance(page, list):
+                prompts.extend([item for item in page if isinstance(item, dict)])
+            next_cursor = result.get("nextCursor")
+            if not isinstance(next_cursor, str) or not next_cursor:
+                break
+            cursor = next_cursor
+        return prompts
+
+    def get_prompt(self, name: str, arguments: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        result = self._request("prompts/get", {"name": str(name), "arguments": dict(arguments or {})})
+        if not isinstance(result, dict):
+            raise McpError("MCP 服务 %s 的 prompts/get 返回不是对象" % self.server_name,
                            code="mcp_http_protocol", server=self.server_name)
         return result
 

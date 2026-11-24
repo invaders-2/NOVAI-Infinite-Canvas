@@ -69,6 +69,7 @@ from server.agents.tools import AGENT_FILE_TOOLS as _AGENT_FILE_TOOLS, AgentFile
 from server.agents import canvas_cli as _agent_canvas_cli
 from server.agents import tools as _agent_file_tools
 from server import asset_meta as _asset_meta
+from server import upstream_user as _upstream_user
 # 阶段一的三个新模块（上下文引擎 / 运行转录 / 按需读取工具）。包一层 try：
 # 裁剪安装或缺文件时不让后端起不来，开关打开时再如实报错。
 try:
@@ -2958,6 +2959,10 @@ def normalize_model_caps_overrides(value) -> Dict[str, Dict[str, Any]]:
         caps = _protocol_updates.normalize_caps(item.get("caps"))
         if not caps:
             continue
+        if _protocol_updates.is_stale_midjourney_image_caps(model, kind, caps):
+            # 旧更新包 v2 写进用户数据的 midjourney 覆盖（batch=[4] / 只有 fast）：丢掉、回落到代码表。
+            # 更新包只做字段级合并、删不掉 batch，不清的话已应用过 v2 的安装永远是旧面板。
+            continue
         out[model.lower()] = {"model": model, "kind": kind, "caps": caps}
     return out
 
@@ -4799,6 +4804,10 @@ class OnlineImageRequest(BaseModel):
     n: int = 1
     midjourney_version: str = ""
     midjourney_hd: bool = False
+    # Midjourney 速度 / 风格化（apimart body 的 speed / stylize）：'' / 0 = 不发，跟随上游默认；
+    # 画布面板显示的是 fast（后端能力表 speeds 只有 fast），不下发就等于默认 relax → 上游一直 9。
+    midjourney_speed: str = ""
+    midjourney_stylize: int = 0
     # 思考模式（仅 APIMart 的 wan2.7-image / wan2.7-image-pro 文档确证支持，布尔两态）：
     # None = 不发、跟随上游默认 true；true/false 才显式下发。其它模型/供应商忽略。
     thinking_mode: Optional[bool] = None
@@ -5662,6 +5671,12 @@ class CanvasLLMRequest(BaseModel):
     no_prompt_intelligence: bool = False  # 聊天模式用：跳过 Prompt Intelligence，仍保留 images/videos/reverse 让模型能看图对话
     # 思考强度：low/mid/high/xhigh/max，空串 = 不传（默认）；真值源见 server/protocols/thinking.py
     think_level: str = ""
+
+class CanvasAnalyzeMediaRequest(BaseModel):
+    image: str = ""                  # data URL（优先）/ /output、/assets 本地路径 / http(s) 外链
+    is_video_frame: bool = False     # true = 视频的一帧，提示词里说明按静态画面反推
+    provider: str = ""               # 空 = 自动挑一个看得懂图的对话模型
+    model: str = ""
 
 class ConversationCreateRequest(BaseModel):
     title: str = "新对话"
@@ -7432,7 +7447,9 @@ def api_headers(json_body=True, provider=None, model=""):
         headers = {"Accept": "application/json", "Authorization": bearer_auth_value(api_key)}
     if json_body:
         headers["Content-Type"] = "application/json"
-    return headers
+    # 本地区域网关按 X-User-Id 归属用量；官方站（公网地址）不会带这个头
+    return _upstream_user.apply_upstream_user_header(
+        headers, (provider or {}).get("base_url") or AI_BASE_URL)
 
 def selected_model(requested, fallback):
     model = (requested or fallback).strip()
@@ -15934,15 +15951,18 @@ APIMART_IMAGE_MODEL_CAPS = {
     },
     "midjourney": {
         # 画布 MJ 预设比例；版本/速度/HDR 白名单与 generate_apimart_midjourney_provider_image 一致
+        # n_max=4 = 一次提交最多拿 4 张候选（上游一次就回 4 张单图），不是发 4 次请求：
+        # 画布上选几张只是「取前几张入画布」，费用按一次任务算；给了 n_max 就不再声明 batch（batch 会覆盖默认张数）。
         "ratios": ("1:1", "16:9", "9:16", "4:3", "3:4", "2:3", "3:2", "7:4", "4:7"),
-        "sizes": ("2K",), "batch": (4,), "qualities": (),
+        "sizes": ("2K",), "n_max": 4, "qualities": (),
         "mask_url": False, "base64_refs": False, "official_fallback": False,
         # 文档确证（2026-11-18，midjourney/video）：图生视频走 POST /v1/midjourney/generations/video，
         # 只有 FAST、约 5 秒、不支持文生视频；motion low|high（默认 high，不影响计费）、
         # batch_size 1|2|4（默认 1，按 N 倍计费）、video_type 480p/720p × 基础/首尾帧 4 个值、
         # end_url 设了会自动升级成 start_end_*。计费 id：midjourney@video / @video-720p。
+        # 速度三档全部声明（fast 放第一 = 面板默认高亮；relax 慢但便宜、turbo 极速档，pricing 已有 turbo）
         "mj": {"versions": ["8.2", "8.1", "7", "6.1", "5.2", "5.1"],
-               "speeds": ["fast"], "hd": ["8.2", "8.1"],
+               "speeds": ["fast", "turbo", "relax"], "hd": ["8.2", "8.1"],
                "video": {
                    "endpoint": "/v1/midjourney/generations/video",
                    "motions": ("low", "high"), "motion_default": "high",
@@ -18449,11 +18469,11 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {**{"videos": local_urls, "task_id": task_id, "raw": result}, **build_canvas_meta(local_urls, payload, "video")}
 
-async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format="", frame_count=0, frame_duration_ms=0, svg_model=""):
+async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format="", frame_count=0, frame_duration_ms=0, svg_model="", midjourney_speed="", midjourney_stylize=0):
     async with provider_slot(get_api_provider(provider_id)):
-        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background, size_notice_out, n, midjourney_version, midjourney_hd, thinking_mode, output_format, frame_count, frame_duration_ms, svg_model)
+        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background, size_notice_out, n, midjourney_version, midjourney_hd, thinking_mode, output_format, frame_count, frame_duration_ms, svg_model, midjourney_speed, midjourney_stylize)
 
-async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format="", frame_count=0, frame_duration_ms=0, svg_model=""):
+async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format="", frame_count=0, frame_duration_ms=0, svg_model="", midjourney_speed="", midjourney_stylize=0):
     provider = get_api_provider(provider_id)
     if reference_images:
         # 私网素材（对方电脑 / 旧克隆漏网的局域网地址）先落本机，绝不把 http://192.168.x.x 发给上游
@@ -18498,8 +18518,11 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
     mask_refs = [ref for ref in refs if str(ref.get("role") or "").strip().lower() == "mask" or str(ref.get("name") or "").lower().endswith("_mask.png")]
     image_refs = [ref for ref in refs if ref not in mask_refs]
     if is_apimart and str(model or "").strip().lower() == "midjourney":
+        # 能力表只声明了 fast：没有前端面板的入口（助手生图工具链等）不传速度时必须补 fast，
+        # 否则它们会继续按上游默认 relax 跑；provider 层保持「传空就不发」，老画布显式传的 relax 不受影响。
         return await generate_apimart_midjourney_provider_image(
-            prompt, size, image_refs, provider, midjourney_version, midjourney_hd)
+            prompt, size, image_refs, provider, midjourney_version, midjourney_hd,
+            midjourney_speed or "fast", midjourney_stylize, n)
     image_request_mode = effective_image_request_mode(provider, model)
     # 到这里已经是「没有平台专属组装函数」的通用分支（apimart 的非默认 image_request_mode 也走这里）：
     # 用与助手链路同一套 caps 兜一次尺寸收敛，避免同一条尺寸在两条链路上被两套口径处理。
@@ -25644,12 +25667,15 @@ def upstream_models_url(base_url: str, protocol: str):
         return f"{url}?expand=category"
     return url
 
-def upstream_model_headers(api_key: str, protocol: str):
+def upstream_model_headers(api_key: str, protocol: str, url: str = ""):
     if protocol == "gemini":
-        return {"x-goog-api-key": api_key, "Accept": "application/json"}
-    if protocol == "runninghub":
-        return {"Authorization": bearer_auth_value(api_key), "Accept": "application/json"}
-    return {"Authorization": bearer_auth_value(api_key), "Accept": "application/json"}
+        headers = {"x-goog-api-key": api_key, "Accept": "application/json"}
+    elif protocol == "runninghub":
+        headers = {"Authorization": bearer_auth_value(api_key), "Accept": "application/json"}
+    else:
+        headers = {"Authorization": bearer_auth_value(api_key), "Accept": "application/json"}
+    # 本地区域网关按 X-User-Id 归属用量；官方站（公网地址）不会带这个头
+    return _upstream_user.apply_upstream_user_header(headers, url)
 
 def volcengine_default_model_payload(status=200, message="", raw=None):
     return {
@@ -25677,7 +25703,7 @@ async def probe_volcengine_task_endpoint(client, base_url: str, api_key: str):
     probe_url = volcengine_task_probe_url(base_url)
     if not probe_url:
         return False, {"status": 0, "message": "Base URL 为空"}
-    response = await client.get(probe_url, headers=upstream_model_headers(api_key, "volcengine"))
+    response = await client.get(probe_url, headers=upstream_model_headers(api_key, "volcengine", probe_url))
     try:
         raw = response.json() if response.text else {}
     except Exception:
@@ -25705,7 +25731,7 @@ async def probe_openai_compat_bearer_endpoint(client, base_url: str, api_key: st
     url = f"{root}/chat/completions"
     response = await client.post(
         url,
-        headers={**upstream_model_headers(api_key, "openai"), "Content-Type": "application/json"},
+        headers={**upstream_model_headers(api_key, "openai", url), "Content-Type": "application/json"},
         json={"messages": []},
     )
     try:
@@ -25722,7 +25748,7 @@ async def probe_openai_compat_bearer_endpoint(client, base_url: str, api_key: st
 
 async def probe_openai_models_endpoint(client, base_url: str, api_key: str):
     url = upstream_models_url(base_url, "openai")
-    response = await client.get(url, headers=upstream_model_headers(api_key, "openai"))
+    response = await client.get(url, headers=upstream_model_headers(api_key, "openai", url))
     try:
         raw = response.json() if response.text else {}
     except Exception:
@@ -25972,7 +25998,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
     url = upstream_models_url(base_url, protocol)
     try:
         async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env({"use_proxy": payload.use_proxy}), timeout=15) as client:
-            resp = await client.get(url, headers=upstream_model_headers(api_key, protocol))
+            resp = await client.get(url, headers=upstream_model_headers(api_key, protocol, url))
             if resp.status_code in (301, 302, 303, 307, 308):
                 location = resp.headers.get("Location") or resp.headers.get("location") or ""
                 suffix = f"：{location}" if location else ""
@@ -26091,7 +26117,8 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
     probe_url = f"{tasks_base}/tasks/healthcheck_probe_do_not_submit"
     try:
         async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env({"use_proxy": payload.use_proxy}), timeout=15) as client:
-            resp = await client.get(probe_url, headers={"Authorization": bearer_auth_value(api_key), "Accept": "application/json"})
+            resp = await client.get(probe_url, headers=_upstream_user.apply_upstream_user_header(
+                {"Authorization": bearer_auth_value(api_key), "Accept": "application/json"}, probe_url))
             try:
                 body = resp.json()
             except Exception:
@@ -26222,7 +26249,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
     url = upstream_models_url(base_url, protocol)
     try:
         async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=30) as client:
-            resp = await client.get(url, headers=upstream_model_headers(api_key, protocol))
+            resp = await client.get(url, headers=upstream_model_headers(api_key, protocol, url))
             endpoint_label = "/v1beta/models" if protocol == "gemini" else "/api/v3/models" if protocol == "volcengine" else "/openapi/v2/models" if protocol == "runninghub" else "/v1/models"
             if resp.status_code in (301, 302, 303, 307, 308):
                 location = resp.headers.get("Location") or resp.headers.get("location") or ""
@@ -26462,18 +26489,25 @@ async def build_online_image_result(payload: OnlineImageRequest):
             provider["id"], payload.background, notice, request_n,
             payload.midjourney_version, payload.midjourney_hd,
             getattr(payload, "thinking_mode", None), output_format,
-            payload.frame_count, payload.frame_duration_ms, payload.svg_model)
+            payload.frame_count, payload.frame_duration_ms, payload.svg_model,
+            getattr(payload, "midjourney_speed", ""), getattr(payload, "midjourney_stylize", 0))
         try:
             image_items = extract_images(raw_item) if isinstance(raw_item, dict) else [image_data]
         except HTTPException:
             image_items = [image_data]
         local_urls = []
         local_items = []
+        # MJ 的四宫格只是「赠品」：URL 在 raw 里单标一下，落盘后给这张图打 mj_grid，
+        # 前端要标注「四宫格」时能用；其它 provider 的 raw 没有这个键，行为不变。
+        grid_source = str((raw_item or {}).get("mj_grid_url") or "").strip() if isinstance(raw_item, dict) else ""
         for item in image_items:
             local_url = await save_ai_image_to_output(item, prefix="online_")
             if local_url:
                 local_urls.append(local_url)
-                local_items.append(image_output_meta(local_url, item))
+                meta = image_output_meta(local_url, item)
+                if grid_source and str(item.get("value") or "").strip() == grid_source:
+                    meta["mj_grid"] = True
+                local_items.append(meta)
         return local_urls, local_items, raw_item, notice
     try:
         # 每批按模型上限发；请求 4 张、模型一次只能 1 张时就是 4 次单张请求，不是 1 张
@@ -30361,6 +30395,199 @@ async def canvas_llm_stream(payload: CanvasLLMRequest):
         raise
 
 
+# ── 画布图片 / 视频节点「解析」：把画面反推成四段可直接用的 AI 绘图提示词 ──
+CANVAS_ANALYZE_MAX_IMAGE_BYTES = 12 * 1024 * 1024
+CANVAS_ANALYZE_TOO_LARGE_DETAIL = "图片太大（超过 12MB）：请先压缩或换一张小一点的图再解析。"
+_CANVAS_ANALYZE_IMAGE_SUFFIXES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/bmp": ".bmp",
+    "image/avif": ".avif",
+}
+# 与画布前端同一套「这个模型看得懂图」判定（见 novai-canvas-ui 的 bridge.ts / novaiBackend.ts）
+_CANVAS_ANALYZE_VISION_MODEL_RE = re.compile(r"vl|vision|gemini|gpt-4o|gpt-5|claude|qwen", re.I)
+
+def canvas_analyze_image_suffix(mime):
+    return _CANVAS_ANALYZE_IMAGE_SUFFIXES.get(str(mime or "").strip().lower(), ".png")
+
+def canvas_analyze_data_url_to_file(value):
+    """data URL 解码成临时图片文件（返回路径，调用方负责删）。超过 12MB 直接 400，先把内存拦住。"""
+    header, _, encoded = str(value or "").partition(",")
+    mime = header[len("data:"):].split(";", 1)[0] if header.startswith("data:") else ""
+    if ";base64" not in header or not encoded:
+        raise HTTPException(status_code=400, detail="图片格式无法识别：解析只接受 data:image/...;base64 形式的图片。")
+    if not mime.startswith("image/"):
+        raise HTTPException(status_code=400, detail=f"只支持图片：收到的是 {(mime or '未知类型')}。")
+    # base64 字符数 ×3/4 ≈ 原始字节数：先按长度拦，避免真把超大图解进内存
+    if len(encoded) * 3 // 4 > CANVAS_ANALYZE_MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_TOO_LARGE_DETAIL)
+    try:
+        raw = base64.b64decode(encoded)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="图片数据损坏，解不出来：请重新导出这张图再解析。") from exc
+    if len(raw) > CANVAS_ANALYZE_MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_TOO_LARGE_DETAIL)
+    fd, path = tempfile.mkstemp(prefix="canvas_analyze_", suffix=canvas_analyze_image_suffix(mime))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+    except Exception:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise
+    return path
+
+async def canvas_analyze_download_to_file(url):
+    """http(s) 外链下载成临时图片文件（返回路径，调用方负责删）。"""
+    try:
+        raw, content_type = await asyncio.to_thread(
+            fetch_remote_media_bytes, url, 30.0, CANVAS_ANALYZE_MAX_IMAGE_BYTES)
+    except HTTPException as exc:
+        if exc.status_code == 413:
+            raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_TOO_LARGE_DETAIL) from exc
+        print(f"[canvas-analyze-media] 下载图片失败 {url[:120]}: {exc.detail}")
+        raise HTTPException(status_code=400, detail="下载这张图片失败：请确认链接能直接打开（对方站点也可能限制了外部访问）。") from exc
+    except Exception as exc:
+        print(f"[canvas-analyze-media] 下载图片失败 {url[:120]}: {exc}")
+        raise HTTPException(status_code=400, detail="下载这张图片失败：请确认链接能直接打开（对方站点也可能限制了外部访问）。") from exc
+    if not raw:
+        raise HTTPException(status_code=400, detail="下载这张图片失败：链接没有返回内容。")
+    mime = str(content_type or "").split(";", 1)[0]
+    fd, path = tempfile.mkstemp(prefix="canvas_analyze_", suffix=canvas_analyze_image_suffix(mime))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+    except Exception:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise
+    return path
+
+async def canvas_analyze_media_path(image):
+    """把请求里的 image 落成本地文件：data URL 优先，其次 /output、/assets 本地路径，最后 http(s) 外链。
+    返回 (本地绝对路径, 需要清理的临时文件；不是临时文件时为空串)。"""
+    text = str(image or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="没有收到图片：请先选好图片或视频画面再解析。")
+    if text.startswith("data:"):
+        path = canvas_analyze_data_url_to_file(text)
+        return path, path
+    local = output_file_from_url(text)
+    if local:
+        return local, ""
+    if text.startswith(("http://", "https://")):
+        path = await canvas_analyze_download_to_file(text)
+        return path, path
+    raise HTTPException(status_code=400, detail="不认识的图片地址：只支持 data URL、/output、/assets 本地路径或 http(s) 链接。")
+
+def canvas_analyze_vision_provider(provider_id=""):
+    """没指定平台时挑一个「看得懂图」的对话模型。
+
+    返回 (平台 id, 模型名)；一个都没命中返回 ("", "")，交给 resolve_chat_provider 的默认值兜底。
+    优先级从高到低，命中即返回：
+    1. 请求显式给了平台：原样返回，模型交给该平台的 chat_models 解析；
+    2. 设置里的默认对话模型（agent_chat_model，形如「平台id::模型名」）：用户自己挑来日常
+       对话的那个模型最可能又强又看得懂图（claude / gpt-4o 这类），中英双语结构化提示词的
+       质量比扫描出来的杂牌模型靠谱，所以排在扫描前面；
+    3. 扫描已启用平台的 chat_models，取第一个名字命中视觉正则的：非 modelscope 的平台先扫，
+       modelscope 放最后兜底——它的 VL 模型（如 InternVL3_5）只是「能看图」的兜底，不是用户
+       日常用的对话模型，中英双语结构化提示词的质量没保证；
+    4. 都没命中 → ("", "")。
+    """
+    provider_id = str(provider_id or "").strip()
+    if provider_id:
+        return provider_id, ""
+    member_only = not _is_admin_actor()
+    providers = load_api_providers()
+
+    def _available(provider):
+        if not provider.get("enabled", True):
+            return False
+        # 成员账号只许用 APIMart（口径同 /api/canvas-llm 的 member_provider），别把别的平台的 Key 借出去
+        if member_only and provider.get("id") != MEMBER_PROVIDER_ID:
+            return False
+        return bool(provider_has_usable_key(provider) or is_codex_provider(provider)
+                    or is_gemini_cli_provider(provider))
+
+    preferred = str(agent_default_chat_model() or "")
+    if "::" in preferred:
+        wanted_provider, wanted_model = preferred.split("::", 1)
+        wanted_provider = wanted_provider.strip().lower()
+        wanted_model = wanted_model.strip()
+        if wanted_model and _CANVAS_ANALYZE_VISION_MODEL_RE.search(wanted_model):
+            for provider in providers:
+                if str(provider.get("id") or "").strip().lower() != wanted_provider:
+                    continue
+                if _available(provider):
+                    return str(provider.get("id") or ""), wanted_model
+                break
+
+    ordered = [p for p in providers if str(p.get("id") or "") != "modelscope"]
+    ordered += [p for p in providers if str(p.get("id") or "") == "modelscope"]
+    for provider in ordered:
+        if not _available(provider):
+            continue
+        for name in provider.get("chat_models") or []:
+            model = str(name or "").strip()
+            if model and _CANVAS_ANALYZE_VISION_MODEL_RE.search(model):
+                return str(provider.get("id") or ""), model
+    return "", ""
+
+def canvas_analyze_error_detail(exc):
+    """把 caption 抛上来的 HTTPException 收成一句中文：上游 HTML 错误页 / 超长原文不往用户脸上糊。"""
+    detail = str(getattr(exc, "detail", "") or "").strip()
+    friendly = friendly_chat_error_detail(detail) if detail else ""
+    if friendly:
+        return friendly
+    if not detail:
+        return "视觉模型调用失败：请稍后重试，或在「API 设置」里换一个看得懂图的模型。"
+    # caption 会把上游响应拼在「上游接口错误：」后面，光看开头判不出 HTML，这里整段找一遍
+    lower_detail = detail.lower()
+    if looks_like_html_response(detail) or "<html" in lower_detail or "<!doctype" in lower_detail:
+        return "上游返回的是网关错误页，不是模型接口的正常响应：请稍后重试，或换一个视觉模型。"
+    if len(detail) > 300:
+        return "视觉模型返回的报错太长了，已省略：请稍后重试，或换一个视觉模型。"
+    return detail
+
+@app.post("/api/canvas-analyze-media")
+async def canvas_analyze_media(payload: CanvasAnalyzeMediaRequest):
+    """画布图片 / 视频节点的「解析」：把画面反推成四段可直接用于 AI 绘图的提示词。"""
+    provider_id = (payload.provider or "").strip()
+    if provider_id:
+        provider_id = member_provider(provider_id)
+    provider_id, model = canvas_analyze_vision_provider(provider_id)
+    prompt = canvas_analyze_prompt(payload.is_video_frame)
+    media_path, cleanup_path = await canvas_analyze_media_path(payload.image)
+    try:
+        try:
+            text, used_model = await caption_image_with_provider(media_path, prompt, provider_id, model)
+        except HTTPException as exc:
+            raise HTTPException(
+                status_code=400 if exc.status_code == 400 else 502,
+                detail=canvas_analyze_error_detail(exc),
+            ) from exc
+        except Exception as exc:
+            print(f"[canvas-analyze-media] 解析失败: {exc}")
+            raise HTTPException(status_code=502, detail="解析失败：调用视觉模型出错，请稍后重试或换一个模型。") from exc
+    finally:
+        if cleanup_path:
+            try:
+                os.remove(cleanup_path)
+            except OSError:
+                pass
+    text = (text or "").strip()
+    # caption_image_with_provider 自己会把空文本换成这句哨兵，这里当成「没内容」
+    if not text or text == "接口返回了空回复。":
+        raise HTTPException(status_code=502, detail="模型没有返回内容，换一个视觉模型再试")
+    return {"ok": True, "text": text, "model": used_model or model, "prompt": prompt}
+
 # --- 对话管理 ---
 
 @app.get("/api/conversations")
@@ -31851,6 +32078,36 @@ async def delete_memory(memory_id: str, canvas_id: str = ""):
     return result
 
 
+
+# 画布图片 / 视频节点「解析」的反推模板（产品侧原文，一字不改；改字先跟产品对齐）
+CANVAS_ANALYZE_PROMPT = """你是资深的 AI 绘图提示词工程师。请把给定画面「反推」成可直接用于 AI 绘图（Midjourney / Stable Diffusion / Seedream / 即梦等）的提示词。
+
+严格按下面四段的顺序输出，每段用标记行开头，标记行原样输出，段与段之间空一行：
+[中文正向]
+[中文负向]
+[English Positive]
+[English Negative]
+
+内容要求：
+1. [中文正向]：一段连续的中文短语流（逗号分隔，不分点、不编号、不写成句子解释），依次覆盖：主体与外观细节 → 动作/姿态/表情 → 场景与环境 → 风格与流派 → 构图与镜头（视角、景别、焦段、机位）→ 光线与氛围 → 色彩与色调 → 材质与质感 → 画质与分辨率词 → 关键细节补充。200–400 字。
+2. [中文负向]：中文短语流，列出要避免的画面问题（低质量、模糊、噪点、过曝、过饱和、畸变、多余手指、错位肢体、水印、logo、文字、边框等），以及与该图风格相冲突的元素。60–120 字。
+3. [English Positive]：英文关键词流，逗号分隔，顺序与中文正向一一对应：subject, appearance details, action/pose/expression, scene, style, composition/camera (angle, shot size, focal length), lighting, color palette, materials/texture, quality/resolution tags, key details。60–150 词。
+4. [English Negative]：英文负向词，逗号分隔，语义与中文负向对应。
+
+硬性规则：
+- 只写画面里真实存在或可合理推断的元素；看不清的细节不要编造，不要出现「这张图」「画面中」「图中」这类叙述词。
+- 只输出这四段，不要任何前言、解释、总结、Markdown 标题或代码块。
+- 中英文语义必须一致，不能各写各的。
+- 如果输入是视频的一帧，按静态画面反推，不要描述镜头运动。
+"""
+
+# 视频的一帧：同一段模板末尾追加一行（is_video_frame=true 时）
+CANVAS_ANALYZE_VIDEO_FRAME_NOTE = "注意：这是视频的一帧，按静态画面反推，不要描述镜头运动。"
+
+def canvas_analyze_prompt(is_video_frame=False):
+    if is_video_frame:
+        return f"{CANVAS_ANALYZE_PROMPT}{CANVAS_ANALYZE_VIDEO_FRAME_NOTE}\n"
+    return CANVAS_ANALYZE_PROMPT
 
 async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_model=""):
     llm_provider = get_api_provider(provider_id) if provider_id not in ("modelscope",) else {}
@@ -35099,6 +35356,12 @@ MIDJOURNEY_ACTION_PATHS = {
 
 MIDJOURNEY_SPEEDS = {"relax", "fast", "turbo"}
 
+# APIMart 官方最佳实践：可重试失败按 1s / 4s / 16s 指数退避；实测 apib.ai 的 MJ 提交通道会整片抖动
+# 十几秒（三次不同 FAST 通道连续被拒），5 秒窗口吃不掉，所以补 8s 档、最多 5 次尝试（首提 + 4 次重试），
+# 最长约 29 秒重试窗口。24（敏感词）与 4（参数错）重试也没用，多打一次只是多一次被拒。
+MIDJOURNEY_RETRY_BACKOFFS = (1.0, 4.0, 8.0, 16.0)
+MIDJOURNEY_MAX_ATTEMPTS = 5
+
 DEFAULT_STORAGE_DIRS = {
     "upload": OUTPUT_INPUT_DIR,
     "generated": OUTPUT_OUTPUT_DIR,
@@ -36059,6 +36322,126 @@ def midjourney_error_detail(raw, fallback="Midjourney 请求失败"):
         or fallback
     )
 
+def midjourney_error_code(raw):
+    """APIMart 把业务错误码放在 body 的 code（HTTP 仍可能是 200）；0 = 这次没报错。
+    成功码按官方码表是 1 / 200：只认 200 会把 code=1 的成功响应当成失败判死。"""
+    if not isinstance(raw, dict):
+        return 0
+    value = raw.get("code")
+    if isinstance(value, bool):
+        return 0
+    try:
+        code = int(value) if isinstance(value, (int, float)) else int(str(value).strip())
+    except (TypeError, ValueError):
+        return 0
+    return 0 if code in (0, 1, 200) else code
+
+_MIDJOURNEY_CODE_RE = re.compile(r"code[^0-9]{0,4}(\d{1,3})", re.I)
+
+def midjourney_codes_in_text(text):
+    """从上游原文里抠 code（描述常写成 upstream code=9 / code: 24）。"""
+    return [int(match.group(1)) for match in _MIDJOURNEY_CODE_RE.finditer(str(text or ""))]
+
+def midjourney_failure_text(raw):
+    """把失败响应压成一行判定文本：code=… + 上游原话。
+    提交失败时 code 在 body 顶层，任务失败时在轮询结果里，两处都读同一套判定。"""
+    if not isinstance(raw, dict):
+        return str(raw or "").strip()[:600]
+    parts = []
+    code = midjourney_error_code(raw)
+    if code:
+        parts.append(f"code={code}")
+    data = midjourney_response_data(raw)
+    for container in (data, raw):
+        if not isinstance(container, dict):
+            continue
+        for key in ("description", "message", "fail_reason", "msg", "error"):
+            value = container.get(key)
+            if isinstance(value, dict):
+                value = value.get("message") or value.get("description")
+            text = str(value or "").strip()
+            if text and text not in parts:
+                parts.append(text)
+    return " / ".join(parts)[:600]
+
+_MIDJOURNEY_RETRY_HINTS = (
+    "upstream submit failure", "no available upstream", "no available instance",
+    "rate limit", "temporarily unavailable", "please try again",
+)
+
+_MIDJOURNEY_FATAL_HINTS = (
+    "banned prompt", "banned_prompt", "content safety", "content_safety", "content policy",
+    "sensitive", "敏感词", "违规", "无法识别的参数", "validation", "invalid parameter",
+    "invalid argument", "unsupported parameter",
+)
+
+def midjourney_failure_retryable(text):
+    """按 APIMart 最佳实践判定一次失败值不值得重试。
+    9（服务拒绝 / 内部错误）、3（无可用实例）、429、5xx、上游提交失败可重试；
+    24（敏感词，平台已退款）与 4（参数错）重试不会变好，只会多烧一次调用。
+    判定给不出结论时按不可重试处理，不凭空重试。"""
+    lowered = str(text or "").strip().lower()
+    if not lowered:
+        return False
+    if any(hint in lowered for hint in _MIDJOURNEY_FATAL_HINTS):
+        return False
+    codes = midjourney_codes_in_text(lowered)
+    if any(code in (4, 24) for code in codes):
+        return False
+    if any(code in (3, 9, 429) or 500 <= code < 600 for code in codes):
+        return True
+    return any(hint in lowered for hint in _MIDJOURNEY_RETRY_HINTS)
+
+def midjourney_error_message(text, attempts=0):
+    """把上游 code 翻成人话，原文放括号里保留（用户看不懂 upstream submit failure）。"""
+    raw = str(text or "").strip()
+    lowered = raw.lower()
+    codes = midjourney_codes_in_text(raw)
+    retried = f"已自动重试 {attempts} 次仍未成功，" if attempts else ""
+    if 24 in codes or any(hint in lowered for hint in (
+            "banned prompt", "banned_prompt", "content safety", "content_safety", "content policy", "sensitive", "敏感词")):
+        message = "提示词触发内容审核，换个说法再试（这类失败平台会自动退款）"
+    elif 9 in codes or "upstream submit failure" in lowered:
+        message = f"上游这次没接住任务（upstream code=9），{retried}稍后再试（这类失败会自动退款）"
+    elif 4 in codes or "无法识别的参数" in lowered or "validation" in lowered:
+        message = "提示词里带了上游不认的参数（多半是 markdown 格式），清理后仍失败"
+    elif 3 in codes or "no available upstream" in lowered or "no available instance" in lowered:
+        message = "上游暂无可用实例，稍后重试"
+    elif 429 in codes or "rate limit" in lowered or "too many requests" in lowered:
+        message = "提交太频繁，稍等几秒再试"
+    elif not raw:
+        return "Midjourney 请求失败，上游没有给出原因"
+    else:
+        message = raw
+    return f"{message}（原文：{raw[:300]}）" if raw and message != raw else message
+
+def midjourney_retry_backoff(attempt):
+    """第 1 次失败后约 1s、第 2 次 4s、第 3 次 8s、第 4 次 16s（官方 1/4/16 指数退避 + 中间档）。
+
+    每次等 ±20% 抖动：上游整片抖动时，同一秒里的多个任务别同时砸回去，也避免同步重试；
+    抖动只影响等待时间，不改尝试次数与「可不可重试」的判定。
+    """
+    index = max(0, min(int(attempt or 1) - 1, len(MIDJOURNEY_RETRY_BACKOFFS) - 1))
+    return MIDJOURNEY_RETRY_BACKOFFS[index] * random.uniform(0.8, 1.2)
+
+def midjourney_candidate_count(count, limit=4):
+    """这一次入画布取几张候选：上游一次提交就回 4 张，取前 N 张，N 夹在 1..limit。"""
+    try:
+        value = int(count or 1)
+    except (TypeError, ValueError):
+        value = 1
+    return max(1, min(value, limit))
+
+def midjourney_stylize_value(stylize):
+    """stylize 只认 1..1000 的整数；0 / 越界 / 脏值一律不发，不让历史调用方的脏值把请求打炸。"""
+    if isinstance(stylize, bool):
+        return 0
+    try:
+        value = int(stylize)
+    except (TypeError, ValueError):
+        return 0
+    return value if 1 <= value <= 1000 else 0
+
 def midjourney_remote_images(raw):
     data = midjourney_response_data(raw)
     values = data.get("image_urls") or data.get("imageUrls") or []
@@ -36080,6 +36463,15 @@ def midjourney_remote_images(raw):
             if value:
                 urls.append(value)
     return list(dict.fromkeys(urls))
+
+def midjourney_grid_image_url(raw):
+    """上游想象任务的四宫格（4 张候选拼一张）。只有带了才返回，不造图。"""
+    data = midjourney_response_data(raw)
+    for key in ("grid_image_url", "gridImageUrl", "grid_url", "gridUrl"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    return ""
 
 async def midjourney_reference_urls(reference_images):
     urls = []
@@ -36126,23 +36518,44 @@ def apimart_api_base(provider):
     return base_url or APIMART_MIDJOURNEY_API_ROOT
 
 async def apimart_midjourney_request(provider, path, body):
+    """提交 MJ 任务：可重试的失败按 1s / 4s 退避重提，最多 3 次尝试（提交 / 动作 / 局部重绘共用）。"""
     timeout = httpx.Timeout(connect=20.0, read=180.0, write=120.0, pool=20.0)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        response = await client.post(
-            f"{apimart_api_base(provider)}{path}",
-            headers=api_headers(provider=provider),
-            json=body,
+    url = f"{apimart_api_base(provider)}{path}"
+    last_reason = ""
+    for attempt in range(1, MIDJOURNEY_MAX_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                response = await client.post(url, headers=api_headers(provider=provider), json=body)
+        except httpx.TransportError as exc:
+            last_reason = f"网络错误：{http_error_detail(exc)}"
+            if attempt < MIDJOURNEY_MAX_ATTEMPTS:
+                print(f"[midjourney] 提交失败（第 {attempt} 次）：{last_reason}，退避后重试")
+                await asyncio.sleep(midjourney_retry_backoff(attempt))
+                continue
+            raise HTTPException(status_code=502, detail=f"Midjourney 请求失败（已重试 {attempt - 1} 次）：{last_reason}") from exc
+        try:
+            raw = response.json()
+        except ValueError:
+            raw = {"message": response.text[:500]}
+        status_code = response.status_code
+        # 业务 code 写在 body 里、HTTP 可能还是 200：只按 HTTP 判会把这类失败伪装成「未返回任务 ID」
+        failure = midjourney_failure_text(raw)
+        if status_code < 400 and not midjourney_error_code(raw):
+            task_id = midjourney_task_id(raw)
+            if task_id:
+                return raw, task_id
+            raise HTTPException(status_code=502, detail=f"Midjourney 未返回任务 ID：{json.dumps(raw, ensure_ascii=False)[:500]}")
+        retryable = (midjourney_failure_retryable(failure)
+                     or status_code == 429 or 500 <= status_code < 600)
+        last_reason = failure or f"HTTP {status_code}"
+        if retryable and attempt < MIDJOURNEY_MAX_ATTEMPTS:
+            print(f"[midjourney] 提交失败（第 {attempt} 次，HTTP {status_code}）：{last_reason}，退避后重试")
+            await asyncio.sleep(midjourney_retry_backoff(attempt))
+            continue
+        raise HTTPException(
+            status_code=status_code if status_code >= 400 else 502,
+            detail=midjourney_error_message(last_reason, attempts=attempt - 1),
         )
-    try:
-        raw = response.json()
-    except ValueError:
-        raw = {"message": response.text[:500]}
-    if response.status_code >= 400:
-        raise HTTPException(status_code=response.status_code, detail=midjourney_error_detail(raw, f"Midjourney 接口错误（{response.status_code}）"))
-    task_id = midjourney_task_id(raw)
-    if not task_id:
-        raise HTTPException(status_code=502, detail=f"Midjourney 未返回任务 ID：{json.dumps(raw, ensure_ascii=False)[:500]}")
-    return raw, task_id
 
 async def midjourney_result(provider, task_id: str, download_images=True):
     safe_task_id = str(task_id or "").strip()
@@ -36189,8 +36602,39 @@ async def midjourney_result(provider, task_id: str, download_images=True):
     }
 
 MIDJOURNEY_PROMPT_LIMIT = 2000
+MIDJOURNEY_VERSIONS = {"8.2", "8.1", "7", "6.1", "5.2", "5.1"}
 # 与前端 novai-canvas-ui/src/canvas/canvas-next/midjourney.ts 同一套规则（node 测试对拍两边输出）。
-# MJ 把 --xxx 当参数解析，提示词里的 markdown / 换行会被上游当成「无法识别的参数」直接失败。
+# MJ 把提示词里的 "-xxx" 当参数解析：单横杠这种非法 token 会被直接拒单
+# （真机失败样本：upstream code=9 upstream submit failure，提示词尾部残留 "-ar 16:9 -v 6.0"，
+#  同一段文字把这两个 token 去掉就一次成功）。
+# 所以这里做「规范化 + 映射」而不是全删：
+#   * 所有 -flag / --flag 一律写回合法的 --flag；
+#   * ar / v / s 画布 body 里已有等价字段（body 优先），从提示词摘掉避免打架；
+#   * --no / --iw / --cref / --sref / --weird / --chaos / --tile / --repeat / --raw / --stop / --cw / --sw
+#     面板没有对应控件，原样保留（规范化后交给上游 MJ 自己解析），不静默丢用户能力；
+#   * 只认下面这些已知参数名，正文里的普通连字符（black slip dress / e-commerce）永远不动。
+_MIDJOURNEY_PARAM_NAMES = (
+    "ar|aspect|v|version|s|stylize|q|quality|iw|c|chaos|niji|repeat|stop|weird|cref|sref|dref"
+    "|seed|video|hd|beta|uplight|upbeta|draft|motion|turbo|relax|fast|raw|tile|style|no|cw|sw"
+)
+# 参数值：一个非空白 token，但不许以 "-" 开头（否则 "--ar --v 6.0" 会把下一个参数当值吃掉）
+_MIDJOURNEY_PARAM_VALUE = r"[^-\s,。;][^\s,。;]*"
+# 参数 -> body 字段（只有这些从提示词里摘出来传给 body；其余保留在提示词里）
+_MIDJOURNEY_BODY_PARAMS = {
+    "ar": "aspect", "aspect": "aspect",
+    "v": "version", "version": "version",
+    "s": "stylize", "stylize": "stylize",
+}
+_MIDJOURNEY_PARAM_VALUE_OK = {
+    "aspect": re.compile(r"^\d{1,2}:\d{1,2}$"),
+    "version": re.compile(r"^\d{1,2}(?:\.\d)?$"),
+    "stylize": re.compile(r"^\d{1,4}$"),
+}
+# (^|空白) + 横杠 + 已知参数名 + 可选值；横杠先收下来，替换时按「映射 / 保留」决定怎么写回
+_MIDJOURNEY_PARAM_RE = re.compile(
+    r"(^|\s)(-{1,2})(" + _MIDJOURNEY_PARAM_NAMES + r")(?![a-zA-Z])(?:[ \t]*[=:]?[ \t]*(" + _MIDJOURNEY_PARAM_VALUE + r"))?",
+    re.I,
+)
 _MIDJOURNEY_PROMPT_RULES = (
     (re.compile(r"```[^\n]*\n?"), " "),
     (re.compile(r"^\s*\|?[\s:|-]{3,}\|?\s*$", re.M), " "),
@@ -36201,40 +36645,94 @@ _MIDJOURNEY_PROMPT_RULES = (
     (re.compile(r"`"), ""),
     (re.compile(r"\|"), " "),
     (re.compile(r"^\s*[-*+]\s+", re.M), " "),
-    (re.compile(r"-{2,}"), "-"),
+    # 先压成一行：参数 token 才能用 ^ / 空白定界（否则行首参数匹配不到）
     (re.compile(r"[\r\n\t]+"), " "),
-    (re.compile(r" {2,}"), " "),
+    # markdown 的 --- 只变空格，不再压成单横杠（单横杠会被上游当参数）
+    (re.compile(r"-{3,}"), " "),
 )
 
-def midjourney_prompt_text(prompt, limit=MIDJOURNEY_PROMPT_LIMIT):
-    """Midjourney 只收一行纯文本：清掉 markdown 记号、压成一行、去掉会被当成参数前缀的 --。
-    内容不删（上游文本节点的策划大纲仍然进提示词，只是不再带格式）。"""
+def _midjourney_body_param(name, value):
+    """这个 token 是不是「body 里有等价字段」的参数；值得像样才算，否则保留给上游判定。"""
+    key = _MIDJOURNEY_BODY_PARAMS.get(str(name or "").lower())
+    if not key:
+        return None
+    pattern = _MIDJOURNEY_PARAM_VALUE_OK.get(key)
+    if not pattern or not pattern.match(str(value or "").strip()):
+        return None
+    return key
+
+def midjourney_prompt_params(prompt, limit=MIDJOURNEY_PROMPT_LIMIT):
+    """把提示词清成一行并拆出可映射到 body 的 MJ 参数。
+
+    返回 (清洗后的提示词, {"aspect"/"version"/"stylize": 原始值})。
+    ar / v / s 摘掉交给 body（body 优先），其余参数规范成 --flag 后原样留在提示词里。
+    """
     text = str(prompt or "")
     for pattern, replacement in _MIDJOURNEY_PROMPT_RULES:
         text = pattern.sub(replacement, text)
-    text = text.strip()
-    return text[:limit].strip() if len(text) > limit else text
+    params = {}
 
-async def generate_apimart_midjourney_provider_image(prompt, size, reference_images, provider, version="", hd=False):
+    def _rewrite(match):
+        prefix, _dashes, name, value = match.group(1), match.group(2), match.group(3), match.group(4)
+        value = str(value or "").strip()
+        suffix = (" " + value) if value else ""
+        key = _midjourney_body_param(name, value)
+        if key:
+            params.setdefault(key, value)
+            return prefix or ""
+        return "%s--%s%s" % (prefix or "", name, suffix)
+
+    text = _MIDJOURNEY_PARAM_RE.sub(_rewrite, text)
+    text = re.sub(r" {2,}", " ", text).strip()
+    if len(text) > limit:
+        text = text[:limit].strip()
+    return text, params
+
+def midjourney_prompt_text(prompt, limit=MIDJOURNEY_PROMPT_LIMIT):
+    """Midjourney 只收一行纯文本：清掉 markdown 记号、压成一行、规范化 MJ 参数 token。
+    ar / v / s 这类 body 有等价字段的参数会被摘掉（见 midjourney_prompt_params）。"""
+    return midjourney_prompt_params(prompt, limit)[0]
+
+def midjourney_explicit_size(size):
+    """请求里给了像素或比例就以请求为准；只有 auto / 自适应这类「没指定」才轮到提示词里的 --ar。"""
+    text = str(size or "").strip()
+    return bool(re.fullmatch(r"\d+\s*[x×]\s*\d+", text) or re.fullmatch(r"\d{1,2}:\d{1,2}", text))
+
+async def generate_apimart_midjourney_provider_image(prompt, size, reference_images, provider, version="", hd=False, speed="", stylize=0, count=1):
     ratio, _resolution = apimart_size_resolution(size)
-    cleaned_prompt = midjourney_prompt_text(prompt)
+    cleaned_prompt, prompt_params = midjourney_prompt_params(prompt)
     if not cleaned_prompt:
         raise HTTPException(status_code=400, detail="提示词里没有能发给 Midjourney 的内容（只剩格式符号）：写一句画面描述再试。")
+    # --ar 只在请求没给像素/比例（auto / 自适应）时兜底；画布总是给比例，请求优先
+    if prompt_params.get("aspect") and not midjourney_explicit_size(size):
+        ratio = str(prompt_params["aspect"])
     body = {"prompt": cleaned_prompt, "size": ratio, "metadata": {"source": "infinite-canvas"}}
     version = str(version or "").strip()
+    # --v 同理：body 没传版本时才用提示词里那个（且必须是接口白名单内的版本，别拿非法值去撞 400）
+    if not version and str(prompt_params.get("version") or "").strip() in MIDJOURNEY_VERSIONS:
+        version = str(prompt_params["version"]).strip()
     if version:
-        if version not in {"8.2", "8.1", "7", "6.1", "5.2", "5.1"}:
+        if version not in MIDJOURNEY_VERSIONS:
             raise HTTPException(status_code=400, detail=f"不支持的 Midjourney 版本：{version}")
         body["version"] = version
     if hd:
         if version and version not in {"8.2", "8.1"}:
             raise HTTPException(status_code=400, detail="Midjourney HD 仅支持 v8.1 或 v8.2。")
         body["hd"] = True
+    # 速度 / 风格化走 body 字段：提示词里的 -- 会被 midjourney_prompt_text 压成 -，
+    # 不显式下发 speed 就等于上游默认 relax，任务会一直卡在 RELAX 通道提交失败（code=9）。
+    speed = str(speed or "").strip().lower()
+    if speed in MIDJOURNEY_SPEEDS:
+        body["speed"] = speed
+    stylize = midjourney_stylize_value(stylize) or midjourney_stylize_value(prompt_params.get("stylize"))
+    if stylize:
+        body["stylize"] = stylize
     image_urls = await midjourney_reference_urls(reference_images)
     if image_urls:
         body["image_urls"] = image_urls
-    _raw, task_id = await apimart_midjourney_request(provider, "/v1/midjourney/generations", body)
     deadline = time.monotonic() + APIMART_IMAGE_TASK_TIMEOUT
+    attempts = 1
+    _raw, task_id = await apimart_midjourney_request(provider, "/v1/midjourney/generations", body)
     initial_delay = APIMART_IMAGE_INITIAL_POLL_DELAY
     while time.monotonic() < deadline:
         if initial_delay:
@@ -36242,10 +36740,35 @@ async def generate_apimart_midjourney_provider_image(prompt, size, reference_ima
             initial_delay = 0
         result = await midjourney_result(provider, task_id, download_images=False)
         if result.get("status") == "failed":
-            raise HTTPException(status_code=502, detail=f"Midjourney 任务失败：{result.get('error') or '未知错误'}")
+            failure = midjourney_failure_text(result.get("raw"))
+            error_text = str(result.get("error") or "").strip()
+            if error_text and error_text not in failure:
+                failure = f"{failure} / {error_text}" if failure else error_text
+            if midjourney_failure_retryable(failure) and attempts < MIDJOURNEY_MAX_ATTEMPTS:
+                print(f"[midjourney] 任务失败（第 {attempts} 次，task_id={task_id}）：{failure}，退避后重新提交")
+                await asyncio.sleep(midjourney_retry_backoff(attempts))
+                attempts += 1
+                _raw, task_id = await apimart_midjourney_request(provider, "/v1/midjourney/generations", body)
+                initial_delay = APIMART_IMAGE_INITIAL_POLL_DELAY
+                continue
+            raise HTTPException(status_code=502, detail=f"Midjourney 任务失败：{midjourney_error_message(failure, attempts=attempts - 1)}")
         if result.get("status") == "succeeded":
-            remote_urls = result.get("remote_images") or []
-            return {"type": "url", "value": remote_urls[0]}, result.get("raw") or {}
+            raw = dict(result.get("raw") or {})
+            urls = (result.get("remote_images") or [])[:midjourney_candidate_count(count)]
+            if not urls:
+                raise HTTPException(status_code=502, detail="Midjourney 任务成功但没有返回图片。")
+            images = [{"url": url} for url in urls]
+            # 四宫格是上游附带的（一次提交的 4 张拼图，不额外收费）：候选之后追加、去重，
+            # 上游没给就不加。前端要标注「四宫格」时靠 mj_grid 标记 + mj_grid_url。
+            grid_url = midjourney_grid_image_url(raw)
+            if grid_url and grid_url not in urls:
+                raw["mj_grid_url"] = grid_url
+                images.append({"url": grid_url, "mj_grid": True})
+            # 上游一次就回 4 张单图，raw 里是 image_urls —— extract_images 的 key 白名单不认它，
+            # 所以只在这个分支补一份它认得的 images 列表，让「候选 N 张 + 四宫格」真的进画布；
+            # 不动全局白名单（会影响所有 provider），也不覆盖 data（里面还有 task id / status）。
+            raw["images"] = images
+            return {"type": "url", "value": urls[0]}, raw
         await asyncio.sleep(min(APIMART_IMAGE_POLL_INTERVAL, max(0.0, deadline - time.monotonic())))
     raise HTTPException(status_code=504, detail=f"Midjourney 任务超时，task_id={task_id}")
 
@@ -39301,11 +39824,22 @@ def _agent_beat_run_batch_run(args):
          "message": f"已让画布开始跑「{title}」的 {rows} 行，结果会逐行出现在节点右侧"}, review)
 
 
-def _agent_beat_mark_run(canvas_id, node_id, settings=None, settings_kind="image", exclude_self_refs=False):
+def _agent_beat_mark_run(canvas_id, node_id, settings=None, settings_kind="image", exclude_self_refs=False,
+                         reference_images=None, review_rerun=False):
     """run_generation 在 BEAT 画布上：可选先改参数，再标记让画布按用户点「运行」同口径执行。
 
-    exclude_self_refs=True（审查触发的重跑）：服务端先过重跑护栏（请求没变就不跑 / 自动重跑上限），
-    并在标记里告诉画布「开跑时剔除节点自己的旧图」，别把上一版问题当参考再喂回去。"""
+    exclude_self_refs=True：只表示「这次不拿节点自己的旧图当参考」（写进 agentRun.excludeSelfRefs /
+    agentPendingExcludeSelfRefs），用户重抽和审查重跑都可能带它，本身不触发护栏。
+    review_rerun=True（审查链路产出的步骤专有，服务端内部标记，不进工具 schema）：先过重跑护栏
+    （请求没变就不跑 / 自动重跑上限），并把这次计入自动重跑次数。
+    reference_images（用户明确要求的参考图）：只收非空地址、去重后最多 10 张；立刻运行写进
+    agentRun.referenceImages，延后执行写进 agentPendingReferenceImages（画布开跑时当参考图）。"""
+    refs = []
+    for ref in (reference_images if isinstance(reference_images, (list, tuple)) else []):
+        url = str((ref.get("url") if isinstance(ref, dict) else ref) or "").strip()
+        if url and url not in refs:
+            refs.append(url)
+    refs = refs[:10]
     state = {}
 
     def _mutate(canvas):
@@ -39338,12 +39872,14 @@ def _agent_beat_mark_run(canvas_id, node_id, settings=None, settings_kind="image
                                  code="empty_prompt")
         if settings:
             _agent_classic_apply_settings(node, settings_kind, settings)
-        review_rerun = bool(exclude_self_refs)
         data = node.setdefault("data", {})
         gen = data.get("gen") if isinstance(data.get("gen"), dict) else {}
+        record_refs = _agent_upstream_media_urls(canvas, node_id)
+        for url in refs:
+            if url not in record_refs:
+                record_refs.append(url)
         record = _agent_generation_request_record(
-            str(node.get("kind") or ""), _agent_beat_prompt(node),
-            _agent_upstream_media_urls(canvas, node_id), gen.get("params") or {})
+            str(node.get("kind") or ""), _agent_beat_prompt(node), record_refs, gen.get("params") or {})
         blocked = _agent_regen_guard(_agent_regen_state_node(canvas, node), record,
                                      review_rerun=review_rerun)
         if blocked:
@@ -39353,15 +39889,23 @@ def _agent_beat_mark_run(canvas_id, node_id, settings=None, settings_kind="image
         if _AGENT_BEAT_DEFER_GEN.get():
             state["deferred"] = True       # 只改好参数，等用户在待生成卡片里点执行
             data["agentPending"] = True
-            if review_rerun:
+            if exclude_self_refs:
                 # 前端契约：待生成卡片里执行时也不许拿节点自己的旧图当参考
                 data["agentPendingExcludeSelfRefs"] = True
+            if refs:
+                # 前端契约：待生成卡片里执行时把用户明确要求的图当参考图
+                data["agentPendingReferenceImages"] = list(refs)
+            else:
+                data.pop("agentPendingReferenceImages", None)
         else:
             data.pop("agentPending", None)
             data.pop("agentPendingExcludeSelfRefs", None)
+            data.pop("agentPendingReferenceImages", None)
             run = {"at": now_ms()}
-            if review_rerun:
+            if exclude_self_refs:
                 run["excludeSelfRefs"] = True   # 前端契约：画布开跑时剔除节点自己的产物（问题图）
+            if refs:
+                run["referenceImages"] = list(refs)   # 前端契约：画布开跑时把用户明确要求的图当参考图
             if settings and isinstance(gen.get("params"), dict):
                 # 用户在待生成卡片里选的模型 / 参数随标记一起交给画布：画布开跑前先套用，避免被本地旧副本覆盖回默认模型
                 run["params"] = dict(gen["params"])
@@ -39615,7 +40159,8 @@ def _agent_node_reference_items(canvas, node, exclude_self=False):
 #     1) 节点自己的产物永远从它自己的参考图里剔掉（服务端强制过滤，不依赖模型传参）；
 #     2) 请求指纹（提示词 / 参数 / 参考图）与上次相同 → 不再发起生成，返回 unchanged；
 #     3) 同一节点自动重跑最多 _AGENT_REVIEW_RERUN_LIMIT 次，超过就停下交用户选择。
-#   状态记在节点上（agentRegen.last / reruns）：节点历史结果一条不删、不覆盖。
+#   状态记在节点 data.agentRegen（last / reruns，前端会持久化；老画布顶层 agentRegen 兼容读）：
+#   节点历史结果一条不删、不覆盖。
 # ---------------------------------------------------------------------------
 
 _AGENT_REVIEW_RERUN_LIMIT = 2
@@ -39652,21 +40197,65 @@ def _agent_self_output_urls(canvas, node):
     return urls
 
 
-def _agent_upstream_media_urls(canvas, node_id):
-    """上游节点已有的结果地址（重跑时真正还能用的「最初输入」之一）。"""
-    by_id = _agent_nodes_by_id(canvas)
+def _agent_beat_explicit_reference_urls(node):
+    """节点上显式指定要当参考图的地址（后端契约：agentRun.referenceImages / agentPendingReferenceImages）。"""
+    data = (node or {}).get("data") if isinstance(node, dict) else None
+    if not isinstance(data, dict):
+        return []
+    run = data.get("agentRun") if isinstance(data.get("agentRun"), dict) else {}
     urls = []
-    for up in _agent_upstream_ids(canvas, node_id):
-        for item in _agent_media_items(by_id.get(up) or {}):
-            url = str(item.get("url") or "").strip()
+    for source in (run.get("referenceImages"), data.get("agentPendingReferenceImages")):
+        if not isinstance(source, list):
+            continue
+        for raw in source:
+            url = str(raw or "").strip()
             if url and url not in urls:
                 urls.append(url)
     return urls
 
 
+def _agent_upstream_media_urls(canvas, node_id):
+    """上游节点已有的结果地址（重跑时真正还能用的「最初输入」之一）。
+
+    BEAT 保存的连线只有 from/to、没有 kind（会被当成 flow），所以 BEAT 画布把 flow 也算上游；
+    经典画布保持只认 input。节点上显式的参考图也算进请求指纹：换了参考图就是换了请求。"""
+    beat = _agent_is_beat_canvas(canvas)
+    by_id = _agent_nodes_by_id(canvas)
+    urls = []
+    for up in _agent_upstream_ids(canvas, node_id, ("input", "flow") if beat else ("input",)):
+        for item in _agent_media_items(by_id.get(up) or {}):
+            url = str(item.get("url") or "").strip()
+            if url and url not in urls:
+                urls.append(url)
+    if beat:
+        for url in _agent_beat_explicit_reference_urls(by_id.get(node_id) or {}):
+            if url not in urls:
+                urls.append(url)
+    return urls
+
+
 def _agent_regen_state(node):
-    state = (node or {}).get(_AGENT_REGEN_STATE_KEY) if isinstance(node, dict) else None
+    """护栏状态优先读 data.agentRegen（前端保存画布只持久化固定字段 + data，顶层未知键会被丢掉），
+    老画布没有时才回退顶层 agentRegen。"""
+    if not isinstance(node, dict):
+        return {}
+    data = node.get("data")
+    state = data.get(_AGENT_REGEN_STATE_KEY) if isinstance(data, dict) else None
+    if not isinstance(state, dict):
+        state = node.get(_AGENT_REGEN_STATE_KEY)
     return state if isinstance(state, dict) else {}
+
+
+def _agent_regen_write_state(node, state):
+    """把护栏状态写回 data.agentRegen（前端会持久化），顺手清掉顶层旧键，避免两处状态打架。"""
+    if not isinstance(node, dict):
+        return
+    data = node.get("data")
+    if not isinstance(data, dict):
+        data = {}
+        node["data"] = data
+    data[_AGENT_REGEN_STATE_KEY] = state
+    node.pop(_AGENT_REGEN_STATE_KEY, None)
 
 
 def _agent_regen_state_node(canvas, node):
@@ -39743,7 +40332,7 @@ def _agent_regen_record(node, record, review_rerun=False):
     state["last"] = record
     state["last_at"] = now_ms()
     state["reruns"] = (_agent_regen_rerun_count(node) + 1) if review_rerun else 0
-    node[_AGENT_REGEN_STATE_KEY] = state
+    _agent_regen_write_state(node, state)
 
 
 def _agent_regen_guard_result(status, node_id, kind=""):
@@ -39778,7 +40367,7 @@ def _agent_regen_reset_review_reruns(canvas_id, node_ids):
                     continue
                 state = dict(_agent_regen_state(node))
                 state["reruns"] = 0
-                node[_AGENT_REGEN_STATE_KEY] = state
+                _agent_regen_write_state(node, state)
             return None
 
         _agent_mutate_canvas(canvas_id, _mutate)
@@ -41112,7 +41701,8 @@ def _agent_tool_run_generation_validate_classic(args):
             "model": model,
             "size": agent_image_size(provider, model, size_hint, ratio),
             "quality": str(args.get("quality") or settings.get("quality") or "auto").strip() or "auto",
-            "exclude_self_refs": bool(args.get("exclude_self_refs"))}
+            "exclude_self_refs": bool(args.get("exclude_self_refs")),
+            "review_rerun": bool(args.get("review_rerun"))}
     if settings:
         norm["settings"] = settings
         norm["settings_kind"] = settings_kind
@@ -41133,7 +41723,9 @@ async def _agent_tool_run_generation_run_classic(args):
     if _agent_is_beat_canvas(canvas):
         return _agent_beat_mark_run(args["canvas_id"], args["node_id"], args.get("settings"),
                                     args.get("settings_kind") or "image",
-                                    exclude_self_refs=bool(args.get("exclude_self_refs")))
+                                    exclude_self_refs=bool(args.get("exclude_self_refs")),
+                                    reference_images=args.get("reference_images") or [],
+                                    review_rerun=bool(args.get("review_rerun")))
     node = _agent_find_node(canvas, args["node_id"])
     if not node:
         raise AgentToolError(f"节点 {args['node_id']} 不存在", code="node_not_found", status_code=404)
@@ -41142,16 +41734,17 @@ async def _agent_tool_run_generation_run_classic(args):
         raise AgentToolError(
             f"节点 {args['node_id']} 没有提示词（text/prompt 为空），请先用 update_node 写入提示词",
             code="empty_prompt")
-    review_rerun = bool(args.get("exclude_self_refs"))
+    exclude_self_refs = bool(args.get("exclude_self_refs"))
+    review_rerun = bool(args.get("review_rerun"))
     # 节点自带图片（images[] / url）自动作为参考图（不覆盖显式传入的 reference_images）
     refs = list(args["reference_images"])
-    if not refs and not review_rerun:
+    if not refs and not exclude_self_refs:
         for img in (node.get("images") or [])[:10]:
             if isinstance(img, dict) and str(img.get("url") or "").strip():
                 refs.append({"url": str(img["url"]).strip()})
         if not refs and str(node.get("url") or "").strip():
             refs.append({"url": str(node["url"]).strip()})
-    if review_rerun:
+    if exclude_self_refs:
         # 服务端强制过滤：显式参考图里夹着节点自己的产物也不许用（问题图不能再进下一版）
         self_urls = _agent_self_output_urls(canvas, node)
         refs = [ref for ref in refs if str(ref.get("url") or "").strip() not in self_urls]
@@ -42111,7 +42704,8 @@ def _agent_image_size_from_settings(eff, provider, model, size_override="", refs
 
 
 async def _agent_start_node_generation(canvas_id, node_id, extra_refs=None, size_override="",
-                                       prompt_override="", count_override=None, exclude_self_refs=False):
+                                       prompt_override="", count_override=None, exclude_self_refs=False,
+                                       review_rerun=False):
     """对智能画布的图片/视频节点发起真实生成，和用户在节点上点「运行」走同一套口径：
     提示词 = 上游提示词节点 + 节点自身提示词；参考 = 节点自身已有的图 + 上游产物；参数 = 画布默认 + runSettings。
     节点已经有图时（重跑），跟前端一样在右侧新开一个结果节点，原图保留不被覆盖。
@@ -42137,13 +42731,14 @@ async def _agent_start_node_generation(canvas_id, node_id, extra_refs=None, size
         raise AgentToolError(
             f"节点 {node_id} 用的是 {engine} 引擎，助手目前只能跑在线平台生成；可以先用 update_node 的 settings.provider 改成在线平台",
             code="unsupported_engine")
-    review_rerun = bool(exclude_self_refs)
-    refs = _agent_node_reference_items(canvas, node, exclude_self=review_rerun)
+    exclude_self = bool(exclude_self_refs)
+    review_rerun = bool(review_rerun)
+    refs = _agent_node_reference_items(canvas, node, exclude_self=exclude_self)
     for ref in (extra_refs or []):
         url = str((ref or {}).get("url") or "").strip()
         if url and url not in {r["url"] for r in refs}:
             refs.append({"url": url, "kind": _agent_item_kind(ref), "name": ""})
-    if review_rerun:
+    if exclude_self:
         # 服务端强制过滤：显式传进来的参考图里如果夹着节点自己的产物（上一版问题图）也不许用
         self_urls = _agent_self_output_urls(canvas, node)
         refs = [r for r in refs if str(r.get("url") or "") not in self_urls]
@@ -42640,7 +43235,8 @@ def _agent_tool_run_generation_validate(args):
     return {"canvas_id": canvas_id, "node_id": node_id, "smart": True,
             "settings": _agent_validate_settings(settings, kind) if settings else {},
             "size": str(args.get("size") or "").strip(), "reference_images": refs,
-            "exclude_self_refs": bool(args.get("exclude_self_refs"))}
+            "exclude_self_refs": bool(args.get("exclude_self_refs")),
+            "review_rerun": bool(args.get("review_rerun"))}
 
 
 async def _agent_tool_run_generation_run(args):
@@ -42654,7 +43250,8 @@ async def _agent_tool_run_generation_run(args):
         _agent_mutate_canvas(args["canvas_id"], _mutate)
     return await _agent_start_node_generation(args["canvas_id"], args["node_id"],
                                               extra_refs=args["reference_images"], size_override=args["size"],
-                                              exclude_self_refs=bool(args.get("exclude_self_refs")))
+                                              exclude_self_refs=bool(args.get("exclude_self_refs")),
+                                              review_rerun=bool(args.get("review_rerun")))
 
 
 def _agent_tool_run_generation_preview(args, canvas):
@@ -44480,7 +45077,7 @@ def _agent_review_fix_plan(canvas, req, verdicts):
                                                        "prompt": v["revised_prompt"]},
                       "description": "按检查建议改提示词"})
         steps.append({"tool": "run_generation", "args": {"canvas_id": req.canvas_id, "node_id": node["id"],
-                                                        "exclude_self_refs": True},
+                                                        "exclude_self_refs": True, "review_rerun": True},
                       "description": "按新提示词重新生成，原图保留"})
         allowed.append(node["id"])
         units += 1
@@ -46653,7 +47250,9 @@ AGENT_TOOLS = {
             "settings": {"type": "object", "description": "可选：运行前要改的生成参数（同 create_node.settings）"},
             "reference_images": {"type": "array", "items": {"type": "string"}, "description": "可选：额外参考图 URL"},
             "exclude_self_refs": {"type": "boolean", "default": False,
-                                  "description": "可选：重新生成审查不合格的结果时用，true=不再拿节点自己的旧图当参考图（上游与手动参考照旧）"}},
+                                  "description": "同一条流水线重新抽一次（再来一张 / 再做一张 / 再来一条 / 重新生成一版 / 换一张）时传 true："
+                                                 "不拿节点自己的上一版结果当参考图；要在这张图上改（改成 / 换成 / 调整 / 重拍）时不要传，"
+                                                 "并把这张图放进 reference_images"}},
             "required": ["canvas_id", "node_id"]},
         "validate": _agent_tool_run_generation_validate,
         "run": _agent_tool_run_generation_run,
@@ -48942,6 +49541,12 @@ async def _agent_add_image_to_canvas(canvas_id, url, title=""):
     node_type = "smart-image" if smart else "image"
 
     def _mutate(canvas_now):
+        # canvas-next 文档里的节点必须带 kind/data.gen，旧形状会被前端当便签渲染
+        if _agent_is_beat_canvas(canvas_now):
+            node = _agent_beat_new_node("image", 0, 0, title=node_title, url=local_url, uploaded=True)
+            node["x"], node["y"] = _agent_beat_place(canvas_now, [], node.get("w") or 240, node.get("h") or 240)
+            canvas_now.setdefault("nodes", []).append(node)
+            return node
         node = {"id": f"agent_{uuid.uuid4().hex[:16]}", "type": node_type, "x": 0, "y": 0,
                 "title": node_title, "created_at": now_ms()}
         if smart:
@@ -50044,7 +50649,11 @@ _AGENT_RUN_SYSTEM_PROMPT = (
     "12) 用户要改某个节点时直接改那个节点，不要新建节点绕开它：改提示词的措辞/风格/内容用 refine_prompt 出候选让用户挑"
     "（用户明确说「直接改成：xxx」给了完整原文时才用 update_node.prompt）；换模型/比例/张数/时长用 update_node.settings，只写要改的项。"
     "用户说「还是之前那版」时，从节点的 earlier_prompts 里找出那一版，用 update_node.prompt 改回去。"
-    "用户说「重新生成/再来一张」时，用 run_generation 跑那个节点。\n"
+    "用户要「再来一张 / 再做一张 / 再来一条 / 重新生成一版 / 换一张」时，是同一条流水线重新抽一次：用 run_generation 跑那个节点并传 exclude_self_refs=true，"
+    "不要把上一版的结果节点、它的图当作 inputs 或 reference_images 再喂回去。"
+    "用户要「在这张基础上改 / 把 A 改成 B / 换成… / 调整… / 重拍」时，是拿这张图当底：先用 update_node.prompt 写新提示词，再 run_generation 且不要传 exclude_self_refs，"
+    "并把这张图当前的地址放进 reference_images（画布会把它当参考图）。"
+    "新建节点再生成时，除非用户明确说「用这张图当参考」，不要把旧的结果节点当作 inputs。\n"
     "13) 用户提到「这个/这张/它」时指的是选中的节点；没有选中又不确定是哪个时，按「最近改动的节点」推断并在 assumptions 里说明，不要停下来提问。\n"
     "14) 新建节点要接上游时，用 create_node 的 inputs 一步连好；已有节点之间才用 connect_nodes / disconnect_nodes。"
     "连线一律是「上游 → 下游」：提示词节点、参考图节点 → 图片/视频节点。\n"
@@ -50377,6 +50986,14 @@ def _agent_run_focus_text(focus, canvas):
             lines.append("用户当前选中的节点（画布上真实存在，操作应优先考虑它们）：")
             for nid in exist:
                 node = nodes[nid]
+                # 分组 / 堆叠单独说清成员：它们自己没有素材 URL，只给 id + 「标题=无」模型分不清几个堆叠
+                if _agent_is_beat_node(node) and str(node.get("kind") or "") == "group":
+                    members = _agent_beat_channel_items(canvas, node, nodes)
+                    names = [(_agent_beat_title(member) or _agent_node_ref(member)) for member in members]
+                    lines.append(f"- {nid}｜kind=group｜标题={_agent_beat_title(node) or node.get('title') or '无'}"
+                                 f"｜{'堆叠' if _agent_beat_is_stack(node) else '分组'}"
+                                 f"（{len(names)} 个成员：{'、'.join(names[:6]) or '空'}）")
+                    continue
                 if _agent_is_beat_node(node):
                     url = _agent_beat_url(node)
                     asset = _agent_beat_asset(node) or {}
@@ -50674,9 +51291,12 @@ def agent_plan_confirmation_needed(steps, confirmed=False):
     if confirmed:
         return {"needed": False, "tools": []}
     tools = [str((s or {}).get("tool") or "") for s in (steps or []) if isinstance(s, dict)]
-    # MCP 工具默认要确认：可能改外部系统、也可能有副作用，统一走「先出方案 → 用户点执行」
+    # MCP 工具默认要确认：可能改外部系统、也可能有副作用，统一走「先出方案 → 用户点执行」；
+    # 例外是 mcp__<server>__prompt——它只把服务端模板展开成文本，没有副作用，拦它只会白花一次确认
     blocked = [t for t in tools
-               if t in AGENT_PLAN_CONFIRM_TOOLS or t.startswith(_mcp_registry.AGENT_TOOL_PREFIX)]
+               if t in AGENT_PLAN_CONFIRM_TOOLS
+               or (t.startswith(_mcp_registry.AGENT_TOOL_PREFIX)
+                   and not _mcp_registry.is_prompt_tool(t))]
     return {"needed": bool(blocked), "tools": blocked}
 
 
@@ -51720,7 +52340,8 @@ def _agent_regenerate_plan(canvas, items, prompts, canvas_id):
                           "args": {"canvas_id": canvas_id, "node_id": node_id, "prompt": prompt},
                           "description": f"按审查建议改「{label}」的提示词"})
         steps.append({"tool": "run_generation",
-                      "args": {"canvas_id": canvas_id, "node_id": node_id, "exclude_self_refs": True},
+                      "args": {"canvas_id": canvas_id, "node_id": node_id,
+                               "exclude_self_refs": True, "review_rerun": True},
                       "description": f"重新生成「{label}」"})
         allowed.append(node_id)
         units += 1
@@ -51731,7 +52352,8 @@ def _agent_regenerate_plan(canvas, items, prompts, canvas_id):
 def _agent_regenerate_steps(canvas, items, prompts, canvas_id):
     """重生成的步骤：先按审查建议（或用户描述）改提示词，再重新跑；timeline 只重新导出，不改提示词。
 
-    重跑一律带 exclude_self_refs=True（服务端强制剔除节点自己的问题图，不依赖模型自觉）。"""
+    重跑一律带 exclude_self_refs=True + review_rerun=True：前者服务端强制剔除节点自己的问题图（不依赖模型自觉），
+    后者是审查链路专用的内部标记，用来走重跑护栏 / 计数；用户自己说「再来一张」只带前者。"""
     return _agent_regenerate_plan(canvas, items, prompts, canvas_id)["steps"]
 
 
@@ -53575,17 +54197,46 @@ def _agent_run_collect_images(focus, canvas):
                 picked.append({"url": url, "label": _agent_node_ref(node)})
             return
 
+    def _take_node_image(node):
+        """选中 / 引用的节点取图：普通节点取第一张；分组 / 堆叠按成员展开，每个成员取第一张。
+
+        堆叠在 _agent_beat_media_items 里返回 []（它只认 image/video/audio），不在这里展开就等于
+        「@ 了三个堆叠，看图链路一张图都没有」，模型只能按标题瞎猜，最后全用了第一个堆叠。
+        展开顺序交给 _agent_beat_channel_items：堆叠按叠内顺序，普通分组按画布位置。
+        """
+        if not isinstance(node, dict) or str(node.get("kind") or "") != "group":
+            _take_first_image(node)
+            return
+        group_name = (_agent_beat_title(node) or str(node.get("title") or "").strip()
+                      or str(node.get("id") or "").strip())
+        is_stack = _agent_beat_is_stack(node)
+        index = 0
+        for member in _agent_beat_channel_items(canvas, node, by_id):
+            for item in _agent_media_items(member):
+                if _agent_item_kind(item) != "image":
+                    continue
+                url = str(item.get("url") or "").strip()
+                if url and url in seen:
+                    break
+                if url:
+                    index += 1
+                    label = (f"{group_name}·图{index}" if is_stack
+                             else (_agent_node_ref(member) or f"{group_name}·图{index}"))
+                    seen.add(url)
+                    picked.append({"url": url, "label": label})
+                break
+
     for nid in (focus or {}).get("selected_node_ids") or []:
         node = by_id.get(str(nid))
         if node:
-            _take_first_image(node)
+            _take_node_image(node)
     # references 排在旧 reference_images 前面：前者带身份（role 说明当什么用），意图更明确
     for ref in (focus or {}).get("references") or []:
         if not isinstance(ref, dict):
             continue
         node = by_id.get(str(ref.get("id") or ""))
         if node:
-            _take_first_image(node)
+            _take_node_image(node)
     n = 0
     for url in (focus or {}).get("reference_images") or []:
         url = str(url or "").strip()
@@ -55360,6 +56011,10 @@ _AGENT_BEAT_SYSTEM_PROMPT = (
     '- 用户执行生成后，系统会等结果、自动审查（图片直接看，视频看 3 帧），并问用户是否满意——这些系统会做，你不用管。用户下一条消息会告诉你满意（继续整体方案的下一阶段）还是哪里不满意（在原节点用 update_node 改提示词 / 参数，再 run_generation 交给用户确认；不要另建新节点）。\n'
     '- 不要提前对还没出结果的节点建时间线。\n'
     '- 改已有节点：提示词 / 标题用 update_node（prompt / title），参数用 update_node.settings；重新出图用 run_generation。用户只说改参数 / 改提示词时只改不跑（跑会花钱），回复里提醒一句「要按新设置重新生成跟我说」。\n'
+    '- 重新出图分两种：用户说「再来一张 / 再做一张 / 再来一条 / 重新生成一版 / 换一张」是同一条流水线重新抽一次，run_generation 传 exclude_self_refs=true，'
+    '不要把上一版的结果节点、它的图当作 inputs / reference_images；用户说「在这张基础上改 / 把 A 改成 B / 换成… / 调整… / 重拍」是拿这张图当底，'
+    '先用 update_node 写新提示词，再 run_generation 且不传 exclude_self_refs，并把这张图当前的地址放进 reference_images。新建节点再生成时，'
+    '除非用户明确说「用这张图当参考」，不要把旧的结果节点当作 inputs。\n'
     '- 新建节点要接上游时用 create_node 的 inputs 一步连好；连线一律「上游 → 下游」。\n'
     '- 用户说「记住 / 以后都 / 默认」时用 remember；上下文里有项目记忆时默认照做。\n'
     '- 多阶段任务每个阶段做完都会停下来等用户确认，下一条消息里用户确认满意后再推进下一阶段（整体方案会一直带着）。\n'
@@ -55612,6 +56267,10 @@ class _CanvasRunContext(_AgentRunContext):
             focus_text=focus_text).replace(_AGENT_OUTPUT_FORMAT_MARKER, _agent_output_format_block())
         # 瘦身在 format 之后做：canvas_cli 示例里的 args={...} 不能被当成格式占位符
         prompt = _agent_slim_system_prompt(prompt, beat=beat)
+        # MCP 服务自带的操作契约（如 Photoshop「抠背景只走 recipe」的硬规则）：没有就空串
+        mcp_contract = _mcp_registry.agent_instructions_block()
+        if mcp_contract:
+            prompt = prompt + "\n\n" + mcp_contract
         return self._prompt_tail(prompt + _agent_v2_read_first_hint())
 
     def build_system_prefix(self, tools_json_text):
@@ -55628,6 +56287,10 @@ class _CanvasRunContext(_AgentRunContext):
             focus_text="").replace(_AGENT_OUTPUT_FORMAT_MARKER, _agent_output_format_block())
         # 瘦身在 format 之后做：canvas_cli 示例里的 args={...} 不能被当成格式占位符
         prompt = _agent_slim_system_prompt(prompt, beat=beat)
+        # 与 build_system_prompt 同口径：MCP 契约进稳定前缀才能命中平台的前缀缓存
+        mcp_contract = _mcp_registry.agent_instructions_block()
+        if mcp_contract:
+            prompt = prompt + "\n\n" + mcp_contract
         return self._prompt_tail(prompt + _agent_v2_read_first_hint())
 
     def build_environment_text(self, snapshot, vision_text="", map_mode=True, cap_tokens=0):
@@ -59605,6 +60268,15 @@ _auth_service.set_asset_hooks(purge=purge_user_asset_data, impact=asset_account_
 
 from server.routes.split_layers import router as _split_layers_router
 app.include_router(_split_layers_router)
+
+# PS 精修桥：HTTP 取回只导出素材（画布由前端写），Agent 工具才由服务端建节点
+from server.integrations import photoshop_bridge as _ps_bridge  # noqa: E402
+_ps_bridge.init(load_canvas=load_canvas, local_image_path=_agent_local_image_path, read_image_size=_agent_read_image_size, add_image_to_canvas=_agent_add_image_to_canvas, tool_error=AgentToolError, assets_dir=lambda: ASSETS_DIR, data_dir=lambda: DATA_DIR)
+app.include_router(_ps_bridge.router)
+AGENT_TOOLS.update(_ps_bridge.agent_tool_entries())
+AGENT_PLAN_WRITE_TOOLS.update({"photoshop_open_node", "photoshop_fetch_node"})
+# CONFIRM_TOOLS 是上面两个集合的副本，只更新 WRITE_TOOLS 不会进确认闸门
+AGENT_PLAN_CONFIRM_TOOLS.update({"photoshop_open_node", "photoshop_fetch_node"})
 
 
 @app.post("/api/native-save")

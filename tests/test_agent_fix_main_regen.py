@@ -83,6 +83,18 @@ def beat_canvas(text="版本A"):
             "connections": [{"from": "u1", "to": "n1", "kind": "input"}]}
 
 
+def frontend_saved(canvas):
+    """模拟前端保存画布：只保留固定字段 + data，节点顶层的未知键会被丢掉（实测行为）。"""
+    fixed = ("id", "type", "kind", "x", "y", "w", "h", "text", "url", "title")
+    nodes = []
+    for node in canvas.get("nodes") or []:
+        kept = {key: node[key] for key in fixed if key in node}
+        if "data" in node:
+            kept["data"] = node["data"]
+        nodes.append(kept)
+    return {"id": canvas.get("id"), "nodes": nodes, "connections": canvas.get("connections") or []}
+
+
 @contextlib.contextmanager
 def patched_generation(canvas):
     """把生成链路换成内存实现：load/mutate 就地改同一个 canvas，任务只记录不真发。"""
@@ -158,13 +170,213 @@ class RuleOneReferenceTests(unittest.TestCase):
     def test_beat_regenerate_marks_canvas_to_exclude_self_refs(self):
         canvas = beat_canvas()
         with patched_generation(canvas) as (tasks, cv):
-            result = main._agent_beat_mark_run("c1", "n1", None, "image", exclude_self_refs=True)
+            result = main._agent_beat_mark_run("c1", "n1", None, "image",
+                                               exclude_self_refs=True, review_rerun=True)
         node = cv["nodes"][1]
         self.assertEqual(result["status"], "queued_on_canvas", result)
         self.assertTrue((node.get("data") or {}).get("agentRun"))
         self.assertTrue((node["data"]["agentRun"] or {}).get("excludeSelfRefs"),
                         "BEAT 画布开跑前要拿到「剔除节点自己的旧图」的标记")
         self.assertEqual(main._agent_regen_rerun_count(node), 1)
+
+    def test_beat_run_generation_carries_explicit_reference_images(self):
+        """BEAT 分支以前把 reference_images 整个丢掉了：「在这张图上改」必须把图交下去。"""
+        canvas = beat_canvas()
+        with patched_generation(canvas) as (tasks, cv):
+            norm = main._agent_tool_run_generation_validate(
+                {"canvas_id": "c1", "node_id": "n1",
+                 "reference_images": ["/ref1.png", "/ref1.png", "", "/ref2.png"]})
+            result = asyncio.run(main._agent_tool_run_generation_run(norm))
+        run = (cv["nodes"][1].get("data") or {}).get("agentRun") or {}
+        self.assertEqual(result["status"], "queued_on_canvas", result)
+        self.assertEqual(run.get("referenceImages"), ["/ref1.png", "/ref2.png"],
+                         "去重、丢掉空串后按顺序交给画布")
+        self.assertFalse(run.get("excludeSelfRefs"), "以这张图为底时不能同时剔除它")
+
+    def test_beat_reference_images_are_capped_at_ten(self):
+        canvas = beat_canvas()
+        urls = ["/r%d.png" % index for index in range(12)] + ["/r0.png", "", None]
+        with patched_generation(canvas) as (tasks, cv):
+            main._agent_beat_mark_run("c1", "n1", None, "image", reference_images=urls)
+        run = (cv["nodes"][1].get("data") or {}).get("agentRun") or {}
+        self.assertEqual(run.get("referenceImages"), ["/r%d.png" % index for index in range(10)])
+
+    def test_beat_deferred_run_records_pending_reference_images(self):
+        canvas = beat_canvas()
+        token = main._AGENT_BEAT_DEFER_GEN.set(True)
+        try:
+            with patched_generation(canvas) as (tasks, cv):
+                norm = main._agent_tool_run_generation_validate(
+                    {"canvas_id": "c1", "node_id": "n1", "exclude_self_refs": True,
+                     "review_rerun": True, "reference_images": ["/base.png"]})
+                result = asyncio.run(main._agent_tool_run_generation_run(norm))
+        finally:
+            main._AGENT_BEAT_DEFER_GEN.reset(token)
+        data = cv["nodes"][1].get("data") or {}
+        self.assertEqual(result["status"], "ready_to_generate", result)
+        self.assertIs(data.get("agentPending"), True)
+        self.assertIs(data.get("agentPendingExcludeSelfRefs"), True,
+                      "延后执行时审查重跑的剔旧图标记照旧")
+        self.assertEqual(data.get("agentPendingReferenceImages"), ["/base.png"])
+        self.assertNotIn("agentRun", data, "延后执行不能提前开跑")
+
+    def test_beat_run_without_refs_clears_stale_pending_refs(self):
+        canvas = beat_canvas()
+        node = canvas["nodes"][1]
+        node["data"]["agentPending"] = True
+        node["data"]["agentPendingReferenceImages"] = ["/stale.png"]
+        with patched_generation(canvas) as (tasks, cv):
+            norm = main._agent_tool_run_generation_validate({"canvas_id": "c1", "node_id": "n1"})
+            asyncio.run(main._agent_tool_run_generation_run(norm))
+        data = cv["nodes"][1].get("data") or {}
+        self.assertNotIn("agentPending", data)
+        self.assertNotIn("agentPendingReferenceImages", data, "上一次留下的参考图不能粘到这一次")
+        self.assertNotIn("referenceImages", data.get("agentRun") or {})
+
+    def test_beat_review_rerun_keeps_exclude_and_explicit_refs(self):
+        canvas = beat_canvas()
+        with patched_generation(canvas) as (tasks, cv):
+            norm = main._agent_tool_run_generation_validate(
+                {"canvas_id": "c1", "node_id": "n1", "exclude_self_refs": True,
+                 "review_rerun": True, "reference_images": ["/base.png"]})
+            result = asyncio.run(main._agent_tool_run_generation_run(norm))
+        run = (cv["nodes"][1].get("data") or {}).get("agentRun") or {}
+        self.assertEqual(result["status"], "queued_on_canvas", result)
+        self.assertIs(run.get("excludeSelfRefs"), True, "审查重跑照旧剔除节点自己的旧图")
+        self.assertEqual(run.get("referenceImages"), ["/base.png"], "显式参考图照旧保留")
+        self.assertEqual(main._agent_regen_rerun_count(cv["nodes"][1]), 1)
+
+
+class ReviewRerunFlagTests(unittest.TestCase):
+    """review_rerun 是审查链路专用的内部标记：用户「再来一张」只带 exclude_self_refs，不走护栏。"""
+
+    def test_user_reroll_only_excludes_self_refs_and_always_runs(self):
+        canvas = beat_canvas()
+        with patched_generation(canvas) as (tasks, cv):
+            statuses = []
+            for _ in range(2):
+                norm = main._agent_tool_run_generation_validate(
+                    {"canvas_id": "c1", "node_id": "n1", "exclude_self_refs": True})
+                statuses.append(asyncio.run(main._agent_tool_run_generation_run(norm))["status"])
+        node = cv["nodes"][1]
+        self.assertEqual(statuses, ["queued_on_canvas", "queued_on_canvas"], statuses)
+        self.assertIs((node.get("data") or {}).get("agentRun", {}).get("excludeSelfRefs"), True,
+                      "exclude_self_refs 仍然写进开跑标记")
+        self.assertEqual(main._agent_regen_rerun_count(node), 0, "用户重抽不算审查自动重跑次数")
+
+    def test_smart_user_reroll_is_not_guarded_either(self):
+        canvas = smart_canvas()
+        with patched_generation(canvas) as (tasks, cv):
+            for _ in range(2):
+                norm = main._agent_tool_run_generation_validate(
+                    {"canvas_id": "c1", "node_id": "n1", "exclude_self_refs": True})
+                result = asyncio.run(main._agent_tool_run_generation_run(norm))
+                self.assertEqual(result.get("status"), "queued", result)
+        self.assertEqual(len(tasks.created), 2, "用户重抽两次都要真的发任务")
+        self.assertEqual(main._agent_regen_rerun_count(cv["nodes"][1]), 0)
+
+    def test_review_rerun_still_blocks_same_request_and_caps(self):
+        canvas = beat_canvas()
+        same = {"canvas_id": "c1", "node_id": "n1", "exclude_self_refs": True, "review_rerun": True}
+
+        def call():
+            return asyncio.run(main._agent_tool_run_generation_run(
+                main._agent_tool_run_generation_validate(dict(same))))
+
+        with patched_generation(canvas) as (tasks, cv):
+            first = call()
+            node = cv["nodes"][1]
+            count = main._agent_regen_rerun_count(node)
+            second = call()
+            node.setdefault("data", {}).setdefault("agentRegen", {})["reruns"] = main._AGENT_REVIEW_RERUN_LIMIT
+            third = call()
+        self.assertEqual(first["status"], "queued_on_canvas", first)
+        self.assertEqual(count, 1, "审查重跑要计数")
+        self.assertEqual(second["status"], "unchanged", second)
+        self.assertEqual(third["status"], "review_rerun_limit", third)
+
+
+class GuardStatePersistenceTests(unittest.TestCase):
+    """护栏状态放在 data.agentRegen：前端保存只持久化固定字段 + data，节点顶层未知键会被丢掉。"""
+
+    def _prospective_record(self, canvas, node, prompt=""):
+        prospective = main._agent_regenerate_prospective(node, canvas, "n1", prompt)
+        return main._agent_generation_request_record(
+            prospective["kind"], prospective["prompt"], prospective["refs"], prospective["params"])
+
+    def test_beat_guard_state_survives_frontend_save(self):
+        canvas = beat_canvas()
+        node = canvas["nodes"][1]
+        main._agent_regen_record(node, self._prospective_record(canvas, node), review_rerun=True)
+        saved = frontend_saved(canvas)
+        saved_node = saved["nodes"][1]
+        self.assertNotIn("agentRegen", saved_node, "前端保存后顶层未知键没了")
+        self.assertIn("agentRegen", saved_node["data"], "护栏状态必须落在 data 里")
+        payload = main.AgentRegenerateRequest(canvas_id="c1", items=[{"node_id": "n1", "label": "海报"}])
+        with patch.object(main, "load_canvas", return_value=saved), \
+                patch.object(main, "_agent_run_resolve_chat", return_value={"provider": "p", "model": "m"}):
+            result = asyncio.run(main.agent_regenerate(payload, object()))
+        self.assertEqual(result["status"], "unchanged", result)
+        saved_node["data"]["agentRegen"]["reruns"] = main._AGENT_REVIEW_RERUN_LIMIT
+        with patch.object(main, "load_canvas", return_value=saved), \
+                patch.object(main, "_agent_run_resolve_chat", return_value={"provider": "p", "model": "m"}):
+            capped = asyncio.run(main.agent_regenerate(payload, object()))
+        self.assertEqual(capped["status"], "review_rerun_limit", capped)
+
+    def test_legacy_top_level_guard_state_is_still_read(self):
+        canvas = beat_canvas()
+        node = canvas["nodes"][1]
+        node["agentRegen"] = {"last": self._prospective_record(canvas, node), "reruns": 0, "last_at": 1}
+        self.assertEqual(main._agent_regen_rerun_count(node), 0)
+        payload = main.AgentRegenerateRequest(canvas_id="c1", items=[{"node_id": "n1", "label": "海报"}])
+        with patch.object(main, "load_canvas", return_value=canvas), \
+                patch.object(main, "_agent_run_resolve_chat", return_value={"provider": "p", "model": "m"}):
+            result = asyncio.run(main.agent_regenerate(payload, object()))
+        self.assertEqual(result["status"], "unchanged", result)
+
+    def test_record_writes_data_and_migrates_legacy_key(self):
+        node = {"id": "n1", "agentRegen": {"last": {"prompt": "旧"}, "reruns": 1}}
+        main._agent_regen_record(node, {"prompt": "新"}, review_rerun=True)
+        self.assertNotIn("agentRegen", node, "顶层旧键写一次就迁走")
+        self.assertEqual(node["data"]["agentRegen"]["last"], {"prompt": "新"})
+        self.assertEqual(node["data"]["agentRegen"]["reruns"], 2, "旧位置的 reruns 也要接上")
+
+
+class BeatFingerprintTests(unittest.TestCase):
+    """BEAT 请求指纹：上游连线没 kind 也算上游；显式参考图变化要让指纹变化。"""
+
+    def test_upstream_refs_without_conn_kind_are_counted(self):
+        canvas = beat_canvas()
+        canvas["connections"] = [{"from": "u1", "to": "n1"}]   # 前端保存时不写 kind
+        refs = main._agent_upstream_media_urls(canvas, "n1")
+        self.assertEqual(refs, ["/up.png"])
+        record = main._agent_generation_request_record("image", "版本A", refs, {})
+        self.assertEqual(record["refs"], ["/up.png"])
+
+    def test_explicit_reference_images_change_the_fingerprint(self):
+        canvas = beat_canvas()
+        node = canvas["nodes"][1]
+        node["data"]["agentRun"] = {"referenceImages": ["/a.png"]}
+        first = main._agent_generation_request_record(
+            "image", "版本A", main._agent_upstream_media_urls(canvas, "n1"), {})
+        node["data"]["agentRun"] = {"referenceImages": ["/b.png"]}
+        second = main._agent_generation_request_record(
+            "image", "版本A", main._agent_upstream_media_urls(canvas, "n1"), {})
+        node["data"].pop("agentRun")
+        node["data"]["agentPendingReferenceImages"] = ["/c.png"]
+        third = main._agent_generation_request_record(
+            "image", "版本A", main._agent_upstream_media_urls(canvas, "n1"), {})
+        self.assertIn("/a.png", first["refs"])
+        self.assertNotEqual(first["refs"], second["refs"])
+        self.assertIn("/c.png", third["refs"], "待生成卡片的参考图也要算进指纹")
+
+    def test_mark_run_fingerprint_includes_current_reference_images(self):
+        canvas = beat_canvas()
+        with patched_generation(canvas) as (tasks, cv):
+            main._agent_beat_mark_run("c1", "n1", None, "image",
+                                      reference_images=["/a.png"], review_rerun=True)
+        last = main._agent_regen_last_request(cv["nodes"][1])
+        self.assertEqual(last["refs"], ["/a.png", "/up.png"])
 
 
 class RuleThreeUnchangedTests(unittest.TestCase):
@@ -174,11 +386,11 @@ class RuleThreeUnchangedTests(unittest.TestCase):
         canvas = legacy_canvas()
         with patched_generation(canvas) as (tasks, cv):
             first = run_tool("run_generation", {"canvas_id": "c1", "node_id": "n1",
-                                                "exclude_self_refs": True})
+                                                "exclude_self_refs": True, "review_rerun": True})
             self.assertTrue(first["ok"], first)
             self.assertEqual(len(tasks.created), 1)
             second = run_tool("run_generation", {"canvas_id": "c1", "node_id": "n1",
-                                                 "exclude_self_refs": True})
+                                                 "exclude_self_refs": True, "review_rerun": True})
         self.assertTrue(second["ok"], second)
         self.assertEqual(second["result"]["status"], "unchanged", second["result"])
         self.assertEqual(len(tasks.created), 1, "请求没变就不能再发一次生成")
@@ -191,7 +403,7 @@ class RuleThreeUnchangedTests(unittest.TestCase):
         record = main._agent_generation_request_record(prospective["kind"], prospective["prompt"],
                                                        prospective["refs"], prospective["params"])
         main._agent_regen_record(node, record, review_rerun=True)
-        node["agentRegen"]["reruns"] = 0
+        node["data"]["agentRegen"]["reruns"] = 0
         plan = main._agent_regenerate_plan(canvas, [{"node_id": "n1", "label": "海报"}], {}, "c1")
         self.assertEqual(plan["unchanged"], ["n1"])
         self.assertEqual(plan["steps"], [], "没变化不该给出任何生成步骤")
@@ -204,7 +416,7 @@ class RuleThreeUnchangedTests(unittest.TestCase):
         record = main._agent_generation_request_record(prospective["kind"], prospective["prompt"],
                                                        prospective["refs"], prospective["params"])
         main._agent_regen_record(node, record, review_rerun=True)
-        node["agentRegen"]["reruns"] = 0
+        node["data"]["agentRegen"]["reruns"] = 0
         payload = main.AgentRegenerateRequest(canvas_id="c1", items=[{"node_id": "n1", "label": "海报"}])
         with patch.object(main, "load_canvas", return_value=canvas), \
                 patch.object(main, "_agent_run_resolve_chat", return_value={"provider": "p", "model": "m"}):
@@ -226,7 +438,7 @@ class RuleFourRerunLimitTests(unittest.TestCase):
             for index, text in enumerate(("版本A", "版本B", "版本C"), start=1):
                 node["text"] = text
                 result = run_tool("run_generation", {"canvas_id": "c1", "node_id": "n1",
-                                                     "exclude_self_refs": True})
+                                                     "exclude_self_refs": True, "review_rerun": True})
                 self.assertTrue(result["ok"], result)
                 statuses.append(result["result"].get("status"))
                 self.assertEqual(main._agent_regen_rerun_count(node), min(index, 2))
@@ -263,7 +475,7 @@ class RuleFourRerunLimitTests(unittest.TestCase):
         ]
         with patched_generation(canvas) as (tasks, cv):
             norm = main._agent_tool_run_generation_validate(
-                {"canvas_id": "c1", "node_id": "b1", "exclude_self_refs": True})
+                {"canvas_id": "c1", "node_id": "b1", "exclude_self_refs": True, "review_rerun": True})
             result = asyncio.run(main._agent_tool_run_generation_run(norm))
         self.assertEqual(result["status"], "review_rerun_limit", result)
         self.assertEqual(len(tasks.created), 0)
@@ -327,6 +539,7 @@ class RuleTwoAndFiveTests(unittest.TestCase):
         # 审查结论只用来改提示词：生成步骤不带审查里的问题图 / 任何参考图
         self.assertEqual([k for k in generation["args"] if k in ("reference_images", "reference_urls")], [])
         self.assertTrue(generation["args"]["exclude_self_refs"])
+        self.assertTrue(generation["args"]["review_rerun"], "审查链路的重跑步骤要带内部护栏标记")
 
     def test_review_conclusion_lands_in_transcript(self):
         if not temp_data_dir():
