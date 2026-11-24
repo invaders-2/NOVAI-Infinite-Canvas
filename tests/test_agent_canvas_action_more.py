@@ -117,5 +117,58 @@ class ModelMoreTests(unittest.TestCase):
         self.assertIn("erase", main.AGENT_TOOLS["canvas_action"]["schema"]["properties"]["action"]["enum"])
 
 
+def video_node(nid, url="https://example.invalid/src.mp4", title="原片"):
+    return {"id": nid, "kind": "video", "x": 0, "y": 0, "w": 320, "h": 180,
+            "data": {"gen": {"title": title, "prompt": "", "hist": [{"url": url, "dur": 8}], "hi": 0}}}
+
+
+class VideoActionTests(unittest.TestCase):
+    def setUp(self):
+        self.cid = new_canvas([video_node("v"), image_node("img", make_png())])
+
+    def _run_deferred(self, args):
+        token = main._AGENT_BEAT_DEFER_GEN.set(True)
+        try:
+            return run({"canvas_id": self.cid, **args})
+        finally:
+            main._AGENT_BEAT_DEFER_GEN.reset(token)
+
+    def test_validate(self):
+        with self.assertRaises(main.AgentToolError):
+            validate("video_replace", target="靴子")
+        with self.assertRaises(main.AgentToolError):
+            validate("video_retake")
+        self.assertEqual(validate("video_extend", direction="开头")["params"]["direction"], "before")
+
+    def test_replace_builds_video_edit_node(self):
+        res = self._run_deferred({"action": "video_replace", "node_id": "v",
+                                  "params": {"target": "黑色靴子", "replacement": "白色运动鞋"}})
+        self.assertEqual(res["status"], "ready_to_generate")
+        self.assertEqual(res["action"], "video_replace")
+        canvas = main.load_canvas(self.cid)
+        node = main._agent_find_node(canvas, res["node_id"])
+        gen = node["data"]["gen"]
+        self.assertEqual(gen["params"]["mode"], "视频编辑")
+        self.assertIn("「黑色靴子」替换成「白色运动鞋」", gen["prompt"])
+        self.assertEqual(gen["title"], "原片 · 替换")
+        self.assertTrue(any(c.get("from") == "v" and c.get("to") == node["id"] for c in canvas["connections"]))
+
+    def test_extend_before_and_retake(self):
+        res = self._run_deferred({"action": "video_extend", "node_id": "v", "params": {"direction": "before"}})
+        node = main._agent_find_node(main.load_canvas(self.cid), res["node_id"])
+        self.assertEqual(node["data"]["gen"]["params"]["mode"], "视频延长")
+        self.assertIn("第一帧之前", node["data"]["gen"]["prompt"])
+        res = self._run_deferred({"action": "video_retake", "node_id": "v", "params": {"camera": "环绕运镜"}})
+        node = main._agent_find_node(main.load_canvas(self.cid), res["node_id"])
+        self.assertIn("「环绕运镜」的机位", node["data"]["gen"]["prompt"])
+
+    def test_image_node_rejected_and_budget(self):
+        with self.assertRaises(main.AgentToolError):
+            self._run_deferred({"action": "video_remove", "node_id": "img", "params": {"target": "路人"}})
+        args = {"action": "video_remove", "node_id": "v", "params": {"target": "路人"}}
+        self.assertEqual(main._agent_step_modality("canvas_action", args), "video")
+        self.assertEqual(main._agent_step_generation_units("canvas_action", args), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
