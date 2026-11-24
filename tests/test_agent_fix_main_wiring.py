@@ -350,7 +350,7 @@ class CanvasKindPathTests(unittest.TestCase):
         with flags(CONTEXT="1", READ_TOOLS="0"), \
                 patch.object(main, "_agent_run_decide_v2", new=fake_decide_v2):
             run_producer(req)
-        self.assertFalse(main._agent_v2_read_tools_enabled())
+            self.assertFalse(main._agent_v2_read_tools_enabled())
         flat = flat_text(seen["messages"])
         self.assertNotIn("read_node", flat)
         self.assertNotIn("search_canvas", flat)

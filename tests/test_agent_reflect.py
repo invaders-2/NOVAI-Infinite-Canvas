@@ -226,7 +226,8 @@ class ReflectionInjectionTests(unittest.TestCase):
             {"thought": "先读画布", "steps": [{"tool": "get_canvas", "args": {"canvas_id": self.canvas_id}}]},
             {"done": True, "message": "好了"},
         ]
-        out = run_producer(self.canvas_id, decisions, executed_fail, extra_env={})
+        out = run_producer(self.canvas_id, decisions, executed_fail,
+                           extra_env={"NOVAI_AGENT_V2_REFLECT": "0"})
         self.assertFalse([item for item in out["events"]
                           if item["event"] == "thought" and item["data"].get("kind") == "reflect"])
         self.assertFalse([entry for entry in out["transcript"].entries
@@ -408,7 +409,8 @@ class SelfCheckProducerTests(unittest.TestCase):
 
     def test_switch_off_has_no_self_check_event(self):
         decisions = [self._roadmap_decision(2), {"done": True, "message": "做完了"}]
-        out = run_producer(self.canvas_id, decisions, executed_ok, extra_env={})
+        out = run_producer(self.canvas_id, decisions, executed_ok,
+                           extra_env={"NOVAI_AGENT_V2_SELF_CHECK": "0"})
         self.assertFalse([item for item in out["events"] if item["event"] == "self_check"])
         self.assertEqual(len(out["messages"]), 2)
 
