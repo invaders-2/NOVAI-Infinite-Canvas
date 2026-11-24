@@ -1,0 +1,191 @@
+{
+  "version": 1,
+  "note": "画布助手评测用例。canvas.nodes 里 asset 是 agent_eval.py 现场画的占位素材（product / grid3 / scene / person / video）；expect 里每一项都是一条独立检查，全部通过才算这条用例通过。字段说明见 tools/agent_eval/README.md。",
+  "cases": [
+    {
+      "id": "t2i-basic",
+      "title": "文生图：电商主图",
+      "category": "生成",
+      "instruction": "做一张白色运动鞋的电商主图，1:1，干净的浅灰背景",
+      "canvas": {"nodes": []},
+      "expect": {
+        "status": ["ok"],
+        "plan": true,
+        "new_nodes": [{"kind": "image", "min": 1, "prompt_any": ["鞋", "sneaker", "shoe"]}],
+        "max_rounds": 6
+      }
+    },
+    {
+      "id": "i2i-model-wear",
+      "title": "参考图生图：模特上脚",
+      "category": "生成",
+      "instruction": "用选中的这双鞋做一张模特穿着它走在街头的图",
+      "canvas": {"nodes": [{"id": "shoe", "kind": "image", "title": "白色运动鞋", "asset": "product"}]},
+      "focus": {"selected": ["shoe"]},
+      "expect": {
+        "plan": true,
+        "new_nodes": [{"kind": "image", "min": 1, "from": ["shoe"]}],
+        "tools_none": ["canvas_action"]
+      }
+    },
+    {
+      "id": "i2v-push-in",
+      "title": "图生视频：镜头推近",
+      "category": "生成",
+      "instruction": "让这张图动起来，镜头慢慢推近，5 秒",
+      "canvas": {"nodes": [{"id": "scene", "kind": "image", "title": "客厅场景", "asset": "scene"}]},
+      "focus": {"selected": ["scene"]},
+      "expect": {
+        "plan": true,
+        "new_nodes": [{"kind": "video", "min": 1, "from": ["scene"]}]
+      }
+    },
+    {
+      "id": "batch-scenes",
+      "title": "批量：五个场景",
+      "category": "生成",
+      "instruction": "用这双鞋做 5 张不同场景的海报：海边、雪山、城市街头、森林、沙漠",
+      "canvas": {"nodes": [{"id": "shoe", "kind": "image", "title": "白色运动鞋", "asset": "product"}]},
+      "focus": {"selected": ["shoe"]},
+      "expect": {
+        "tools_any": ["batch_generate", "generate_image", "create_node"],
+        "new_nodes": [{"kind": "image", "min": 1}],
+        "generations_min": 5
+      }
+    },
+    {
+      "id": "angle-three",
+      "title": "组件：三个机位",
+      "category": "组件",
+      "instruction": "给这双鞋出 3 个不同角度：左侧 45 度、正侧面、俯视",
+      "canvas": {"nodes": [{"id": "shoe", "kind": "image", "title": "白色运动鞋", "asset": "product"}]},
+      "focus": {"selected": ["shoe"]},
+      "expect": {
+        "actions": [{"action": "angle", "min": 3}],
+        "plan": true
+      }
+    },
+    {
+      "id": "clear-product",
+      "title": "组件：清空商品留场景",
+      "category": "组件",
+      "instruction": "把这张图里的商品去掉，只留下背景场景，后面我要换别的产品放进去",
+      "canvas": {"nodes": [{"id": "scene", "kind": "image", "title": "桌面产品图", "asset": "scene"}]},
+      "focus": {"selected": ["scene"]},
+      "expect": {
+        "actions_any": [{"action": "whitemodel", "params": {"tier": "clear"}}, {"action": "erase"}]
+      }
+    },
+    {
+      "id": "split-grid",
+      "title": "组件：九宫格拆开",
+      "category": "组件",
+      "instruction": "这是一张九宫格分镜，帮我拆成九张单图",
+      "canvas": {"nodes": [{"id": "grid", "kind": "image", "title": "九宫格分镜", "asset": "grid3"}]},
+      "focus": {"selected": ["grid"]},
+      "expect": {
+        "actions": [{"action": "split", "params": {"cols": 3, "rows": 3}}],
+        "new_nodes": [{"kind": "image", "min": 9, "from": ["grid"]}]
+      }
+    },
+    {
+      "id": "stack-two",
+      "title": "组件：收成堆叠",
+      "category": "组件",
+      "instruction": "把这两张同款鞋的图收成一组，后面当一组参考用",
+      "canvas": {"nodes": [
+        {"id": "a", "kind": "image", "title": "鞋 正面", "asset": "product"},
+        {"id": "b", "kind": "image", "title": "鞋 侧面", "asset": "product"}
+      ]},
+      "focus": {"selected": ["a", "b"]},
+      "expect": {
+        "actions_any": [{"action": "stack"}, {"action": "group"}],
+        "new_nodes": [{"kind": "group", "min": 1}],
+        "tools_none": ["generate_image", "generate_video"]
+      }
+    },
+    {
+      "id": "outpaint-vertical",
+      "title": "组件：横图扩成竖版",
+      "category": "组件",
+      "instruction": "这张图要发抖音，扩成 9:16 竖版，上下补出画面，别裁掉内容",
+      "canvas": {"nodes": [{"id": "scene", "kind": "image", "title": "横版场景", "asset": "scene"}]},
+      "focus": {"selected": ["scene"]},
+      "expect": {
+        "actions": [{"action": "outpaint", "params": {"ratio": "9:16"}}],
+        "tools_none": ["generate_image"]
+      }
+    },
+    {
+      "id": "adjust-warm",
+      "title": "组件：调暖调亮",
+      "category": "组件",
+      "instruction": "这张图颜色偏冷偏暗，调暖一点、亮一点就行，别重新生成",
+      "canvas": {"nodes": [{"id": "scene", "kind": "image", "title": "场景图", "asset": "scene"}]},
+      "focus": {"selected": ["scene"]},
+      "expect": {
+        "actions": [{"action": "adjust"}],
+        "tools_none": ["generate_image"]
+      }
+    },
+    {
+      "id": "crop-square",
+      "title": "组件：裁成正方形",
+      "category": "组件",
+      "instruction": "把这张裁成 1:1 正方形",
+      "canvas": {"nodes": [{"id": "scene", "kind": "image", "title": "场景图", "asset": "scene"}]},
+      "focus": {"selected": ["scene"]},
+      "expect": {
+        "actions": [{"action": "crop", "params": {"ratio": "1:1"}}],
+        "tools_none": ["generate_image"]
+      }
+    },
+    {
+      "id": "video-replace",
+      "title": "视频：替换商品",
+      "category": "视频",
+      "instruction": "把这个视频里的黑色靴子换成白色运动鞋，其他都不要动",
+      "canvas": {"nodes": [{"id": "clip", "kind": "video", "title": "靴子原片", "asset": "video"}]},
+      "focus": {"selected": ["clip"]},
+      "expect": {
+        "actions_any": [{"action": "video_replace"}],
+        "new_nodes": [{"kind": "video", "min": 1, "from": ["clip"], "mode": "视频编辑"}]
+      }
+    },
+    {
+      "id": "video-extend",
+      "title": "视频：往后续写",
+      "category": "视频",
+      "instruction": "这段视频太短了，接着往后再拍几秒，人物继续往前走",
+      "canvas": {"nodes": [{"id": "clip", "kind": "video", "title": "街拍原片", "asset": "video"}]},
+      "focus": {"selected": ["clip"]},
+      "expect": {
+        "new_nodes": [{"kind": "video", "min": 1, "from": ["clip"], "mode": "视频延长"}]
+      }
+    },
+    {
+      "id": "ambiguous-ask",
+      "title": "模糊需求先问",
+      "category": "沟通",
+      "instruction": "帮我弄一下",
+      "canvas": {"nodes": []},
+      "expect": {
+        "asks": true,
+        "tools_none": ["generate_image", "generate_video", "batch_generate", "canvas_action"],
+        "new_nodes_max": 0
+      }
+    },
+    {
+      "id": "no-spend-on-question",
+      "title": "问问题不动画布",
+      "category": "沟通",
+      "instruction": "图片生成和视频生成哪个更花钱？只回答，不要动画布",
+      "canvas": {"nodes": [{"id": "shoe", "kind": "image", "title": "白色运动鞋", "asset": "product"}]},
+      "expect": {
+        "status": ["ok"],
+        "new_nodes_max": 0,
+        "plan": false
+      }
+    }
+  ]
+}
