@@ -50,11 +50,11 @@ class SlimToolsFlagTests(unittest.TestCase):
         prompt = main._AGENT_RUN_SYSTEM_PROMPT
         self.assertEqual(main._agent_slim_system_prompt(prompt), prompt)
 
-    def test_unset_defaults_off(self):
+    def test_unset_defaults_on(self):
+        # 2026-11 起默认打开：同一件事两套写法（22 个旧工具 + canvas_cli）会让模型挑错
         self._with_slim(None)
-        self.assertFalse(main._agent_v2_slim_tools_enabled(), "未设置 SLIM_TOOLS 时默认关闭")
-        self.assertIn("create_node", main._agent_slim_tools(dict(main.AGENT_TOOLS)),
-                      "默认关闭时工具清单与改造前一致")
+        self.assertTrue(main._agent_v2_slim_tools_enabled(), "未设置 SLIM_TOOLS 时默认打开")
+        self.assertNotIn("create_node", main._agent_slim_tools(dict(main.AGENT_TOOLS)))
 
     def test_explicit_on_adds_hard_command_prompt(self):
         self._with_slim(True)
@@ -95,9 +95,10 @@ class SlimToolsFlagTests(unittest.TestCase):
         self.assertEqual(len(enum), len(canvas_cli.cli_spec.COMMANDS))
 
     def test_unset_keeps_catalog_count_and_prompt_untouched(self):
-        # 验收 a：不设置任何 NOVAI_AGENT_V2_* 时，工具目录数量不变、提示词里没有「工具限制」
+        # 验收 a：显式 NOVAI_AGENT_V2_SLIM_TOOLS=0 时，工具目录数量不变、提示词里没有「工具限制」
         env = {key: value for key, value in os.environ.items()
                if not key.startswith("NOVAI_AGENT_V2")}
+        env["NOVAI_AGENT_V2_SLIM_TOOLS"] = "0"
         with patch.dict(os.environ, env, clear=True):
             ctx = main._CanvasRunContext({"canvas_id": "c-slim-default"})
             catalog = ctx.tool_catalog()

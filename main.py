@@ -45777,12 +45777,12 @@ def _agent_v2_flag(name, default=False):
 
 def _agent_v2_context_enabled():
     """多轮消息列表 + 分层预算 + 两级压缩 + 系统提示词拆分 + 画布地图。"""
-    return _agent_v2_flag("CONTEXT") and _agent_context_engine is not None
+    return _agent_v2_flag("CONTEXT", default=True) and _agent_context_engine is not None
 
 
 def _agent_v2_read_tools_enabled():
     """六个按需读取工具（只读、不占步数、不过确认闸门）。"""
-    return _agent_v2_flag("READ_TOOLS") and _agent_read_tools is not None
+    return _agent_v2_flag("READ_TOOLS", default=True) and _agent_read_tools is not None
 
 
 def _agent_v2_transcript_enabled():
@@ -45800,12 +45800,12 @@ def _agent_v2_stream_enabled():
 
 def _agent_v2_reflect_enabled():
     """阶段三·3：反思轮——步骤失败 / 审查不合格 / 连续一轮无进展时，注入固定格式的反思消息。"""
-    return _agent_v2_flag("REFLECT")
+    return _agent_v2_flag("REFLECT", default=True)
 
 
 def _agent_v2_self_check_enabled():
     """阶段三·3：完成前自检——roadmap 阶段、硬约束、失败如实汇报都过了才真正结束（最多打回一次）。"""
-    return _agent_v2_flag("SELF_CHECK")
+    return _agent_v2_flag("SELF_CHECK", default=True)
 
 
 def _agent_v2_triggers_enabled():
@@ -45815,7 +45815,7 @@ def _agent_v2_triggers_enabled():
 
 def _agent_v2_slim_tools_enabled():
     # 默认关闭：未设置时工具清单 / 系统提示词与改造前逐字一致；显式 NOVAI_AGENT_V2_SLIM_TOOLS=1 才打开瘦身。
-    return _agent_v2_flag("SLIM_TOOLS", default=False)
+    return _agent_v2_flag("SLIM_TOOLS", default=True)
 
 
 def _agent_slim_tool_equivalents():
@@ -49090,8 +49090,12 @@ def _agent_web_tool_entries():
 
 
 def _agent_build_tools_catalog():
+    # 读取工具在 import 时按默认值注册进 AGENT_TOOLS；运行时显式 NOVAI_AGENT_V2_READ_TOOLS=0 也要从目录里拿掉
+    hidden = set()
+    if _agent_read_tools is not None and not _agent_v2_read_tools_enabled():
+        hidden = set(getattr(_agent_read_tools, "READ_TOOL_NAMES", ()) or ())
     catalog = [{"name": name, "description": entry["description"], "schema": entry["schema"]}
-               for name, entry in AGENT_TOOLS.items()]
+               for name, entry in AGENT_TOOLS.items() if name not in hidden]
     if agent_web_enabled():
         catalog.extend({"name": name, "description": entry["description"], "schema": entry["schema"]}
                        for name, entry in _agent_web_tool_entries().items())
@@ -50532,7 +50536,11 @@ def _agent_run_user_prompt(instruction, history, round_no, max_steps, steps_exec
         parts.append("本轮之前已执行的步骤与结果：\n" + _agent_run_history_text(history))
     if reflect_text:
         # 阶段三·3：固定格式的反思消息（三问）替代原来只追一句「请换一种做法」
-        parts.append(str(reflect_text).strip())
+        reflect_part = str(reflect_text).strip()
+        if last_error and _AGENT_WEB_DISABLED_MARK in str(last_error) and _AGENT_WEB_DISABLED_MODEL_HINT not in reflect_part:
+            # 联网没开不是换个做法能绕过的：反思轮也要把「别再试联网工具、直接告诉用户去开开关」钉上
+            reflect_part += " " + _AGENT_WEB_DISABLED_MODEL_HINT
+        parts.append(reflect_part)
     elif last_error:
         last_error_text = f"最近一次失败原因（请换一种做法，不要重复同样的调用）：{last_error}"
         if _AGENT_WEB_DISABLED_MARK in str(last_error):
@@ -51360,8 +51368,16 @@ def _agent_self_check_constraint_items(instruction, snapshot, node_ids, reply=""
     return items
 
 
+def _agent_self_check_user_fail_notes(fail_notes):
+    """要求「如实汇报」的失败只算用户关心的（工具执行 / 生成失败）。
+    模型自己写错工具名（「模型给出了不可用步骤」）是循环内部已经纠正的格式问题：
+    拿它打回一轮逼模型在回复里讲给用户听，只会多花一轮、回复里出现用户看不懂的内部词。"""
+    return [note for note in (fail_notes or []) if "模型给出了不可用步骤" not in str(note or "")]
+
+
 def _agent_run_self_check(instruction, history, results, snapshot, roadmap, reply, fail_notes):
     """§6.6 完成前自检：返回 {"passed", "items": [{"text", "ok"}]}（不通过的项交给调用方打回）。"""
+    fail_notes = _agent_self_check_user_fail_notes(fail_notes)
     items = _agent_self_check_roadmap_items(roadmap, history, results)
     node_ids = _agent_self_check_node_ids(snapshot, history, results)
     items.extend(_agent_self_check_constraint_items(instruction, snapshot, node_ids, reply=reply))
@@ -53556,6 +53572,111 @@ def _agent_vision_deny_note(key):
     label = "连续看图失败，已暂时拉黑" if entry.get("hard") else "上次看图失败，已暂时跳过"
     text = label + (f"（{reason}）" if reason else "")
     return text + f"，约 {minutes} 分钟后自动重试"
+
+
+# 选中 / @ 了视频节点时，运行开始前自动读一遍（关键帧网格 + 口播 + 切点），
+# 不再指望模型自己想起来调 analyze_video——以前模型经常只看标题就动手，等于「无视视频内容」。
+AGENT_AUTO_VIDEO_MAX = 2
+AGENT_AUTO_VIDEO_TIMEOUT = 75.0
+AGENT_AUTO_VIDEO_TRANSCRIPT_CHARS = 800
+
+
+def _agent_auto_video_enabled():
+    """NOVAI_AGENT_AUTO_VIDEO=0 可关（排查用）；默认打开。"""
+    return str(os.environ.get("NOVAI_AGENT_AUTO_VIDEO", "1")).strip().lower() not in ("0", "false", "off", "no")
+
+
+def _agent_focus_video_node_ids(focus, canvas):
+    """选中节点 + 本轮引用里的视频节点（按出现顺序去重，最多 AGENT_AUTO_VIDEO_MAX 个）。"""
+    if not isinstance(canvas, dict):
+        return []
+    by_id = _agent_nodes_by_id(canvas)
+    wanted = []
+    for nid in (focus or {}).get("selected_node_ids") or []:
+        wanted.append(str(nid or ""))
+    for ref in (focus or {}).get("references") or []:
+        if isinstance(ref, dict) and str(ref.get("source") or "node") == "node":
+            wanted.append(str(ref.get("id") or ""))
+    out = []
+    for nid in wanted:
+        if not nid or nid in out or nid not in by_id:
+            continue
+        try:
+            _agent_video_node_url(canvas, nid)
+        except Exception:
+            continue
+        out.append(nid)
+        if len(out) >= AGENT_AUTO_VIDEO_MAX:
+            break
+    return out
+
+
+def _agent_auto_video_note(label, result):
+    """把 analyze_video 的结果压成一段给模型看的文字（关键帧网格图另外挂图）。"""
+    parts = ["已自动读取视频「%s」" % label]
+    meta = []
+    if result.get("duration"):
+        meta.append("时长 %.1f 秒" % float(result.get("duration") or 0))
+    if result.get("aspect"):
+        meta.append("画幅 %s" % result.get("aspect"))
+    cuts = result.get("cuts") or []
+    if cuts:
+        meta.append("%d 个硬切点（%s）" % (len(cuts), "、".join(str(c.get("time") or "") for c in cuts[:12])))
+    elif result.get("cuts_note"):
+        meta.append(str(result.get("cuts_note")))
+    if meta:
+        parts.append("：" + "，".join(meta))
+    transcript = result.get("transcript") or {}
+    text = str(transcript.get("text") or "").strip()
+    if transcript.get("ok") and text:
+        if len(text) > AGENT_AUTO_VIDEO_TRANSCRIPT_CHARS:
+            text = text[:AGENT_AUTO_VIDEO_TRANSCRIPT_CHARS] + "…（后面还有，需要全文再调 analyze_video）"
+        parts.append("\n口播转写：" + text)
+    elif transcript.get("error"):
+        parts.append("\n口播没拿到：" + str(transcript.get("error"))[:120])
+    frames = result.get("frames") or []
+    if frames:
+        parts.append("\n关键帧（#序号 时间 → 地址，可直接当参考图）：" + "；".join(
+            "#%s %s %s" % (f.get("index"), f.get("time"), f.get("url")) for f in frames[:12]))
+    if result.get("first_frame_url") or result.get("last_frame_url"):
+        parts.append("\n首帧 %s，尾帧 %s" % (result.get("first_frame_url") or "-", result.get("last_frame_url") or "-"))
+    if result.get("grid_url"):
+        parts.append("\n关键帧网格图已随消息附上（只给你看，不要当参考图）。")
+    parts.append("要细看某一段，用 analyze_video 带 start/end 再读。")
+    return "".join(parts)
+
+
+async def _agent_run_auto_read_videos(focus, canvas, canvas_id, emit=None):
+    """返回 (notes_text, grid_images)。失败只降级成一句说明，绝不让整个运行失败。"""
+    if not _agent_auto_video_enabled() or not isinstance(canvas, dict):
+        return "", []
+    node_ids = _agent_focus_video_node_ids(focus, canvas)
+    if not node_ids:
+        return "", []
+    notes, grids = [], []
+    for nid in node_ids:
+        label = nid
+        try:
+            _, label = _agent_video_node_url(canvas, nid)
+        except Exception:
+            pass
+        if emit:
+            emit("thought", {"kind": "auto_video", "text": "先看一遍视频「%s」的画面和口播" % label})
+        try:
+            args = _agent_tool_analyze_video_validate({"canvas_id": canvas_id, "node_id": nid, "frames": 12})
+            result = await asyncio.wait_for(_agent_tool_analyze_video_run(args),
+                                            timeout=AGENT_AUTO_VIDEO_TIMEOUT)
+        except asyncio.TimeoutError:
+            notes.append("视频「%s」自动读取超时（%d 秒），需要时请调用 analyze_video 再读。" % (label, int(AGENT_AUTO_VIDEO_TIMEOUT)))
+            continue
+        except Exception as exc:
+            reason = getattr(exc, "message", "") or str(exc) or type(exc).__name__
+            notes.append("视频「%s」自动读取失败：%s。需要时请调用 analyze_video 再读。" % (label, str(reason)[:160]))
+            continue
+        notes.append(_agent_auto_video_note(label, result))
+        if result.get("grid_url"):
+            grids.append({"url": result["grid_url"], "label": "%s 关键帧网格" % label})
+    return "\n".join(notes), grids
 
 
 def _agent_run_collect_images(focus, canvas):
@@ -57485,6 +57606,8 @@ async def _agent_run_producer(req, queue, bus=None):
     pending_reviews = []       # 后台审查完成的结论：下一轮消费（做反思/约束），不挡当前回复
     run_reviews = []           # 本次 run 的全部审查结论：落线程用，不随决策轮清空
     resume_pending_review = None
+    # 已批准步骤直接执行时不经过轮首赋值：先给默认值，反思轮读它不会 UnboundLocalError
+    round_review = None
     # 阶段四·3：挂起 / 恢复（开关关闭时 suspended 一直 False，行为与现状逐字一致）
     suspended = False
     waiting_user_marker = False
@@ -57581,6 +57704,13 @@ async def _agent_run_producer(req, queue, bus=None):
         ctx.recent_refs = recent_refs
         # 看图：选中节点的图 + 用户附带的参考图（文件上下文没有图，collect_images 返回空）
         vision_images = ctx.collect_images(first_snapshot)
+        video_notes = ""
+        if ctx.kind == "canvas":
+            # 选中 / @ 的视频：先自动读一遍（网格图并进看图清单，文字说明并进注意力段）
+            video_notes, video_grids = await _agent_run_auto_read_videos(focus, first_snapshot, context_id, emit)
+            if video_grids:
+                keep = max(0, AGENT_VISION_MAX_IMAGES - len(video_grids))
+                vision_images = list(vision_images[:keep]) + list(video_grids)
         vision_mode, vision_text = "", ""
         if vision_images:
             if _agent_model_maybe_vision(chat.get("model")) and _agent_chat_vision_key(chat) not in _AGENT_VISION_DENY:
@@ -57589,6 +57719,8 @@ async def _agent_run_producer(req, queue, bus=None):
                                 "text": "已把" + "、".join(i["label"] for i in vision_images) + "直接给模型看"})
             else:
                 vision_mode, vision_text = await _agent_run_vision_setup(vision_images, chat, emit)
+        if video_notes:
+            vision_text = (vision_text + "\n" + video_notes) if vision_text else video_notes
         ctx.vision_mode_direct = (vision_mode == "direct")
         # D1：挂图只影响挂图那一轮；记住运行开始时的值，每轮开始恢复（否则之后每轮都提示「消息里附了图片」）
         initial_vision_direct = bool(getattr(ctx, "vision_mode_direct", False))
