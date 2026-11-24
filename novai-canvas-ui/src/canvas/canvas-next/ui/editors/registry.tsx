@@ -717,6 +717,9 @@ function MoreMenu({ ctl, id, n, close }: { ctl: Ctl; id: string; n: CanvasNode; 
     <button className="mi" data-k="open-outpaint" onClick={() => { close(); setEd({ type: "outpaint", id }); }}><Icon name="outpaint" size="s" />扩图</button>
     <button className="mi" onClick={() => { close(); setEd({ type: "mask", id, mode: "erase" }); }}><Icon name="eraser" size="s" />擦除</button>
     <button className="mi" onClick={() => { close(); setEd({ type: "mask", id, mode: "annot" }); }}><Icon name="annot" size="s" />标注</button>
+    {/* 2.0.08 收窄工具条时把这两个入口漏了（编辑器一直在，只是没按钮）：补回「更多」前部 */}
+    <button className="mi" data-k="crop" onClick={() => { close(); openEditor(ctl, "crop", id); }}><Icon name="crop" size="s" />裁剪 / 旋转</button>
+    <button className="mi" data-k="markup" onClick={() => { close(); openEditor(ctl, "markup", id); }}><Icon name="pencil" size="s" />涂鸦 / 文字 / 马赛克</button>
     {/* 低频 AI 特效：与条上按钮同一条 openEditor 路由，功能不变 */}
     <button className="mi" data-k="angle" onClick={() => { close(); openEditor(ctl, "angle", id); }}><Icon name="cube" size="s" />多角度</button>
     <button className="mi" data-k="relight" onClick={() => { close(); openEditor(ctl, "relight", id); }}><Icon name="sun" size="s" />重打光</button>

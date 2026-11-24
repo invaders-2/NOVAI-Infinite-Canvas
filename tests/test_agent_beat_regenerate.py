@@ -117,6 +117,11 @@ class RegenerateStepsTests(unittest.TestCase):
         self.assertEqual(steps[0]["description"], "按审查建议改「海报」的提示词")
         self.assertEqual(steps[1]["description"], "重新生成「海报」")
         self.assertEqual([step["args"]["node_id"] for step in steps[1:]], ["n1", "n2", "n3"])  # 文本节点不重跑
+        # 只有真重跑的步骤带审查内部标记（timeline 只重新导出，不需要）
+        reruns = [step for step in steps if step["args"].get("exclude_self_refs")]
+        self.assertEqual([step["args"]["node_id"] for step in reruns], ["n1", "n2"])
+        self.assertTrue(all(step["args"].get("review_rerun") for step in reruns),
+                        "审查重跑步骤要带 server 内部的 review_rerun 标记")
 
     def test_item_prompt_is_used_when_model_gives_nothing(self):
         steps = main._agent_regenerate_steps(canvas(), [{"node_id": "n1", "prompt": "杯身笔直"}], {}, "c1")

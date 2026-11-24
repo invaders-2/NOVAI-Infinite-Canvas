@@ -10,6 +10,7 @@ import { bgColor, clampTrim, formatClock, genOf, isGenKind, outOf, tagColor, TYP
 import type { RunState } from "../store";
 import { Icon } from "./Icon";
 import { TableNodeBody } from "./TableNode";
+import { SegRetakeSource, segRetakeOf } from "./SegRetake";
 import { StackBody } from "./StackNode";
 import { isStack, takeFlyOut } from "../stack";
 import { groupBackground } from "../groupStyle";
@@ -19,7 +20,7 @@ import { AudioBody } from "./AudioBody";
 import { isSplitNode, SplitNodeBody } from "./SplitNode";
 import { useAssetUrl } from "./useAsset";
 import { useMediaUrl } from "./useMedia";
-import { useCtl } from "./ctx";
+import { useCtl, useS } from "./ctx";
 import type { GenData } from "../model";
 import { retryBlockedReason } from "../errorText";
 
@@ -58,6 +59,8 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
   // 指针进到节点正文才算「在看这个节点」：GIF 换原图播、视频才懒挂 <video>。
   // 画布不虚拟化（所有节点常驻 DOM），默认态把媒体全挂上等于全部常驻解码；hover 只重渲染这一个节点。
   const [hoverNode, setHoverNode] = useState(false);
+  // 「解析」中的节点：纯界面态（store.ui.parsing），只借文本生成中的骨架 / 脉冲点，不动运行时
+  const parsing = useS((s) => s.ui.parsing.has(node.id));
   useEffect(() => { const t = setTimeout(() => { enterRef.current = false; setEntering(false); }, 200); return () => clearTimeout(t); }, []);
   const cls = ["node", entering ? "enter" : "", p.sel ? "sel" : "", run ? "running" : "", p.drop ? "drop" : "", p.noconn ? "noconn" : "", p.hl ? "hl" : "", p.queued && !run ? "queued" : ""].filter(Boolean).join(" ");
   const style = { left: node.x, top: node.y, width: node.w };
@@ -137,13 +140,14 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
         {node.kind === "video" ? <span className="kindtag" data-kindtag>视频</span> : null}
         {g.tag || g.pinned ? <i className="tagdot" title="颜色标记" style={{ background: tagColor(g.tag || "red")! }} /> : null}{g.agent ? <span className="pinmark">Agent</span> : null}
         {running ? <span className="st tnum" style={{ color: "var(--fg2)" }}>{run!.batch ? `${run!.batch.done}/${run!.batch.total}` : <i className="runsig" role="status" aria-label="生成中" />}</span>
+          : parsing ? <span className="st tnum" style={{ color: "var(--fg2)" }}><i className="runsig" role="status" aria-label="解析中" /></span>
           : g.err ? <span className="st" style={{ color: "var(--bad)" }}><Icon name="alert" size="xs" /></span>
           : out ? <span className="st" style={{ color: "var(--fg3)" }}><Icon name="check" size="xs" /></span> : null}
       </div>
       <div className={"nbody" + (g.bg ? " tinted" : "")} style={{ height: node.h, ...(g.bg ? { ["--tint" as string]: bgColor(g.bg)! } : {}) }}
         onPointerEnter={node.kind === "image" || node.kind === "video" ? () => setHoverNode(true) : undefined}
         onPointerLeave={node.kind === "image" || node.kind === "video" ? () => setHoverNode(false) : undefined}>
-        <Body {...p} out={out} running={running} hover={hoverNode} />
+        <Body {...p} out={out} running={running} parsing={parsing} hover={hoverNode} />
         {g.hist.length > 1 && !running ? <div className="vstrip tnum"><button data-act="vprev" onPointerDown={(e) => p.onAct(node, "vprev", e)}><Icon name="left" size="xs" /></button><button className="vnum" data-act="vmenu" title="版本操作" onPointerDown={(e) => p.onAct(node, "vmenu", e)}>{g.hi + 1}/{g.hist.length}</button><button data-act="vnext" onPointerDown={(e) => p.onAct(node, "vnext", e)}><Icon name="right" size="xs" /></button></div> : null}
         {(node.kind === "image" || node.kind === "video") && out && !running ? <button className={"favstar" + (g.fav ? " on" : "")} data-act="fav" title={g.fav ? "取消收藏" : "收藏到素材库（收藏后可在提示词编辑器里 @ 引用）"} onPointerDown={(e) => p.onAct(node, "fav", e)}><Icon name="star" size="s" /></button> : null}
         {(node.kind === "image" || node.kind === "video" || node.kind === "audio") && out && !running ? <button className="node-replace" data-act="replace" title="替换素材（位置 / 尺寸 / 连线 / 提示词保留）" style={{ height: 24, padding: "0 9px", borderRadius: 7, background: "rgba(0,0,0,.62)", color: "#fff", fontSize: 11, gap: 3, zIndex: 3, whiteSpace: "nowrap", alignItems: "center" }} onPointerDown={(e) => { e.stopPropagation(); p.onAct(node, "replace", e); }}><Icon name="upload" size="xs" />替换</button> : null}
@@ -190,10 +194,10 @@ function Ports({ h, only }: { h: number; only?: "out" }) {
   return <>{(only ? [only] : ["in", "out"] as const).map((s) => <div key={s} className={"pz " + s} data-port={s} style={{ top: 24 + h / 2 }}><div className="pf"><div className="port"><Icon name="plus" /></div></div></div>)}</>;
 }
 
-function Body(p: NodeViewProps & { out: GenOutput | null; running: boolean; hover: boolean }) {
-  const { node, out, running } = p; const g = genOf(node);
-  // 文本节点生成中：同 TapNow 用骨架线；流式有内容后直接按 Markdown 渲染并跟随光标
-  if (running && node.kind === "text") return p.run?.stream ? <div className="ntext md-wrap streaming"><Markdown streaming text={p.run.stream} /></div> : <TextSkeleton />;
+function Body(p: NodeViewProps & { out: GenOutput | null; running: boolean; parsing: boolean; hover: boolean }) {
+  const { node, out, running, parsing } = p; const g = genOf(node);
+  // 文本节点生成中 / 「解析」取画面期间：同 TapNow 用骨架线（解析没有流式内容，一直是骨架）
+  if ((running || parsing) && node.kind === "text") return p.run?.stream ? <div className="ntext md-wrap streaming"><Markdown streaming text={p.run.stream} /></div> : <TextSkeleton />;
   if (running) return <><Loading /><span className="nl-lab tnum">{p.run?.batch ? `逐行生成 ${p.run.batch.done}/${p.run.batch.total}` : "生成中"}</span></>;
   if (node.kind === "image") {
     if (out?.url) return <MediaImg src={out.url} alpha={false} px={node.w} play={p.hover} nodeId={node.id} nodeW={node.w} nodeH={node.h} />;
@@ -207,6 +211,8 @@ function Body(p: NodeViewProps & { out: GenOutput | null; running: boolean; hove
   }
   if (node.kind === "video") {
     if (out && (out.frame || out.url)) return <VideoBody node={node} out={out} res={(genOf(node).params as VideoParams).res || out.res} hover={p.hover} />;
+    // 片段重拍节点还没出片：正文直接播来源视频（SegRetake.tsx）
+    if (segRetakeOf(node)) return <SegRetakeSource node={node} />;
     return <div className="ph" data-short={node.h < PH_SHORT_H ? "" : undefined}><Icon name="video" /><span>连入图片作为首帧 / 尾帧 / 参考，或直接写提示词</span></div>;
   }
   if (out) return <AudioBody out={out} sel={p.sel} />;

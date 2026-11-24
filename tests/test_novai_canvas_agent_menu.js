@@ -33,6 +33,11 @@ assert.ok(panel.includes('id="agent-model-options"') && panel.includes('role="gr
 // 选中仍走同一个回调，只是从行内 onClick 换成组合框的 onPick；data-agent-model 仍挂在每一项上
 assert.ok(panel.includes('"data-agent-model": m.id') && panel.includes('onPick={(m) => { close(); onChoose(m.id); }}'), '二级模型项可选中并回调');
 assert.ok(panel.includes('placePopover({ anchor: box(active.row)'), '二级 flyout 仍有视口夹取/翻边');
+// 2026-11-23：换供应商必须重量高度——不同供应商模型数差很多（1 个 vs 37 个），
+// 沿用上一次量到的 maxHeight 会把 APIMART 的 17 个模型裁成一行（2.0.10 真机现象）。
+assert.ok(panel.includes('placedVendor.current === active.vendor'), '换供应商会重新定位/量高（不沿用上一个供应商的 maxHeight）');
+assert.ok(panel.includes('el.clientHeight - scroller.clientHeight + scroller.scrollHeight'), '浮层高度按列表完整高度（scrollHeight）量，不是被裁剪后的外框高度');
+assert.ok(panel.includes('capHeight: 420'), '浮层高度上限 420（placePopover 再按视口可用空间收）');
 assert.ok(css.includes('.cn-root #pop.model-pop{overflow:visible}'), '模型菜单 #pop 不裁剪二级 flyout');
 assert.ok(css.includes('.cn-root .model-providers{max-height:min(300px,calc(100vh - 320px));overflow-y:auto'), '供应商列表自己滚动（收紧到 300px，给模型强度滑块留位置）');
 

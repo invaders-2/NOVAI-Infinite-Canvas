@@ -12,7 +12,7 @@
  *   · 片段里是胶片缩略图与真实音频波形（按需取帧 / 解码，都带缓存）；时间码按 30fps 的 MM:SS:FF 显示
  *   · 片段重拍（交互同 LibTV）：选中视频片段点「片段重拍」，新建「原名-片段重拍」节点（来源视频当参考视频），
  *     弹窗里大预览 + 胶片条，点胶片条截片段（最多 5 段），提示词自动写成「把 @视频 中 00:03–00:08：」；出片后换进时间线。
- *     图片片段的「重拍」直接打开来源节点的生成面板。「版本」切的是来源节点的当前版本
+ *     图片片段的「重拍」直接打开来源节点的生成面板，在来源节点上原地出新版本（inPlace）。「版本」切的是来源节点的当前版本
  *   · 全屏剪辑：工具条右上角「全屏」或双击节点空白处进入，同一份数据；Esc（没有选中片段时）或「退出全屏」返回画布
  *   · 撤销 / 重做：工具条按钮或 ⌘Z / ⇧⌘Z（与画布共用一条历史）；播放头、拖动修剪都对齐到帧（30fps）
  *   · 画中画轨：视频 / 图片叠在主画面上，自由摆放；选中画面片段可调位置 / 缩放 / 不透明度 / 旋转，或在预览里直接拖动、滚轮缩放
@@ -22,14 +22,16 @@
  *   · 标记点：⇧M 或「标记」在播放头加标记，点标记跳过去、右键删除；拖动时会吸附到标记
  *   · 轨道锁定：锁住的轨道不能拖动 / 修剪 / 删除 / 切开
  *   · 调色（亮度 / 对比 / 饱和）、更多转场（擦除 / 推入 / 放大进场）、背景音乐自动压低（画面有声音时降低音乐）
- *   · AI 剪辑（工具条「AI 剪辑」）：拆镜头（按画面切换点自动切开）、去静音（剪掉停顿和空白，后面的片段自动补上）、
- *     自动字幕（整条时间线的声音转写成带时间的字幕，走「设置 → 通用 → 语音转写」）
+ *   · AI 剪辑（工具条「AI 剪辑」）：拆镜头（按画面切换点）、去静音（剪掉停顿和空白，后面的片段自动补上）、
+ *     自动字幕（整条时间线的声音转写成带时间的字幕，走「设置 → 通用 → 语音转写」）。三个动作都**不直接改片子**：
+ *     算完先落成「建议」轨上的卡片（在画面轨上方），点 ✓ 才真的改、点 ✕ 只丢掉这条建议；两种都能 ⌘Z 回退
  *   · 导出：MP4（NOVAI 后端 ffmpeg 渲染，或桌面版媒体服务）/ WebM（浏览器录制），或直接作为新视频节点放回画布
  *   · 布局：顶栏（添加素材 / AI 剪辑 / 画幅清晰度 / 导出）→ 左预览 + 右属性面板（选中片段的重拍、声音、转场、画面、调色；
  *     没选中时是使用说明和快捷键）→ 工具条 → 轨道。视频自带的声音单独显示在「原声」轨（跟着画面片段走）
- * 数据存在 node.clips（旧版 TimelineClip + 可选字段），画幅在 node.ratio，清晰度 / 字幕样式 / 吸附 / 轨道显隐在 node.data。
+ * 数据存在 node.clips（旧版 TimelineClip + 可选字段），画幅在 node.ratio，清晰度 / 字幕样式 / 吸附 / 轨道显隐在 node.data，
+ * AI 建议在 node.data.tlSugs（可选字段：旧文档没有就当没有，照常打开）。
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { backendExportAvailable, exportPlanMp4, novaiTimelineAvailable, renderTimelineNovai } from "../../react-canvas/timelineExportBackend";
@@ -38,11 +40,12 @@ import { novaiName } from "./downloadName";
 import { defaultParams, genOf, isGenKind, newNode, outOf, uid, type GenOutput, type VideoParams } from "../model";
 import { GenPanel } from "./GenPanel";
 import { preferSourceVideoMode, regenAsNew } from "../engine";
+import { SegPicker } from "./SegRetake";
 import { mentionToken } from "../mentions";
 import { addFiles } from "../actions";
 import { clipable, clipFromNode, syncTimelineEdges } from "../playlist";
 import { closePop, openPop } from "./overlay";
-import { baseTf, EXPORT_PRESETS, type ExportPreset, isFree, keyAt, needsCompositor, nextOf, prevOf, rollEdit, slideEdit, slipEdit, TRANS_LABEL, tfAt, upsertKey, type Tf, duplicate, fadeOf, fmt, fmtTC, frameSec, frameSize, IMAGE_LEN, lenOf, moveGroupTo, normalize, place, RATIOS, renderPlan, RESES, shiftSub, snapPoints, snapTo, speedOf, SPEEDS, splitAt, tickStep, toSrt, totalOf, trackOf, transOf, trimEdge, volOf, type Clip, type ClipMedia, type Placed, type Track, type TransKind } from "../timelineModel";
+import { baseTf, EXPORT_PRESETS, type ExportPreset, isFree, keyAt, needsCompositor, nextOf, prevOf, rollEdit, slideEdit, slipEdit, TRANS_LABEL, tfAt, upsertKey, type Tf, duplicate, fadeOf, fmt, fmtTC, frameSec, frameSize, IMAGE_LEN, lenOf, MIN_LEN, moveGroupTo, normalize, place, RATIOS, renderPlan, RESES, shiftSub, snapPoints, snapTo, speedOf, SPEEDS, splitAt, tickStep, toSrt, totalOf, trackOf, transOf, trimEdge, volOf, type Clip, type ClipMedia, type Placed, type Track, type TransKind } from "../timelineModel";
 import { grabThumb, recordWebM, TimelinePlayer, type SubStyle } from "../timelinePlayer";
 import { exportMp4Browser } from "../timelineExportMp4";
 import { exportProjectZip } from "../timelineInterchange";
@@ -51,7 +54,7 @@ import { useFilmstrip } from "../timelineFilmstrip";
 import { peaksOf, usePeaks, WaveStrip, type Peaks } from "../timelineWave";
 import { useCtl, useS } from "./ctx";
 import { IS_MAC } from "./shortcuts";
-import { Icon } from "./Icon";
+import { Icon, type IconName } from "./Icon";
 import { resolveMediaUrl, useAssetUrl } from "./useAsset";
 import { useThumbBg } from "./thumb";
 
@@ -60,23 +63,114 @@ const stop = (e: React.SyntheticEvent) => e.stopPropagation();
 const stopOnControl = (e: React.PointerEvent) => {
   if ((e.target as HTMLElement).closest("button,input,select,textarea,label")) e.stopPropagation();
 };
-const LAB = 108; // 轨道标签宽度（px）：显隐按钮 + 轨名 + 添加 + 锁定，片段从它右边开始
+const LAB = 116; // 轨道标签宽度（px）：轨型图标 + 显隐按钮 + 轨名 + 添加 + 锁定，片段从它右边开始
 const MEDIA_LABEL: Record<ClipMedia, string> = { video: "视频", audio: "音频", image: "图片" };
 const SHORT: Record<string, number> = { "720p": 720, "1080p": 1080, "2K": 1440, "4K": 2160 };
 type Drag = { id: string; ids: Set<string>; mode: "move" | "l" | "r" | "roll" | "slip" | "slide"; dt: number; snap: number | null };
 type Mark = { t: number };
-type TlData = { tlRes?: string; tlSub?: SubStyle; tlSnap?: boolean; tlFit?: "contain" | "cover"; tlTracks?: Partial<Record<Track | "vaudio", boolean>>; tlLock?: Partial<Record<Track, boolean>>; tlMarks?: Mark[]; tlPending?: Pending[] };
+/** AI 剪辑建议：AI 不给片子动手，只把「要改哪几秒、怎么改」落成一张卡；from / to 是时间线上的秒数（卡片按它定位） */
+type Sug = {
+  id: string; kind: "scenes" | "silence" | "subs"; label: string;
+  from: number; to: number; state: "pending" | "applied" | "dismissed";
+  payload: { points?: number[]; ranges?: Array<[number, number]>; subs?: Array<{ start: number; end: number; text: string }> };
+};
+type TlData = { tlRes?: string; tlSub?: SubStyle; tlSnap?: boolean; tlFit?: "contain" | "cover"; tlTracks?: Partial<Record<Track | "vaudio", boolean>>; tlLock?: Partial<Record<Track, boolean>>; tlMarks?: Mark[]; tlPending?: Pending[]; tlSugs?: Sug[] };
 /** 重拍中的片段：存在节点数据里，弹窗关了、退出全屏、刷新画布后出片也照样换进时间线 */
 type Pending = { clipId: string; nodeId: string; base: number; seg?: boolean };
 type Tool = "select" | "roll" | "slip" | "slide";
-const TOOLS: Array<{ id: Tool; label: string; key: string; tip: string }> = [
-  { id: "select", label: "选择", key: "V", tip: "选择：拖动换位置，拖两端修剪（V）" },
-  { id: "roll", label: "滚动", key: "N", tip: "滚动编辑：拖两段之间的剪辑点，左边变长右边等量变短，总时长不变（N）" },
-  { id: "slip", label: "滑移", key: "Y", tip: "滑移：片段位置和长度不变，左右拖换用素材里的另一段（Y）" },
-  { id: "slide", label: "滑动", key: "U", tip: "滑动：片段不变，在前后两段之间左右挪，前后两段跟着变长变短（U）" },
+const TOOLS: Array<{ id: Tool; label: string; key: string; tip: string; icon: IconName }> = [
+  { id: "select", label: "选择", key: "V", icon: "cursor", tip: "选择：拖动换位置，拖两端修剪（V）" },
+  { id: "roll", label: "滚动", key: "N", icon: "fit", tip: "滚动编辑：拖两段之间的剪辑点，左边变长右边等量变短，总时长不变（N）" },
+  { id: "slip", label: "滑移", key: "Y", icon: "history", tip: "滑移：片段位置和长度不变，左右拖换用素材里的另一段（Y）" },
+  { id: "slide", label: "滑动", key: "U", icon: "distribute", tip: "滑动：片段不变，在前后两段之间左右挪，前后两段跟着变长变短（U）" },
 ];
 type IO = { a: number; b: number };
 type Box = { x: number; y: number; w: number; h: number };
+
+/** 波形是 canvas 画的，fillStyle 认不了 CSS 变量：换主题后按 .cn-root 上的 --wave 重新取色 */
+function useWaveColor(): string {
+  const theme = useS((s) => s.ui.theme);
+  const [color, setColor] = useState("rgba(255,255,255,.55)");
+  useLayoutEffect(() => {
+    const root = document.querySelector(".cn-root");
+    if (!root) return;
+    const wave = getComputedStyle(root).getPropertyValue("--wave").trim();
+    if (wave) setColor(wave);
+  }, [theme]);
+  return color;
+}
+
+/** 波形按片段峰值归一化：素材音量差很多，不归一会有的片段缩成一条线（只影响显示，不改数据） */
+function fillPeaks(p: Peaks | null): Peaks | null {
+  if (!p) return null;
+  let max = 0;
+  for (let i = 0; i < p.data.length; i++) { const v = Math.abs(p.data[i]); if (v > max) max = v; }
+  if (max <= 0.001) return p;
+  const data = new Float32Array(p.data.length);
+  for (let i = 0; i < p.data.length; i++) data[i] = p.data[i] / max;
+  return { dur: p.dur, step: p.step, data };
+}
+
+/** 建议卡上的区间文字：00:00:12–00:00:15（时:分:秒） */
+const fmtHMS = (v: number) => {
+  const s = Math.max(0, Math.round(v));
+  return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((x) => String(x).padStart(2, "0")).join(":");
+};
+const SUG_ICON: Record<Sug["kind"], IconName> = { scenes: "scissors", silence: "mute", subs: "text" };
+const r3s = (v: number) => Math.round(v * 1000) / 1000;
+
+/** 在时间点切开画面：只切画面 / 画中画轨上压着这一点的片段（和「拆镜头」原来只切选中那段是同一件事） */
+function splitPictures(clips: Clip[], time: number): Clip[] {
+  let next = clips;
+  for (const tr of ["video", "overlay"] as const) {
+    for (const p of place(next, tr)) {
+      if (time <= p.start + MIN_LEN || time >= p.end - MIN_LEN) continue;
+      next = splitAt(next, time, p.clip.id, () => uid("clip")).clips;
+    }
+  }
+  return next;
+}
+
+/** 删掉时间线上的一段（去静音用）：两个边界切开 → 区间里的片段拿掉 → 吸附轨自动往前补，画中画 / 字幕跟着左移 */
+function cutRange(clips: Clip[], from: number, to: number): Clip[] {
+  const a = Math.max(0, r3s(from)); const b = r3s(to); const len = b - a;
+  if (len < MIN_LEN) return clips;
+  const inside = (s: number, e: number) => s >= a - 1e-3 && e <= b + 1e-3;
+  let next = splitAt(clips, a).clips; next = splitAt(next, b).clips;
+  const drop = new Set<string>();
+  for (const tr of ["video", "audio"] as const) for (const p of place(next, tr)) if (inside(p.start, p.end)) drop.add(p.clip.id);
+  next = next.flatMap((c) => {
+    const t = trackOf(c);
+    if (t === "subtitle") {
+      const s = Number(c.start) || 0; const e = Number(c.end) || s + 1;
+      if (inside(s, e)) return [];
+      return s >= b - 1e-3 ? [{ ...c, start: r3s(s - len), end: r3s(e - len) }] : [c];
+    }
+    if (t === "overlay") {
+      const s = Number(c.start) || 0; const e = s + lenOf(c);
+      if (inside(s, e)) return [];
+      return s >= b - 1e-3 ? [{ ...c, start: r3s(s - len) }] : [c];
+    }
+    return drop.has(c.id) ? [] : [c];
+  });
+  return normalize(next);
+}
+
+/** 点 ✓ 才跑：把一条建议变回时间线上的改动 */
+function applySug(clips: Clip[], s: Sug): Clip[] {
+  if (s.kind === "scenes") {
+    let next = clips;
+    for (const p of [...(s.payload.points || [])].sort((a, b) => b - a)) next = splitPictures(next, p);
+    return next;
+  }
+  if (s.kind === "silence") {
+    let next = clips;
+    for (const [a, b] of [...(s.payload.ranges || [])].sort((x, y) => y[0] - x[0])) next = cutRange(next, a, b);
+    return next;
+  }
+  const subs = (s.payload.subs || []).filter((g) => g.end > g.start).map((g): Clip => ({ id: uid("sub"), sourceNodeId: "", url: "", mediaKind: "video", inPoint: 0, outPoint: 2, order: 9999, type: "subtitle", text: g.text, start: r3s(g.start), end: r3s(g.end) }));
+  return normalize([...clips.filter((c) => c.type !== "subtitle"), ...subs]);
+}
 
 export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?: boolean; onFull?: (on: boolean) => void }) {
   const ctl = useCtl(); const store = ctl.store; const doc = useS((s) => s.doc);
@@ -93,9 +187,12 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
   const [t, setT] = useState(0); const tRef = useRef(0); tRef.current = t;
   const [playing, setPlaying] = useState(false);
   const [pps, setPps] = useState(36);
+  const wave = useWaveColor();
   const [drag, setDrag] = useState<Drag | null>(null);
   const [box, setBox] = useState<Box | null>(null);
   const [io, setIo] = useState<IO | null>(null);
+  /** 「+N 更多」浮层的屏幕位置（null = 收起）；列表跟着 pending 建议实时变 */
+  const [more, setMore] = useState<{ x: number; y: number } | null>(null);
   const [loop, setLoop] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>("select");
@@ -103,6 +200,9 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
   const [lanesX, setLanesX] = useState(0);
   const locked = (meta.tlLock || {}) as Partial<Record<Track, boolean>>;
   const marks = useMemo(() => ((meta.tlMarks || []) as Mark[]).filter((m) => Number.isFinite(m.t)).sort((a, b) => a.t - b.t), [meta.tlMarks]);
+  const sugs = useMemo(() => ((meta.tlSugs || []) as Sug[]), [meta.tlSugs]);
+  // 只有 pending 的建议显示在「建议」轨上；采纳 / 忽略过的等 3 秒清掉
+  const pend = useMemo(() => sugs.filter((s) => s.state === "pending"), [sugs]);
   const isLocked = (c: Clip) => !!locked[trackOf(c)];
   const screen = useRef<HTMLCanvasElement>(null); const player = useRef<TimelinePlayer | null>(null);
   const lanes = useRef<HTMLDivElement>(null); const root = useRef<HTMLDivElement>(null); const mon = useRef<HTMLDivElement>(null);
@@ -127,6 +227,20 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
   const tl = useRef({ t: 0, total: 0 }); tl.current = { t, total };
 
   const commit = (next: Clip[]) => { store.snapshot(); store.updateNode(node.id, (n) => ({ ...n, clips: normalize(next) })); };
+  const sugOf = () => (((store.node(node.id)?.data as TlData | undefined)?.tlSugs) || []) as Sug[];
+  const setSugs = (list: Sug[]) => store.updateNode(node.id, (n) => ({ ...n, data: { ...((n.data as object) || {}), tlSugs: list.length ? list : undefined } }), { history: false });
+  /** 采纳 / 忽略过的建议 3 秒后从数据里清掉（撤销快照里还留着那一份，⌘Z 照样回到 pending） */
+  useEffect(() => {
+    const done = ((meta.tlSugs || []) as Sug[]).filter((s) => s.state !== "pending");
+    if (!done.length) return;
+    const timers = done.map((s) => window.setTimeout(() => {
+      const list = sugOf();
+      if (!list.some((x) => x.id === s.id && x.state !== "pending")) return;
+      setSugs(list.filter((x) => x.id !== s.id));
+    }, 3000));
+    return () => timers.forEach((x) => window.clearTimeout(x));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta.tlSugs]);
   const setMeta = (p: { ratio?: string } & TlData) => {
     store.snapshot();
     store.updateNode(node.id, (n) => {
@@ -342,6 +456,16 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
     segPrefix.current = pre;
     if (np !== cur) store.patchGen(n.id, { prompt: np }, { history: false });
   };
+  /** 片段重拍点生成前：截了片段但「把 @视频 中 …：」后面没写改法，就别发——模型只拿到原片当参考、没有要改的内容，
+   *  出来的片子和原来几乎一样，看上去就像「重拍了但没有变化」 */
+  const segReady = () => {
+    if (!retake?.seg || !ranges.length) return true;
+    const n = store.node(retake.nodeId); const cur = n ? genOf(n).prompt || "" : ""; const pre = segPrefix.current;
+    const rest = pre && cur.startsWith(pre) ? cur.slice(pre.length) : cur;
+    if (rest.trim()) return true;
+    store.toast("先在「把 … 中 …：」后面写上这一段要改成什么，再生成；不写的话模型只会照着原片再拍一遍，看不出变化", 6000);
+    return false;
+  };
   /** 把来源节点的某个版本换进片段：时长尽量不变（新视频更短就用新视频的长度），这样后面的片段不会被挤动。
    *  seg（片段重拍）：新视频是整段重新生成的，入出点原样保留；片段改跟新节点走 */
   const applyTake = (clipId: string, o: GenOutput | undefined, seg?: { nodeId: string }) => {
@@ -397,7 +521,7 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
           {retake.seg && retakeClip
             ? <SegPicker url={retakeClip.url} clip={retakeClip} ranges={ranges} onChange={setSegRanges} locked={!!retakeRun} />
             : <p className="tle-rt-tip">改提示词或参数后生成，新版本会自动替换这个片段</p>}
-          <div id="gp" className={"tle-rt-gp" + (retakeSrc.kind === "video" ? " gp-video" : "")}><GenPanel node={retakeSrc} /></div>
+          <div id="gp" className={"tle-rt-gp" + (retakeSrc.kind === "video" ? " gp-video" : "")}><GenPanel node={retakeSrc} runOpts={retake.seg ? undefined : { inPlace: true }} beforeSend={retake.seg ? segReady : undefined} /></div>
           {retake.seg ? <p className="tle-note">{ranges.length ? "只会改动框出的片段，其余部分尽量保持原样。" : "没有截片段：整段重新生成（来源视频作为参考）。"}需要支持「参考视频生视频」或「视频编辑」的模型；新节点会留在画布上。</p> : null}
         </div>
       </div>
@@ -410,40 +534,48 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
     if (isLocked(c)) { store.toast("这条轨道已锁定"); return null; }
     const p = place(clips, trackOf(c)).find((q) => q.clip.id === c.id); return p ? { c, p } : null;
   };
+  /** 落一条建议：同一类只留最新的 pending（重复点不会堆一长串），返回新建议 */
+  const addSugs = (list: Array<Omit<Sug, "id" | "state">>) => {
+    if (!list.length) return [];
+    const made = list.map((s) => ({ ...s, id: uid("sug"), state: "pending" as const }));
+    const kinds = new Set(made.map((s) => s.kind));
+    const next = [...sugOf().filter((x) => !(x.state === "pending" && kinds.has(x.kind))), ...made];
+    setSugs(next);
+    // 播放头只跳一次：跳到这一批（含已经挂着的建议）里 from 最小的那条，先让人看到要改的那几秒。
+    // 已经在那个位置就不动——后面再生成别的建议不会把播放头从第一条拽走（正在播也不打断）。
+    if (!playing) {
+      const first = next.filter((x) => x.state === "pending").reduce((m, x) => Math.min(m, x.from), Infinity);
+      if (Number.isFinite(first) && Math.abs(first - tRef.current) > 1e-3) seekNow(first);
+    }
+    store.toast(`已生成 ${made.length} 条建议 · 在建议轨确认`, 4000);
+    return made;
+  };
   const aiScenes = async () => {
     const tg = aiTarget(false); if (!tg) return;
     const { c, p } = tg; setBusy("正在找镜头切换点…");
     try {
       const cuts = await detectScenes(await resolveMediaUrl(store.backend, c.url), c.inPoint, c.outPoint);
       if (!cuts.length) { store.toast("这段里没找到明显的镜头切换"); return; }
-      let next = clips; const k = speedOf(c);
-      // 从后往前切：左半段保留原 id，前面的切点还落在它身上
-      for (const cut of [...cuts].sort((x, y) => y - x)) next = splitAt(next, p.start + (cut - c.inPoint) / k, c.id, () => uid("clip")).clips;
-      commit(next); store.toast(`按镜头切成了 ${cuts.length + 1} 段`);
+      const k = speedOf(c);
+      // 切点换算成时间线上的秒数：点 ✓ 采纳时直接按这些时间点切
+      const points = [...cuts].sort((x, y) => x - y).map((cut) => r3s(p.start + (cut - c.inPoint) / k));
+      addSugs([{ kind: "scenes", label: `拆镜头 · ${points.length} 个切点`, from: p.start, to: p.end, payload: { points } }]);
     } catch (e) { store.toast("拆镜头失败：" + (e instanceof Error ? e.message : "读不到视频")); }
     finally { setBusy(null); }
   };
   const aiSilence = async () => {
     const tg = aiTarget(true); if (!tg) return;
-    const { c } = tg; setBusy("正在找静音段…");
+    const { c, p } = tg; setBusy("正在找静音段…");
     try {
       const gaps = await detectSilence(await resolveMediaUrl(store.backend, c.url), c.inPoint, c.outPoint);
       if (gaps == null) { store.toast("这段没有声音轨，没法去静音"); return; }
       if (!gaps.length) { store.toast("没找到超过 0.5 秒的静音"); return; }
-      // 留下的区间 = 片段区间减去静音段；吸附轨上后面的片段会自动往前补
-      const keep: Array<[number, number]> = []; let cur = c.inPoint;
-      for (const [a, b] of gaps) { if (a - cur >= 0.15) keep.push([cur, a]); cur = Math.max(cur, b); }
-      if (c.outPoint - cur >= 0.15) keep.push([cur, c.outPoint]);
-      if (!keep.length) { store.toast("整段都是静音，没有动它"); return; }
-      const k = speedOf(c); let at = Number(c.start) || 0;
-      const parts: Clip[] = keep.map(([a, b], i) => {
-        const part: Clip = { ...c, id: i ? uid("clip") : c.id, inPoint: Math.round(a * 1000) / 1000, outPoint: Math.round(b * 1000) / 1000, order: c.order + i * 0.01, kf: undefined, ...(i ? { trans: "none" as TransKind, transMs: 0 } : {}) };
-        if (trackOf(c) === "overlay") { part.start = Math.round(at * 1000) / 1000; at += (b - a) / k; }
-        return part;
-      });
-      const cut = gaps.reduce((sum, [a, b]) => sum + (b - a), 0) / k;
-      commit(clips.flatMap((x) => (x.id === c.id ? parts : [x])));
-      store.toast(`去掉了 ${gaps.length} 处静音，共 ${cut.toFixed(1)} 秒`);
+      const k = speedOf(c);
+      // 静音段换算成时间线上的区间：采纳时删掉这些区间，吸附轨上后面的片段自动往前补
+      const ranges = gaps.map(([a, b]): [number, number] => [r3s(p.start + (a - c.inPoint) / k), r3s(p.start + (b - c.inPoint) / k)]).filter(([a, b]) => b - a >= 0.2);
+      if (!ranges.length) { store.toast("没找到超过 0.5 秒的静音"); return; }
+      if (ranges.reduce((sum, [a, b]) => sum + (b - a), 0) >= p.end - p.start - MIN_LEN) { store.toast("整段都是静音，没有动它"); return; }
+      addSugs([{ kind: "silence", label: `去静音 · ${ranges.length} 处`, from: ranges[0][0], to: ranges[ranges.length - 1][1], payload: { ranges } }]);
     } catch (e) { store.toast("去静音失败：" + (e instanceof Error ? e.message : "读不到声音")); }
     finally { setBusy(null); }
   };
@@ -464,19 +596,137 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
         if (next && next.start < g.end) next.start = g.end;
         g.start = Math.round(Math.min(g.start, total) * 100) / 100; g.end = Math.round(Math.min(Math.max(g.end, g.start + 0.3), total) * 100) / 100;
       });
-      const subs: Clip[] = segs.filter((g) => g.end > g.start).map((g) => ({ id: uid("sub"), sourceNodeId: "", url: "", mediaKind: "video", inPoint: 0, outPoint: 2, order: 9999, type: "subtitle", text: g.text, start: g.start, end: g.end }));
-      const had = clips.filter((x) => x.type === "subtitle").length;
-      commit([...clips.filter((x) => x.type !== "subtitle"), ...subs]);
-      store.toast(`生成了 ${subs.length} 条字幕` + (had ? `（替换了原来的 ${had} 条，撤销可以找回）` : ""), 5000);
+      const subs = segs.filter((g) => g.end > g.start).map((g) => ({ start: g.start, end: g.end, text: g.text }));
+      if (!subs.length) { store.toast("没有转写出字幕", 6000); return; }
+      addSugs([{ kind: "subs", label: `自动字幕 · ${subs.length} 条`, from: 0, to: total, payload: { subs } }]);
     } catch (e) { store.toast("自动字幕失败：" + (e instanceof Error ? e.message : "未知错误")); }
     finally { setBusy(null); }
   };
   const aiMenu = (e: React.MouseEvent) => openPop(e.currentTarget as HTMLElement, (close) => <div className="tle-menu" data-tl-ai>
-    <div className="mh">AI 剪辑</div>
-    <button className="mi" data-ai="scenes" disabled={!!busy} onClick={() => { close(); void aiScenes(); }}><span className="ic"><Icon name="scissors" size="s" /></span><span className="tle-mi-t">拆镜头<span className="d">选中一段视频，按画面切换点自动切开</span></span></button>
+    <div className="mh">AI 剪辑 · 先给建议</div>
+    <button className="mi" data-ai="scenes" disabled={!!busy} onClick={() => { close(); void aiScenes(); }}><span className="ic"><Icon name="scissors" size="s" /></span><span className="tle-mi-t">拆镜头<span className="d">选中一段视频，按画面切换点先给一条建议</span></span></button>
     <button className="mi" data-ai="silence" disabled={!!busy} onClick={() => { close(); void aiSilence(); }}><span className="ic"><Icon name="mute" size="s" /></span><span className="tle-mi-t">去静音<span className="d">选中一段，剪掉停顿和空白，后面自动补上</span></span></button>
     <button className="mi" data-ai="subs" disabled={!!busy || !total} onClick={() => { close(); void aiSubs(); }}><span className="ic"><Icon name="text" size="s" /></span><span className="tle-mi-t">自动字幕<span className="d">整条时间线的人声转成带时间的字幕</span></span></button>
+    <div className="tle-menu-foot">三个动作都先落成「建议」轨上的卡片：点 ✓ 才真的改时间线，点 ✕ 只丢掉这条建议。</div>
   </div>, "down");
+  /* ── 建议：采纳 / 忽略（卡片 120ms 收起，下面的片段按 160ms FLIP 补位） ── */
+  const flipFrom = useRef<{ map: Map<string, number>; doc: unknown } | null>(null);
+  const captureFlip = () => {
+    const el = lanes.current; if (!el) return;
+    const m = new Map<string, number>();
+    el.querySelectorAll<HTMLElement>(".tle-clip,.tle-va").forEach((e) => { const k = e.dataset.clip || e.dataset.va; if (k) m.set(k, e.getBoundingClientRect().left); });
+    flipFrom.current = { map: m, doc: store.state.doc };
+  };
+  useLayoutEffect(() => {
+    const shot = flipFrom.current; if (!shot) return;
+    // 压快照也会让界面重渲染一次（文档还没变）：等真正改动的那一帧再量，否则位移永远是 0
+    if (shot.doc === store.state.doc) return;
+    flipFrom.current = null;
+    const before = shot.map;
+    const el = lanes.current; if (!el) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    el.querySelectorAll<HTMLElement>(".tle-clip,.tle-va").forEach((e) => {
+      const k = e.dataset.clip || e.dataset.va; if (!k) return;
+      const now = e.getBoundingClientRect().left; const old = before.get(k);
+      if (old == null) { e.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 160, easing: "cubic-bezier(.2,0,0,1)" }); return; }
+      if (Math.abs(old - now) > 0.5) e.animate([{ transform: `translateX(${old - now}px)` }, { transform: "translateX(0)" }], { duration: 160, easing: "cubic-bezier(.2,0,0,1)" });
+    });
+  });
+  /** 一条建议正在落地时挡住重复点击：卡片动画有 120ms，双击会踩两次落地 */
+  const sugBusy = useRef(false);
+  /** 建议轨行数变化（1 行 ↔ 3 行）时，下方轨道整体平移 160ms 补位，别硬跳 */
+  const trackTops = useRef<Map<string, number> | null>(null);
+  useLayoutEffect(() => {
+    const el = lanes.current; if (!el) return;
+    const scale = el.offsetWidth ? el.getBoundingClientRect().width / el.offsetWidth : 1;
+    const now = new Map<string, number>();
+    el.querySelectorAll<HTMLElement>(".tle-track[data-track]").forEach((t) => {
+      const k = t.dataset.track; if (k && k !== "sug") now.set(k, t.getBoundingClientRect().top);
+    });
+    const prev = trackTops.current; trackTops.current = now;
+    if (!prev || !scale || !now.size) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    now.forEach((top, k) => {
+      const before = prev.get(k); if (before == null) return;
+      const dy = (before - top) / scale;
+      if (Math.abs(dy) < 0.5) return;
+      el.querySelector<HTMLElement>('.tle-track[data-track="' + k + '"]')?.animate([{ transform: `translateY(${dy}px)` }, { transform: "translateY(0)" }], { duration: 160, easing: "cubic-bezier(.2,0,0,1)" });
+    });
+  });
+  const resolveSug = async (s: Sug, accept: boolean) => {
+    if (sugBusy.current) return;
+    sugBusy.current = true;
+    try {
+      const card = lanes.current?.querySelector<HTMLElement>(`[data-sug="${s.id}"]`);
+      if (card && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        try { await card.animate([{ opacity: 1, transform: "translateY(0) scale(1)" }, { opacity: 0, transform: "translateY(-6px) scale(.96)" }], { duration: 120, easing: "cubic-bezier(.2,0,0,1)" }).finished; } catch { /* 动画被打断也照常落地 */ }
+      }
+      if (!sugOf().some((x) => x.id === s.id && x.state === "pending")) return;
+      captureFlip();
+      // 快照是整个文档：建议状态和片段改动都在里面，⌘Z / ⇧⌘Z 一起回退
+      store.snapshot();
+      store.updateNode(node.id, (n) => {
+        const list = (((n.data as TlData | undefined)?.tlSugs || []) as Sug[]).map((x) => (x.id === s.id ? { ...x, state: (accept ? "applied" : "dismissed") as Sug["state"] } : x));
+        const cur = (n.clips || []) as Clip[];
+        return { ...n, clips: accept ? applySug(cur, s) : cur, data: { ...((n.data as object) || {}), tlSugs: list } };
+      }, { history: false });
+      store.toast(accept ? `已采纳：${s.label} · 撤销` : "已忽略 · 撤销", 4200, () => store.undo());
+    } finally { sugBusy.current = false; }
+  };
+  /**
+   * 全部采纳 / 全部忽略：整批只压一次撤销快照（⌘Z 一次回到批量操作前），
+   * 采纳时逐条走和单条 ✕/✓ 完全相同的 applySug 路径。
+   */
+  const resolveAll = async (accept: boolean) => {
+    if (sugBusy.current) return;
+    const list = sugOf().filter((s) => s.state === "pending");
+    if (!list.length) return;
+    sugBusy.current = true;
+    try {
+      const cards = [...(lanes.current?.querySelectorAll<HTMLElement>("[data-sug]") || [])];
+      if (cards.length && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        await Promise.all(cards.map((c) => c.animate([{ opacity: 1 }, { opacity: 0, transform: "translateY(-6px) scale(.96)" }], { duration: 120, easing: "cubic-bezier(.2,0,0,1)" }).finished.catch(() => undefined)));
+      }
+      const live = sugOf().filter((s) => s.state === "pending");
+      if (!live.length) return;
+      captureFlip();
+      const ids = new Set(live.map((s) => s.id));
+      store.snapshot();
+      store.updateNode(node.id, (n) => {
+        const cur = (n.clips || []) as Clip[];
+        let next = cur;
+        if (accept) for (const s of live) next = applySug(next, s);
+        const sugs = (((n.data as TlData | undefined)?.tlSugs || []) as Sug[]).map((x) => (ids.has(x.id) ? { ...x, state: (accept ? "applied" : "dismissed") as Sug["state"] } : x));
+        return { ...n, clips: next, data: { ...((n.data as object) || {}), tlSugs: sugs } };
+      }, { history: false });
+      store.toast(accept ? `已采纳 ${live.length} 条建议 · 撤销` : `已忽略 ${live.length} 条建议 · 撤销`, 4200, () => store.undo());
+    } finally { sugBusy.current = false; }
+  };
+  /** 「+N 更多」：贴聚合卡弹出磨砂浮层，逐条处理放不下的建议 */
+  const toggleMore = (el: HTMLElement) => {
+    if (more) { setMore(null); return; }
+    const r = el.getBoundingClientRect();
+    const w = 320; const h = Math.min(380, 64 + sugLayout.overflow.length * 48);
+    setMore({ x: Math.max(12, Math.min(r.left, window.innerWidth - w - 12)), y: Math.max(12, Math.min(r.bottom + 8, window.innerHeight - h - 12)) });
+  };
+  // 点外面 / Esc 收起浮层；放不下的建议处理完也自动收起
+  useEffect(() => {
+    if (!more) return;
+    const onDown = (e: PointerEvent) => { if (!(e.target as HTMLElement | null)?.closest?.(".tle-sug-more-pop,[data-sug-more]")) setMore(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMore(null); };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => { window.removeEventListener("pointerdown", onDown, true); window.removeEventListener("keydown", onKey, true); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!more]);
+  /** 键盘 ←/→：在多条建议卡之间移动焦点（到头就停住，不绕回去） */
+  const focusSug = (fromId: string, dir: 1 | -1) => {
+    const el = lanes.current; if (!el) return;
+    const list = [...el.querySelectorAll<HTMLElement>("[data-sug]")];
+    if (!list.length) return;
+    const i = Math.max(0, list.findIndex((e) => e.dataset.sug === fromId));
+    list[Math.max(0, Math.min(list.length - 1, i + dir))]?.focus({ preventScroll: true });
+  };
 
   /* ── 标记点 / 轨道锁定 ── */
   const addMark = () => { const at = Math.round(t * 1000) / 1000; if (marks.some((m) => Math.abs(m.t - at) < frameSec)) return; setMeta({ tlMarks: [...marks, { t: at }] }); };
@@ -989,12 +1239,59 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
     </>;
   })();
 
+  /**
+   * 建议轨按区间分行（最多 3 行）：from 升序依次找第一行放得下的位置（和那行已占区间不重叠），放不下就换行。
+   * 轨道高 = 4 + 36 × 行数；行数超过 3 时，多出来的收进最后一行的「+N 更多」聚合卡，点开逐条处理。
+   */
+  const ROW_H = 36; const MAX_ROWS = 3;
+  const sugLayout = useMemo(() => {
+    const used: Array<Array<{ left: number; right: number }>> = [];
+    const placed: Array<{ s: Sug; x: number; w: number; row: number }> = [];
+    const overflow: Sug[] = [];
+    for (const s of [...pend].sort((a, b) => a.from - b.from)) {
+      // 宽度跟着区间走（最窄 132）：卡片比实际区间宽，视觉上就是在撒谎
+      const w = Math.max(132, Math.max(0, s.to - s.from) * pps);
+      const x = Math.max(0, s.from) * pps;
+      let row = -1;
+      for (let r = 0; r < MAX_ROWS; r += 1) {
+        const list = used[r];
+        if (!list || !list.some((o) => x < o.right - 0.5 && x + w > o.left + 0.5)) { row = r; break; }
+      }
+      if (row < 0) { overflow.push(s); continue; }
+      (used[row] = used[row] || []).push({ left: x, right: x + w });
+      placed.push({ s, x, w, row });
+    }
+    const rows = placed.reduce((m, c) => Math.max(m, c.row + 1), 0);
+    let more: { n: number; x: number; row: number } | null = null;
+    if (overflow.length) {
+      const row = Math.max(0, rows - 1);
+      const right = placed.filter((c) => c.row === row).reduce((m, c) => Math.max(m, c.x + c.w), 0);
+      more = { n: overflow.length, x: right + 8, row };
+    }
+    return { placed, overflow, rows, more, h: placed.length ? 4 + ROW_H * rows : 0 };
+  }, [pend, pps]);
+  // 放不下的建议都处理完了：浮层自动收起
+  useEffect(() => { if (more && !sugLayout.overflow.length) setMore(null); }, [more, sugLayout.overflow.length]);
+  const moreView = more && typeof document !== "undefined" ? createPortal(
+    <div className="tle-sug-more-pop" style={{ left: more.x, top: more.y }} role="dialog" aria-label="还有建议待处理" onPointerDown={(e) => e.stopPropagation()}>
+      <div className="tle-sug-more-h">还有 {sugLayout.overflow.length} 条建议</div>
+      {sugLayout.overflow.map((s) => (
+        <div className="tle-sug-more-row" key={s.id}>
+          <span className="tle-sug-i" aria-hidden="true"><Icon name={SUG_ICON[s.kind]} size="xs" /></span>
+          <span className="tle-sug-more-t"><b>{s.label}</b><em className="tnum">{fmtHMS(s.from)}–{fmtHMS(s.to)}</em></span>
+          <button className="tle-sug-a yes" aria-label="采纳建议" title="采纳建议" onClick={() => void resolveSug(s, true)}><Icon name="check" size="xs" /></button>
+          <button className="tle-sug-a no" aria-label="忽略建议" title="忽略建议" onClick={() => void resolveSug(s, false)}><Icon name="x" size="xs" /></button>
+        </div>
+      ))}
+    </div>,
+    (document.querySelector(".cn-root") as HTMLElement | null) || document.body,
+  ) : null;
   const hasVideoAudio = visRaw.some((c) => c.mediaKind === "video" && trackOf(c) === "video");
-  const trackRows: Array<{ t: Track | "vaudio"; label: string; icon: "video" | "audio" | "text" | "layers" | "mic"; h: number; addTip?: string }> = [
+  const trackRows: Array<{ t: Track | "vaudio"; label: string; icon: IconName; h: number; addTip?: string }> = [
     { t: "video", label: "画面", icon: "video", h: 46, addTip: "添加视频 / 图片" },
     ...(hasVideoAudio ? [{ t: "vaudio" as const, label: "原声", icon: "mic" as const, h: 26 }] : []),
     { t: "overlay", label: "画中画", icon: "layers", h: 34, addTip: "添加画中画" },
-    { t: "audio", label: "音频", icon: "audio", h: 34, addTip: "添加配乐 / 配音" },
+    { t: "audio", label: "音频", icon: "volume", h: 34, addTip: "添加配乐 / 配音" },
     { t: "subtitle", label: "字幕", icon: "text", h: 26, addTip: "在播放头处加字幕" },
   ];
   const addTo = (tr: Track | "vaudio", el: HTMLElement) => {
@@ -1011,7 +1308,10 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
     onDoubleClick={(e) => { stop(e); if (!full && onFull && !(e.target as HTMLElement).closest("button,input,select,textarea,.tle-clip,.tle-ruler,.tle-side,.tle-va")) onFull(true); }}>
     <div className="tle-top" onPointerDown={stopOnControl}>
       <button className="pill strong" data-tl="add" onClick={addRoot}><Icon name="plus" size="xs" />添加素材</button>
-      <button className="pill" data-tl="ai" onClick={aiMenu}><Icon name="sparkle" size="xs" />AI 剪辑<Icon name="down" size="xs" className="tle-caret" /></button>
+      <button className="pill tle-ai" data-tl="ai" onClick={aiMenu} aria-label={"AI 剪辑" + (pend.length ? ` · ${pend.length} 条建议待确认` : "")}>
+        <Icon name="sparkle" size="xs" />AI 剪辑<Icon name="down" size="xs" className="tle-caret" />
+        {pend.length ? <i className="tle-ai-badge tnum" data-tl="ai-badge" aria-hidden="true">{pend.length > 9 ? "9+" : pend.length}</i> : null}
+      </button>
       <span className="grow" />
       {busy ? <span className="tle-busy" data-tl-busy><i className="tle-spin" />{busy}</span> : null}
       <select className="tle-sel" data-tl="ratio" value={ratio} onChange={(e) => setMeta({ ratio: e.target.value })} title="画幅">{RATIOS.map((r) => <option key={r} value={r}>{r}</option>)}</select>
@@ -1042,7 +1342,7 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
     </div>
 
     <div className="tle-tbar" onPointerDown={stopOnControl}>
-      <span className="tle-seg tle-tools">{TOOLS.map((x) => <button key={x.id} className={"tipT" + (tool === x.id ? " on" : "")} data-tl={"tool-" + x.id} data-tip={x.tip} onClick={() => setTool(x.id)}>{x.label}</button>)}</span>
+      <span className="tle-seg tle-tools">{TOOLS.map((x) => <button key={x.id} className={"tipT" + (tool === x.id ? " on" : "")} data-tl={"tool-" + x.id} data-tip={x.tip} title={x.tip} onClick={() => setTool(x.id)}><Icon name={x.icon} size="xs" /><span className="tle-tool-t">{x.label}</span></button>)}</span>
       <span className="tle-sep" />
       <button className="ib tipT" data-tl="split" data-tip="在播放头处切开（C）" disabled={!clips.length} onClick={split}><Icon name="scissors" size="s" /></button>
       <button className="ib tipT" data-tl="dup" data-tip="复制选中片段（D）" disabled={!sel.size} onClick={dup}><Icon name="copy" size="s" /></button>
@@ -1070,11 +1370,30 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
           {marks.map((m) => <span key={m.t} className="tle-mark" data-mark={m.t} title={"标记 " + fmtTC(m.t) + "（点击跳到这里，右键删除）"} style={{ left: LAB + m.t * pps }} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); seekNow(m.t); }} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); delMark(m.t); }} />)}
           {Array.from({ length: Math.floor(span / step) + 1 }, (_, i) => <span key={i} className="tle-tick" style={{ left: LAB + i * step * pps }}>{fmt(i * step).replace(/\.0$/, "")}</span>)}
         </div>
+        {sugLayout.h ? <div className="tle-track k-sug" data-track="sug" style={{ height: sugLayout.h }}>
+          <span className="tle-lab">
+            <span className="tle-lab-i" aria-hidden="true"><Icon name="sparkle" size="xs" /></span>
+            <span className="tle-lab-n">建议</span>
+            <span className="tle-lab-c tnum" data-tl="sug-count">{pend.length}</span>
+            <span className="tle-sug-batch">
+              <button className="tle-sb" data-tl="sug-accept-all" title={"全部采纳（" + pend.length + " 条）"} aria-label={"全部采纳 " + pend.length + " 条建议"}
+                onPointerDown={stopOnControl} onClick={(e) => { e.stopPropagation(); void resolveAll(true); }}><Icon name="check" size="xs" /></button>
+              <button className="tle-sb" data-tl="sug-ignore-all" title={"全部忽略（" + pend.length + " 条）"} aria-label={"全部忽略 " + pend.length + " 条建议"}
+                onPointerDown={stopOnControl} onClick={(e) => { e.stopPropagation(); void resolveAll(false); }}><Icon name="x" size="xs" /></button>
+            </span>
+          </span>
+          {sugLayout.placed.map(({ s, x, w, row }) => <SugCard key={s.id} s={s} left={LAB + x} top={2 + ROW_H * row} width={w}
+            onAccept={() => void resolveSug(s, true)} onIgnore={() => void resolveSug(s, false)} onSeek={() => seekNow(s.from)} onMove={(d) => focusSug(s.id, d)} />)}
+          {sugLayout.more ? <button type="button" className="tle-sug more" data-sug-more aria-label={"还有 " + sugLayout.more.n + " 条建议，展开逐条处理"} title={"还有 " + sugLayout.more.n + " 条建议"}
+            style={{ left: LAB + sugLayout.more.x, top: 2 + ROW_H * sugLayout.more.row, width: 92 }}
+            onPointerDown={stopOnControl} onClick={(e) => { e.stopPropagation(); toggleMore(e.currentTarget); }}>+{sugLayout.more.n} 更多</button> : null}
+        </div> : null}
         {trackRows.map((tr) => {
           const real = tr.t !== "vaudio" ? (tr.t as Track) : null;
           const off = trackHidden(tr.t);
           return <div key={tr.t} className={"tle-track k-" + tr.t + (off ? " off" : "") + (real && locked[real] ? " locked" : "")} style={{ height: tr.h }} data-track={tr.t} onPointerDown={(e) => { if (e.target === e.currentTarget) laneDown(e); }}>
             <span className="tle-lab">
+              <span className="tle-lab-i" aria-hidden="true"><Icon name={tr.icon} size="xs" /></span>
               <button className={"tle-tb" + (off ? " off" : "")} data-tl={"track-" + tr.t} title={tr.t === "audio" || tr.t === "vaudio" ? (off ? "取消静音这条轨" : "静音这条轨") : (off ? "显示这条轨" : "隐藏这条轨")} onPointerDown={stopOnControl} onClick={(e) => { e.stopPropagation(); toggleTrack(tr.t); }}>
                 <Icon name={tr.t === "audio" || tr.t === "vaudio" ? (off ? "mute" : "volume") : (off ? "eyeoff" : "eye")} size="xs" />
               </button>
@@ -1083,9 +1402,9 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
               {real ? <button className={"tle-tb lk" + (locked[real] ? " on" : "")} data-tl={"lock-" + tr.t} title={locked[real] ? "解锁这条轨" : "锁定这条轨（不能拖动 / 修剪 / 删除）"} onPointerDown={stopOnControl} onClick={(e) => { e.stopPropagation(); toggleLock(real); }}><Icon name="shield" size="xs" /></button> : null}
             </span>
             {tr.t === "vaudio"
-              ? place(visRaw, "video").filter((p) => p.clip.mediaKind === "video" && p.clip.url).map((p) => <VoiceBlock key={p.clip.id} p={p} pps={pps} selected={sel.has(p.clip.id)} off={off}
+              ? place(visRaw, "video").filter((p) => p.clip.mediaKind === "video" && p.clip.url).map((p) => <VoiceBlock key={p.clip.id} p={p} pps={pps} selected={sel.has(p.clip.id)} off={off} wave={wave}
                 onDown={(e) => { e.stopPropagation(); if (e.button === 2) return; e.preventDefault(); pick(e, p.clip.id); focus(); }} onMenu={clipMenu} />)
-              : place(visRaw, tr.t as Track).map((p, i, all) => <ClipBlock key={p.clip.id} p={p} prev={all[i - 1]?.clip} pps={pps} selected={sel.has(p.clip.id)}
+              : place(visRaw, tr.t as Track).map((p, i, all) => <ClipBlock key={p.clip.id} p={p} prev={all[i - 1]?.clip} pps={pps} selected={sel.has(p.clip.id)} wave={wave}
                 dx={drag && drag.id === p.clip.id && drag.mode === "move" ? drag.dt * pps : 0} onDown={startDrag} onMenu={clipMenu} />)}
           </div>;
         })}
@@ -1097,11 +1416,12 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
       </div>
     </div>
     {retakeView}
+    {moreView}
   </div>;
 }
 
 /** 「原声」轨上的一段：跟着画面轨上的视频片段走（位置 / 长度 / 变速都一样），显示它自带声音的波形；点一下选中那段视频 */
-function VoiceBlock({ p, pps, selected, off, onDown, onMenu }: { p: Placed; pps: number; selected: boolean; off: boolean; onDown: (e: React.PointerEvent) => void; onMenu: (e: React.MouseEvent, id: string) => void }) {
+function VoiceBlock({ p, pps, selected, off, wave, onDown, onMenu }: { p: Placed; pps: number; selected: boolean; off: boolean; wave: string; onDown: (e: React.PointerEvent) => void; onMenu: (e: React.MouseEvent, id: string) => void }) {
   const c = p.clip; const width = Math.max(6, (p.end - p.start) * pps);
   const [st, setSt] = useState<{ peaks: Peaks | null; done: boolean }>({ peaks: null, done: false });
   const be = useCtl().store.backend;
@@ -1112,16 +1432,17 @@ function VoiceBlock({ p, pps, selected, off, onDown, onMenu }: { p: Placed; pps:
   }, [c.url, be]);
   const muted = volOf(c) === 0 || off;
   const none = st.done && !st.peaks;
+  const wavePeaks = useMemo(() => fillPeaks(st.peaks), [st.peaks]);
   return <div className={"tle-va" + (selected ? " on" : "") + (muted ? " muted" : "") + (none ? " none" : "")} data-va={c.id} title={none ? "这段视频没有声音" : muted ? "已静音" : "视频自带的声音 · 音量 " + Math.round(volOf(c) * 100) + "%"}
     style={{ left: LAB + p.start * pps, width }} onPointerDown={onDown} onContextMenu={(e) => onMenu(e, c.id)}>
-    {st.peaks ? <WaveStrip peaks={st.peaks} from={c.inPoint} to={c.outPoint} width={Math.round(Math.min(2400, width))} height={20} color="rgba(255,255,255,.78)" /> : <span className="tle-va-t">{none ? "无声音" : ""}</span>}
+    {wavePeaks ? <WaveStrip peaks={wavePeaks} from={c.inPoint} to={c.outPoint} width={Math.round(Math.min(2400, width))} height={16} color={wave} dim={0} /> : <span className="tle-va-t">{none ? "无声音" : ""}</span>}
     {volOf(c) !== 1 && !none ? <span className="tle-badge tnum">{volOf(c) === 0 ? "静音" : Math.round(volOf(c) * 100) + "%"}</span> : null}
   </div>;
 }
 
-type ClipBlockProps = { p: Placed; prev?: Clip; pps: number; selected: boolean; dx: number; onDown: (e: React.PointerEvent, id: string, mode: Drag["mode"]) => void; onMenu: (e: React.MouseEvent, id: string) => void };
+type ClipBlockProps = { p: Placed; prev?: Clip; pps: number; selected: boolean; dx: number; wave: string; onDown: (e: React.PointerEvent, id: string, mode: Drag["mode"]) => void; onMenu: (e: React.MouseEvent, id: string) => void };
 
-function ClipBlock({ p, prev, pps, selected, dx, onDown, onMenu }: ClipBlockProps) {
+function ClipBlock({ p, prev, pps, selected, dx, wave, onDown, onMenu }: ClipBlockProps) {
   const store = useCtl().store;
   const c = p.clip; const t = trackOf(c); const isImg = c.mediaKind === "image";
   // 时间线上一排小封面只有几十像素高：用缩略图，别为一条时间线拉几十张 4K 原图（失败自动退回原图）
@@ -1136,13 +1457,14 @@ function ClipBlock({ p, prev, pps, selected, dx, onDown, onMenu }: ClipBlockProp
   const cells = useFilmstrip(strip ? c.url : "", c.inPoint, c.outPoint, width);
   // 视频自带的声音画在下面单独的「原声」轨上；片段里只给音频 / 画中画画波形
   const peaks = usePeaks((t === "audio" || t === "overlay") && c.url ? c.url : "");
+  const wavePeaks = useMemo(() => fillPeaks(peaks), [peaks]);
   const orphan = !!c.sourceNodeId && !store.node(c.sourceNodeId);
   const tip = `${fmt(p.start)} – ${fmt(p.end)} · ${lenOf(c).toFixed(1)}s${k !== 1 ? ` · ${k}×` : ""}${orphan ? " · 来源节点已删除" : ""}`;
   return <div className={"tle-clip k-" + t + (isImg ? " k-image" : "") + (selected ? " on" : "") + (dx ? " drag" : "") + (t !== "subtitle" && volOf(c) === 0 ? " muted" : "")} data-clip={c.id} title={tip}
     style={{ left: LAB + p.start * pps, width, transform: dx ? `translateX(${dx}px)` : undefined, backgroundImage: !strip && thumb ? `url("${thumb}")` : undefined }}
     onPointerDown={(e) => { if (e.button === 2) { e.stopPropagation(); return; } onDown(e, c.id, "move"); }} onContextMenu={(e) => onMenu(e, c.id)}>
     {strip && cells.length ? <span className="tle-fs">{cells.map((src, i) => <i key={i} style={src ? { backgroundImage: `url("${src}")` } : undefined} />)}</span> : null}
-    {peaks && t !== "subtitle" ? <span className={"tle-wavewrap" + (t === "audio" ? " tall" : "")}><WaveStrip peaks={peaks} from={c.inPoint} to={c.outPoint} width={Math.round(Math.min(2400, width))} height={t === "audio" ? 26 : 13} color={t === "audio" ? "rgba(214,255,231,.85)" : "rgba(255,255,255,.72)"} /></span> : null}
+    {wavePeaks && t !== "subtitle" ? <span className={"tle-wavewrap" + (t === "audio" ? " tall" : "")}><WaveStrip peaks={wavePeaks} from={c.inPoint} to={c.outPoint} width={Math.round(Math.min(2400, width))} height={t === "audio" ? 20 : 13} color={wave} dim={t === "audio" ? 0 : undefined} /></span> : null}
     {tr && tr.kind !== "none" ? <span className="tle-tr" title={tr.kind === "fade" ? "黑场淡入" : "交叉溶解"} style={{ width: Math.max(6, tr.sec * pps) }} /> : null}
     {t !== "subtitle" && fd.in > 0 ? <span className="tle-fade l" style={{ width: Math.min(width / 2, fd.in * pps) }} /> : null}
     {t !== "subtitle" && fd.out > 0 ? <span className="tle-fade r" style={{ width: Math.min(width / 2, fd.out * pps) }} /> : null}
@@ -1156,78 +1478,40 @@ function ClipBlock({ p, prev, pps, selected, dx, onDown, onMenu }: ClipBlockProp
 }
 
 
-/** 片段重拍的选段（交互和 LibTV 一致）：大预览 + 整段来源视频的胶片条。
- *  点胶片条空白处截一段（默认 3 秒，最多 5 段，不重叠）；拖片段挪位置，拖两端改长短，悬停点 × 删除；
- *  胶片条下沿的亮条是时间线上用到的那一段（入点～出点）；点哪里预览就跳到哪里。 */
-function SegPicker({ url, clip, ranges, onChange, locked }: { url: string; clip: Clip; ranges: Array<{ a: number; b: number }>; onChange: (r: Array<{ a: number; b: number }>) => void; locked: boolean }) {
-  const store = useCtl().store;
-  const src = useAssetUrl(url);
-  const vref = useRef<HTMLVideoElement>(null);
-  const bar = useRef<HTMLDivElement>(null);
-  const [dur, setDur] = useState(Number(clip.srcDur) || clip.outPoint || 0);
-  const [now, setNow] = useState(clip.inPoint);
-  const cells = useFilmstrip(url, 0, Math.max(0.1, dur), 1100);
-  const MAX = 5, MIN = 0.5, DEF = 3;
-  const r2 = (v: number) => Math.round(v * 100) / 100;
-  const sorted = [...ranges].sort((p, q) => p.a - q.a);
-  const pct = (v: number) => (dur ? (v / dur) * 100 : 0) + "%";
-  const toSec = (x: number) => { const r = bar.current!.getBoundingClientRect(); return Math.min(1, Math.max(0, (x - r.left) / r.width)) * dur; };
-  const seek = (t: number) => { const v = vref.current; if (v && Number.isFinite(t)) { try { v.currentTime = t; } catch { /* 还没加载 */ } } setNow(t); };
-  /** 第 i 段左右能挪到哪（不压到别的段）；i 省略时按时间点 t 找它所在的空档 */
-  const room = (t: number, skip = -1) => {
-    let lo = 0, hi = dur;
-    sorted.forEach((r, j) => { if (j === skip) return; if (r.b <= t + 1e-6) lo = Math.max(lo, r.b); else if (r.a >= t - 1e-6) hi = Math.min(hi, r.a); });
-    return { lo, hi };
-  };
-  const add = (e: React.PointerEvent) => {
-    if (e.button !== 0 || !dur) return;
-    e.stopPropagation(); e.preventDefault();
-    const t = toSec(e.clientX); seek(t);
-    if (locked || sorted.some((r) => t >= r.a && t <= r.b)) return;
-    if (sorted.length >= MAX) { store.toast(`最多截 ${MAX} 个片段`); return; }
-    const { lo, hi } = room(t);
-    if (hi - lo < MIN) { store.toast("这里剩下的空间不够截一段"); return; }
-    const len = Math.min(DEF, hi - lo); const a = Math.max(lo, Math.min(t - len / 2, hi - len));
-    onChange([...sorted, { a: r2(a), b: r2(a + len) }].sort((p, q) => p.a - q.a));
-  };
-  const drag = (i: number, mode: "a" | "b" | "move") => (e: React.PointerEvent) => {
-    e.stopPropagation(); e.preventDefault();
-    if (locked || e.button !== 0) return;
-    const r0 = sorted[i]; const { lo, hi } = room((r0.a + r0.b) / 2, i); const t0 = toSec(e.clientX);
-    const move = (ev: PointerEvent) => {
-      const t = toSec(ev.clientX); let a = r0.a, b = r0.b;
-      if (mode === "a") a = Math.max(lo, Math.min(t, r0.b - MIN));
-      else if (mode === "b") b = Math.min(hi, Math.max(t, r0.a + MIN));
-      else { const d = Math.max(lo - r0.a, Math.min(hi - r0.b, t - t0)); a = r0.a + d; b = r0.b + d; }
-      seek(mode === "b" ? b : a);
-      onChange(sorted.map((r, j) => (j === i ? { a: r2(a), b: r2(b) } : r)));
-    };
-    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
-    addEventListener("pointermove", move); addEventListener("pointerup", up);
-  };
-  return <div className="tle-segpick">
-    <div className="tle-segpick-v">
-      <video ref={vref} src={src || undefined} controls playsInline preload="metadata" crossOrigin="anonymous"
-        onLoadedMetadata={(e) => { const d = e.currentTarget.duration; if (Number.isFinite(d) && d > 0) setDur(d); try { e.currentTarget.currentTime = clip.inPoint; } catch { /* ignore */ } }}
-        onTimeUpdate={(e) => setNow(e.currentTarget.currentTime)} />
-    </div>
-    <div className="tle-segpick-row">
-      <div className={"tle-segpick-bar" + (locked ? " locked" : "")} ref={bar} data-rt="strip" onPointerDown={add}>
-        <span className="tle-segpick-fs">{cells.map((c, i) => <i key={i} style={c ? { backgroundImage: `url("${c}")` } : undefined} />)}</span>
-        {dur ? <span className="tle-segpick-used" title="时间线上用到的部分" style={{ left: pct(clip.inPoint), width: pct(clip.outPoint - clip.inPoint) }} /> : null}
-        {!sorted.length ? <span className="tle-segpick-hint">点击可截取新片段</span> : null}
-        {sorted.map((r, i) => <span key={i} className="tle-segpick-r" data-rt={"range-" + i} style={{ left: pct(r.a), width: pct(r.b - r.a) }} onPointerDown={drag(i, "move")}>
-          <i className="h l" onPointerDown={drag(i, "a")} /><i className="h r" onPointerDown={drag(i, "b")} />
-          <em className="tnum">{(r.b - r.a).toFixed(1)}s</em>
-          {!locked ? <button className="x" aria-label="删除这段" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onChange(sorted.filter((_, j) => j !== i)); }}><Icon name="x" size="xs" /></button> : null}
-        </span>)}
-        {dur ? <span className="tle-segpick-ph" style={{ left: pct(now) }} /> : null}
-      </div>
-      <span className="tle-segpick-n tnum">{sorted.length}/{MAX} 个片段</span>
-    </div>
+type SugCardProps = { s: Sug; left: number; top: number; width: number; onAccept: () => void; onIgnore: () => void; onSeek: () => void; onMove: (dir: 1 | -1) => void };
+
+/** 建议轨上的一张卡：按区间定位（left = from，宽度 = 区间），点空白处跳到建议开始；回车采纳、退格忽略 */
+function SugCard({ s, left, top, width, onAccept, onIgnore, onSeek, onMove }: SugCardProps) {
+  // 宽度自适应：≥180 显示「标签 + 区间」；<180 只留图标 + 标签（区间放 title 里）；<152 两个圆钮悬停才浮出来
+  const compact = width < 180; const mini = width < 152;
+  const range = fmtHMS(s.from) + "–" + fmtHMS(s.to);
+  return <div className={"tle-sug" + (compact ? " compact" : "") + (mini ? " mini" : "")} data-sug={s.id} tabIndex={0} role="group"
+    aria-label={s.label + " · " + range + "（回车采纳，退格忽略，左右键换建议）"}
+    style={{ left, top, width }} title={s.label + " · " + range}
+    onPointerDown={(e) => { if ((e.target as HTMLElement).closest("button")) return; e.stopPropagation(); e.preventDefault(); onSeek(); }}
+    onKeyDown={(e) => {
+      if (e.target !== e.currentTarget) return; // 焦点在里面的圆钮上：回车 / 空格交给按钮自己
+      if (e.metaKey || e.ctrlKey || e.altKey) return; // ⌘Z 之类留给时间线
+      const k = e.key;
+      if (k === "Enter") { e.preventDefault(); e.stopPropagation(); onAccept(); }
+      else if (k === "Backspace" || k === "Escape") { e.preventDefault(); e.stopPropagation(); onIgnore(); }
+      else if (k === " " || k === "Spacebar") { e.preventDefault(); e.stopPropagation(); } // 空格不穿透成播放
+      else if (k === "ArrowLeft" || k === "ArrowRight") { e.preventDefault(); e.stopPropagation(); onMove(k === "ArrowLeft" ? -1 : 1); }
+      else e.stopPropagation();
+    }}>
+    <span className="tle-sug-sb" aria-hidden="true" />
+    <span className="tle-sug-i" aria-hidden="true"><Icon name={SUG_ICON[s.kind]} size="xs" /></span>
+    <span className="tle-sug-t">
+      <b>{s.label}</b>
+      {compact ? null : <em className="tnum">{range}</em>}
+    </span>
+    {mini ? <span className="tle-sug-hint" aria-hidden="true"><Icon name="check" size="xs" /></span> : null}
+    <span className="tle-sug-acts">
+      <button className="tle-sug-a yes" aria-label="采纳建议" title="采纳建议（回车）" onPointerDown={stop} onClick={onAccept}><Icon name="check" size="xs" /></button>
+      <button className="tle-sug-a no" aria-label="忽略建议" title="忽略建议（退格）" onPointerDown={stop} onClick={onIgnore}><Icon name="x" size="xs" /></button>
+    </span>
   </div>;
 }
-
 
 /**
  * 画布上的剪辑节点：平时在节点里编辑；切到全屏时整个编辑器 portal 到画布最上层铺满窗口（同一份数据），

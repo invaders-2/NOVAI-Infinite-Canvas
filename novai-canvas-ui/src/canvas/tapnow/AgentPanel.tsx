@@ -447,6 +447,15 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     const sel = selectedIds.filter((id) => !a.muted.has(id) && !pinnedIds.includes(id)).map((id) => store.node(id)).filter((n): n is CanvasNode => !!n);
     return [...pinned.map((n) => ({ n, pinned: true })), ...sel.map((n) => ({ n, pinned: false }))];
   };
+  /** 分组 / 堆叠的引用标签：title(n) 对 group 只会退回 kind（三个堆叠全叫 group），
+      这里用 data.gen.title（堆叠名）+ 成员数，引用清单 / 胶囊才分得清是哪一个。 */
+  const refLabel = (n: CanvasNode): string => {
+    if (n.kind !== "group") return title(n);
+    const row = n as unknown as { text?: string; children?: unknown[]; data?: { stack?: unknown; gen?: { title?: unknown } } };
+    const name = String(row.data?.gen?.title || row.text || "").trim() || (row.data?.stack ? "堆叠" : "分组");
+    const count = Array.isArray(row.children) ? row.children.length : 0;
+    return count ? `${name}（${count} 个成员）` : name;
+  };
   useEffect(() => { [...a.muted].forEach((id) => { if (!ui.sel.has(id)) a.muted.delete(id); }); }, [ui.sel, a]);
   // 画布上点选加入上下文
   useEffect(() => { const on = (e: Event) => { const id = (e as CustomEvent).detail as string; if (!a.pinned.includes(id)) a.pinned.push(id); a.emit(); }; addEventListener("cn:agent-pick", on); return () => removeEventListener("cn:agent-pick", on); }, [a]);
@@ -1022,12 +1031,12 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     const tokenCtx: NonNullable<AgentMsg["ctx"]> = [];
     for (const t of parseMentionTokens(rawText)) {
       if (t.kind === "skill") continue;
-      if (t.kind === "node") { const n = store.node(t.id); if (n) tokenCtx.push({ id: n.id, title: title(n), kind: n.kind, src: displaySrc(store.state.doc.nodes, n) || undefined }); continue; }
+      if (t.kind === "node") { const n = store.node(t.id); if (n) tokenCtx.push({ id: n.id, title: refLabel(n), kind: n.kind, src: displaySrc(store.state.doc.nodes, n) || undefined }); continue; }
       const ref = refs.find((r) => r.id === t.id);
       if (ref) tokenCtx.push({ id: ref.id, title: ref.title, kind: ref.kind, src: ref.kind === "asset" ? ref.ref : undefined });
     }
     const msgCtx: NonNullable<AgentMsg["ctx"]> = [...tokenCtx,
-      ...ctx.map((n) => ({ id: n.id, title: title(n), kind: n.kind, src: displaySrc(store.state.doc.nodes, n) || undefined })),
+      ...ctx.map((n) => ({ id: n.id, title: refLabel(n), kind: n.kind, src: displaySrc(store.state.doc.nodes, n) || undefined })),
       ...refs.map((r) => ({ id: r.id, title: r.title, kind: r.kind, src: r.kind === "asset" ? r.ref : undefined })),
     ].filter((x, i, arr) => arr.findIndex((y) => y.id === x.id) === i);
     const userMsgId = mid();
@@ -1047,7 +1056,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
        task/run 走 canvasContext.selectedNodeIds + resourceRefs，不解析文本；
        但 chat 回退 / 记忆这类「只有文字」的路径会丢引用，所以把引用清单隐性附到 goal 尾部。 */
     const refSeen: Record<string, number> = {};
-    const refDigest = [...ctx.map((n) => { const k = n.kind === "image" ? "图" : n.kind === "video" ? "视频" : n.kind === "text" ? "文本" : n.kind === "audio" ? "音频" : "节点"; refSeen[k] = (refSeen[k] || 0) + 1; return k + refSeen[k] + "=" + title(n) + "（" + n.id + "）"; }), ...refs.map((r) => (r.kind === "app" ? "应用=" + r.title + "（工具名 " + r.ref + "）" : "素材=" + r.title))].join("；");
+    const refDigest = [...ctx.map((n) => { const k = n.kind === "image" ? "图" : n.kind === "video" ? "视频" : n.kind === "text" ? "文本" : n.kind === "audio" ? "音频" : "节点"; refSeen[k] = (refSeen[k] || 0) + 1; return k + refSeen[k] + "=" + refLabel(n) + "（" + n.id + "）"; }), ...refs.map((r) => (r.kind === "app" ? "应用=" + r.title + "（工具名 " + r.ref + "）" : "素材=" + r.title))].join("；");
     const apps = refs.filter((r) => r.kind === "app").map((r) => ({ name: r.ref, title: r.title, description: r.detail || "" }));
     try {
       if (installSource) { await inspectRepository(m, installSource); return; }
@@ -1265,7 +1274,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
   const chipFor = (refs: AgentState["refs"], kind: MentionKind, id: string): MentionChip | null => {
     if (kind === "node") {
       const n = store.node(id); if (!n) return null;
-      return { kind, id, title: title(n), src: displaySrc(store.state.doc.nodes, n), icon: n.kind === "table" ? "grid" : TYPE_ICON[n.kind as GenKind] || "layers", badge: CTX_KIND_LABEL[n.kind] };
+      return { kind, id, title: refLabel(n), src: displaySrc(store.state.doc.nodes, n), icon: n.kind === "table" ? "grid" : TYPE_ICON[n.kind as GenKind] || "layers", badge: CTX_KIND_LABEL[n.kind] };
     }
     if (kind === "skill") return { kind, id, title: id, icon: "sparkle", badge: "技能" };
     const ref = refs.find((x) => x.id === id);
@@ -1618,12 +1627,20 @@ function AgentModelMenu({ models, defaultModelId, selectedModelId, thinkLevels, 
       active.row.focus();
     }, 180);
   };
-  // 二级弹层 portal 到 .cn-root 根级：用视口 fixed 坐标，脱离 #pop 的 backdrop root，才能采到画布而不是父盒
+  /* 二级弹层 portal 到 .cn-root 根级：用视口 fixed 坐标，脱离 #pop 的 backdrop root，才能采到画布而不是父盒。
+     换供应商必须重量：1 个和 37 个模型的供应商共用同一块浮层，沿用上一次量到的 maxHeight 会把新列表裁成一行。
+     量的是列表完整高度（.combo-scroll 的 scrollHeight + 搜索框/内距），不是被 maxHeight 裁过的外框高度；
+     上限 420 由 placePopover 的 capHeight 给（它再按视口可用空间收），贴边 / 翻到左侧仍交给 placePopover。 */
+  const placedVendor = useRef<string | null>(null);
   useLayoutEffect(() => {
-    if (!active || place) return;
+    if (!active) return;
+    if (place && placedVendor.current === active.vendor) return;
     const el = flyRef.current; if (!el) return;
     const r = el.getBoundingClientRect();
-    const placed = placePopover({ anchor: box(active.row), popup: { x: 0, y: 0, width: r.width, height: r.height }, viewport: { width: innerWidth, height: innerHeight }, dir: "right", align: "left", margin: 8, gap: 8 });
+    const scroller = el.querySelector<HTMLElement>(".combo-scroll");
+    const contentHeight = scroller ? el.clientHeight - scroller.clientHeight + scroller.scrollHeight : r.height;
+    const placed = placePopover({ anchor: box(active.row), popup: { x: 0, y: 0, width: r.width, height: contentHeight }, viewport: { width: innerWidth, height: innerHeight }, dir: "right", align: "left", margin: 8, gap: 8, capHeight: 420 });
+    placedVendor.current = active.vendor;
     setPlace({ left: Math.round(placed.x), top: Math.round(placed.y), maxHeight: Math.round(placed.maxHeight) });
   }, [active, place]);
   useEffect(() => { if (!active) return; const on = () => setPlace(null); addEventListener("resize", on); return () => removeEventListener("resize", on); }, [active]);
@@ -2084,11 +2101,18 @@ function textNodes(text: string, ctx: NonNullable<AgentMsg["ctx"]>, ctl: Ctl, ow
     if (!hits.length) return [text];
     hits.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
     const parts: React.ReactNode[] = []; let cur = 0;
-    for (const h of hits) {
+    const used = new Set<string>();
+    for (let i = 0; i < hits.length; i++) {
+        let h = hits[i];
         if (h.start < cur) continue;
+        /* 同一处有多个同名候选（老版本三个堆叠都叫「group」，或两个堆叠同名）：按发送时的引用顺序取还没用过的那个，
+           否则每一处都会落到 ctx 里第一个同名项——表现就是「@ 了三个堆叠，发出去全是第一个」。 */
+        for (let j = i; j < hits.length && hits[j].start === h.start && hits[j].end === h.end; j++) {
+            if (!hits[j].c.id || !used.has(hits[j].c.id)) { h = hits[j]; break; }
+        }
         if (h.start > cur) parts.push(text.slice(cur, h.start));
         parts.push(<MentionInline key={"m" + h.start} c={h.c} ctl={ctl} />);
-        if (h.c.id) hit?.add(h.c.id);
+        if (h.c.id) { used.add(h.c.id); hit?.add(h.c.id); }
         cur = h.end;
     }
     if (cur < text.length) parts.push(text.slice(cur));

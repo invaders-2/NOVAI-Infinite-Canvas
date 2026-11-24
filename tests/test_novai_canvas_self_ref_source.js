@@ -61,8 +61,8 @@ assert.ok(/const selfSeed = flags\?\.selfSrcSeed !== undefined \? flags\.selfSrc
 assert.ok(/let selfSrc: string \| null = null;/.test(engine), 'buildRequest 要按「这次实际发出去的 self 源图」准备记录，没有就是 null');
 assert.ok(/selfSrc, \.\.\.\(vm \?/.test(engine), 'self 源图记录要随 GenRequest 带给写回');
 assert.ok(!/url: selfSourceOf\(node\) \}\)/.test(engine), '不能把可能为空的 selfSourceOf 直接拼进 inputs');
-assert.ok(/applyRunResult\(store, id, req\.kind, res\.outputs, \{ draft: isDraft, selfSrc: req\.selfSrc \}\)/.test(engine), '写回要原样用请求里的 self 源图记录');
-assert.ok(/selfSrc !== undefined \? \{ \.\.\.o, meta: \{ \.\.\.o\.meta, selfSrc \}/.test(engine), '写回时把请求里的记录（含 null）挂到新版本 meta.selfSrc');
+assert.ok(/applyRunResult\(store, id, req\.kind, res\.outputs, \{ draft: isDraft, selfSrc: req\.selfSrc, prompt: req\.prompt \}\)/.test(engine), '写回要原样用请求里的 self 源图记录 + 出这一版时的提示词');
+assert.ok(/selfSrc !== undefined \|\| prompt !== undefined \? \{ \.\.\.o, meta: \{ \.\.\.o\.meta, \.\.\.\(selfSrc !== undefined \? \{ selfSrc \} : \{\}\), \.\.\.\(prompt !== undefined \? \{ prompt \} : \{\}\) \}/.test(engine), '写回时把请求里的记录（含 null）和提示词挂到新版本 meta.selfSrc / meta.prompt');
 assert.ok(!/selfSourceOf\(before\)/.test(engine), '写回不能再事后从 before 推算');
 
 // ---- 8. C3（阶段三修复）：带 excludeSelfRefs 重跑时保留「最初的源图」，只剔除当前这一版结果 ----
@@ -91,10 +91,19 @@ assert.ok(!/selfSourceOf\(before\)/.test(engine), '写回不能再事后从 befo
     assert.deepStrictEqual((flaggedOnly.inputs || []).map((x) => x.url), [], 'C3：源图就是当前这一版结果时不发');
     assert.strictEqual(flaggedOnly.selfSrc, null, 'C3：没发就记 null（明确没发）');
 
-    // 没有标记：与既有行为一致（发当前这一版，记录它）
+    // R2（产品规则）：提示词里显式 @ 了本节点 = 明确要带，保持既有行为（发当前这一版，记录它）
     const plain = buildRequest(storeOf({ nodes: [onlyCurrent], edges: [] }), onlyCurrent);
-    assert.deepStrictEqual((plain.inputs || []).map((x) => x.url), ['/gen-only.png'], 'C3：无标记时保持既有行为');
-    assert.strictEqual(plain.selfSrc, '/gen-only.png', 'C3：无标记时照常记录');
+    assert.deepStrictEqual((plain.inputs || []).map((x) => x.url), ['/gen-only.png'], 'R2：显式 @ 本节点时发当前这一版（既有能力不变）');
+    assert.strictEqual(plain.selfSrc, '/gen-only.png', 'R2：显式 @ 本节点时照常记录');
+
+    // R1（产品规则）：没 @ 本节点、提示词又没改过 → 模型生成的上一版结果不再自动当参考图（C3 从「保持既有行为」改成这条）
+    const samePrompt = {
+        id: 'n1', kind: 'image', x: 0, y: 0, w: 200, h: 200,
+        data: { gen: { title: '主图', prompt: '把背景换成落地窗', params: {}, order: [], hist: [{ url: '/gen-only.png', meta: { runId: 'r1', prompt: '把背景换成落地窗' } }], hi: 0 } },
+    };
+    const r1 = buildRequest(storeOf({ nodes: [samePrompt], edges: [] }), samePrompt);
+    assert.deepStrictEqual((r1.inputs || []).map((x) => x.url), [], 'R1：同提示词重复生成不带上一版结果（没有原始素材可带）');
+    assert.strictEqual(r1.selfSrc, null, 'R1：没发就记 null，下次也不会补上一版结果');
 }
 
 console.log('test_novai_canvas_self_ref_source: ok');

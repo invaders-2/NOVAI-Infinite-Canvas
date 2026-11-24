@@ -22,6 +22,7 @@ from urllib.parse import quote
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from server import upstream_user
 from server.auth import service, tenant
 
 PUBLIC_EXACT_PATHS = frozenset({
@@ -158,6 +159,15 @@ async def _call_with_tenant(user, request: Request, call_next: Any):
 
 
 async def auth_guard(request: Request, call_next: Any):
+    """请求级用户标识：上游用量网关按人记账要用，鉴权各分支（含 auth 关闭）之前就得绑。"""
+    token = upstream_user.bind_request(request.headers.get("x-user-id", ""))
+    try:
+        return await _auth_guard(request, call_next)
+    finally:
+        upstream_user.reset_request(token)
+
+
+async def _auth_guard(request: Request, call_next: Any):
     mode = service.auth_mode()
     if mode == "off" or request.method == "OPTIONS":
         return await call_next(request)

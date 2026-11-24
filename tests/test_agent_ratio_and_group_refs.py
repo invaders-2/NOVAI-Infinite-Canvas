@@ -293,6 +293,7 @@ class AgentReviewRegenerateWithoutSelfRefTests(unittest.TestCase):
         self.assertEqual([s["tool"] for s in steps], ["update_node", "run_generation"])
         self.assertEqual(steps[0]["args"]["prompt"], "主体居中、背景留白")
         self.assertTrue(steps[1]["args"]["exclude_self_refs"])
+        self.assertTrue(steps[1]["args"]["review_rerun"], "审查重跑要带内部护栏标记")
         self.assertEqual(steps[1]["args"]["node_id"], "i1")
         self.assertEqual(units, 1)
 
@@ -312,6 +313,11 @@ class AgentReviewRegenerateWithoutSelfRefTests(unittest.TestCase):
         schema = main.AGENT_TOOLS["run_generation"]["schema"]["properties"]["exclude_self_refs"]
         self.assertEqual(schema["type"], "boolean")
         self.assertFalse(schema["default"])
+        # 语义说明要覆盖两条路：重新抽（true）与拿这张图当底（不传 + 放进 reference_images）
+        self.assertIn("再来一张", schema["description"])
+        self.assertIn("reference_images", schema["description"])
+        # review_rerun 是服务端内部标记，不许暴露给模型
+        self.assertNotIn("review_rerun", main.AGENT_TOOLS["run_generation"]["schema"]["properties"])
 
 
 class AgentClassicExcludeSelfRefTests(unittest.TestCase):

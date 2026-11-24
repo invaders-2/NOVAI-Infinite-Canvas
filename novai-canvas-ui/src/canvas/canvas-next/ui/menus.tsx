@@ -1,4 +1,5 @@
 /** 添加节点 / 右键 / ⊕ 端口菜单，以及节点内按钮动作 */
+import { useState } from "react";
 import { hostRoot } from "../../../novaiBridgeRoot";
 import { isAssetRef } from "../../canvasAssetRefs";
 import { plainPrompt } from "../mentions";
@@ -6,8 +7,8 @@ import { createElementFrom, elementRefsOf } from "./Elements";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { addFiles, alignSelection, connect, copySelection, deleteSelection, duplicate, extractCurrentVersion, hasClip, paste, spreadHistory, title } from "../actions";
 import { runChain, runNode } from "../engine";
-import { genOf, inputsOf, isGenKind, outOf, trimIsFull, trimLabel, TYPE_ICON, uid, type GenKind, NODE_DEFAULT_SIZE } from "../model";
-import { refitNodeBox } from "../mediaFit";
+import { cloneParams, genOf, inputsOf, isGenKind, outOf, trimIsFull, trimLabel, TYPE_ICON, uid, withGen, type GenKind, NODE_DEFAULT_SIZE } from "../model";
+import { fitSourceBox, refitNodeBox } from "../mediaFit";
 import { emptyTable, withTable } from "../table";
 import type { Ctl } from "./ctx";
 import type { CanvasStore } from "../store";
@@ -93,6 +94,49 @@ export function portMenu(ctl: Ctl, n: CanvasNode, side: "in" | "out", at: { x: n
   </>);
 }
 
+type PsReply = { ok: boolean; message: string; url?: string; width?: number; height?: number };
+
+/** PS 桥：后端失败统一 {ok:false, code, message}，这里只取 toast 要用的文案 */
+async function psPost(path: string, canvasId: string, nodeId: string): Promise<PsReply> {
+  try {
+    const response = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ canvas_id: canvasId, node_id: nodeId }) });
+    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const message = typeof data.message === "string" ? data.message : typeof data.detail === "string" ? data.detail : "";
+    return { ok: response.ok && data.ok === true, message, url: typeof data.url === "string" ? data.url : undefined, width: Number(data.width) || undefined, height: Number(data.height) || undefined };
+  } catch (error) { return { ok: false, message: "连接不上 NOVAI 服务：" + (error instanceof Error ? error.message : "未知错误") }; }
+}
+
+/** 取回 PS 修改：仿 extractCurrentVersion 造一个新图片节点（原节点不动），只带这一版 */
+function addPsNode(store: CanvasStore, src: CanvasNode, url: string, width?: number, height?: number) {
+  const g = genOf(src); const box = width && height ? fitSourceBox(width, height) : null;
+  const node = withGen({ ...src, id: uid("n"), x: src.x + src.w + 30, y: src.y, w: box?.w || src.w, h: box?.h || src.h, data: undefined },
+    { ...g, params: cloneParams(g.params), title: `${title(src)} · PS 精修`, hist: [{ url, ...(width && height ? { w: width, h: height } : {}) }], hi: 0, order: [] });
+  store.addNodes([node], [], { select: true });
+  return node;
+}
+
+/** 节点菜单里的 Photoshop 两项：请求期间禁用并显示「处理中…」，避免连点开多个文档 */
+function PhotoshopItems({ ctl, node }: { ctl: Ctl; node: CanvasNode }) {
+  const [busy, setBusy] = useState<"open" | "fetch" | null>(null);
+  const store = ctl.store; const ready = node.kind === "image" && !!outOf(node)?.url;
+  const run = async (kind: "open" | "fetch") => {
+    if (busy) return;
+    setBusy(kind);
+    try {
+      const reply = await psPost(kind === "open" ? "/api/photoshop/open-node" : "/api/photoshop/fetch-node", store.state.canvasId, node.id);
+      if (!reply.ok) { store.toast(reply.message || "Photoshop 操作失败", 6000); return; }
+      if (kind === "open") { store.toast("已送到 Photoshop，改完点『取回 PS 修改』"); return; }
+      if (!reply.url) { store.toast("Photoshop 没有返回图片地址", 6000); return; }
+      addPsNode(store, node, reply.url, reply.width, reply.height);
+      store.toast("已取回 Photoshop 修改");
+    } finally { setBusy(null); }
+  };
+  return <>
+    <button className="mi" data-k="psopen" disabled={!ready || !!busy} onClick={() => void run("open")}><Icon name="brush" size="s" />{busy === "open" ? "处理中…" : "在 Photoshop 中精修"}</button>
+    <button className="mi" data-k="psfetch" disabled={!ready || !!busy} onClick={() => void run("fetch")}><Icon name="download" size="s" />{busy === "fetch" ? "处理中…" : "取回 PS 修改"}</button>
+  </>;
+}
+
 export function nodeMenu(ctl: Ctl, at: { x: number; y: number }) {
   const store = ctl.store; const sel = [...store.state.ui.sel]; const n = store.node(sel[0]); if (!n) return; const multi = sel.length > 1;
   const gen = isGenKind(n.kind); const g = gen ? genOf(n) : null; const out = gen ? outOf(n) : null;
@@ -108,6 +152,7 @@ export function nodeMenu(ctl: Ctl, at: { x: number; y: number }) {
       <div className="msep" />
       <button className="mi" data-k="extractver" disabled={!g || g.hist.length < 2} onClick={act(() => extractCurrentVersion(store, n.id))}><Icon name="copy" size="s" />提取当前版本<span className="k">{g && g.hist.length > 1 ? "第 " + (g.hi + 1) + " 版" : ""}</span></button>
       <button className="mi" data-k="allhist" disabled={!g || g.hist.length < 2} onClick={act(() => spreadHistory(store, n.id))}><Icon name="layers" size="s" />应用所有历史<span className="k">{g && g.hist.length > 1 ? g.hist.length + " 个版本" : ""}</span></button>
+      <PhotoshopItems ctl={ctl} node={n} />
       <div className="msep" />
       {multi || n.kind === "group" ? <button className="mi" data-k="rungroup" onClick={act(() => runNodes(ctl, sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x)))}><Icon name="play" size="s" />{multi ? "一键运行选中节点" : isStack(n) ? "一键运行堆叠" : "一键运行分组"}<span className="k">{keyHint("run")}</span></button> : null}
       {multi || n.kind === "group" ? <button className="mi" data-k="savetpl" onClick={act(() => { const ns = sel.map((x) => store.node(x)).filter((x): x is CanvasNode => !!x); saveAsTemplate(ctl, ns, multi ? store.state.name + " 模板" : groupLabel(n) + " 模板"); })}><Icon name="layout" size="s" />存为我的模板</button> : null}

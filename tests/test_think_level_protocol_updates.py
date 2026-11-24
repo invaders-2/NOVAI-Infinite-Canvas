@@ -740,10 +740,13 @@ class ModelCapsAndAudioTests(unittest.TestCase):
         mj = items["midjourney"]
         self.assertEqual(len(mj["ratios"]), 9)
         self.assertEqual(mj["sizes"], ["2K"])
-        self.assertEqual(mj["batch"], [4])
+        # 张数改成 n_max=4（上游一次就回 4 张候选，画布选几张只是取前几张，一次提交只扣一次费）；
+        # 不再声明 batch —— model.ts 会用 batch[0] 顶掉默认张数，那样面板默认会从 1 变回 4。
+        self.assertEqual(mj["n_max"], 4)
+        self.assertNotIn("batch", mj)
         self.assertEqual(mj["qualities"], [])
         self.assertEqual(mj["mj"]["versions"], ["8.2", "8.1", "7", "6.1", "5.2", "5.1"])
-        self.assertEqual(mj["mj"]["speeds"], ["fast"])
+        self.assertEqual(mj["mj"]["speeds"], ["fast", "turbo", "relax"])
         self.assertEqual(mj["mj"]["hd"], ["8.2", "8.1"])
         muse_image = items["muse-image-ext"]
         self.assertEqual(muse_image["ratios"],
@@ -882,12 +885,67 @@ class ModelCapsOverrideTests(unittest.TestCase):
         self.assertEqual((seedance["ref_max"], seedance["video_ref_max"], seedance["audio_ref_max"]), (30, 10, 10))
         mj = overrides["midjourney"]["caps"]
         self.assertEqual(mj["sizes"], ["2K"])
+        # 张数改成「一次提交最多 4 张候选、取几张入画布」的 n_max 口径，不再写 batch（batch 会顶掉默认张数）
+        self.assertEqual(mj["n_max"], 4)
+        self.assertNotIn("batch", mj)
+        self.assertEqual(mj["mj"]["speeds"], ["fast", "turbo", "relax"])
         self.assertEqual(mj["mj"]["hd"], ["8.2", "8.1"])
         self.assertIs(overrides["minimax-h3-context-ir"]["caps"]["prompt_only"], True)
         # v3 给 seedream-5-5 声明了原生透明背景（文档确证 background=transparent，必须 PNG）
         self.assertIs(overrides["seedream-5-5"]["caps"]["native_background"], True)
         self.assertEqual(len(body["applied"]["model_caps"]), 11)
         self.assertTrue(body["applied"]["parameter_changes"])
+
+    def test_data_source_midjourney_caps_use_new_contract(self) -> None:
+        """更新包数据源本身就得是新契约，否则新装机会被 v2 写成旧面板。"""
+        caps = next(
+            cap["caps"]
+            for update in protocol_updates.updates_for("apimart")
+            for cap in (update.get("model_caps") or [])
+            if cap.get("model") == "midjourney" and cap.get("kind") == "image"
+        )
+        self.assertEqual(caps.get("n_max"), 4)
+        self.assertNotIn("batch", caps)
+        self.assertEqual(caps["mj"]["speeds"], ["fast", "turbo", "relax"])
+        self.assertEqual(caps["sizes"], ["2K"])
+
+    def test_stale_midjourney_override_is_dropped_others_kept(self) -> None:
+        """已应用过 v2 的安装：数据里带着旧契约 override（batch=[4] / 只有 fast），加载后必须回落新代码表。"""
+        self._override("gpt-image-2.6-ext", "image", {"ratios": ["1:1"], "qualities": ["auto"]})
+        self._override("midjourney", "image", {
+            "ratios": ["1:1"], "sizes": ["2K"], "batch": [4], "qualities": [],
+            "mj": {"versions": ["8.2"], "speeds": ["fast"], "hd": ["8.2"]},
+        })
+        provider = main.get_api_provider("apimart")
+        overrides = main.normalize_model_caps_overrides(provider.get("model_caps_overrides"))
+        self.assertNotIn("midjourney", overrides, "旧契约的 midjourney override 必须在加载时丢掉")
+        self.assertIn("gpt-image-2.6-ext", overrides, "别的模型的 override 不能一起丢")
+        merged = main.model_caps_for(provider, "midjourney", "image")
+        self.assertEqual(merged.get("n_max"), 4)
+        self.assertNotIn("batch", merged)
+        self.assertEqual(merged["mj"]["speeds"], ["fast", "turbo", "relax"])
+        # 其它模型自己的覆盖原样保留（ratio 只留 ["1:1"]）
+        self.assertEqual(main.model_caps_for(provider, "gpt-image-2.6-ext", "image").get("ratios"), ["1:1"])
+
+    def test_apply_prunes_stale_midjourney_override_and_writes_new_contract(self) -> None:
+        """apply 路径：旧契约先清掉，再按修好的 v2 写回新契约；不相关的模型覆盖不受影响。"""
+        self._override("midjourney", "image", {
+            "ratios": ["1:1"], "sizes": ["2K"], "batch": [4], "qualities": [],
+            "mj": {"versions": ["8.2"], "speeds": ["fast"], "hd": ["8.2"]},
+        })
+        self._override("user-image-x", "image", {"ratios": ["1:1"], "n_max": 2})
+        self._apply()
+        overrides = self._stored().get("model_caps_overrides") or {}
+        mj = overrides["midjourney"]["caps"]
+        self.assertEqual(mj.get("n_max"), 4)
+        self.assertNotIn("batch", mj)
+        self.assertEqual(mj["mj"]["speeds"], ["fast", "turbo", "relax"])
+        self.assertEqual((overrides["user-image-x"]["caps"]["n_max"],
+                          overrides["user-image-x"]["caps"]["ratios"]), (2, ["1:1"]))
+        served = {item["model"]: item for item in fresh_client().get("/api/model-caps").json()["items"]}
+        self.assertEqual(served["midjourney"].get("n_max"), 4)
+        self.assertNotIn("batch", served["midjourney"])
+        self.assertEqual(served["midjourney"]["mj"]["speeds"], ["fast", "turbo", "relax"])
 
     def test_apply_is_idempotent(self) -> None:
         self._apply()

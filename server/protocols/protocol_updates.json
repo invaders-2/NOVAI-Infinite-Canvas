@@ -60,7 +60,7 @@
       "name": "APIMart",
       "version": 2,
       "released_at": "2026-11-06",
-      "summary": "模型参数更新（v2）：gpt-image-2.6 ext/flare/sunburst、gpt-image-2.5 flare/sunburst、muse-image-ext、muse-video-ext、seedance-2.5、minimax-h3-context-ir、midjourney 的比例/分辨率/质量/张数/时长/参考上限参数覆盖。应用后编辑器立即使用新参数，内置能力表不再需要改代码才生效。",
+      "summary": "模型参数更新（v2）：gpt-image-2.6 ext/flare/sunburst、gpt-image-2.5 flare/sunburst、muse-image-ext、muse-video-ext、seedance-2.5、minimax-h3-context-ir、midjourney 的比例/分辨率/质量/张数/时长/参考上限参数覆盖（midjourney 张数按「一次提交最多 4 张候选、取几张入画布」的 n_max 口径，速度三档）。应用后编辑器立即使用新参数，内置能力表不再需要改代码才生效。",
       "docs_url": "https://docs.apimart.ai/",
       "new_models": {
         "chat": [],
@@ -399,9 +399,7 @@
             "sizes": [
               "2K"
             ],
-            "batch": [
-              4
-            ],
+            "n_max": 4,
             "qualities": [],
             "mj": {
               "versions": [
@@ -413,7 +411,9 @@
                 "5.1"
               ],
               "speeds": [
-                "fast"
+                "fast",
+                "turbo",
+                "relax"
               ],
               "hd": [
                 "8.2",
@@ -533,8 +533,8 @@
           "model": "midjourney",
           "field": "caps",
           "from": "无独立能力表",
-          "to": "9 比例 / 2K / batch4 / MJ 版本白名单",
-          "note": "与画布 MJ 预设一致"
+          "to": "9 比例 / 2K / 一次提交最多 4 张候选（n_max，取几张入画布）/ MJ 三档速度 + 版本白名单",
+          "note": "与画布 MJ 预设一致；张数是「一次出 4 张候选、取前 N 张」，不是发 N 次任务"
         }
       ]
     },

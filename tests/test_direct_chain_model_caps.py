@@ -75,7 +75,7 @@ class ApimartImageDirectTests(unittest.TestCase):
         self.assertEqual(main.direct_image_request_count(APIMART, "gpt-image-2", 9), 2)
         self.assertEqual(main.direct_image_request_count(APIMART, "gpt-image-1", 9), 2)
         self.assertEqual(main.direct_image_request_count(APIMART, "gpt-image-2", 2), 1)
-        self.assertEqual(main.direct_image_request_count(APIMART, "midjourney", 9), 8)   # 无 n_max：逐张，8 次
+        self.assertEqual(main.direct_image_request_count(APIMART, "midjourney", 9), 2)   # n_max=4（一次提交回 4 张）：8 张 → [4,4] 两次
 
 
 class AgnesImageDirectTests(unittest.TestCase):

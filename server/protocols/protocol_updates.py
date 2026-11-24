@@ -134,6 +134,28 @@ def normalize_model_caps(value: Any) -> List[dict]:
     return out
 
 
+# v2 更新包当初把 midjourney 的张数/速度契约写成 batch=[4] / speeds=["fast"]；代码表后来改成
+# n_max=4 / 三档速度。更新包只做字段级合并、**删不掉旧键**（batch 会一直留在用户数据里），
+# 所以按写死的旧契约特征把已存在的 midjourney 图生图覆盖丢掉，让 /api/model-caps 回落到代码表。
+STALE_MIDJOURNEY_CAPS = {"batch": [4], "speeds": ["fast"]}
+
+
+def is_stale_midjourney_image_caps(model: Any, kind: Any, caps: Any) -> bool:
+    """旧契约（batch=[4] 且 mj.speeds 只有 ["fast"]）的 midjourney 图生图覆盖。
+
+    两个特征必须同时成立才判定，且只认 image：用户/后续版本自己调过的覆盖不会命中，别的模型一律不碰。
+    """
+    if str(model or "").strip().lower() != "midjourney":
+        return False
+    if str(kind or "image").strip().lower() != "image":
+        return False
+    if not isinstance(caps, dict):
+        return False
+    mj = caps.get("mj") if isinstance(caps.get("mj"), dict) else {}
+    return (list(caps.get("batch") or []) == STALE_MIDJOURNEY_CAPS["batch"]
+            and list(mj.get("speeds") or []) == STALE_MIDJOURNEY_CAPS["speeds"])
+
+
 def normalize_parameter_changes(value: Any) -> List[dict]:
     out: List[dict] = []
     for item in (value if isinstance(value, list) else []):
@@ -343,6 +365,13 @@ def apply_updates(provider: dict, updates: List[dict]) -> Tuple[dict, Dict[str, 
     applied = _empty_applied()
     fields = dict(merged.get("protocol_fields") or {}) if isinstance(merged.get("protocol_fields"), dict) else {}
     overrides = dict(merged.get("model_caps_overrides") or {}) if isinstance(merged.get("model_caps_overrides"), dict) else {}
+    # 已存量的旧契约覆盖先清掉：只合并新字段是删不掉 batch 的（实测 batch=[4] 会一直留着），
+    # 不清就等于「应用了新版本也还是旧面板」。
+    overrides = {
+        key: value for key, value in overrides.items()
+        if not (isinstance(value, dict) and is_stale_midjourney_image_caps(
+            value.get("model") or key, value.get("kind"), value.get("caps")))
+    }
     for update in sorted(updates or [], key=lambda item: int(item.get("version") or 0)):
         for kind in MODEL_KINDS:
             target_key = f"{kind}_models"
@@ -370,9 +399,13 @@ def apply_updates(provider: dict, updates: List[dict]) -> Tuple[dict, Dict[str, 
                 continue
             key = model.lower()
             kind = str(cap.get("kind") or "image")
+            new_caps = normalize_caps(cap.get("caps"))
+            if is_stale_midjourney_image_caps(model, kind, new_caps):
+                # 旧契约条目（batch=[4] / 只有 fast）不再写进覆盖，回落到代码表的新契约
+                logger.info("[ProtocolUpdates] 跳过旧契约的 midjourney caps（v%s）", update.get("version"))
+                continue
             previous = overrides.get(key) if isinstance(overrides.get(key), dict) else {}
             merged_caps = dict(previous.get("caps") or {})
-            new_caps = normalize_caps(cap.get("caps"))
             merged_caps.update(new_caps)
             overrides[key] = {"model": model, "kind": kind, "caps": merged_caps}
             applied["model_caps"].append({"model": model, "kind": kind, "fields": sorted(new_caps)})

@@ -51,6 +51,27 @@ assert.strictEqual('maxRefs' in noBatch, false, '没有 maxRefs 不编');
 assert.strictEqual(caps.modelCapsUi('image', { kind: 'video', ratios: ['16:9'] }), null, 'kind 不符直接忽略');
 assert.strictEqual(caps.modelCapsUi('image', {}), null, '空 caps 返回 null');
 
+// ---- 1b. Midjourney：张数降序（默认 4 张候选 + 四宫格）；速度三档 ----
+const mjItem = {
+    provider: 'apimart', model: 'midjourney', kind: 'image',
+    ratios: ['1:1', '16:9'], sizes: ['2K'], n_max: 4, qualities: [],
+    mj: { versions: ['8.2', '8.1'], speeds: ['fast', 'turbo', 'relax'], hd: ['8.2', '8.1'] },
+};
+const mjUiCaps = caps.modelCapsUi('image', mjItem);
+assert.deepStrictEqual(mjUiCaps.batch, [4, 3, 2, 1], 'MJ 张数候选降序（4 在前）：1/2/4 全可点');
+assert.deepStrictEqual(mjUiCaps.mj.speeds, ['fast', 'turbo', 'relax'], 'MJ 速度三档都进面板');
+const mjCapSpec = model.specFor({ configId: 'apimart::midjourney', label: 'midjourney', vendor: 'APIMART', kind: 'image', ui: mjUiCaps, specSource: 'spec' });
+assert.strictEqual(model.defaultParams('image', mjCapSpec).count, 4, 'MJ 新建节点默认 4 张候选（四宫格免费附带 → 画布共 5 张）');
+assert.strictEqual(model.clampParams('image', { ...model.defaultParams('image', mjCapSpec), count: 1 }, mjCapSpec).count, 1, '已经是 MJ：手动选 1 张保留 1（1 候选 + 四宫格 = 2 张）');
+assert.strictEqual(model.clampParams('image', { ...model.defaultParams('image', mjCapSpec), count: 2 }, mjCapSpec).count, 2, '已经是 MJ：手动选 2 张也保留');
+const fromOther = { model: 'apimart::gpt-image-2', ratio: '1:1', size: '1K', count: 1, search: false, style: '无', camera: {} };
+assert.strictEqual(model.clampParams('image', fromOther, mjCapSpec).count, 4, '从别的模型切到 MJ：按 MJ 默认重新起步 4 张');
+// 对照：非 MJ 模型仍是升序 + 默认 1，不许被这次改动带偏
+const otherUi = caps.modelCapsUi('image', { provider: 'apimart', model: 'gpt-image-2', kind: 'image', ratios: ['1:1'], n_max: 4 });
+assert.deepStrictEqual(otherUi.batch, [1, 2, 3, 4], '非 MJ 模型张数仍是升序');
+const otherSpec = model.specFor({ configId: 'apimart::gpt-image-2', label: 'gpt-image-2', vendor: 'APIMART', kind: 'image', ui: otherUi, specSource: 'spec' });
+assert.strictEqual(model.defaultParams('image', otherSpec).count, 1, '非 MJ 模型默认张数仍是 1');
+
 // ---- 2. 视频 caps ----
 const videoUi = caps.modelCapsUi('video', {
     provider: 'apimart', model: 'seedance-2.5', kind: 'video',

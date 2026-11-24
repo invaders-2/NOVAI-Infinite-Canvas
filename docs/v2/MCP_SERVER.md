@@ -193,3 +193,12 @@ Mcp-Session-Id: sess_xxx
 | `POST /api/mcp/reload` | 清缓存并重新发现工具 |
 
 增 / 改 / 删只写盘、不主动连服务；要靠 `POST /api/mcp/reload`（或等 60 秒缓存过期）才刷新工具目录。配置非法时返回 400 并给出具体原因（`command 必填`、`url 必须…` 等），已有的坏配置文件不会被静默覆盖。
+
+### 服务端主动给的两样东西（Client 方向）
+
+除了工具清单，MCP 服务还会主动给两样东西，NOVAI 都会用上，做法是「发现时收进缓存、缓存 60 秒」：
+
+- **`initialize` 的 `instructions`**：服务端自带的使用契约 / 硬规则（Photoshop MCP 有 7 千多字，比如「抠背景只能 get_state → recipe_remove_background → get_preview，不许栅栏化 / 选区遮罩那套」）。发现时会存下来，画布助手的系统提示词末尾追加一段「【MCP 服务「x」自带的操作契约…】」；单个服务最多 8000 字、最多拼 2 个服务，缓存没命中就自己重新发现一次，失败就当没有。它**不**进 `GET /api/mcp/servers` 的返回（太长）。
+- **`prompts/list` + `prompts/get`**：服务端的任务模板（Photoshop MCP 有 24 个 `ps.*`）。每个有模板的服务会额外生成**一个** agent 工具 `mcp__<server>__prompt`：`name` 的 enum 是模板名，`arguments` 是模板参数；调用时执行 `prompts/get`，把返回的 messages 文本拼成工具结果（形状与 `tools/call` 一致，都是 `{ok, tool, result}`）。它是只读的（risk=low），不进用户确认闸门。服务端不支持 `prompts/*` 就当没有模板，不影响工具发现。
+
+这两条都不需要改配置：服务端给了就用，没给就和改造前逐字一致（MCP 总开关关闭时提示词不追加任何东西、目录里也没有任何 `mcp__` 工具）。

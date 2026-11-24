@@ -173,6 +173,11 @@ export function modelCapsUi(kind: "image" | "video" | "audio", item: ModelCapsIt
       // 后端说「不掌握上限」：张数只保留 1，并让面板提示未知，而不是补一个假上限
       ui.batchUnknown = true;
     }
+    // Midjourney 张数按「从多到少」给：新建 / 切换模型时取 batch[0] = 4（默认 4 张候选 + 四宫格赠品）。
+    // 其它模型保持升序与 1 张默认，顺序和默认值都不动。
+    if (mj && Array.isArray(ui.batch) && (ui.batch as unknown[]).length) {
+      ui.batch = [...(ui.batch as number[])].sort((a, b) => b - a);
+    }
     // 质量档 / 先思考：后端声明什么就是什么（空数组 / 缺字段 = 不给入口，前端不按模型名猜）
     if (Array.isArray(item.qualities)) ui.qualities = strings(item.qualities);
     if (item.thinking_mode === true) ui.thinkingMode = true;

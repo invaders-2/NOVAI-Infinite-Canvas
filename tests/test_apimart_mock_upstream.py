@@ -475,7 +475,8 @@ class ApimartMockUpstreamTests(unittest.TestCase):
         self.assertEqual(body.get("size"), "1:1")
         self.assertNotIn("model", body)
         self.assertNotIn("version", body)
-        self.assertNotIn("speed", body)
+        # 没有速度入参的入口必须落到 fast（能力表只声明 fast；空着等于上游默认 relax → code=9）
+        self.assertEqual(body.get("speed"), "fast")
         urls = body.get("image_urls") or []
         self.assertEqual(len(urls), 1, urls)
         self.assertTrue(str(urls[0]).startswith("data:image/"), str(urls[0])[:48])

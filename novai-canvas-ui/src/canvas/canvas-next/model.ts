@@ -48,7 +48,7 @@ export type GenOutput = {
   draft?: boolean;
   /** 音频波形（0~1），后端不给时前端从音频解码或用占位 */
   bars?: number[];
-  meta?: { model?: string; ratio?: string; size?: string; at?: number; runId?: string; remote?: string; /** 上传文档的文件名 */ doc?: string; /** 后端返回的尺寸收敛说明（如 GIF 每帧尺寸被拼版上限缩小），写回后 toast 一次 */ notice?: string; /** 生成这一版时「@ 本节点」实际发出去的自我参考图：string = 那张源图；null = 明确没发（没有可用源图 / 模型不收）。字段缺失 = 这次改动之前的旧数据，读取时走旧回退（见 mentions.selfSourceOf） */ selfSrc?: string | null };
+  meta?: { model?: string; ratio?: string; size?: string; at?: number; runId?: string; remote?: string; /** 上传文档的文件名 */ doc?: string; /** 后端返回的尺寸收敛说明（如 GIF 每帧尺寸被拼版上限缩小），写回后 toast 一次 */ notice?: string; /** 生成这一版时「@ 本节点」实际发出去的自我参考图：string = 那张源图；null = 明确没发（没有可用源图 / 模型不收）。字段缺失 = 这次改动之前的旧数据，读取时走旧回退（见 mentions.selfSourceOf） */ selfSrc?: string | null; /** 出这一版时用的提示词（归一比较见 mentions.samePromptAsVersion）：提示词没改 = 重复生成，不再带上一版结果；改过 = 用户在这张基础上改，仍带当前这一版当第一参考 */ prompt?: string };
 };
 
 export type GenData = {
@@ -594,7 +594,11 @@ export function pinMissingModelIds(doc: CanvasDoc, pick: (kind: GenKind, current
 
 export function defaultParams(kind: GenKind, m?: ModelSpec): AnyParams {
   const model = m?.id || "";
-  if (kind === "image") return { model, ratio: m?.ratios?.includes("3:4") ? "3:4" : m?.ratios?.[0] || "1:1", size: m?.sizes?.includes("2K") ? "2K" : m?.sizes?.[0] || "1K", count: 1, search: false, style: "无", camera: { ...DEFAULT_CAMERA } };
+  if (kind === "image") {
+    // Midjourney 默认一次 4 张候选（batch 降序，batch[0] = 4；四宫格是免费赠品）；其它模型保持 1
+    const count = m?.mj && Array.isArray(m.batch) && m.batch.length ? (Number(m.batch[0]) || 1) : 1;
+    return { model, ratio: m?.ratios?.includes("3:4") ? "3:4" : m?.ratios?.[0] || "1:1", size: m?.sizes?.includes("2K") ? "2K" : m?.sizes?.[0] || "1K", count, search: false, style: "无", camera: { ...DEFAULT_CAMERA } };
+  }
   if (kind === "video") {
     const rawRatio = m?.ratios?.[0] || "16:9";
     return { model, mode: "文生视频", ratio: /^(auto|adaptive|自适应)$/i.test(rawRatio) ? "adaptive" : rawRatio, res: m?.res?.includes("720p") ? "720p" : m?.res?.[0] || "720p", dur: defaultVideoDuration(m), sound: false, times: 1 };
@@ -614,6 +618,9 @@ export function clampParams(kind: GenKind, p: AnyParams, m: ModelSpec): AnyParam
     if (m.ratios && m.ratios.length && !m.ratios.includes(q.ratio)) q.ratio = m.ratios[0];
     if (m.sizes && m.sizes.length && !m.sizes.includes(q.size)) q.size = nearestTier(m.sizes, q.size);
     if (m.batch && !m.batch.includes(q.count)) q.count = m.batch[0];
+    // Midjourney：从别的模型切过来时按「一次 4 张候选」起步（batch 降序，batch[0] = 4）；
+    // 已经就是 MJ 时不覆盖，用户手动选的 1/2 张要保留
+    if (m.mj && m.batch?.length && String((p as ImageParams).model || "") !== m.id) q.count = m.batch[0];
     if (!m.search) q.search = false; q.style = m.style ? normalizeStyle(q.style) : "无"; if (!m.camera) q.camera.on = false;
     // MJ 专属参数：换模型后非法值收敛（版本 / 速度不在该模型列表里 → 回默认；HD 只在版本允许时保留）
     if (m.mj) {
@@ -786,11 +793,19 @@ export const outputsOf = (doc: CanvasDoc, id: string) => doc.edges.filter((e) =>
 /** 分组作为生成输入时展开成组内节点；普通分组按画布位置排序，堆叠保持叠内顺序。 */
 export function expandGroupInputs(doc: CanvasDoc, inputs: InputRef[]): InputRef[] {
   const byId = new Map(doc.nodes.map((n) => [n.id, n]));
+  /* 分组里再套分组 / 堆叠：递归展开到素材节点（和后端 _agent_beat_channel_items 同口径，最多 6 层，防环）。
+     每一层各按自己的规则排：堆叠保持叠内顺序，普通分组按画布位置（先上后下、先左后右）。 */
+  const membersOf = (group: CanvasNode, depth: number, seen: Set<string>): CanvasNode[] => {
+    if (depth > 6 || seen.has(group.id)) return [];
+    seen.add(group.id);
+    const stacked = !!(group.data && typeof group.data === "object" && (group.data as { stack?: unknown }).stack);
+    const kids = (group.children || []).map((id) => byId.get(id)).filter((n): n is CanvasNode => !!n && (n.kind === "group" || isGenKind(n.kind)));
+    if (!stacked) kids.sort((a, b) => a.y - b.y || a.x - b.x);
+    return kids.flatMap((n) => (n.kind === "group" ? membersOf(n, depth + 1, seen) : [n]));
+  };
   const expanded = inputs.flatMap((x) => {
     if (x.node.kind !== "group") return [x];
-    const stacked = !!(x.node.data && typeof x.node.data === "object" && (x.node.data as { stack?: unknown }).stack);
-    const members = (x.node.children || []).map((id) => byId.get(id)).filter((n): n is CanvasNode => !!n && isGenKind(n.kind));
-    if (!stacked) members.sort((a, b) => a.y - b.y || a.x - b.x);
+    const members = membersOf(x.node, 0, new Set()).filter((n, i, arr) => arr.findIndex((m) => m.id === n.id) === i);
     return members.map((node) => ({ edge: { ...x.edge, id: `${x.edge.id}:${node.id}` }, node, order: x.order }));
   });
   return expanded.map((x, order) => ({ ...x, order }));
@@ -831,17 +846,41 @@ export function connectBlock(doc: CanvasDoc, from: string, to: string): string |
   return null;
 }
 
+/** 有效输入里各类素材的条数（视频方式的选择只看这些） */
+export type VideoInputCounts = { images: number; videos: number; audios: number };
+
+/**
+ * 视频方式按**有效输入**选：有视频 → 参考视频生视频 / 视频延长；人像 + 音频 → 数字人；
+ * 只有图 → 首帧 / 首尾帧 / 参考生视频；什么都没有 → 文生视频。模型不支持时退到最接近的一档。
+ * 单独抽出来是因为请求组装会剔除「来源连线」，剔除后不能再用文档上的连线数来选。
+ */
+export function videoModeForCounts(modes: VideoMode[] | undefined | null, counts: VideoInputCounts): VideoMode | null {
+  const list = modes == null ? (["文生视频"] as VideoMode[]) : modes;
+  if (!list.length) return null; // 空 modes = 后端声明没有生成方式（如 Context-IR 这类提示词模型）
+  const { images: imgs, videos: vids, audios: auds } = counts;
+  const want: VideoMode = vids ? (imgs ? "参考视频生视频" : "视频延长") : auds && imgs ? "数字人" : imgs === 0 ? "文生视频" : imgs === 1 ? "首帧" : imgs === 2 ? "首尾帧" : "参考生视频";
+  if (list.includes(want)) return want;
+  if (vids && list.includes("视频编辑")) return "视频编辑";
+  const alt: VideoMode = imgs ? "参考生视频" : "文生视频";
+  return list.includes(alt) ? alt : list[0];
+}
+
+/** 这个生成方式是不是依赖某类输入（视频 / 音频）：这类输入没了就不能继续用它 */
+export function videoModeMissingInput(mode: VideoMode, counts: VideoInputCounts): boolean {
+  if (mode === "参考视频生视频" || mode === "视频编辑" || mode === "视频延长") return counts.videos === 0;
+  if (mode === "数字人") return counts.audios === 0;
+  return false;
+}
+
 /** 视频节点按输入自动选生成方式 */
 export function autoVideoMode(doc: CanvasDoc, id: string, m: ModelSpec): VideoMode | null {
   const n = doc.nodes.find((x) => x.id === id); if (!n || n.kind !== "video") return null;
-  const ins = expandGroupInputs(doc, inputsOf(doc, id)); const modes = m.modes || ["文生视频"];
-  if (!modes.length) return null; // 空 modes = 后端声明没有生成方式（如 Context-IR 这类提示词模型）
-  const imgs = ins.filter((x) => x.node.kind === "image").length, vids = ins.filter((x) => x.node.kind === "video").length, auds = ins.filter((x) => x.node.kind === "audio").length;
-  const want: VideoMode = vids ? (imgs ? "参考视频生视频" : "视频延长") : auds && imgs ? "数字人" : imgs === 0 ? "文生视频" : imgs === 1 ? "首帧" : imgs === 2 ? "首尾帧" : "参考生视频";
-  if (modes.includes(want)) return want;
-  if (vids && modes.includes("视频编辑")) return "视频编辑";
-  const alt: VideoMode = imgs ? "参考生视频" : "文生视频";
-  return modes.includes(alt) ? alt : modes[0];
+  const ins = expandGroupInputs(doc, inputsOf(doc, id));
+  return videoModeForCounts(m.modes, {
+    images: ins.filter((x) => x.node.kind === "image").length,
+    videos: ins.filter((x) => x.node.kind === "video").length,
+    audios: ins.filter((x) => x.node.kind === "audio").length,
+  });
 }
 
 /* ---------- 引用 @节点·段落 ---------- */

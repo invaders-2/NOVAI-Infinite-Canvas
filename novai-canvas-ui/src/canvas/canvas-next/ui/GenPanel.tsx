@@ -10,7 +10,7 @@ import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
 import { addMention, afterInputsChanged, title } from "../actions";
 import { mentionable, mentionedIds, remapMention, unmentionedInputs } from "../mentions";
 import { PromptEditor } from "./PromptEditor";
-import { regenAsNew, requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRole, stopNode } from "../engine";
+import { regenAsNew, requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRole, stopNode, type RunOpts } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
 import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, withGen, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, newNode, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatOptions, outputFormatShortLabel, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
 import { batchInputWarnings, batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, ownRefCount, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
@@ -41,6 +41,8 @@ import { EffortSlider } from "./EffortSlider";
 import { useEditorState } from "./editors/registry";
 import { draftToFinal, smartClip, trimToNode } from "../videoTools";
 import { videoAiMenu } from "./VideoTools";
+import { parseMedia } from "./parseMedia";
+import { createSegRetake, replaceSourceWithTake, segRetakeOf, segRetakeReady, SegRetakeStrip, SEG_RETAKE_PH } from "./SegRetake";
 import type { CanvasStore } from "../store";
 
 export function SelectionUI() {
@@ -49,7 +51,9 @@ export function SelectionUI() {
   const id = ui.sel.size === 1 && !ui.dragging && !editing ? [...ui.sel][0] : null;
   const node = id ? doc.nodes.find((n) => n.id === id) : undefined;
   const tbRef = useRef<HTMLDivElement>(null); const gpRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ tb: { left: number; top: number } | null; gp: { left: number; top: number } | null }>({ tb: null, gp: null });
+  /** 片段重拍节点：节点和生成面板之间多一条胶片条（选片段） */
+  const srRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ tb: { left: number; top: number } | null; gp: { left: number; top: number } | null; sr?: { left: number; top: number; width: number } | null }>({ tb: null, gp: null });
   const [enterKey, setEnterKey] = useState(id);
   useEffect(() => { if (id !== enterKey) setEnterKey(id); }, [id, enterKey]);
   useLayoutEffect(() => {
@@ -59,13 +63,15 @@ export function SelectionUI() {
     const lb = (tbRef.current || gpRef.current)?.closest(".cn-root")?.querySelector("#lb")?.getBoundingClientRect();
     const minLeft = (top: number, h: number) => (lb && lb.width && top < lb.bottom - sr.top && top + h > lb.top - sr.top ? Math.max(8, lb.right - sr.left + 8) : 8);
     if (tbRef.current) { const tw = tbRef.current.offsetWidth, th = tbRef.current.offsetHeight; const ty = a.y - sr.top - 60; const top = Math.max(8, ty); tb = ty > sr.height - 60 || b.y < sr.top ? { left: -9999, top: -9999 } : { left: clamp(cx - tw / 2, minLeft(top, th), sr.width - tw - 8), top }; }
-    if (gpRef.current) { const gw = gpRef.current.offsetWidth, gh = gpRef.current.offsetHeight; let top = b.y - sr.top + 14; const safeB = gpRef.current.closest(".cn-root.in-win") ? 76 : 8; /* 嵌在系统窗口里：底部给会弹出的 Dock 让位 */ if (top + gh > sr.height - safeB) top = Math.max(8, sr.height - gh - safeB); gp = { left: clamp(cx - gw / 2, minLeft(top, gh), sr.width - gw - 8), top }; }
-    if (JSON.stringify(tb) !== JSON.stringify(pos.tb) || JSON.stringify(gp) !== JSON.stringify(pos.gp)) setPos({ tb, gp });
+    const srH = srRef.current ? srRef.current.offsetHeight + 10 : 0; let strip: { left: number; top: number; width: number } | null = null;
+    if (gpRef.current) { const gw = gpRef.current.offsetWidth, gh = gpRef.current.offsetHeight; let top = b.y - sr.top + 14 + srH; const safeB = gpRef.current.closest(".cn-root.in-win") ? 76 : 8; /* 嵌在系统窗口里：底部给会弹出的 Dock 让位 */ if (top + gh > sr.height - safeB) top = Math.max(8, sr.height - gh - safeB); gp = { left: clamp(cx - gw / 2, minLeft(top, gh), sr.width - gw - 8), top }; if (srRef.current) strip = { left: gp.left, top: gp.top - srH, width: gw }; }
+    if (JSON.stringify(tb) !== JSON.stringify(pos.tb) || JSON.stringify(gp) !== JSON.stringify(pos.gp) || JSON.stringify(strip) !== JSON.stringify(pos.sr || null)) setPos({ tb, gp, sr: strip });
   });
   if (!node) return null;
   const run = runtime[node.id];
   return <>
     <Toolbar key={"t" + node.id} refEl={tbRef} node={node} running={!!run} progress={run?.progress || 0} style={pos.tb || { left: -9999, top: -9999 }} />
+    {segRetakeOf(node) ? <div className="segr-strip float enter" key={"r" + node.id} ref={srRef} style={pos.sr || { left: -9999, top: -9999 }} onPointerDown={(e) => e.stopPropagation()}><SegRetakeStrip node={node} /></div> : null}
     {isGenKind(node.kind) && !isSplitNode(node) ? <div id="gp" key={"g" + node.id} ref={gpRef} className={"float enter" + (node.kind === "video" ? " gp-video" : "")} style={pos.gp || { left: -9999, top: -9999 }} onPointerDown={(e) => e.stopPropagation()}><GenPanel node={node} /></div> : null}
   </>;
 }
@@ -81,6 +87,8 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
   // 不走 FloatMenuBar —— 那套「按指针所在那颗长标签」是给一排按钮用的，单颗按钮用它会像一条空条子。
   // 空视频只收视频、空图片只收图片：detail 里带 kind + accept，CanvasApp 打开文件选择前用它收窄类型
   // （拖拽 / 粘贴等别的入口选错类型，仍由 addFiles 的类型守卫挡住并说明原因）。
+  // 片段重拍节点还没出片：正文在播来源视频，不给「上传」（上传会把它变成普通视频节点）
+  if (segRetakeOf(node) && !out && !running) return null;
   if (isGenKind(node.kind) && !out && !running) {
     const video = node.kind === "video";
     const what = video ? "上传视频" : "上传图片";
@@ -93,7 +101,9 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
   const B = (act: string, ic: IconName, tip: string, lab = "", on?: (el: HTMLElement) => void) => <FloatMenuButton key={act} icon={ic} label={lab || LABEL[act] || tip} title={tip} data={{ "data-tb": act, "data-tip": tip }} onClick={(e) => on ? on(e.currentTarget) : edit(act, e.currentTarget)} />;
   const hasModel = !!out && !!(g?.params as { model?: string } | undefined)?.model;
   const rerunBtn = hasModel ? B("rerun", "redo", node.kind === "video" ? "用同样的提示词、参考素材和参数再生成一条，新结果放在右边" : "用同样的提示词、参考图和参数再生成一张，新结果放在右边", node.kind === "video" ? "再来一条" : "再来一张", () => {
-    const fresh = regenAsNew(store, node, undefined, { linkSelf: false });
+    // fresh：新节点不再和这个结果节点连箭头（那只表示来源），改为复制来源节点自己的输入作为参考；
+    // 模型生成的上一版结果不再自动当参考图（见 mentions.autoSelfUrl / buildRequest 的来源剔除）
+    const fresh = regenAsNew(store, node, undefined, { linkSelf: false, fresh: true });
     if (node.kind !== "text" && mentionedIds(genOf(fresh).prompt).has(node.id)) {
       // 提示词里 @ 了本节点：「再来一张」要的是同一张参考图。以前把 @ 改写成新节点自己——新节点还没有结果，
       // 这张参考图就悄悄丢了。现在把原节点连成新节点的上游，@ 原样指向原节点（面板里显示成上游胶囊）。
@@ -137,17 +147,22 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
   if (running) items = node.kind === "video"
     ? [B("frame", "frame", "截帧（快捷键 1）", "截帧"), <span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))]
     : [<span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))];
-  // 图片工具条只留 局部重绘 / 调色 / 无损改图 + 更多；裁剪 / 涂鸦 / 拆分图层和低频 AI 特效（多角度 / 重打光 / 白膜）都收进「更多」菜单（见 registry.tsx MoreMenu）
-  else if (node.kind === "image") items = [B("mask", "brush", "局部重绘"), B("adjust", "palette", "调色"), B("lossless", "edit", "无损改图"), B("more", "more", "更多"), <span key="s" className="vsep" />, tagBtn(), B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store)), ...(rerunBtn ? [rerunBtn] : []), B("full", "expand", "全屏查看", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })))];
+  // 图片工具条只留 局部重绘 / 调色 / 无损改图 + 更多；裁剪 / 旋转、涂鸦（文字 / 马赛克）、多角度、重打光、白膜、
+  // 拆分图层、快速切分、扩图 / 擦除 / 标注 / 抠图 / 旋转 / 增强 / 调整像素都在「更多」里（registry.tsx MoreMenu，
+  // 和条上按钮走同一套 openEditor / setEd 路由；2.0.08 收窄时漏过裁剪、涂鸦，已补回）。
+  else if (node.kind === "image") items = [B("mask", "brush", "局部重绘"), B("adjust", "palette", "调色"), B("lossless", "edit", "无损改图"), B("more", "more", "更多"), B("parse", "wand", "解析：反推画面的提示词，自动生成一个文本节点", "解析", () => void parseMedia(ctl, node)), <span key="s" className="vsep" />, tagBtn(), B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)), B("dl", "download", "下载", "", () => void download(node, store)), ...(rerunBtn ? [rerunBtn] : []), B("full", "expand", "全屏查看", "", () => window.dispatchEvent(new CustomEvent("cn:lightbox", { detail: node.id })))];
   else if (node.kind === "text") items = [bgBtn(), tagBtn(), <span key="s" className="vsep" />, B("copy", "copy", "复制全部", "", async () => { try { await navigator.clipboard.writeText(textOf(node)); store.toast("已复制全部内容"); } catch { store.toast("剪贴板不可用"); } }), B("lib", "libadd", "保存到素材库", "", (el) => { const r = el.getBoundingClientRect(); void saveNodeToLibrary(ctl, node, { x: r.left, y: r.bottom + 6 }); }), B("full", "expand", "全屏编辑", "", () => window.dispatchEvent(new CustomEvent("cn:textdoc", { detail: node.id })))];
   else if (node.kind === "video" && out) items = [
     // TapNow 视频工具栏：修剪 / 智能切镜 / AI 编辑（替换·移除·续写·重拍）/ 截帧 / 更多 ┃ 标签 ┃ 保存素材库 / 下载 / 全屏
     // 草稿模式出的低清版本最前面多一个「出成片」
+    ...(segRetakeOf(node) ? [B("segreplace", "upload", "用这一版替换原视频：原节点多一个版本（可切回），用到它的剪辑时间线跟着换", "替换原视频", () => replaceSourceWithTake(store, node.id))] : []),
     ...(out.draft ? [B("final", "sparkle", "按最高清晰度重新生成成片", "出成片", () => void draftToFinal(store, node))] : []),
     B("trim", "scissors", "修剪：把使用区间裁成新视频节点", "", () => void trimToNode(store, node)),
     B("smartclip", "split", "智能切镜：按镜头拆成多个节点", "", () => void smartClip(store, node)),
+    B("segretake", "camera", "片段重拍：截出要改的片段重新生成，结果放在右边的新节点", "片段重拍", () => { createSegRetake(ctl, node); }),
     <FloatMenuButton key="vai" icon="wand" label="AI 编辑" title="AI 编辑：替换 / 移除 / 续写 / 重拍" data={{ "data-tb": "vai", "data-tip": "AI 编辑：替换 / 移除 / 续写 / 重拍" }} onClick={(e) => videoAiMenu(store, node, e.currentTarget)} />,
     B("frame", "frame", "截帧（快捷键 1）", "截帧"),
+    B("parse", "wand", "解析：反推画面的提示词，自动生成一个文本节点", "解析", () => void parseMedia(ctl, node)),
     <FloatMenuButton key="vmore" icon="more" label="更多" title="更多" data={{ "data-tb": "vmore", "data-tip": "更多" }} onClick={(e) => videoMore(ctl, node, e.currentTarget)} />,
     <span key="s1" className="vsep" />, tagBtn(), <span key="s2" className="vsep" />,
     B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)),
@@ -172,7 +187,7 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
 
 /* ---------------- 生成面板 ---------------- */
 /** 生成面板：选中生成节点时浮在节点下方；剪辑时间线的「片段重拍」也直接复用它（同一个编辑器） */
-export function GenPanel({ node }: { node: CanvasNode }) {
+export function GenPanel({ node, runOpts, beforeSend }: { node: CanvasNode; /** 剪辑时间线「重拍」：图片 / 音频片段要在来源节点上原地出新版本（inPlace），不能分流到旁边的结果节点 */ runOpts?: RunOpts; /** 点生成前的检查：返回 false 就不发（时间线片段重拍：截了片段却没写改法） */ beforeSend?: () => boolean }) {
   const ctl = useCtl(); const store = ctl.store;
   const doc = useS((s) => s.doc); const run = useS((s) => s.runtime[node.id]); const preview = useS((s) => s.ui.preview); const pick = useS((s) => s.ui.pick); useS((s) => s.models);
   const kind = node.kind as GenKind; const g = genOf(node); const m = store.modelOf(node); const p = g.params;
@@ -254,7 +269,7 @@ export function GenPanel({ node }: { node: CanvasNode }) {
   refsIn(g.prompt, ins).missing.forEach((r) => warns.push(`找不到引用「@${r}」：确认上游节点里有这一段。`));
 
   const set = (patch: Partial<typeof p>) => store.patchGen(node.id, (gg) => ({ params: { ...gg.params, ...patch } as typeof p }));
-  const send = () => { commitPrompt(draft); runNode(store, node.id).catch((err) => { console.error(err); store.toast("生成出错：" + (err instanceof Error ? err.message : String(err))); }); };
+  const send = () => { commitPrompt(draft); if (beforeSend && !beforeSend()) return; if (segRetakeOf(node) && !segRetakeReady(store, node.id)) return; runNode(store, node.id, runOpts).catch((err) => { console.error(err); store.toast("生成出错：" + (err instanceof Error ? err.message : String(err))); }); };
   const est = m ? (kind === "image" ? `约 ${m.secs * ((p as ImageParams).count || 1)}s` : `约 ${m.secs}s`) : "";
 
   // 输入芯片拖动排序
@@ -291,7 +306,7 @@ export function GenPanel({ node }: { node: CanvasNode }) {
     };
     openPop(ta, (close) => <SlashList onPick={(sc) => { close(); put(sc); }} onClose={() => { close(); ta.focus(); }} />);
   };
-  const ph = kind === "text" ? (g.manual ? "这是手写文本节点。写一条指令可以让模型改写它，或双击节点直接编辑" : (p as TextParams).output === "table" ? "描述要拆成哪些行、每行包含什么，上游文字和素材会一起发送" : (p as TextParams).output === "storyboard" ? "描述这条片子的内容，会拆成逐镜头的分镜表" : "写给模型的指令，输入 @ 引用上游节点") : kind === "video" ? "描述镜头运动、主体动作和氛围，输入 @ 引用上游节点" : kind === "audio" ? "描述想要的音乐或声音，输入 @ 引用上游节点" : "描述任何你想要生成的内容，输入 @ 引用上游节点";
+  const ph = segRetakeOf(node) ? SEG_RETAKE_PH : kind === "text" ? (g.manual ? "这是手写文本节点。写一条指令可以让模型改写它，或双击节点直接编辑" : (p as TextParams).output === "table" ? "描述要拆成哪些行、每行包含什么，上游文字和素材会一起发送" : (p as TextParams).output === "storyboard" ? "描述这条片子的内容，会拆成逐镜头的分镜表" : "写给模型的指令，输入 @ 引用上游节点") : kind === "video" ? "描述镜头运动、主体动作和氛围，输入 @ 引用上游节点" : kind === "audio" ? "描述想要的音乐或声音，输入 @ 引用上游节点" : "描述任何你想要生成的内容，输入 @ 引用上游节点";
   // 视频编辑器：TapNow 排法 —— 顶部参考缩略图（首帧/尾帧）+ 交换 + 「+」，下面提示词；
   // 底部一行左边「模型 · 生成方式 · 比例 · 清晰度 · 时长」文字值，右边 次数 + 圆形发送；音频收成行首图标。
   if (kind === "video") {
@@ -903,6 +918,8 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
   if (k === "count") return pop((close) => {
     const options = mm.batchUnknown ? [1] : [4, 2, 1];
     return <><div className="mh">一次生成几张</div>{options.map((c) => <button key={c} className={"mi" + ((cur().g.params as ImageParams).count === c ? " on" : "")} disabled={dis || !mm.batch?.includes(c)} onClick={() => { close(); set({ count: c }); }}>{c}×<span className="k">{!dis && mm.batch?.includes(c) ? (c > 1 ? (store.state.ui.batchMode === "stack" ? "堆叠在本节点" : "铺开成新节点") : "") : "该模型不支持"}</span></button>)}
+      {/* MJ 上游一次就回 4 张单图、只扣一次费：这里选的只是「取几张进画布」，不是发几次任务 */}
+      {mm.mj ? <div className="mh">上游一次出 4 张候选 + 1 张四宫格，这里决定入画布几张；四宫格免费附带</div> : null}
     </>;
   });
   if (k === "vtimes") return pop((close) => <><div className="mh">一次生成几条</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + (((cur().g.params as VideoParams).times || 1) === c ? " on" : "")} disabled={dis || !(mm.times || [1]).includes(c)} onClick={() => { close(); set({ times: c }); }}>{c}×<span className="k">{!dis && (mm.times || [1]).includes(c) ? (c > 1 ? "每条单独计费" : "") : "该模型不支持"}</span></button>)}</>);

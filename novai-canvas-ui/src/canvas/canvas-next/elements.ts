@@ -159,6 +159,24 @@ export function refRoom(kind: GenKind, m: ModelSpec | undefined, params: unknown
   return 0;
 }
 
+/**
+ * 画布助手「在这张基础上改」：后端把要当参考的地址写在 data.agentRun.referenceImages /
+ * data.agentPendingReferenceImages（契约固定），这里按剩余参考名额加成 reference 输入（和元素图同一条路）。
+ */
+export function referenceInputs(urls: string[] | undefined | null, kind: GenKind, m: ModelSpec | undefined, params: unknown, inputs: GenInput[]): GenInput[] {
+  if (!Array.isArray(urls) || !urls.length) return [];
+  const room = refRoom(kind, m, params, inputs);
+  const have = new Set(inputs.map((x) => x.url).filter(Boolean));
+  const out: GenInput[] = [];
+  for (const raw of urls) {
+    if (out.length >= room) break;
+    const url = String(raw || "").trim(); if (!url || have.has(url)) continue;
+    have.add(url);
+    out.push({ nodeId: "reference:" + (out.length + 1), title: "参考图", kind: "image", order: inputs.length + out.length + 1, role: "reference", url });
+  }
+  return out;
+}
+
 /** 被 @ 的元素的参考图 → 参考输入（按剩余名额，元素之间轮流取，保证每个元素至少一张） */
 export function elementInputs(prompt: string, kind: GenKind, m: ModelSpec | undefined, params: unknown, inputs: GenInput[], list = listElements()): GenInput[] {
   const els = mentionedElements(prompt, list).filter((e) => e.refs.length); let room = refRoom(kind, m, params, inputs);
