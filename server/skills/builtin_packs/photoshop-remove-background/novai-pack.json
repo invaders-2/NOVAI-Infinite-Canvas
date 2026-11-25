@@ -1,0 +1,14 @@
+{
+  "display_name": "Photoshop 一键去背",
+  "category": "图像后期",
+  "icon": "image",
+  "runtime": "canvas",
+  "tags": [
+    "Photoshop",
+    "去背",
+    "抠图",
+    "透明背景",
+    "MCP"
+  ],
+  "description": "Photoshop 一键去背：说去背/抠图/白底/透明背景时，只调一次 remove_background 配方再看预览，禁止栅格化或手动建蒙版。"
+}

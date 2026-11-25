@@ -28,6 +28,7 @@ import subprocess
 import time
 import inspect
 import traceback
+import platform
 import shutil
 import stat
 import glob
@@ -167,6 +168,19 @@ def _ffmpeg_name_variants(name: str) -> List[str]:
     return [name]
 
 
+def _ffmpeg_platform_tags() -> List[str]:
+    """安装包内置 ffmpeg 的平台子目录名（bin/<tag>），架构匹配的排前面；Windows 仍是 win。"""
+    if sys.platform.startswith("win"):
+        return ["win"]
+    machine = (platform.machine() or "").lower()
+    if sys.platform == "darwin":
+        # Electron 打包时 Apple Silicon 用 mac-arm64，Intel 用 mac
+        return ["mac-arm64", "mac"] if machine in ("arm64", "aarch64") else ["mac"]
+    if sys.platform.startswith("linux"):
+        return ["linux-arm64", "linux"] if machine in ("arm64", "aarch64") else ["linux", "linux-arm64"]
+    return ["win"]
+
+
 def _bundled_ffmpeg_dirs() -> List[str]:
     """安装包里可能放 ffmpeg 的目录，按优先级排列；不存在的目录由调用方跳过。"""
     dirs: List[str] = []
@@ -176,26 +190,44 @@ def _bundled_ffmpeg_dirs() -> List[str]:
         if normalized and normalized not in dirs:
             dirs.append(normalized)
 
+    # 平台目录在前；bin/win 始终保留（老安装包只有 Windows 那个目录，其它平台查不到就跳过）
+    tags = _ffmpeg_platform_tags()
+    if "win" not in tags:
+        tags = tags + ["win"]
     try:
         exe_dir = os.path.dirname(os.path.abspath(sys.executable))
     except Exception:
         exe_dir = ""
     if exe_dir:
-        # PyInstaller 后端在 resources/backend/NOVAI.exe → ../bin/win 就是 resources/bin/win
-        add(os.path.join(exe_dir, "..", "bin", "win"))
-        add(os.path.join(exe_dir, "bin", "win"))
+        # PyInstaller 后端在 resources/backend/NOVAI.exe → ../bin/<tag> 就是 resources/bin/<tag>
+        for tag in tags:
+            add(os.path.join(exe_dir, "..", "bin", tag))
+            add(os.path.join(exe_dir, "bin", tag))
     install_dir = (os.environ.get("NOVAI_INSTALL_DIR") or "").strip()
     if install_dir:
-        add(os.path.join(install_dir, "bin", "win"))
-        add(os.path.join(install_dir, "resources", "bin", "win"))
+        for tag in tags:
+            add(os.path.join(install_dir, "bin", tag))
+            add(os.path.join(install_dir, "resources", "bin", tag))
     app_dir = (os.environ.get("NOVAI_APP_DIR") or "").strip()
     if app_dir:
-        add(os.path.join(app_dir, "..", "bin", "win"))
+        for tag in tags:
+            add(os.path.join(app_dir, "..", "bin", tag))
     meipass = str(getattr(sys, "_MEIPASS", "") or "")
     if meipass:
-        add(os.path.join(meipass, "bin", "win"))
+        for tag in tags:
+            add(os.path.join(meipass, "bin", tag))
         add(meipass)
     return dirs
+
+
+def _system_media_dirs() -> List[str]:
+    """系统常见安装目录：从 Finder / Launchpad 启动的 GUI 进程 PATH 里没有 Homebrew 等目录，
+    shutil.which 落空时再按平台到这里找（只认真实存在且可执行的文件）。"""
+    if sys.platform == "darwin":
+        return ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", "/usr/bin"]
+    if sys.platform.startswith("linux"):
+        return ["/usr/local/bin", "/usr/bin", "/snap/bin"]
+    return []
 
 
 def _resolve_media_binary(name: str, env_var: str) -> Optional[str]:
@@ -207,16 +239,29 @@ def _resolve_media_binary(name: str, env_var: str) -> Optional[str]:
             bundled = _existing_executable(os.path.join(directory, candidate_name))
             if bundled:
                 return bundled
-    return shutil.which(name)
+    found = shutil.which(name)
+    if found:
+        return found
+    for directory in _system_media_dirs():
+        for candidate_name in _ffmpeg_name_variants(name):
+            candidate = _existing_executable(os.path.join(directory, candidate_name))
+            if candidate:
+                return candidate
+    return None
+
+
+# 缺 ffmpeg 时统一文案：前端按 FFMPEG_MISSING 弹「本机缺少 ffmpeg」层，文案与这里保持一致
+_FFMPEG_MISSING_MESSAGE = "这台机器上没找到可用的 ffmpeg，暂时没法在本地合成 MP4。可以先用浏览器录制导出 WebM，或装好 ffmpeg 后重启 NOVAI。"
+_FFMPEG_MISSING_SEGMENT_MESSAGE = "这台机器上没找到可用的 ffmpeg，暂时没法切分视频。装好 ffmpeg 后重启 NOVAI。"
 
 
 def ffmpeg_binary() -> Optional[str]:
-    """ffmpeg 路径：环境变量 FFMPEG_PATH → 安装包内置 bin/win → PATH。"""
+    """ffmpeg 路径：环境变量 FFMPEG_PATH → 安装包内置 bin/<平台> → PATH → 系统常见安装目录。"""
     return _resolve_media_binary("ffmpeg", "FFMPEG_PATH")
 
 
 def ffprobe_binary() -> Optional[str]:
-    """ffprobe 路径：环境变量 FFPROBE_PATH → 安装包内置 bin/win → PATH。"""
+    """ffprobe 路径：环境变量 FFPROBE_PATH → 安装包内置 bin/<平台> → PATH → 系统常见安装目录。"""
     return _resolve_media_binary("ffprobe", "FFPROBE_PATH")
 
 
@@ -3362,6 +3407,11 @@ from server.routes.store import (skill_body_by_id as _store_skill_body_by_id,
 app.include_router(_store_router)   # 应用市场：GET /api/store/catalog、items/{kind}/{id}、install/uninstall
 from server.routes.mcp import router as _mcp_router  # noqa: E402
 app.include_router(_mcp_router)   # MCP 服务：GET /api/mcp/servers、POST .../{name}/enable、POST /api/mcp/reload
+from server.routes.mcp_catalog import router as _mcp_catalog_router  # noqa: E402
+from server.routes.mcp_catalog import set_data_dir as _set_mcp_catalog_data_dir  # noqa: E402
+# 安装目录与状态文件跟着 main 的 DATA_DIR 走（catalog 不 import main，避免循环依赖）
+_set_mcp_catalog_data_dir(DATA_DIR)
+app.include_router(_mcp_catalog_router)   # 应用市场 MCP 插件：GET /api/mcp/catalog、.../install、.../uninstall
 
 # --- 邀请制登录（M1）：只有 NOVAI_AUTH_ENABLED=1 才真正拦截请求 --------------
 # 默认关闭时鉴权中间件直接放行、bootstrap_admin 也不会建号，本地桌面版完全无感。
@@ -5674,6 +5724,9 @@ class CanvasLLMRequest(BaseModel):
 
 class CanvasAnalyzeMediaRequest(BaseModel):
     image: str = ""                  # data URL（优先）/ /output、/assets 本地路径 / http(s) 外链
+    images: Optional[List[str]] = None  # 视频多帧：按时间顺序，最多 4 张；空则退回单张 image
+    kind: Optional[str] = ""            # "image" / "video"；空时按 images 帧数推断（>=2 视为 video）
+    duration: Optional[float] = 0.0     # 整段视频时长（秒），只用于模板里描述「整段约 N 秒」
     is_video_frame: bool = False     # true = 视频的一帧，提示词里说明按静态画面反推
     provider: str = ""               # 空 = 自动挑一个看得懂图的对话模型
     model: str = ""
@@ -13088,7 +13141,7 @@ def segment_video_file(src_path: str, out_dir: str, index: int, start: float, du
         return {"clip_path": clip_path, "frame_path": frame_path}
     ffmpeg = ffmpeg_binary()
     if not ffmpeg:
-        raise RuntimeError("服务器缺少 ffmpeg，无法切分视频")
+        raise RuntimeError(_FFMPEG_MISSING_SEGMENT_MESSAGE)
     os.makedirs(out_dir, exist_ok=True)
     start = float(start)
     duration = float(duration)
@@ -20699,7 +20752,8 @@ def _timeline_render_sync(payload, sources, tmpdir):
 async def timeline_render(payload: TimelineRenderRequest):
     """智能画布 剪辑时间线导出 MP4：片段位置 / 修剪 / 变速 / 音量 / 淡入淡出 / 转场 / 字幕 / 画幅全部按时间线渲染。"""
     if not ffmpeg_binary():
-        raise HTTPException(status_code=400, detail="未找到 ffmpeg，无法导出 MP4（可以先用「导出 WebM」）")
+        # 503：这台机器缺 ffmpeg，导出 MP4 暂时做不了；前端据此弹「本机缺少 ffmpeg」并给 WebM 退路
+        raise HTTPException(status_code=503, detail={"code": "FFMPEG_MISSING", "message": _FFMPEG_MISSING_MESSAGE})
     clips = [c for c in (payload.clips or []) if str(c.url or "").strip()]
     if not clips:
         raise HTTPException(status_code=400, detail="时间线上还没有片段")
@@ -20752,7 +20806,7 @@ async def video_segments(payload: VideoSegmentsRequest):
     if not ffprobe_binary():
         raise HTTPException(status_code=400, detail="服务器缺少 ffprobe，无法读取视频时长")
     if not ffmpeg_binary():
-        raise HTTPException(status_code=400, detail="服务器缺少 ffmpeg，无法切分视频")
+        raise HTTPException(status_code=400, detail=_FFMPEG_MISSING_SEGMENT_MESSAGE)
     duration = probe_video_file_duration_seconds(src_path)
     if not duration or duration <= 0:
         raise HTTPException(status_code=400, detail="读取视频时长失败，请确认是有效视频文件")
@@ -21500,7 +21554,7 @@ async def image_matting(payload: ImageMattingRequest):
         if _matting_session() is None:
             raise HTTPException(status_code=500, detail=_matting_unavailable_reason())
         out_filename = f"matting_{uuid.uuid4().hex}.png"
-        out_path = os.path.join(ASSETS_DIR, "output", out_filename)
+        out_path = output_path_for(out_filename, "output")
         try:
             await asyncio.to_thread(run_image_matting, src_path, out_path)
         except Exception as exc:
@@ -21534,7 +21588,7 @@ async def image_matting(payload: ImageMattingRequest):
                 img_bytes = resp.content
         transparent_bytes = await asyncio.to_thread(chroma_key_to_transparent, img_bytes, src_path)
         out_filename = f"matting_{uuid.uuid4().hex}.png"
-        out_path = os.path.join(ASSETS_DIR, "output", out_filename)
+        out_path = output_path_for(out_filename, "output")
         with open(out_path, "wb") as f:
             f.write(transparent_bytes)
         result_url = output_url_for(out_filename, "output")
@@ -22055,7 +22109,7 @@ async def image_upscale_runtime_download():
 
 @app.post("/api/image/upscale")
 async def image_upscale(payload: ImageUpscaleRequest):
-    """本地 AI 高清放大：2k=长边2048 / 4k=长边4096，结果落 assets/output/hd_*.png。"""
+    """本地 AI 高清放大：2k=长边2048 / 4k=长边4096，结果落 output_path_for()：未登录是 assets/output/hd_*.png，登录后是 assets/users/{uid}/output/hd_*.png。"""
     raw_url = (payload.url or "").strip()
     if not raw_url:
         raise HTTPException(status_code=400, detail="缺少图片 URL")
@@ -22073,7 +22127,7 @@ async def image_upscale(payload: ImageUpscaleRequest):
     if not _upscale_runtime_installed():
         raise HTTPException(status_code=400, detail="本地高清放大组件未安装")
     out_filename = f"hd_{uuid.uuid4().hex}.png"
-    out_path = os.path.join(ASSETS_DIR, "output", out_filename)
+    out_path = output_path_for(out_filename, "output")
     try:
         info = await asyncio.to_thread(run_local_upscale, src_path, out_path, _UPSCALE_TARGET_LONG[target])
     except Exception as exc:
@@ -30398,6 +30452,18 @@ async def canvas_llm_stream(payload: CanvasLLMRequest):
 # ── 画布图片 / 视频节点「解析」：把画面反推成四段可直接用的 AI 绘图提示词 ──
 CANVAS_ANALYZE_MAX_IMAGE_BYTES = 12 * 1024 * 1024
 CANVAS_ANALYZE_TOO_LARGE_DETAIL = "图片太大（超过 12MB）：请先压缩或换一张小一点的图再解析。"
+CANVAS_ANALYZE_MAX_FRAMES = 8
+CANVAS_ANALYZE_MAX_TOTAL_BYTES = 20 * 1024 * 1024
+# 压住预扣费：不设输出上限时上游按最大输出预估，多帧解析会被算成远超余额的预扣费而直接拒绝。
+# 不能压太狠：真实链路里 2048 会把 JSON 截断（实测 508 字就断 -> 解析失败、table=null），
+# 8192 才够「3–8 行分镜 + 四段」完整输出（实测 6 帧 / 6 行分镜正常返回）。
+CANVAS_ANALYZE_MAX_TOKENS = 8192
+CANVAS_ANALYZE_QUOTA_DETAIL = (
+    "账号额度不足：这次解析按上限预估的预扣费超过了当前余额，请充值，"
+    "或在素材库「反推设置」里换一个更便宜的视觉模型再试。")
+CANVAS_ANALYZE_TOO_MANY_FRAMES_DETAIL = "一次最多 8 帧：请减少帧数后再解析。"
+CANVAS_ANALYZE_TOTAL_TOO_LARGE_DETAIL = (
+    "所有帧加起来太大（超过 20MB）：请减少帧数，或把画面压小一点再解析。")
 _CANVAS_ANALYZE_IMAGE_SUFFIXES = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -30487,6 +30553,34 @@ async def canvas_analyze_media_path(image):
         return path, path
     raise HTTPException(status_code=400, detail="不认识的图片地址：只支持 data URL、/output、/assets 本地路径或 http(s) 链接。")
 
+async def canvas_analyze_media_paths(frames):
+    """把多帧依次落成本地文件，返回 (路径列表, 待清理临时文件列表)。
+
+    中途任何一帧失败（含总字节超限）都先删掉已经写出的临时文件再把异常抛出去，
+    所以调用方的 finally 只管删「成功返回」的这批，不会漏。
+    """
+    paths, cleanup_paths, total_bytes = [], [], 0
+    try:
+        for frame in frames:
+            path, cleanup_path = await canvas_analyze_media_path(frame)
+            paths.append(path)
+            if cleanup_path:
+                cleanup_paths.append(cleanup_path)
+            try:
+                total_bytes += os.path.getsize(path)
+            except OSError:
+                pass
+            if total_bytes > CANVAS_ANALYZE_MAX_TOTAL_BYTES:
+                raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_TOTAL_TOO_LARGE_DETAIL)
+    except BaseException:
+        for path in cleanup_paths:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        raise
+    return paths, cleanup_paths
+
 def canvas_analyze_vision_provider(provider_id=""):
     """没指定平台时挑一个「看得懂图」的对话模型。
 
@@ -30540,9 +30634,21 @@ def canvas_analyze_vision_provider(provider_id=""):
                 return str(provider.get("id") or ""), model
     return "", ""
 
+# 额度类拒绝的上游原文特征：预扣费不足常带 pre-consume / quota / balance / 402 这些字样
+_CANVAS_ANALYZE_QUOTA_MARKERS = (
+    "pre-consume", "preconsume", "pre consume", "quota", "insufficient", "balance", "402",
+)
+
+def canvas_analyze_quota_error(detail):
+    """上游是在说「额度 / 预扣费不够」时返回 True（英文 JSON 原文别糊给用户）。"""
+    lower = str(detail or "").lower()
+    return any(marker in lower for marker in _CANVAS_ANALYZE_QUOTA_MARKERS)
+
 def canvas_analyze_error_detail(exc):
-    """把 caption 抛上来的 HTTPException 收成一句中文：上游 HTML 错误页 / 超长原文不往用户脸上糊。"""
+    """把 caption 抛上来的 HTTPException 收成一句中文：额度不足 / 上游 HTML 错误页 / 超长原文不往用户脸上糊。"""
     detail = str(getattr(exc, "detail", "") or "").strip()
+    if canvas_analyze_quota_error(detail):
+        return CANVAS_ANALYZE_QUOTA_DETAIL
     friendly = friendly_chat_error_detail(detail) if detail else ""
     if friendly:
         return friendly
@@ -30556,18 +30662,52 @@ def canvas_analyze_error_detail(exc):
         return "视觉模型返回的报错太长了，已省略：请稍后重试，或换一个视觉模型。"
     return detail
 
+def canvas_analyze_frames(payload):
+    """按接口契约把请求拆成 (帧列表, 是否视频)。
+
+    帧来源：kind=video 只认 images（空则退回单张 image）；否则 images >= 2 也当视频；
+    剩下的一律走旧单帧路径（image 优先，其次 images[0]）。
+    """
+    images = [str(item or "").strip() for item in (payload.images or [])]
+    images = [item for item in images if item]
+    single = str(payload.image or "").strip()
+    if str(payload.kind or "").strip().lower() == "video":
+        frames = images or ([single] if single else [])
+        if not frames:
+            raise HTTPException(status_code=400, detail="没有收到视频画面：请先选好视频或截好帧再解析。")
+        return frames, True
+    if len(images) >= 2:
+        return images, True
+    frame = single or (images[0] if images else "")
+    if not frame:
+        raise HTTPException(status_code=400, detail="没有收到图片：请先选好图片或视频画面再解析。")
+    return [frame], False
+
 @app.post("/api/canvas-analyze-media")
 async def canvas_analyze_media(payload: CanvasAnalyzeMediaRequest):
-    """画布图片 / 视频节点的「解析」：把画面反推成四段可直接用于 AI 绘图的提示词。"""
+    """画布图片 / 视频节点的「解析」：把画面反推成四段可直接用于 AI 绘图的提示词。
+
+    kind=video（或 images >= 2）走视频专用模板、把所有帧按顺序发给模型；
+    其余保持旧单帧行为（image / images[0]，is_video_frame 只追加那行说明）。
+    """
     provider_id = (payload.provider or "").strip()
     if provider_id:
         provider_id = member_provider(provider_id)
     provider_id, model = canvas_analyze_vision_provider(provider_id)
-    prompt = canvas_analyze_prompt(payload.is_video_frame)
-    media_path, cleanup_path = await canvas_analyze_media_path(payload.image)
+    frames, is_video = canvas_analyze_frames(payload)
+    if len(frames) > CANVAS_ANALYZE_MAX_FRAMES:
+        raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_TOO_MANY_FRAMES_DETAIL)
+    prompt = (canvas_analyze_video_prompt(payload.duration, len(frames)) if is_video
+              else canvas_analyze_prompt(payload.is_video_frame))
+    media_paths, cleanup_paths = await canvas_analyze_media_paths(frames)
     try:
         try:
-            text, used_model = await caption_image_with_provider(media_path, prompt, provider_id, model)
+            if is_video:
+                text, used_model = await caption_images_with_provider(
+                    media_paths, prompt, provider_id, model, max_tokens=CANVAS_ANALYZE_MAX_TOKENS)
+            else:
+                text, used_model = await caption_image_with_provider(
+                    media_paths[0], prompt, provider_id, model, max_tokens=CANVAS_ANALYZE_MAX_TOKENS)
         except HTTPException as exc:
             raise HTTPException(
                 status_code=400 if exc.status_code == 400 else 502,
@@ -30577,16 +30717,23 @@ async def canvas_analyze_media(payload: CanvasAnalyzeMediaRequest):
             print(f"[canvas-analyze-media] 解析失败: {exc}")
             raise HTTPException(status_code=502, detail="解析失败：调用视觉模型出错，请稍后重试或换一个模型。") from exc
     finally:
-        if cleanup_path:
+        for path in cleanup_paths:
             try:
-                os.remove(cleanup_path)
+                os.remove(path)
             except OSError:
                 pass
     text = (text or "").strip()
-    # caption_image_with_provider 自己会把空文本换成这句哨兵，这里当成「没内容」
+    # caption_images_with_provider（含单图包装）会把空文本换成这句哨兵，这里当成「没内容」
     if not text or text == "接口返回了空回复。":
         raise HTTPException(status_code=502, detail="模型没有返回内容，换一个视觉模型再试")
-    return {"ok": True, "text": text, "model": used_model or model, "prompt": prompt}
+    # 模板现在要求模型只吐 JSON：四段 text 由后端拼，分镜表由后端组（模型自造列名不采信）
+    parsed = canvas_analyze_reply_json(text)
+    reply_text = canvas_analyze_text_from_reply(parsed, text)
+    if not reply_text or reply_text == "接口返回了空回复。":
+        raise HTTPException(status_code=502, detail="模型没有返回内容，换一个视觉模型再试")
+    return {"ok": True, "text": reply_text,
+            "table": canvas_analyze_table_from_reply(parsed),
+            "model": used_model or model, "prompt": prompt}
 
 # --- 对话管理 ---
 
@@ -32080,25 +32227,23 @@ async def delete_memory(memory_id: str, canvas_id: str = ""):
 
 
 # 画布图片 / 视频节点「解析」的反推模板（产品侧原文，一字不改；改字先跟产品对齐）
-CANVAS_ANALYZE_PROMPT = """你是资深的 AI 绘图提示词工程师。请把给定画面「反推」成可直接用于 AI 绘图（Midjourney / Stable Diffusion / Seedream / 即梦等）的提示词。
+CANVAS_ANALYZE_PROMPT = """你是资深的 AI 绘图提示词工程师。请把给定画面「反推」成可直接用于 AI 绘图（Midjourney / Stable Diffusion / Seedream / 即梦等）的提示词，并同时给出这一张画面的分镜表。
 
-严格按下面四段的顺序输出，每段用标记行开头，标记行原样输出，段与段之间空一行：
-[中文正向]
-[中文负向]
-[English Positive]
-[English Negative]
+只输出一个 JSON 对象，不要 Markdown 代码块、不要任何前言、解释或总结。JSON 结构固定为：
+{"prompt":{"cnPos":"","cnNeg":"","enPos":"","enNeg":""},"shots":[{"no":"1","dur":"","desc":"","char":"","charDesc":"","shotSize":"","mood":"","light":"","audio":"","line":"","prompt":"","motion":""}]}
 
 内容要求：
-1. [中文正向]：一段连续的中文短语流（逗号分隔，不分点、不编号、不写成句子解释），依次覆盖：主体与外观细节 → 动作/姿态/表情 → 场景与环境 → 风格与流派 → 构图与镜头（视角、景别、焦段、机位）→ 光线与氛围 → 色彩与色调 → 材质与质感 → 画质与分辨率词 → 关键细节补充。200–400 字。
-2. [中文负向]：中文短语流，列出要避免的画面问题（低质量、模糊、噪点、过曝、过饱和、畸变、多余手指、错位肢体、水印、logo、文字、边框等），以及与该图风格相冲突的元素。60–120 字。
-3. [English Positive]：英文关键词流，逗号分隔，顺序与中文正向一一对应：subject, appearance details, action/pose/expression, scene, style, composition/camera (angle, shot size, focal length), lighting, color palette, materials/texture, quality/resolution tags, key details。60–150 词。
-4. [English Negative]：英文负向词，逗号分隔，语义与中文负向对应。
+- prompt.cnPos：一段连续的中文短语流（逗号分隔，不分点、不编号、不写成句子解释），依次覆盖：主体与外观细节 → 动作/姿态/表情 → 场景与环境 → 风格与流派 → 构图与镜头（视角、景别、焦段、机位）→ 光线与氛围 → 色彩与色调 → 材质与质感 → 画质与分辨率词 → 关键细节补充。200–400 字。
+- prompt.cnNeg：中文短语流，列出要避免的画面问题（低质量、模糊、噪点、过曝、过饱和、畸变、多余手指、错位肢体、水印、logo、文字、边框等），以及与该图风格相冲突的元素。60–120 字。
+- prompt.enPos：英文关键词流，逗号分隔，顺序与中文正向一一对应：subject, appearance details, action/pose/expression, scene, style, composition/camera (angle, shot size, focal length), lighting, color palette, materials/texture, quality/resolution tags, key details。60–150 词。
+- prompt.enNeg：英文负向词，逗号分隔，语义与中文负向对应。
+- shots：这一张画面只给 1 行。no 固定 "1"；dur、audio、line、motion 一律给空字符串 ""；desc（画面描述）、char（主体角色）、charDesc（角色描述）、shotSize（景别，如 特写 / 近景 / 中景 / 全景）、mood（情绪）、light（光影氛围）、prompt（可直接用于生成这一张图的提示词）尽量填。拿不到的信息给空字符串，不要编。
 
 硬性规则：
 - 只写画面里真实存在或可合理推断的元素；看不清的细节不要编造，不要出现「这张图」「画面中」「图中」这类叙述词。
-- 只输出这四段，不要任何前言、解释、总结、Markdown 标题或代码块。
 - 中英文语义必须一致，不能各写各的。
 - 如果输入是视频的一帧，按静态画面反推，不要描述镜头运动。
+- 只输出那一个 JSON 对象，字段名和结构与上面完全一致，不要增删字段。
 """
 
 # 视频的一帧：同一段模板末尾追加一行（is_video_frame=true 时）
@@ -32109,7 +32254,125 @@ def canvas_analyze_prompt(is_video_frame=False):
         return f"{CANVAS_ANALYZE_PROMPT}{CANVAS_ANALYZE_VIDEO_FRAME_NOTE}\n"
     return CANVAS_ANALYZE_PROMPT
 
-async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_model=""):
+# 视频多帧解析：整段视频专用模板（产品侧原文，一字不改；改字先跟产品对齐）
+CANVAS_ANALYZE_VIDEO_PROMPT = """你是资深的 AI 视频提示词工程师。下面按时间顺序给出这段视频的若干帧，它们来自同一个镜头（或同一段里的几个镜头）。请把这段视频「反推」成可直接用于 AI 视频生成（Seedance / 可灵 / Veo / Runway 等）的提示词，并同时给出分镜表。
+
+只输出一个 JSON 对象，不要 Markdown 代码块、不要任何前言、解释或总结。JSON 结构固定为：
+{"prompt":{"cnPos":"","cnNeg":"","enPos":"","enNeg":""},"shots":[{"no":"1","dur":"","desc":"","char":"","charDesc":"","shotSize":"","mood":"","light":"","audio":"","line":"","prompt":"","motion":""}]}
+
+内容要求：
+- prompt.cnPos：一段连续的中文短语流（逗号分隔，不分点、不编号、不写成句子解释），依次覆盖：主体与外观细节 → 主体的动作与变化（按时间前后说明怎么动） → 镜头运动（推拉摇移跟、俯仰、景别与机位变化） → 节奏与时长感（快慢、卡点、慢动作、镜头时长） → 场景与环境 → 光线与色调的变化 → 风格与质感 → 画质与帧率感 → 转场或段落变化。200–400 字。
+- prompt.cnNeg：中文短语流，列出视频生成要避免的问题（画面闪烁、抖动、跳帧、形变、穿模、肢体扭曲、五官错位、拖影、模糊、过曝、噪点、画面撕裂、变焦抖动、风格突变、水印、字幕、logo），以及与该片风格相冲突的元素。60–120 字。
+- prompt.enPos：英文关键词流，逗号分隔，顺序与中文正向一一对应，必须包含 motion、subject action、camera movement（push in / pull out / pan / tilt / track / handheld 等）、pacing、lighting change、transition、quality tags。60–150 词。
+- prompt.enNeg：英文负向词，逗号分隔，语义与中文负向对应。
+- shots：按帧序把这段视频拆成 3–8 行分镜。no 从 "1" 开始依次递增；dur 写这一镜时长（如 "4s"），各镜时长相加要≈整段视频时长；每行都要填 desc（画面描述）、char（主体角色）、charDesc（角色描述）、shotSize（景别）、mood（情绪）、light（光影氛围）、audio（音效）、line（对白）、prompt（分镜提示词，可直接用于生成这一镜的画面）、motion（视频运动提示词，这一镜的运镜，如 "Slow Dolly in + 顶部聚光跟随"，中英混排可接受）。拿不到的信息给空字符串，不要编。
+
+硬性规则：
+- 只写这些帧里真实出现或可合理推断的内容；帧与帧之间看不清的变化不要编造。
+- 不要出现「第一帧」「第二帧」「画面中」「图中」这类叙述词，直接给可用于生成的描述。
+- 中英文语义必须一致，不能各写各的。
+- 把这段视频当成「一个镜头内的连续画面」描述，不要写成几段互不相干的画面。
+- 只输出那一个 JSON 对象，字段名和结构与上面完全一致，不要增删字段。
+"""
+
+# 请求给了 duration > 0 时，在视频模板最前面追加这一句（{duration} / {n} 由 canvas_analyze_video_prompt 填）
+CANVAS_ANALYZE_VIDEO_DURATION_LINE = "这段视频整段约 {duration} 秒，共给出 {n} 帧，按时间顺序排列。"
+
+def canvas_analyze_video_prompt(duration=0, frame_count=1):
+    prompt = CANVAS_ANALYZE_VIDEO_PROMPT
+    try:
+        seconds = float(duration or 0)
+    except (TypeError, ValueError):
+        seconds = 0.0
+    if seconds > 0:
+        frames = max(1, int(frame_count or 1))
+        line = CANVAS_ANALYZE_VIDEO_DURATION_LINE.format(duration=f"{seconds:g}", n=frames)
+        prompt = f"{line}\n\n{prompt}"
+    return prompt
+
+# 分镜表的列由后端定死：模型自造的列名一律不采信，缺列补空串
+CANVAS_ANALYZE_TABLE_COLUMNS = [
+    "镜号", "时长", "画面描述", "角色", "角色描述", "景别",
+    "情绪", "光影氛围", "音效", "对白", "分镜提示词", "视频运动提示词",
+]
+# 与 columns 一一对应的 JSON 键（模板里固定的 shots 字段名）
+CANVAS_ANALYZE_TABLE_KEYS = [
+    "no", "dur", "desc", "char", "charDesc", "shotSize",
+    "mood", "light", "audio", "line", "prompt", "motion",
+]
+CANVAS_ANALYZE_TABLE_MAX_ROWS = 200
+CANVAS_ANALYZE_TABLE_MAX_CELL_CHARS = 20000
+# 后端拼 text 时的四段顺序与标记行（前端按这四行切段，顺序不能变）
+CANVAS_ANALYZE_PROMPT_SECTIONS = [
+    ("cnPos", "中文正向"),
+    ("cnNeg", "中文负向"),
+    ("enPos", "English Positive"),
+    ("enNeg", "English Negative"),
+]
+
+def canvas_analyze_reply_json(text):
+    """从模型回复里抽 JSON：容忍 ```json 围栏和前后废话，先试围栏内，再试整段，最后取第一个 { 到最后一个 }。"""
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    candidates = []
+    for fence in ("```json", "```JSON", "```"):
+        if fence in raw:
+            fenced = raw.split(fence, 1)[1]
+            if "```" in fenced:
+                fenced = fenced.split("```", 1)[0]
+            candidates.append(fenced.strip())
+            break
+    candidates.append(raw)
+    start, end = raw.find("{"), raw.rfind("}")
+    if start != -1 and end > start:
+        candidates.append(raw[start:end + 1])
+    for candidate in candidates:
+        try:
+            data = json.loads(candidate)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+def canvas_analyze_cell_text(value):
+    """表格单元格统一成字符串：None → 空串，非字符串转字符串，超长截断。"""
+    if value is None:
+        return ""
+    text = value if isinstance(value, str) else str(value)
+    return text[:CANVAS_ANALYZE_TABLE_MAX_CELL_CHARS]
+
+def canvas_analyze_text_from_reply(data, fallback=""):
+    """模型 JSON → 前端现用的四段文本；没有可用 prompt 时退回整段回复原文（模型没按格式也能用）。"""
+    prompt = data.get("prompt") if isinstance(data, dict) else None
+    if isinstance(prompt, dict):
+        sections = [(label, canvas_analyze_cell_text(prompt.get(key)).strip())
+                    for key, label in CANVAS_ANALYZE_PROMPT_SECTIONS]
+        if any(value for _, value in sections):
+            return "\n\n".join(f"[{label}]\n{value}" for label, value in sections)
+    return str(fallback or "").strip()
+
+def canvas_analyze_table_from_reply(data):
+    """模型 JSON → 固定 12 列的分镜表；没有可用 shots 时返回 None（前端跳过建表）。"""
+    shots = data.get("shots") if isinstance(data, dict) else None
+    if not isinstance(shots, list):
+        return None
+    rows = []
+    for shot in shots[:CANVAS_ANALYZE_TABLE_MAX_ROWS]:
+        if not isinstance(shot, dict):
+            continue
+        rows.append([canvas_analyze_cell_text(shot.get(key)) for key in CANVAS_ANALYZE_TABLE_KEYS])
+    if not rows:
+        return None
+    return {"columns": list(CANVAS_ANALYZE_TABLE_COLUMNS), "rows": rows}
+
+async def caption_images_with_provider(abs_paths, prompt, provider_id, model, ms_model="", max_tokens=0):
+    """一张或多张图交给视觉模型反推：多帧按传入顺序放进同一次请求。
+
+    max_tokens > 0 时把输出上限带进请求；默认 0 = 不发，旧调用点行为完全不变。
+    """
+    paths = [str(path) for path in (abs_paths or []) if str(path or "").strip()]
     llm_provider = get_api_provider(provider_id) if provider_id not in ("modelscope",) else {}
     if is_codex_provider(llm_provider):
         resolved_model = selected_model(model, (llm_provider.get("chat_models") or CODEX_DEFAULT_CHAT_MODELS)[0])
@@ -32117,7 +32380,8 @@ async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_m
             message=(prompt or "描述图片").strip() or "描述图片",
             provider=provider_id or "codex",
             model=resolved_model,
-            images=[abs_path],
+            images=paths,
+            max_tokens=max_tokens,
         )
         text, _raw = await codex_chat_text(payload, [])
         return text, resolved_model
@@ -32127,7 +32391,8 @@ async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_m
             message=(prompt or "描述图片").strip() or "描述图片",
             provider=provider_id or "gemini-cli",
             model=resolved_model,
-            images=[abs_path],
+            images=paths,
+            max_tokens=max_tokens,
         )
         text, _raw = await gemini_cli_chat_text(payload, [])
         return text, resolved_model
@@ -32137,25 +32402,24 @@ async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_m
             message=(prompt or "描述图片").strip() or "描述图片",
             provider=provider_id or "lovart",
             model=resolved_model,
-            images=[abs_path],
+            images=paths,
+            max_tokens=max_tokens,
         )
         text, _raw = await lovart_chat_text(payload, [])
         return text, resolved_model
     chat_base, chat_hdrs, resolved_model = resolve_chat_provider(provider_id, model, ms_model)
     is_apimart = is_apimart_provider(llm_provider)
     prompt_text = (prompt or "描述图片").strip() or "描述图片"
-    data_url = image_path_to_data_url(abs_path, max_size=1024)
-    messages = [{
-        "role": "user",
-        "content": [
-            {"type": "text", "text": prompt_text},
-            {"type": "image_url", "image_url": {"url": data_url}},
-        ],
-    }]
+    content = [{"type": "text", "text": prompt_text}]
+    content += [{"type": "image_url", "image_url": {"url": image_path_to_data_url(path, max_size=1024)}}
+                for path in paths]
+    messages = [{"role": "user", "content": content}]
     raw = None
     try:
         async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=AI_REQUEST_TIMEOUT) as client:
             req_body = {"model": resolved_model, "messages": messages}
+            if max_tokens and int(max_tokens) > 0:
+                req_body["max_tokens"] = int(max_tokens)
             if is_apimart:
                 req_body["stream"] = False
             response = await client.post(
@@ -32178,6 +32442,10 @@ async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_m
         raise HTTPException(status_code=502, detail=f"解析上游响应失败：{exc}") from exc
     text = text_from_chat_response(raw).strip() if isinstance(raw, dict) else ""
     return text or "接口返回了空回复。", resolved_model
+
+async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_model="", max_tokens=0):
+    """单图调用（旧签名）：转调多图版，行为与之前完全一致。"""
+    return await caption_images_with_provider([abs_path], prompt, provider_id, model, ms_model, max_tokens)
 
 
 def find_asset_item_in_library(lib, item_id, library_id=""):
@@ -48075,6 +48343,9 @@ AGENT_TOOLS["mux_audio"] = {
 # ---------------------------------------------------------------------------
 # 画布助手剪辑时间线：edit_timeline（列出 / 切开 / 删除 / 修剪 / 换位置 / 转场 / 音量 / 变速 / 字幕 / 画中画 / 调色 / 自动压低）
 # 片段模型和前端 timelineModel.ts 一致：画面 / 音频是首尾相接的吸附轨，画中画 / 字幕是自由轨。
+# 这个工具不直接改片子：每次调用只把「应用后的片段」写成一条 pending 建议塞进 node.data.tlSugs，
+# 用户在建议轨点 ✓ 才由前端把 node.clips 整份换成建议里的 payload.clips（撤销靠画布历史快照）。
+# 同一画布只留一条 pending 助手建议：再次调用把 ops 并进去、从这条建议的 prev 重放全部累积 ops。
 # ---------------------------------------------------------------------------
 
 _TL_OVERLAP = ("dissolve", "wipe", "slide", "zoom")
@@ -48182,6 +48453,28 @@ def _tl_find(clips, ref):
     raise AgentToolError("时间线里没有片段「%s」：先用 op=list 看一下片段编号" % text, code="invalid_args")
 
 
+def _tl_find_resolved(clips, ref):
+    """已解析的 op 里 clip 一定是片段 id：只按 id 匹配，绝不回退到「轨道:序号」。
+    重放时靠它保证不会因为前面的切开 / 删除让序号指向别的片段。"""
+    text = str(ref or "").strip()
+    for c in clips:
+        if str(c.get("id")) == text:
+            return c
+    raise AgentToolError("时间线里没有片段「%s」：先用 op=list 看一下片段编号" % text, code="invalid_args")
+
+
+def _tl_resolve_ops(ops, clips):
+    """新来的 op 是模型按「画布现状」写的：落库前把 clip 的序号（video:2 / 画面:3）解析成片段 id，
+    只留 id + 时间参数，重放时不再做序号→片段的推断。序号按这次调用开始时的 clips 解析。"""
+    out = []
+    for op in ops:
+        item = dict(op, _resolved=True)
+        if str(item.get("clip") or "").strip():
+            item["clip"] = str(_tl_find(clips, item["clip"]).get("id"))
+        out.append(item)
+    return out
+
+
 def _tl_split(clips, c, at):
     track = _tl_track(c)
     span = next(((s, e) for (x, s, e) in _tl_place(clips, track) if x is c), None)
@@ -48216,6 +48509,62 @@ _TL_PRESETS = {
 }
 
 
+def _tl_touch(times, clips, c):
+    """记下片段此刻占的时间区间：建议卡的 from / to 取本次 ops 涉及的最早 / 最晚时间。"""
+    track = _tl_track(c)
+    for (x, s, e) in _tl_place(clips, track):
+        if x is c:
+            times.append((s, e))
+            return
+
+
+_TL_OP_WORD = {"split": "切开", "remove": "删掉", "trim": "修剪", "move": "挪动", "transition": "转场",
+               "volume": "音量", "speed": "变速", "subtitle": "加字幕", "clear_subtitles": "清空字幕",
+               "overlay": "加画中画", "color": "调色", "duck": "背景音乐", "format": "成片规格"}
+_TL_OP_UNIT = {"split": "处", "remove": "段", "trim": "段", "move": "段", "transition": "处", "volume": "段",
+               "speed": "段", "subtitle": "条", "overlay": "个", "color": "段", "duck": "处"}
+
+
+def _tl_sug_label(ops, extra=None):
+    """建议卡上那句人话：「助手 · 切开 2 处」「助手 · 删掉 1 段」「助手 · 音量 60%」。
+    同一种操作合并计数，最多列 3 种，再多就收成「等 N 项」。"""
+    extra = extra or {}
+    order, groups = [], {}
+    for op in ops:
+        kind = op.get("op")
+        if kind == "list":
+            continue
+        if kind not in groups:
+            groups[kind] = []
+            order.append(kind)
+        groups[kind].append(op)
+    parts = []
+    for kind in order:
+        group = groups[kind]
+        n = len(group)
+        if kind == "clear_subtitles":
+            parts.append("清空字幕")
+        elif kind == "volume" and n == 1:
+            parts.append("音量 %d%%" % round(max(0.0, min(2.0, _tl_num(group[0].get("value"), 1))) * 100))
+        elif kind == "speed" and n == 1:
+            parts.append("变速 %g×" % max(0.25, min(4.0, _tl_num(group[0].get("value"), 1))))
+        elif kind == "duck":
+            level = _tl_num(group[0].get("level"), 0.25)
+            if n > 1:
+                parts.append("背景音乐压低 %d 处" % n)
+            elif 0 < level < 1:
+                parts.append("背景音乐 %d%%" % round(level * 100))
+            else:
+                parts.append("关闭自动压低")
+        elif kind == "format":
+            spec = " · ".join(x for x in (extra.get("ratio") or "", extra.get("res") or "") if x)
+            parts.append("成片 " + (spec or "规格"))
+        else:
+            parts.append("%s %d %s" % (_TL_OP_WORD.get(kind, kind), n, _TL_OP_UNIT.get(kind, "项")))
+    head = "、".join(parts[:3]) + (" 等 %d 项" % len(parts) if len(parts) > 3 else "")
+    return "助手 · " + (head or "调整")
+
+
 def _agent_tool_edit_timeline_validate(args):
     args = dict(args or {})
     canvas_id = str(args.get("canvas_id") or "").strip() or str(_AGENT_RUN_CANVAS_ID.get() or "").strip()
@@ -48243,7 +48592,7 @@ def _agent_tool_edit_timeline_preview(args, canvas=None):
              "volume": "音量", "speed": "变速", "subtitle": "加字幕", "clear_subtitles": "清空字幕", "overlay": "加画中画",
              "color": "调色", "duck": "自动压低", "format": "成片规格"}
     ops = [names.get(o.get("op"), o.get("op")) for o in args.get("ops") or []]
-    return "剪辑时间线：" + "、".join(ops[:8]) + ("等 %d 个操作" % len(ops) if len(ops) > 8 else "")
+    return "剪辑时间线建议：" + "、".join(ops[:8]) + ("等 %d 个操作" % len(ops) if len(ops) > 8 else "") + "（先给建议，用户确认后才应用）"
 
 
 def _agent_tool_edit_timeline_run(args):
@@ -48256,14 +48605,38 @@ def _agent_tool_edit_timeline_run(args):
             raise AgentToolError("画布上没有剪辑时间线节点" if not nodes else "找不到时间线节点 %s" % args["node_id"],
                                  code="node_not_found", status_code=404)
         by_id = _agent_nodes_by_id(canvas)
-        clips = [dict(c) for c in node.get("clips") or [] if isinstance(c, dict)]
-        done = []
-        for op in args["ops"]:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        sugs = [dict(s) for s in (data.get("tlSugs") or []) if isinstance(s, dict)]
+        # 同一画布只留一条 pending 的助手建议：已经有就把这次 ops 并进去，从它原来的 prev 重放全部累积 ops
+        pending = [s for s in sugs if s.get("kind") == "agent" and s.get("state") == "pending"]
+        target = pending[-1] if pending else None
+        # 应用前 / 应用后两份快照：算完只把「应用后的」塞进建议，画布上的 node.clips 一个字都不动
+        prev = [dict(c) for c in node.get("clips") or [] if isinstance(c, dict)]
+        new_ops = [op for op in args["ops"] if op.get("op") != "list"]
+        if not new_ops:
+            state.update({"node": node, "clips": prev, "done": [], "sug": None, "merged": False})
+            return None
+        # 落库前先解析：序号按「画布现状」（prev）换成片段 id，重放不再依赖序号
+        new_ops = _tl_resolve_ops(new_ops, prev)
+        base, ops = prev, new_ops
+        if target is not None:
+            old = target.get("payload") if isinstance(target.get("payload"), dict) else {}
+            old_prev = [dict(c) for c in (old.get("prev") or []) if isinstance(c, dict)]
+            if old_prev:
+                base = old_prev
+            ops = [o for o in (old.get("ops") or []) if isinstance(o, dict)] + new_ops
+        clips = [dict(c) for c in base]
+        done, touched, extra = [], [], {}
+        for op in ops:
             kind = op["op"]
             if kind == "list":
                 continue
+            # 已解析的 op 只按 id 找片段；老数据里没解析的原始序号继续走 _tl_find 的兼容路径
+            if op.get("_resolved") and op.get("clip"):
+                _tl_find_resolved(clips, op["clip"])
             if kind == "split":
                 at = _tl_num(op.get("at"), -1)
+                touched.append((at, at))
                 if op.get("clip"):
                     targets = [_tl_find(clips, op["clip"])]
                 else:
@@ -48275,12 +48648,14 @@ def _agent_tool_edit_timeline_run(args):
                 done.append("在 %.2f 秒切开" % at)
             elif kind == "remove":
                 c = _tl_find(clips, op.get("clip"))
+                _tl_touch(touched, clips, c)
                 clips = [x for x in clips if x is not c]
                 done.append("删除 %s" % (c.get("title") or c.get("text") or c.get("id")))
             elif kind == "trim":
                 c = _tl_find(clips, op.get("clip"))
                 if _tl_track(c) == "subtitle":
                     raise AgentToolError("字幕用 start/end 调时间（op=subtitle 重新加），trim 只用于画面 / 音频片段", code="invalid_args")
+                _tl_touch(touched, clips, c)
                 src_max = _tl_num(c.get("srcDur"), 0) or 1e9
                 new_in = _tl_num(op.get("in"), _tl_num(c.get("inPoint"))) if op.get("in") is not None else _tl_num(c.get("inPoint"))
                 new_out = _tl_num(op.get("out"), _tl_num(c.get("outPoint"))) if op.get("out") is not None else _tl_num(c.get("outPoint"))
@@ -48295,6 +48670,7 @@ def _agent_tool_edit_timeline_run(args):
                 done.append("修剪 %s → %.2f–%.2f" % (c.get("title") or c.get("id"), new_in, new_out))
             elif kind == "move":
                 c = _tl_find(clips, op.get("clip"))
+                _tl_touch(touched, clips, c)
                 track = _tl_track(c)
                 if track in ("overlay", "subtitle"):
                     shift = _tl_num(op.get("start"), _tl_num(c.get("start")))
@@ -48312,6 +48688,7 @@ def _agent_tool_edit_timeline_run(args):
                 done.append("调整 %s 的位置" % (c.get("title") or c.get("id")))
             elif kind == "transition":
                 c = _tl_find(clips, op.get("clip"))
+                _tl_touch(touched, clips, c)
                 tk = str(op.get("kind") or "dissolve")
                 if tk not in _TL_TRANS:
                     raise AgentToolError("转场 kind 只能是 %s" % "/".join(_TL_TRANS), code="invalid_args")
@@ -48319,6 +48696,7 @@ def _agent_tool_edit_timeline_run(args):
                 done.append("%s 进场转场 %s" % (c.get("title") or c.get("id"), tk))
             elif kind in ("volume", "speed"):
                 c = _tl_find(clips, op.get("clip"))
+                _tl_touch(touched, clips, c)
                 if kind == "volume":
                     c["volume"] = round(max(0.0, min(2.0, _tl_num(op.get("value"), 1))), 3)
                 else:
@@ -48333,8 +48711,11 @@ def _agent_tool_edit_timeline_run(args):
                 clips.append({"id": "sub_%s" % uuid.uuid4().hex[:10], "sourceNodeId": "", "url": "", "mediaKind": "video",
                               "inPoint": 0, "outPoint": 2, "order": 9999, "type": "subtitle", "text": text[:200],
                               "start": round(start, 2), "end": round(end, 2)})
+                _tl_touch(touched, clips, clips[-1])
                 done.append("加字幕「%s」" % text[:12])
             elif kind == "clear_subtitles":
+                for x in [y for y in clips if y.get("type") == "subtitle"]:
+                    _tl_touch(touched, clips, x)
                 clips = [x for x in clips if x.get("type") != "subtitle"]
                 done.append("清空字幕")
             elif kind == "overlay":
@@ -48355,9 +48736,11 @@ def _agent_tool_edit_timeline_run(args):
                 if tf:
                     clip["tf"] = tf
                 clips.append(clip)
+                _tl_touch(touched, clips, clip)
                 done.append("加画中画 %s" % clip["title"])
             elif kind == "color":
                 c = _tl_find(clips, op.get("clip"))
+                _tl_touch(touched, clips, c)
                 col = dict(c.get("color") or {})
                 for key, name in (("b", "brightness"), ("c", "contrast"), ("s", "saturation")):
                     v = op.get(key, op.get(name))
@@ -48369,6 +48752,7 @@ def _agent_tool_edit_timeline_run(args):
                 c = _tl_find(clips, op.get("clip"))
                 if _tl_track(c) != "audio":
                     raise AgentToolError("自动压低只用在音频轨上的片段（通常是背景音乐）", code="invalid_args")
+                _tl_touch(touched, clips, c)
                 level = _tl_num(op.get("level"), 0.25)
                 if 0 < level < 1:
                     c["duck"] = round(level, 3)
@@ -48388,39 +48772,57 @@ def _agent_tool_edit_timeline_run(args):
                 if not ratio and not res:
                     raise AgentToolError("format 要给 preset，或 ratio / res", code="invalid_args")
                 if ratio:
-                    node["ratio"] = ratio
+                    extra["ratio"] = ratio
                 if res:
-                    data = node.get("data") if isinstance(node.get("data"), dict) else {}
-                    node["data"] = dict(data, tlRes=res)
-                done.append("成片规格改为 %s%s" % ((preset or {}).get("label", "") + " " if preset else "",
-                                                 " · ".join(x for x in (node.get("ratio") if ratio else "", res) if x)))
+                    extra["res"] = res
+                done.append("成片规格 %s%s" % ((preset or {}).get("label", "") + " " if preset else "",
+                                              " · ".join(x for x in (ratio, res) if x)))
             else:
                 raise AgentToolError("不认识的操作 op=%s" % kind, code="invalid_args")
         clips = _tl_normalize(clips)
+        sug = None
         if done:
-            node["clips"] = clips
-            # 来源连线和片段保持一致（前端也会补，这里先把新加的画中画来源连上）
-            conns = canvas.setdefault("connections", [])
-            have = {(str(e.get("from")), str(e.get("to"))) for e in conns if isinstance(e, dict)}
-            for c in clips:
-                sid = str(c.get("sourceNodeId") or "")
-                if sid and sid in by_id and (sid, str(node["id"])) not in have:
-                    conns.append(_agent_beat_edge(sid, node["id"]))
-                    have.add((sid, str(node["id"])))
-        state.update({"node": node, "clips": clips, "done": done})
+            end = round(max(t[1] for t in touched), 3) if touched else round(_tl_listing(clips)[1], 3)
+            start = round(max(0.0, min(t[0] for t in touched)), 3) if touched else 0.0
+            if target is not None:   # 并进已有建议：区间取并集，prev 保持第一条建议时的样子
+                start = round(min(start, _tl_num(target.get("from"), start)), 3)
+                end = round(max(end, _tl_num(target.get("to"), end)), 3)
+            # 建议里存应用前 / 应用后两份快照：前端采纳时整份替换 clips，撤销也能精确回到 prev
+            payload = {"clips": clips, "prev": base, "ops": [dict(o) for o in ops]}
+            payload.update(extra)
+            sug = {"id": ((target or {}).get("id") or "sug_%s" % uuid.uuid4().hex[:10]), "kind": "agent",
+                   "label": _tl_sug_label(ops, extra),
+                   "from": start, "to": round(max(start + 0.1, end), 3), "state": "pending", "payload": payload}
+            sugs = ([sug if s.get("id") == sug["id"] else s for s in sugs] if target is not None
+                    else sugs + [sug])
+            node["data"] = dict(data, tlSugs=sugs)
+        # 返回当前（建议还没应用）的片段：和用户在时间线上看到的一致，模型照着它继续给操作才不会错位
+        state.update({"node": node, "clips": prev, "done": done, "sug": sug, "merged": target is not None})
         return None
 
     _agent_mutate_canvas(args["canvas_id"], _mutate)
     rows, total = _tl_listing(state["clips"])
-    msg = ("已修改剪辑时间线：" + "；".join(state["done"])) if state["done"] else "剪辑时间线现状如下"
-    node = state["node"]
-    return {"node_id": node["id"], "duration": total, "clips": rows, "changed": bool(state["done"]),
-            "ratio": node.get("ratio") or "16:9", "res": (node.get("data") or {}).get("tlRes") or "1080p",
-            "message": msg + "（共 %.1f 秒，%d 段）" % (total, len(rows))}
+    node, sug = state["node"], state.get("sug")
+    merged = bool(state.get("merged"))
+    ratio = node.get("ratio") or "16:9"
+    res = (node.get("data") or {}).get("tlRes") or "1080p"
+    if sug:
+        head = "已合并进当前建议（仍未应用）" if merged else "已生成建议（未应用）"
+        tail = ("这次的操作并进了时间线「建议」轨上的同一条建议，用户点一次 ✓ 就把这一轮的全部改动一起落地。"
+                if merged else "等用户在时间线「建议」轨上点 ✓ 才真正应用。")
+        return {"node_id": node["id"], "duration": total, "clips": rows, "changed": False, "suggested": True,
+                "merged": merged,
+                "suggestion": {"id": sug["id"], "label": sug["label"], "from": sug["from"], "to": sug["to"]},
+                "ratio": ratio, "res": res,
+                "message": "%s：%s，涉及 %.2f–%.2f 秒。时间线还没有变；%s不要跟用户说「已剪好 / 已修改」。（当前共 %.1f 秒，%d 段）"
+                           % (head, sug["label"], sug["from"], sug["to"], tail, total, len(rows))}
+    return {"node_id": node["id"], "duration": total, "clips": rows, "changed": False, "suggested": False,
+            "merged": False, "ratio": ratio, "res": res,
+            "message": "剪辑时间线现状如下（共 %.1f 秒，%d 段）" % (total, len(rows))}
 
 
 AGENT_TOOLS["edit_timeline"] = {
-    "description": "查看和修改画布上的剪辑时间线（不花额度）。ops 是按顺序执行的操作列表：\n"
+    "description": "查看画布上的剪辑时间线，并把它要的改动算成建议（不花额度，不会直接改片子）。ops 是按顺序算的操作列表：\n"
                    "· list：列出全部片段（ref=轨道:序号、id、在时间线上的 start/end、素材 in/out）——改之前先 list\n"
                    "· split{at, clip?}：在时间线第 at 秒切开（不给 clip 就切开压着这一秒的所有片段）\n"
                    "· remove{clip}：删除片段（画面 / 音频轨后面的片段自动往前补）\n"
@@ -48433,8 +48835,12 @@ AGENT_TOOLS["edit_timeline"] = {
                    "· color{clip, b?, c?, s?}：亮度 / 对比 / 饱和（百分比，100=原样）\n"
                    "· duck{clip, level}：音频轨的背景音乐在画面有声音时自动压低到 level（0–1，给 1 关闭）\n"
                    "· format{preset? | ratio?, res?}：成片规格。preset=douyin(9:16)|xiaohongshu(3:4)|bilibili(16:9)|square(1:1)|4k；"
-                   "或直接给 ratio（16:9 / 9:16 / 1:1 / 3:4 …）和 res（720p / 1080p / 2K / 4K）。改完运行时间线节点就按这个规格导出成片\n"
-                   "clip 用片段 id 或 video:2 / audio:1 / overlay:1 / subtitle:3（从 1 开始按时间顺序）。返回改完后的片段列表。",
+                   "或直接给 ratio（16:9 / 9:16 / 1:1 / 3:4 …）和 res（720p / 1080p / 2K / 4K）。采纳后运行时间线节点就按这个规格导出成片\n"
+                   "clip 用片段 id 或 video:2 / audio:1 / overlay:1 / subtitle:3（从 1 开始按时间顺序）。序号一律按**这次调用开始时**的画布解析成片段 id 再落库"
+                   "（同一调用里前面的切开 / 删除不会改后面的序号；要引用新切出来的片段，改用 trim / move 这类直接写在原片段上的操作，或等用户采纳后再改）。\n"
+                   "**这个工具不会直接改片子**：每次调用只把「应用后的时间线」算成建议，挂到时间线节点的「建议」轨，等用户在时间线里点 ✓ 才真正生效。\n"
+                   "同一条时间线上最多只有一条待确认的助手建议：已经有建议时再调用不新增卡片，这次 ops 会并进去、从原始片段重放全部累积操作（存的是解析后的片段 id，重放不依赖序号），用户点一次 ✓ 落地整轮改动。\n"
+                   "返回的 clips 是画布上当前（还没应用）的片段；message 会说明这次是新建还是合并了建议。跟用户说「已在建议轨生成建议，点 ✓ 才会应用」，不要说「已剪好 / 已修改」。",
     "schema": {"type": "object", "properties": {
         "canvas_id": {"type": "string", "description": "不填就用当前画布"},
         "node_id": {"type": "string", "description": "剪辑时间线节点 id；画布上只有一条时间线时可以不填"},

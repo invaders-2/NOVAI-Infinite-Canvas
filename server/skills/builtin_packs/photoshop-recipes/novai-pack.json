@@ -1,0 +1,17 @@
+{
+  "display_name": "Photoshop 配方路由",
+  "category": "图像后期",
+  "icon": "palette",
+  "runtime": "canvas",
+  "tags": [
+    "Photoshop",
+    "配方路由",
+    "去背",
+    "抠图",
+    "修图",
+    "调色",
+    "导出",
+    "MCP"
+  ],
+  "description": "Photoshop 配方选择表：去背/抠图/白底/修人像/磨皮/调色/电影感/网页导出/九宫格/批量水印/证件照/贴图替换，先查表再调工具。"
+}

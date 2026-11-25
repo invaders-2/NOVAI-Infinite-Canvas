@@ -8,6 +8,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import MarketDetail from './MarketDetail.vue';
 import CoverMedia from './CoverMedia.vue';
+import RecommendedPlugins from './RecommendedPlugins.vue';
 import { fetchCatalog } from './storeData.js';
 import { SHOWCASE } from './showcase.js';
 import { navigate } from '../../lib/bridge.js';
@@ -178,6 +179,7 @@ onBeforeUnmount(() => { window.removeEventListener('novai-page-focus', onFocus);
 
                     <section class="mk-sec">
                         <div class="mk-sh"><h2>插件</h2><button type="button" class="more" @click="setTab('plugin')">查看全部<NvIcon name="chevr" /></button></div>
+                        <RecommendedPlugins @installed="loadPlugins" />
                         <div class="pl-grid">
                             <div class="pl">
                                 <div class="top"><span class="ico"><NvIcon name="globe" /></span><div class="nm"><b>联网搜索</b><span class="by">NOVAI 内置</span></div></div>
@@ -231,6 +233,7 @@ onBeforeUnmount(() => { window.removeEventListener('novai-page-focus', onFocus);
                     <section class="mk-sec">
                         <div class="mk-sh"><h2>插件</h2><button type="button" class="more" @click="openSettings('mcp')">在设置里管理<NvIcon name="chevr" /></button></div>
                         <p class="lead">插件就是 MCP 服务，启用后画布助手能调用它们提供的工具。</p>
+                        <RecommendedPlugins v-if="!searching" @installed="loadPlugins" />
                         <div class="pl-grid">
                             <div v-if="hit('联网搜索 网页')" class="pl">
                                 <div class="top"><span class="ico"><NvIcon name="globe" /></span><div class="nm"><b>联网搜索</b><span class="by">NOVAI 内置</span></div></div>

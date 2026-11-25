@@ -8,7 +8,8 @@
  * 断言四组：
  *   1) 源码：图片「更多」菜单里「增强」二级浮层的三项（data-k + 文案）被钉住；
  *   2) 构建产物：6 个 data-k / 3 个方法名 / 三项文案 / .enhance-menu 都在；
- *   3) 后端没被这轮需求偷改：/api/image/upscale* 三条路由在 HEAD 里就存在，未提交的 main.py 改动不碰 upscale；
+ *   3) 后端 upscale 路由：三条路由在 HEAD 里就存在；写盘走 output_path_for()、不再写死 assets/output
+ *      （原是「这一轮未提交的 main.py 改动不碰 upscale」的一次性 guard，2026-11-24 那次修复后被换成这条常青断言）；
  *   4) 范围：受保护路径（main.py / server / static/js / web / canvas-ui / desktop）里没有本功能标记。
  *
  * mtime 窗口检查（受保护路径在「本轮改动窗口」内零改动）只在本地工作树可信：
@@ -123,9 +124,21 @@ if (headMain) {
 } else {
     skip('HEAD 的 main.py 基线对照', '读不到 git HEAD（归档/无 .git 环境）');
 }
-const mainDiff = sh('git', ['diff', '--', 'main.py']);
-if (!exists('.git')) skip('未提交的 main.py 改动不含 upscale', '无 .git，拿不到 diff');
-else check('本轮未提交的 main.py 改动里没有一行提到 upscale', mainDiff.indexOf('upscale') < 0, { diffBytes: mainDiff.length, hits: (mainDiff.match(/upscale/g) || []).length });
+// 2026-11-24：原断言是「这一轮（增强菜单）未提交的 main.py 改动里没有一行提到 upscale」，
+// 属于一次性 guard —— 后面「图片增强 4K 落盘目录」那轮合法地改了 upscale 路由，它必然过期。
+// 换成等价的常青断言：三条路由仍在，且写盘走 output_path_for()（不再写死 assets/output）。
+const upscaleBlock = (() => {
+    const marker = '@app.post("/api/image/upscale")';
+    const start = mainPy.indexOf(marker);
+    if (start < 0) return '';
+    const rest = mainPy.slice(start + marker.length);
+    const next = rest.search(/\n@app\.(get|post|put|delete|patch)\(/);
+    return next < 0 ? mainPy.slice(start) : mainPy.slice(start, start + marker.length + next);
+})();
+check('upscale 写盘走 output_path_for(out_filename, "output")',
+    upscaleBlock.indexOf('output_path_for(out_filename, "output")') >= 0, { blockBytes: upscaleBlock.length });
+check('upscale 不再写死 os.path.join(ASSETS_DIR, "output", ...)',
+    upscaleBlock.indexOf('os.path.join(ASSETS_DIR, "output"') < 0);
 
 /* ---------- 4. 受保护路径：无本功能标记 + （本地）改动窗口内零改动 ---------- */
 for (const marker of FEATURE_MARKERS) {

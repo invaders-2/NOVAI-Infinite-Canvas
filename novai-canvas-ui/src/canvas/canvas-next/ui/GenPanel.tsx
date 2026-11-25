@@ -41,7 +41,7 @@ import { EffortSlider } from "./EffortSlider";
 import { useEditorState } from "./editors/registry";
 import { draftToFinal, smartClip, trimToNode } from "../videoTools";
 import { videoAiMenu } from "./VideoTools";
-import { parseMedia } from "./parseMedia";
+import { parseMedia, parseMediaFrame } from "./parseMedia";
 import { createSegRetake, replaceSourceWithTake, segRetakeOf, segRetakeReady, SegRetakeStrip, SEG_RETAKE_PH } from "./SegRetake";
 import type { CanvasStore } from "../store";
 
@@ -660,6 +660,7 @@ function videoMore(ctl: Ctl, node: CanvasNode, anchor: Element) {
       <div className="mh">截帧</div>
       <button className="mi" data-tbk="firstframe" onClick={fire("firstframe")}><Icon name="frame" size="s" /><span style={{ flex: 1 }}>首帧</span><span className="k">2</span></button>
       <button className="mi" data-tbk="lastframe" onClick={fire("lastframe")}><Icon name="frame" size="s" /><span style={{ flex: 1 }}>尾帧</span><span className="k">3</span></button>
+      <button className="mi" data-tbk="parseframe" onClick={() => { close(); void parseMediaFrame(ctl, node); }}><Icon name="wand" size="s" /><span style={{ flex: 1 }}>解析当前帧</span><span className="k">反推提示词</span></button>
       <div className="msep" />
       <button className="mi" data-tbk="setcover" onClick={fire("setcover")}><Icon name="star" size="s" />设为视频封面</button>
       <button className="mi" data-tbk="applycanvas" onClick={fire("applycanvas")}><Icon name="libadd" size="s" />应用到画布</button>

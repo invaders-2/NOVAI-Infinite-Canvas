@@ -1,4 +1,4 @@
-"""ffmpeg_binary() / ffprobe_binary() 解析优先级：环境变量 → 安装包内置 → PATH。
+"""ffmpeg_binary() / ffprobe_binary() 解析优先级：环境变量 → 安装包内置 → PATH → 系统常见安装目录。
 
 Windows 安装包把 ffmpeg/ffprobe 放在 resources/bin/win，Electron 主进程通过
 FFMPEG_PATH/FFPROBE_PATH 传给后端；macOS/Linux 没有内置二进制，必须能回退到 PATH。
@@ -41,10 +41,15 @@ class FfmpegBinaryTests(unittest.TestCase):
             else:
                 os.environ[key] = value
 
-    def _patch_resolution(self, bundled_dirs=(), which_map=None):
+    def _patch_resolution(self, bundled_dirs=(), which_map=None, system_dirs=()):
+        """默认把「系统常见安装目录」也 mock 成空：真机上 /opt/homebrew/bin/ffmpeg 真的存在，
+        不 mock 掉的话「什么都找不到」这类用例会命中真文件。"""
         dirs_patcher = mock.patch.object(main, "_bundled_ffmpeg_dirs", return_value=list(bundled_dirs))
         dirs_patcher.start()
         self.addCleanup(dirs_patcher.stop)
+        system_patcher = mock.patch.object(main, "_system_media_dirs", return_value=list(system_dirs))
+        system_patcher.start()
+        self.addCleanup(system_patcher.stop)
         which_map = dict(which_map or {})
         which_patcher = mock.patch.object(main.shutil, "which", side_effect=lambda name: which_map.get(name))
         which_patcher.start()
@@ -97,6 +102,22 @@ class FfmpegBinaryTests(unittest.TestCase):
     def test_nothing_found_returns_none(self):
         self._patch_resolution([str(self.tmpdir / "missing")], {})
         self.assertIsNone(main.ffmpeg_binary())
+
+    def test_system_install_dir_is_probed_after_path_lookup(self):
+        """which 落空时按平台探常见安装目录：macOS 上 brew 装了 ffmpeg、GUI 进程 PATH 里却没有 /opt/homebrew/bin"""
+        system_dir = self.tmpdir / "homebrew-bin"
+        system_dir.mkdir(parents=True, exist_ok=True)
+        found = _make_executable(system_dir, "ffmpeg")
+        self._patch_resolution([str(self.tmpdir / "missing")], {}, [str(system_dir)])
+        self.assertEqual(main.ffmpeg_binary(), found)
+
+    def test_path_wins_over_system_install_dirs(self):
+        """PATH 里已经找得到就不再探绝对路径：有 ffmpeg 的机器行为不变"""
+        system_dir = self.tmpdir / "homebrew-bin"
+        system_dir.mkdir(parents=True, exist_ok=True)
+        _make_executable(system_dir, "ffmpeg")
+        self._patch_resolution([str(self.tmpdir / "missing")], {"ffmpeg": "/usr/bin/ffmpeg"}, [str(system_dir)])
+        self.assertEqual(main.ffmpeg_binary(), "/usr/bin/ffmpeg")
 
     def test_ffprobe_uses_its_own_env_var(self):
         env_ffmpeg = _make_executable(self.tmpdir, "env-ffmpeg")

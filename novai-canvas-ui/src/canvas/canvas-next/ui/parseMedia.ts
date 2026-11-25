@@ -1,19 +1,23 @@
 /**
- * 节点工具条上的「解析」：把节点当前的画面（图片结果 / 视频帧）交给视觉模型，反推出
+ * 节点工具条上的「解析」：把节点当前的画面交给视觉模型，反推出
  * 中文 / 英文的正向 · 负向提示词，在源节点右边新建一个文本节点。
+ * 视频走专用流程：在「使用区间」里均匀取 6 帧一起发，得到的是视频提示词；响应里带了分镜表
+ * （table）就在文本节点下面再放一张「解析 · 分镜表」表格节点（不连线、不抢选中）。
+ * 「更多 › 解析当前帧」仍按老的单帧走。
  *
  * 放在 ui/ 的原因：这个动作要 toast、要选中并带出新建的节点，视频取帧又直接复用
- * ui/editors/registry 的 grabVideoFrame（桌面版的流式地址也能取），跟界面同一层最省。
+ * ui/editors/registry 的 grabVideoFrame / grabVideoFrameAt（桌面版的流式地址也能取），跟界面同一层最省。
  *
- * 不挂到画布运行时（runNode）上：这里只读一张图、没有模型参数 / 版本 / 批量这些概念，
+ * 不挂到画布运行时（runNode）上：这里只读画面、没有模型参数 / 版本 / 批量这些概念，
  * 挂上去会把「一个节点同一时间只能跑一个生成」的通道白白占住。
  */
 import { isAssetRef } from "../../canvasAssetRefs";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
-import { bounds, genOf, outOf, uid } from "../model";
+import { bounds, clampTrim, genOf, outOf, uid } from "../model";
+import { normalizeTable, withTable, type TableData } from "../table";
 import type { CanvasStore } from "../store";
 import { toDataUrl } from "./editors/sourceToDataUrl";
-import { grabVideoFrame } from "./editors/registry";
+import { grabVideoFrame, grabVideoFrameAt } from "./editors/registry";
 import type { Ctl } from "./ctx";
 
 const ENDPOINT = "/api/canvas-analyze-media";
@@ -21,7 +25,15 @@ const ENDPOINT = "/api/canvas-analyze-media";
 const MAX_EDGE = 1280;
 const JPEG_QUALITY = 0.9;
 const MAX_BYTES = 8 * 1024 * 1024;
+/** 视频解析取几帧：使用区间里均匀取 6 个时间点（后端多帧上限已放宽到 8） */
+const FRAME_COUNT = 6;
+const MAX_FRAMES = 8;
 const TIMEOUT_MS = 90 * 1000;
+/** 分镜表：文本节点正下方 80px、宽 1240 高 360；只放表格数据，不连线 */
+const TABLE_TITLE = "解析 · 分镜表";
+const TABLE_W = 1240;
+const TABLE_H = 360;
+const TABLE_GAP = 80;
 /** 新文本节点的落点：源节点右侧留 140，和别的节点撞上就按 60 往下让 */
 const GAP_X = 140;
 const DROP_Y = 60;
@@ -159,10 +171,64 @@ async function videoFrameDataUrl(store: CanvasStore, node: CanvasNode): Promise<
   return encodeJpeg(first);
 }
 
-async function analyze(store: CanvasStore, node: CanvasNode): Promise<{ image: string; isVideoFrame: boolean }> {
-  if (node.kind === "image") return { image: await imageDataUrl(store, node), isVideoFrame: false };
-  if (node.kind === "video") return { image: await videoFrameDataUrl(store, node), isVideoFrame: true };
-  throw new Error("只有图片 / 视频节点能解析");
+/**
+ * 视频多帧：在「使用区间」里均匀取 FRAME_COUNT 个时间点（有 trim 按 trim.in→trim.out，没有就 0→真实时长），
+ * 每帧同样缩到长边 ≤1280 的 JPEG；取不到 / 重复的帧跳过，至少留 1 帧。
+ */
+async function videoFrames(store: CanvasStore, node: CanvasNode): Promise<{ images: string[]; duration: number }> {
+  const o = outOf(node);
+  if (!o?.url && !o?.frame) throw new Error("这个节点还没有可解析的画面");
+  const trim = o?.trim ? clampTrim(o.dur, o.trim) : null;
+  const from = trim ? trim.in : 0;
+  const head = await grabVideoFrameAt(store, node, from);
+  // 真实时长用来算等分点；请求里的 duration 仍按 outOf().dur（拿不到就不带）
+  const total = head.duration > 0 ? head.duration : Number(o?.dur) || 0;
+  const to = trim ? Math.min(trim.out, total || trim.out) : (total > 0 ? total : from);
+  const images: string[] = [];
+  const add = async (data: string) => {
+    if (!data) return;
+    const jpeg = await encodeJpeg(data).catch(() => "");
+    if (jpeg && !images.includes(jpeg)) images.push(jpeg);
+  };
+  await add(head.data);
+  // 区间内均匀取 FRAME_COUNT 个点（首点已取），末点由 grabVideoFrameAt 收到 duration-0.05
+  for (let i = 1; i < FRAME_COUNT; i += 1) {
+    const seconds = from + ((to - from) * i) / (FRAME_COUNT - 1);
+    const frame = await grabVideoFrameAt(store, node, seconds).catch(() => ({ data: "", duration: 0 }));
+    await add(frame.data);
+  }
+  if (!images.length) throw new Error("取不到画面：视频还没加载出来");
+  return { images, duration: Number(o?.dur) || 0 };
+}
+
+/** 接口 body：图片 / 单帧走 image + is_video_frame；视频多帧走 images + kind，有总时长就带 duration */
+type ParseBody =
+  | { image: string; is_video_frame: boolean }
+  | { images: string[]; kind: "video"; duration?: number };
+
+async function collect(store: CanvasStore, node: CanvasNode, singleFrame: boolean): Promise<ParseBody> {
+  if (node.kind === "image") return { image: await imageDataUrl(store, node), is_video_frame: false };
+  if (node.kind !== "video") throw new Error("只有图片 / 视频节点能解析");
+  if (singleFrame) return { image: await videoFrameDataUrl(store, node), is_video_frame: true };
+  const { images, duration } = await videoFrames(store, node);
+  return { images, kind: "video", ...(duration > 0 ? { duration } : {}) };
+}
+
+/**
+ * 体积闸门：总数 ≤4 帧、每帧 ≤8MB，超了就不发（原因经 catch 写进节点正文并 toast）。
+ * 视频多帧点名是第几帧，方便换张更小的图 / 缩短区间。
+ */
+function assertPayloadSize(body: ParseBody): void {
+  if ("image" in body) {
+    const bytes = dataUrlBytes(body.image);
+    if (bytes > MAX_BYTES) throw new Error(`画面约 ${Math.round(bytes / 1024 / 1024)}MB，超过 ${MAX_BYTES / 1024 / 1024}MB 上限，没有发送`);
+    return;
+  }
+  if (body.images.length > MAX_FRAMES) throw new Error(`取了 ${body.images.length} 帧，超过 ${MAX_FRAMES} 帧上限，没有发送`);
+  body.images.forEach((image, index) => {
+    const bytes = dataUrlBytes(image);
+    if (bytes > MAX_BYTES) throw new Error(`第 ${index + 1} 帧约 ${Math.round(bytes / 1024 / 1024)}MB，超过 ${MAX_BYTES / 1024 / 1024}MB 上限，没有发送`);
+  });
 }
 
 /** 后端的两种失败形状都认：{detail:"…"} 与 {ok:false,error:"…"} */
@@ -198,8 +264,8 @@ function captionModel(): { provider: string; model: string } {
   }
 }
 
-/** 成功返回正文和实际用的模型（成功响应里带 model，可能为空） */
-async function requestParse(image: string, isVideoFrame: boolean): Promise<{ text: string; model: string }> {
+/** 成功返回正文、实际用的模型（可能为空）和后端顺带给的分镜表（table 可能是 null） */
+async function requestParse(body: ParseBody): Promise<{ text: string; model: string; table: unknown }> {
   const caption = captionModel();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -208,8 +274,7 @@ async function requestParse(image: string, isVideoFrame: boolean): Promise<{ tex
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        image,
-        is_video_frame: isVideoFrame,
+        ...body,
         // 素材库里选过反推平台 / 模型就沿用，两个都齐才发；否则后端自己挑一个能看图的对话模型
         ...(caption.provider && caption.model ? { provider: caption.provider, model: caption.model } : {}),
       }),
@@ -218,28 +283,28 @@ async function requestParse(image: string, isVideoFrame: boolean): Promise<{ tex
     const data = await response.json().catch(() => null);
     if (!response.ok) throw new Error(reasonOf(data) || `接口返回 ${response.status}`);
     if (!data || (data as { ok?: unknown }).ok === false) throw new Error(reasonOf(data) || "接口没有返回内容");
-    const row = data as { text?: unknown; model?: unknown };
+    const row = data as { text?: unknown; model?: unknown; table?: unknown };
     const text = typeof row.text === "string" ? row.text.trim() : "";
     if (!text) throw new Error("模型没有返回内容");
-    return { text, model: typeof row.model === "string" ? row.model.trim() : "" };
+    return { text, model: typeof row.model === "string" ? row.model.trim() : "", table: row.table ?? null };
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** 源节点右侧的空位：和已有节点重叠就按 DROP_Y 往下让（同 videoTools.rowSpots 的避让思路，那边是私有函数，这里按需重写） */
-function freeY(store: CanvasStore, src: CanvasNode, x: number, y: number): number {
+/** 目标位置的空位：和已有节点重叠就按 DROP_Y 往下让（同 videoTools.rowSpots 的避让思路，那边是私有函数，这里按需重写） */
+function freeY(store: CanvasStore, src: CanvasNode, x: number, y: number, w = TEXT_W, h = TEXT_H): number {
   const hit = (yy: number) => store.state.doc.nodes.some((node) => node.id !== src.id
-    && node.x < x + TEXT_W + 20 && node.x + node.w + 20 > x
-    && node.y < yy + TEXT_H + 20 && node.y + node.h + 20 > yy);
+    && node.x < x + w + 20 && node.x + node.w + 20 > x
+    && node.y < yy + h + 20 && node.y + node.h + 20 > yy);
   let yy = y;
   for (let i = 0; i < 40 && hit(yy); i++) yy += DROP_Y;
   return yy;
 }
 
 /** 新节点已经完整露出时不动视图：用户正看着的地方不该因为一次解析被挪走 */
-function revealIfOffscreen(ctl: Ctl, node: CanvasNode): void {
-  const bb = bounds([node]);
+function revealIfOffscreen(ctl: Ctl, nodes: CanvasNode[]): void {
+  const bb = bounds(nodes);
   if (!bb) return;
   const rect = ctl.rect(); const view = ctl.store.state.view;
   const left = rect.left + bb.x * view.k + view.x;
@@ -247,7 +312,26 @@ function revealIfOffscreen(ctl: Ctl, node: CanvasNode): void {
   if (left >= rect.left + VISIBLE_MARGIN && top >= rect.top + VISIBLE_MARGIN
     && left + bb.w * view.k <= rect.right - VISIBLE_MARGIN
     && top + bb.h * view.k <= rect.bottom - VISIBLE_MARGIN) return;
-  ctl.fitTo([node], 160, 1);
+  ctl.fitTo(nodes, 160, 1);
+}
+
+/** 响应里的 table → 可落库的 TableData；null / 形状不对 / 空表都当「这次没有表」，不建也不报错 */
+function tableDataOf(raw: unknown, sourceId: string): TableData | null {
+  const t = normalizeTable(raw, false);
+  if (!t || !t.columns.length || !t.rows.length) return null;
+  return { kind: "table", version: 1, title: TABLE_TITLE, columns: t.columns, rows: t.rows, sourceId };
+}
+
+/**
+ * 文本节点正下方放一张分镜表：x 对齐文本节点、间隔 TABLE_GAP，撞到已有节点按 60 往下让。
+ * 不连任何边（连进表格会变成输入通道，把表格数据搅乱），也不 select——选中仍留在文本节点上。
+ */
+function addStoryboardTable(store: CanvasStore, text: CanvasNode, table: TableData): CanvasNode {
+  const x = text.x;
+  const y = freeY(store, text, x, text.y + text.h + TABLE_GAP, TABLE_W, TABLE_H);
+  const node = withTable({ id: uid("t"), kind: "table", x, y, w: TABLE_W, h: TABLE_H, text: TABLE_TITLE }, table);
+  store.addNodes([node], [], { history: true });
+  return node;
 }
 
 /** 异常 → (中文原因, 指路补充)：建节点和跑接口两处失败都按同一套口径说话 */
@@ -263,11 +347,11 @@ function failureOf(error: unknown): { reason: string; hint: string } {
 }
 
 /**
- * 点「解析」的入口：先在源节点右边建好文本节点、连上「源 → 文本」的边并选中（用户立刻看到东西），
- * 再去取一帧 → 打接口 → 把四段式正文写进这个节点的当前版本。
+ * 「解析」的共同流程：先在源节点右边建好文本节点、连上「源 → 文本」的边并选中（用户立刻看到东西），
+ * 再去取画面（图片 1 张 / 视频区间起、中、末 3 帧）→ 打接口 → 把四段式正文写进这个节点的当前版本。
  * 失败不删节点：把「解析失败：…」写进正文并 toast 同样的原因，异常不悄悄吞掉。
  */
-export async function parseMedia(ctl: Ctl, node: CanvasNode): Promise<void> {
+async function runParse(ctl: Ctl, node: CanvasNode, singleFrame: boolean): Promise<void> {
   const store = ctl.store;
   if (inFlight.has(node.id)) { store.toast("正在解析…"); return; }
   inFlight.add(node.id);
@@ -297,17 +381,28 @@ export async function parseMedia(ctl: Ctl, node: CanvasNode): Promise<void> {
   // 纯界面态：让这个文本节点在等画面 / 等模型时显示「文本生成中」的骨架 + 脉冲点。
   // 不进文档，也不伪造 runtime 的 run——那会牵出停止按钮、Escape、排队、并发这些生成通道的逻辑。
   store.setUI({ parsing: new Set([...store.state.ui.parsing, text.id]) });
-  revealIfOffscreen(ctl, text);
-  // 取画面 + 视觉模型要 10–40 秒，节点虽然已经出来了，还得说一句让它知道在跑
-  store.toast("解析中…（约 10–40 秒）", 40000);
+  revealIfOffscreen(ctl, [text]);
+  // 视频多帧要取 6 帧再一起给模型，比单图慢；图片和视频单帧仍是 10–40 秒。
+  // 节点虽然已经出来了，还得说一句让它知道在跑
+  store.toast(node.kind === "video" && !singleFrame ? "解析中…（约 15–50 秒）" : "解析中…（约 10–40 秒）", 40000);
   try {
-    const { image, isVideoFrame } = await analyze(store, node);
-    const bytes = dataUrlBytes(image);
-    if (bytes > MAX_BYTES) throw new Error(`画面约 ${Math.round(bytes / 1024 / 1024)}MB，超过 ${MAX_BYTES / 1024 / 1024}MB 上限，没有发送`);
-    const parsed = await requestParse(image, isVideoFrame);
+    const payload = await collect(store, node, singleFrame);
+    assertPayloadSize(payload);
+    const parsed = await requestParse(payload);
     const body = formatParsedPrompt(parsed.text);
     // 节点可能在等结果时被用户删掉 / 撤销，写之前确认它还在
     if (store.node(text.id)) store.patchGen(text.id, (g) => ({ hist: g.hist.map((h, i) => (i === g.hi ? { ...h, text: body } : h)) }), { history: true });
+    const live = store.node(text.id);
+    // 后端顺带给了分镜表就放到文本节点下面；table=null / 形状不对就不建，也不额外报错
+    const table = tableDataOf(parsed.table, text.id);
+    if (table && live) {
+      try {
+        revealIfOffscreen(ctl, [live, addStoryboardTable(store, live, table)]);
+      } catch (error) {
+        // 建表失败不能把已经成功的解析判成失败：正文已经写好，toast 照常报成功
+        console.warn("[canvas] 分镜表创建失败", error);
+      }
+    }
     store.toast(parsed.model ? `已生成解析提示词（${parsed.model}）` : "已生成解析提示词");
   } catch (error) {
     const { reason, hint } = failureOf(error);
@@ -320,4 +415,14 @@ export async function parseMedia(ctl: Ctl, node: CanvasNode): Promise<void> {
     store.setUI({ parsing: new Set([...store.state.ui.parsing].filter((id) => id !== text.id)) });
     inFlight.delete(node.id);
   }
+}
+
+/** 点「解析」：图片 = 单图；视频 = 区间均匀 6 帧一起交给模型，出的是视频提示词（有 table 就再建分镜表） */
+export async function parseMedia(ctl: Ctl, node: CanvasNode): Promise<void> {
+  return runParse(ctl, node, false);
+}
+
+/** 视频「更多 › 解析当前帧」：仍走老的单帧逻辑（image + is_video_frame:true），不重新抽 6 帧 */
+export async function parseMediaFrame(ctl: Ctl, node: CanvasNode): Promise<void> {
+  return runParse(ctl, node, true);
 }

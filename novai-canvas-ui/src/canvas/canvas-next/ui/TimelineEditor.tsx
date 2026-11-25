@@ -25,6 +25,8 @@
  *   · AI 剪辑（工具条「AI 剪辑」）：拆镜头（按画面切换点）、去静音（剪掉停顿和空白，后面的片段自动补上）、
  *     自动字幕（整条时间线的声音转写成带时间的字幕，走「设置 → 通用 → 语音转写」）。三个动作都**不直接改片子**：
  *     算完先落成「建议」轨上的卡片（在画面轨上方），点 ✓ 才真的改、点 ✕ 只丢掉这条建议；两种都能 ⌘Z 回退
+ *   · 画布助手改片也一样（后端 edit_timeline）：助手只把「应用后的片段」写成 kind=agent 的建议（不动 node.clips），
+ *     同一张卡上点 ✓ 才整份替换、点 ✕ 不动；卡片区间取这次 ops 涉及的最早 / 最晚时间
  *   · 导出：MP4（NOVAI 后端 ffmpeg 渲染，或桌面版媒体服务）/ WebM（浏览器录制），或直接作为新视频节点放回画布
  *   · 布局：顶栏（添加素材 / AI 剪辑 / 画幅清晰度 / 导出）→ 左预览 + 右属性面板（选中片段的重拍、声音、转场、画面、调色；
  *     没选中时是使用说明和快捷键）→ 工具条 → 轨道。视频自带的声音单独显示在「原声」轨（跟着画面片段走）
@@ -44,7 +46,7 @@ import { SegPicker } from "./SegRetake";
 import { mentionToken } from "../mentions";
 import { addFiles } from "../actions";
 import { clipable, clipFromNode, syncTimelineEdges } from "../playlist";
-import { closePop, openPop } from "./overlay";
+import { closePop, openModal, openPop } from "./overlay";
 import { baseTf, EXPORT_PRESETS, type ExportPreset, isFree, keyAt, needsCompositor, nextOf, prevOf, rollEdit, slideEdit, slipEdit, TRANS_LABEL, tfAt, upsertKey, type Tf, duplicate, fadeOf, fmt, fmtTC, frameSec, frameSize, IMAGE_LEN, lenOf, MIN_LEN, moveGroupTo, normalize, place, RATIOS, renderPlan, RESES, shiftSub, snapPoints, snapTo, speedOf, SPEEDS, splitAt, tickStep, toSrt, totalOf, trackOf, transOf, trimEdge, volOf, type Clip, type ClipMedia, type Placed, type Track, type TransKind } from "../timelineModel";
 import { grabThumb, recordWebM, TimelinePlayer, type SubStyle } from "../timelinePlayer";
 import { exportMp4Browser } from "../timelineExportMp4";
@@ -66,13 +68,33 @@ const stopOnControl = (e: React.PointerEvent) => {
 const LAB = 116; // 轨道标签宽度（px）：轨型图标 + 显隐按钮 + 轨名 + 添加 + 锁定，片段从它右边开始
 const MEDIA_LABEL: Record<ClipMedia, string> = { video: "视频", audio: "音频", image: "图片" };
 const SHORT: Record<string, number> = { "720p": 720, "1080p": 1080, "2K": 1440, "4K": 2160 };
+/** 与 main.py 的 _FFMPEG_MISSING_MESSAGE 同一句：/api/timeline/render 缺 ffmpeg 时回 503 + detail.code=FFMPEG_MISSING */
+const FFMPEG_MISSING_MESSAGE = "这台机器上没找到可用的 ffmpeg，暂时没法在本地合成 MP4。可以先用浏览器录制导出 WebM，或装好 ffmpeg 后重启 NOVAI。";
+/** 桥接层只把 message 带上来（拿不到 status），所以按 code 或原文案认「本机没 ffmpeg」 */
+const isFfmpegMissing = (err: unknown) => {
+  const msg = err instanceof Error ? err.message : String(err || "");
+  return msg.includes("FFMPEG_MISSING") || msg.includes(FFMPEG_MISSING_MESSAGE);
+};
+/** 本机没有 ffmpeg：用现成的居中弹层给两条路（换浏览器录制 / 知道了），不只弹一行 toast 就结束 */
+const ffmpegMissingModal = (onWebm: () => void) => openModal((close) => (
+  <div className="folder-dialog" data-ffmpeg-missing>
+    <div className="fd-head"><b>本机缺少 ffmpeg</b><button className="ib" aria-label="关闭" onClick={close}><Icon name="x" size="s" /></button></div>
+    <p>{FFMPEG_MISSING_MESSAGE}</p>
+    <div className="fd-foot">
+      <button className="btn" data-ffmpeg-dismiss onClick={close}>知道了</button>
+      <button className="btn solid" data-ffmpeg-webm onClick={() => { close(); onWebm(); }}>改用浏览器录制（WebM）</button>
+    </div>
+  </div>
+), "folder-dialog-modal");
 type Drag = { id: string; ids: Set<string>; mode: "move" | "l" | "r" | "roll" | "slip" | "slide"; dt: number; snap: number | null };
 type Mark = { t: number };
 /** AI 剪辑建议：AI 不给片子动手，只把「要改哪几秒、怎么改」落成一张卡；from / to 是时间线上的秒数（卡片按它定位） */
 type Sug = {
-  id: string; kind: "scenes" | "silence" | "subs"; label: string;
+  id: string; kind: "scenes" | "silence" | "subs" | "agent"; label: string;
   from: number; to: number; state: "pending" | "applied" | "dismissed";
-  payload: { points?: number[]; ranges?: Array<[number, number]>; subs?: Array<{ start: number; end: number; text: string }> };
+  /** agent（画布助手 edit_timeline）：clips = 应用后的整份片段，prev = 应用前的整份片段，ops 只是给人看的操作摘要。
+   *  画幅 / 清晰度这类不落在片段上的改动也在 payload 里，等点 ✓ 才一起落地。 */
+  payload: { points?: number[]; ranges?: Array<[number, number]>; subs?: Array<{ start: number; end: number; text: string }>; clips?: Clip[]; prev?: Clip[]; ops?: Array<Record<string, unknown>>; ratio?: string; res?: string };
 };
 type TlData = { tlRes?: string; tlSub?: SubStyle; tlSnap?: boolean; tlFit?: "contain" | "cover"; tlTracks?: Partial<Record<Track | "vaudio", boolean>>; tlLock?: Partial<Record<Track, boolean>>; tlMarks?: Mark[]; tlPending?: Pending[]; tlSugs?: Sug[] };
 /** 重拍中的片段：存在节点数据里，弹窗关了、退出全屏、刷新画布后出片也照样换进时间线 */
@@ -116,7 +138,7 @@ const fmtHMS = (v: number) => {
   const s = Math.max(0, Math.round(v));
   return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((x) => String(x).padStart(2, "0")).join(":");
 };
-const SUG_ICON: Record<Sug["kind"], IconName> = { scenes: "scissors", silence: "mute", subs: "text" };
+const SUG_ICON: Record<Sug["kind"], IconName> = { scenes: "scissors", silence: "mute", subs: "text", agent: "sparkle" };
 const r3s = (v: number) => Math.round(v * 1000) / 1000;
 
 /** 在时间点切开画面：只切画面 / 画中画轨上压着这一点的片段（和「拆镜头」原来只切选中那段是同一件事） */
@@ -158,6 +180,8 @@ function cutRange(clips: Clip[], from: number, to: number): Clip[] {
 
 /** 点 ✓ 才跑：把一条建议变回时间线上的改动 */
 function applySug(clips: Clip[], s: Sug): Clip[] {
+  // 画布助手的建议：后端已经把「应用后」的整份片段算好了，这里不用懂 op 语义，整份换掉即可
+  if (s.kind === "agent") return normalize(s.payload.clips || clips);
   if (s.kind === "scenes") {
     let next = clips;
     for (const p of [...(s.payload.points || [])].sort((a, b) => b - a)) next = splitPictures(next, p);
@@ -193,6 +217,8 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
   const [io, setIo] = useState<IO | null>(null);
   /** 「+N 更多」浮层的屏幕位置（null = 收起）；列表跟着 pending 建议实时变 */
   const [more, setMore] = useState<{ x: number; y: number } | null>(null);
+  /** 预览区 + 建议轨一共能用的高度（CSS px）：建议轨行数按它和预览保底 240 算，节点尺寸变了会跟着更新 */
+  const [availH, setAvailH] = useState(0);
   const [loop, setLoop] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>("select");
@@ -668,9 +694,12 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
       store.updateNode(node.id, (n) => {
         const list = (((n.data as TlData | undefined)?.tlSugs || []) as Sug[]).map((x) => (x.id === s.id ? { ...x, state: (accept ? "applied" : "dismissed") as Sug["state"] } : x));
         const cur = (n.clips || []) as Clip[];
-        return { ...n, clips: accept ? applySug(cur, s) : cur, data: { ...((n.data as object) || {}), tlSugs: list } };
+        // 画布助手的建议：片段整份换成 payload.clips；画幅 / 清晰度也一起落地（同一份快照，⌘Z 一起回退）
+        const take = accept && s.kind === "agent" ? s.payload : null;
+        const data = { ...((n.data as object) || {}), tlSugs: list, ...(take?.res ? { tlRes: take.res } : {}) };
+        return { ...n, ...(take?.ratio ? { ratio: take.ratio } : {}), clips: accept ? applySug(cur, s) : cur, data };
       }, { history: false });
-      store.toast(accept ? `已采纳：${s.label} · 撤销` : "已忽略 · 撤销", 4200, () => store.undo());
+      store.toast(accept ? `已应用：${s.label} · 撤销` : "已忽略 · 撤销", 4200, () => store.undo());
     } finally { sugBusy.current = false; }
   };
   /**
@@ -694,12 +723,20 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
       store.snapshot();
       store.updateNode(node.id, (n) => {
         const cur = (n.clips || []) as Clip[];
-        let next = cur;
-        if (accept) for (const s of live) next = applySug(next, s);
+        let next = cur; let ratio = n.ratio; let res: string | undefined;
+        if (accept) for (const s of live) {
+          next = applySug(next, s);
+          if (s.kind === "agent") { if (s.payload.ratio) ratio = s.payload.ratio; if (s.payload.res) res = s.payload.res; }
+        }
         const sugs = (((n.data as TlData | undefined)?.tlSugs || []) as Sug[]).map((x) => (ids.has(x.id) ? { ...x, state: (accept ? "applied" : "dismissed") as Sug["state"] } : x));
-        return { ...n, clips: next, data: { ...((n.data as object) || {}), tlSugs: sugs } };
+        return { ...n, ...(ratio ? { ratio } : {}), clips: next, data: { ...((n.data as object) || {}), tlSugs: sugs, ...(res ? { tlRes: res } : {}) } };
       }, { history: false });
-      store.toast(accept ? `已采纳 ${live.length} 条建议 · 撤销` : `已忽略 ${live.length} 条建议 · 撤销`, 4200, () => store.undo());
+      // 老数据里可能留着多条助手建议（上一版一条一张卡）：按创建顺序依次应用，说清楚是「按顺序」
+      const agents = live.filter((s) => s.kind === "agent").length;
+      const okText = !agents ? `已应用 ${live.length} 条建议 · 撤销`
+        : (agents === live.length ? `已按顺序应用 ${agents} 条助手建议 · 撤销`
+          : `已应用 ${live.length} 条建议（含 ${agents} 条助手建议）· 撤销`);
+      store.toast(accept ? okText : `已忽略 ${live.length} 条建议 · 撤销`, 4200, () => store.undo());
     } finally { sugBusy.current = false; }
   };
   /** 「+N 更多」：贴聚合卡弹出磨砂浮层，逐条处理放不下的建议 */
@@ -968,7 +1005,14 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
     if ((e.metaKey || e.ctrlKey) && k === "z") { const tag0 = (e.target as HTMLElement).tagName; if (tag0 === "INPUT" || tag0 === "TEXTAREA") return; e.preventDefault(); e.stopPropagation(); if (e.shiftKey) store.redo(); else store.undo(); return; }
     if ((e.metaKey || e.ctrlKey) && k === "y") { e.preventDefault(); e.stopPropagation(); store.redo(); return; }
     if (e.metaKey || e.ctrlKey) return; // ⌘C 等交给画布
-    const tag = (e.target as HTMLElement).tagName; e.stopPropagation();
+    const tag = (e.target as HTMLElement).tagName;
+    // Delete / Backspace 先于 stopPropagation 判断：时间线里没有选中片段时一概不拦（不 preventDefault、不
+    // stopPropagation），事件冒泡给画布，画布才能删节点；选中了片段才按「删片段」处理。输入框里照旧让给输入框。
+    if (e.key === "Delete" || e.key === "Backspace") {
+      if (!sel.size || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      e.preventDefault(); e.stopPropagation(); remove(); return;
+    }
+    e.stopPropagation();
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
     if (e.key === " ") { e.preventDefault(); toggle(); }
     else if (k === "s" || k === "c") { e.preventDefault(); split(); }
@@ -990,7 +1034,6 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
     else if (e.key === ".") { e.preventDefault(); seekNow(t + frameSec); }
     else if (e.key === "Home") { e.preventDefault(); seekNow(0); }
     else if (e.key === "End") { e.preventDefault(); seekNow(total); }
-    else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); remove(); }
     else if (e.key === "Escape") { if (sel.size || !full) setSel(new Set()); else onFull?.(false); }
     else if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); seekNow(t + (e.key === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 1 : frameSec)); }
   };
@@ -1020,6 +1063,19 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
     setBusy(label + "…");
     return exportMp4Browser(visible, size, (u) => resolveMediaUrl(store.backend, u), { subStyle, fit, onProgress: (f, step) => setBusy(`${label}：${step} ${Math.round(f * 100)}%`) });
   };
+  /** 浏览器录 WebM 放回画布：MP4 这条路走不通时（本机没 ffmpeg）的退路，链路本身没改 */
+  const recordCanvasWebM = async () => {
+    setBusy("合成到画布…");
+    try {
+      const blob = await recordWebM(visible, out, (u) => resolveMediaUrl(store.backend, u), (f) => setBusy(`合成到画布… ${Math.round(f * 100)}%`), subStyle);
+      const file = new File([blob], (node.text || "剪辑时间线") + ".webm", { type: blob.type || "video/webm" });
+      const had = new Set(store.state.doc.nodes.map((n) => n.id));
+      await addFiles(store, [file], { x: node.x + node.w + 120 + 200, y: node.y + 160 });
+      const made = store.state.doc.nodes.find((n) => !had.has(n.id) && n.kind === "video");
+      if (made) { store.patchGen(made.id, { title: (node.text || "剪辑时间线") + " · 成片" }); ctl.focusNode(made.id); }
+    } catch (err) { store.toast("导出失败：" + (err instanceof Error ? err.message : "未知错误"), 6000); }
+    finally { setBusy(null); }
+  };
   const exportToCanvas = async () => {
     player.current?.pause(); setPlaying(false);
     try {
@@ -1039,14 +1095,11 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
         store.toast("成片已放到画布上" + (r.subtitlesDropped ? "（本机 ffmpeg 不支持字幕，字幕没有烧进去）" : ""), 5000);
         return;
       }
-      setBusy("合成到画布…");
-      const blob = await recordWebM(visible, out, (u) => resolveMediaUrl(store.backend, u), (f) => setBusy(`合成到画布… ${Math.round(f * 100)}%`), subStyle);
-      const file = new File([blob], (node.text || "剪辑时间线") + ".webm", { type: blob.type || "video/webm" });
-      const had = new Set(store.state.doc.nodes.map((n) => n.id));
-      await addFiles(store, [file], { x: node.x + node.w + 120 + 200, y: node.y + 160 });
-      const made = store.state.doc.nodes.find((n) => !had.has(n.id) && n.kind === "video");
-      if (made) { store.patchGen(made.id, { title: (node.text || "剪辑时间线") + " · 成片" }); ctl.focusNode(made.id); }
-    } catch (err) { store.toast("导出失败：" + (err instanceof Error ? err.message : "未知错误"), 6000); }
+      await recordCanvasWebM();
+    } catch (err) {
+      if (isFfmpegMissing(err)) { ffmpegMissingModal(() => void recordCanvasWebM()); return; }
+      store.toast("导出失败：" + (err instanceof Error ? err.message : "未知错误"), 6000);
+    }
     finally { setBusy(null); }
   };
   const canBrowserMp4 = typeof VideoEncoder === "function";
@@ -1074,7 +1127,10 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
         const blob = await recordWebM(visible, out, (u) => resolveMediaUrl(store.backend, u), (f) => setBusy(`导出 WebM… ${Math.round(f * 100)}%`), subStyle);
         downloadTimelineBlob(blob, novaiName("webm")); store.toast("已导出 WebM");
       }
-    } catch (err) { store.toast("导出失败：" + (err instanceof Error ? err.message : "未知错误"), 6000); }
+    } catch (err) {
+      if (isFfmpegMissing(err)) { ffmpegMissingModal(() => void exportIt("webm")); return; }
+      store.toast("导出失败：" + (err instanceof Error ? err.message : "未知错误"), 6000);
+    }
     finally { setBusy(null); }
   };
   /** 剪辑工程包：Premiere / 达芬奇 xml + Final Cut fcpxml + OTIO + 字幕 + 素材 */
@@ -1240,10 +1296,14 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
   })();
 
   /**
-   * 建议轨按区间分行（最多 3 行）：from 升序依次找第一行放得下的位置（和那行已占区间不重叠），放不下就换行。
-   * 轨道高 = 4 + 36 × 行数；行数超过 3 时，多出来的收进最后一行的「+N 更多」聚合卡，点开逐条处理。
+   * 建议轨按区间分行：from 升序依次找第一行放得下的位置（和那行已占区间不重叠），放不下就换行。
+   * 行数上限按模式：节点内嵌 2 行、全屏剪辑 3 行；再按「预览不得低于 240px」压低行数（最低 1 行）。
+   * 轨道高 = 4 + 36 × 行数；放不下的收进最后一行的「+N 更多」聚合卡，点开逐条处理。
    */
-  const ROW_H = 36; const MAX_ROWS = 3;
+  const ROW_H = 36; const PREVIEW_MIN = 240;
+  const modeMax = full ? 3 : 2;
+  // 预览(r) = availH - 4 - 36r ≥ 240 → r ≤ (availH - 244) / 36；还没量到就先按模式上限
+  const MAX_ROWS = availH ? Math.max(1, Math.min(modeMax, Math.floor((availH - PREVIEW_MIN - 4) / ROW_H))) : modeMax;
   const sugLayout = useMemo(() => {
     const used: Array<Array<{ left: number; right: number }>> = [];
     const placed: Array<{ s: Sug; x: number; w: number; row: number }> = [];
@@ -1269,7 +1329,15 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
       more = { n: overflow.length, x: right + 8, row };
     }
     return { placed, overflow, rows, more, h: placed.length ? 4 + ROW_H * rows : 0 };
-  }, [pend, pps]);
+  }, [pend, pps, MAX_ROWS]);
+  // 量「预览 + 建议轨」的可用高度（建议轨长高的那部分是从预览里让出来的，这个和恒定）：
+  // 行数上限靠它压，节点尺寸 / 全屏切换变了会跟着更新
+  useLayoutEffect(() => {
+    const m = mon.current; if (!m) return;
+    const lane = lanes.current?.querySelector<HTMLElement>(".tle-track.k-sug");
+    const base = m.offsetHeight + (lane ? lane.offsetHeight + 4 : 0);
+    if (base > 0 && Math.abs(base - availH) > 0.5) setAvailH(base);
+  });
   // 放不下的建议都处理完了：浮层自动收起
   useEffect(() => { if (more && !sugLayout.overflow.length) setMore(null); }, [more, sugLayout.overflow.length]);
   const moreView = more && typeof document !== "undefined" ? createPortal(

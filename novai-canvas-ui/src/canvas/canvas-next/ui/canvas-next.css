@@ -3222,14 +3222,14 @@ html.tle-scrubbing,html.tle-scrubbing *{cursor:ew-resize!important;user-select:n
 .cn-root[data-theme=light]{--sug-bg:rgba(var(--ink),.06);--sug-shadow:0 1px 2px rgba(0,0,0,.06);--sug-shadow-hi:0 8px 18px rgba(0,0,0,.12)}
 .cn-root .tle-track.k-sug{cursor:default}
 .cn-root .tle-lab-c{margin-left:auto;margin-right:8px;padding:0 5px;border-radius:6px;font-size:10px;line-height:15px;background:rgba(var(--ink),.1);color:var(--fg2)}
-.cn-root .tle-sug{position:absolute;height:32px;border-radius:8px;display:flex;align-items:center;gap:7px;padding:0 4px 0 8px;overflow:hidden;cursor:pointer;background:var(--sug-bg);box-shadow:var(--sug-shadow);transition:transform .16s cubic-bezier(.2,0,0,1),box-shadow .16s cubic-bezier(.2,0,0,1)}
+.cn-root .tle-sug{position:absolute;height:32px;border-radius:8px;display:flex;align-items:center;gap:6px;padding:0 3px 0 7px;overflow:hidden;cursor:pointer;background:var(--sug-bg);box-shadow:var(--sug-shadow);transition:transform .16s cubic-bezier(.2,0,0,1),box-shadow .16s cubic-bezier(.2,0,0,1)}
 .cn-root .tle-sug:hover{transform:translateY(-1px);box-shadow:var(--sug-shadow-hi)}
 .cn-root .tle-sug-sb{position:absolute;left:0;right:0;top:0;height:2px;background:color-mix(in srgb,var(--fg) 30%,transparent);pointer-events:none}
 .cn-root .tle-sug-i{flex:none;display:grid;place-items:center;color:var(--fg3)}
 .cn-root .tle-sug:hover .tle-sug-i{color:var(--fg2)}
 .cn-root .tle-sug-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;padding-bottom:1px}
 .cn-root .tle-sug-t b{font-size:11px;font-weight:500;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15}
-.cn-root .tle-sug-t em{font-style:normal;font-size:10px;line-height:1.1;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em}
+.cn-root .tle-sug-t em{font-style:normal;font-size:9px;line-height:1.15;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0}
 .cn-root .tle-sug-acts{flex:none;display:flex;gap:4px;position:relative;z-index:2}
 .cn-root .tle-sug-a{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:rgba(var(--ink),.1);color:var(--fg2);transition:background-color .16s cubic-bezier(.2,0,0,1),color .16s cubic-bezier(.2,0,0,1),transform .16s cubic-bezier(.2,0,0,1)}
 .cn-root .tle-sug-a:active{transform:scale(.9)}
@@ -3238,6 +3238,12 @@ html.tle-scrubbing,html.tle-scrubbing *{cursor:ew-resize!important;user-select:n
 @media (prefers-reduced-motion:reduce){
   .cn-root .tle-sug,.cn-root .tle-sug-a{transition:none}
   .cn-root .tle-sug:hover{transform:none}
+}
+/* 建议轨出现 / 行数变化：高度 160ms 过渡（预览跟着 flex 平滑收缩，轨道钉在底部不动） */
+.cn-root .tle-track.k-sug{transition:height .16s cubic-bezier(.2,0,0,1);animation:sugLaneIn .16s cubic-bezier(.2,0,0,1)}
+@keyframes sugLaneIn{from{height:0}}
+@media (prefers-reduced-motion:reduce){
+  .cn-root .tle-track.k-sug{transition:none;animation:none}
 }
 /* 带「撤销」的 toast 要能点：#toasts 默认 pointer-events:none，只有可操作的这条例外 */
 .cn-root .toast.is-action{pointer-events:auto;cursor:pointer}
