@@ -10,7 +10,7 @@ import type { CanvasNode } from "../../../react-canvas/reactCanvasStore";
 import { relit } from "../../backend/mockEdit";
 import { GenError, type EditOp, type MattingModelStatus, type UpscaleRuntimeStatus } from "../../backend/types";
 import { maskedStructureScore } from "../../whitemodelScore.js";
-import { clamp, clampTrim, genOf, outOf, uid, withGen, type GenOutput, type ModelSpec } from "../../model";
+import { clamp, clampTrim, genOf, outOf, uid, withGen, type GenOutput, type ModelSpec, type VideoTrim } from "../../model";
 import { fitMediaBox } from "../../mediaFit";
 import type { CanvasStore } from "../../store";
 import { useCtl, useS, type Ctl } from "../ctx";
@@ -1157,8 +1157,35 @@ export async function grabVideoFrame(store: CanvasStore, n: CanvasNode, at: "cur
       catch { nowAt = vid.currentTime || 0; }
     }
   }
+  const { data } = await seekVideoFrame(store, n, o, (duration, trim) => nowAt >= 0
+    ? Math.min(nowAt, Math.max(0, duration - 0.05))
+    : at === "first"
+      ? (trim ? trim.in : Math.min(0.05, Math.max(0, duration / 2)))
+      : (trim ? Math.min(trim.out, duration || trim.out) : Math.max(0, duration - 0.05)));
+  return data;
+}
+
+/**
+ * 按秒取帧：解析视频时区间中点 / 末帧这种 grabVideoFrame 的 first / current / last 覆盖不到的时点用它。
+ * 返回帧和源时长：调用方要算中点 / 末帧时不用再加载一遍元数据。
+ */
+export async function grabVideoFrameAt(store: CanvasStore, n: CanvasNode, seconds: number): Promise<{ data: string; duration: number }> {
+  const o = outOf(n);
+  if (!o) return { data: "", duration: 0 };
+  const target = Number(seconds);
+  return seekVideoFrame(store, n, o, (duration) => {
+    const top = duration > 0 ? Math.max(0, duration - 0.05) : Math.max(0, Number.isFinite(target) ? target : 0);
+    return Math.min(Math.max(0, Number.isFinite(target) ? target : 0), top);
+  });
+}
+
+/** 临时 video 定位到某一时刻再画：grabVideoFrame / grabVideoFrameAt 共用这一段，seek 只有一份 */
+async function seekVideoFrame(
+  store: CanvasStore, n: CanvasNode, o: GenOutput,
+  timeOf: (duration: number, trim: VideoTrim | null) => number,
+): Promise<{ data: string; duration: number }> {
   const src = o.url ? await srcData(store, o.url) : "";
-  if (!src) return o.frame ? await srcData(store, o.frame) : "";
+  if (!src) return { data: o.frame ? await srcData(store, o.frame) : "", duration: 0 };
   const v = document.createElement("video");
   v.muted = true; v.preload = "auto"; v.crossOrigin = "anonymous"; v.src = src;
   const ok = await new Promise<boolean>((resolve) => {
@@ -1166,17 +1193,15 @@ export async function grabVideoFrame(store: CanvasStore, n: CanvasNode, at: "cur
     v.onerror = () => resolve(false);
     setTimeout(() => resolve(!!v.videoWidth), 4000);
   });
-  if (!ok || !v.videoWidth) return o.frame ? await srcData(store, o.frame) : "";
+  if (!ok || !v.videoWidth) return { data: o.frame ? await srcData(store, o.frame) : "", duration: 0 };
   const duration = Number(v.duration) || 0;
   // 设了「使用区间」就按区间取首/尾帧（截帧跟着区间走）
   const trim = o.trim ? clampTrim(o.dur, o.trim) : null;
-  v.currentTime = nowAt >= 0 ? Math.min(nowAt, Math.max(0, duration - 0.05)) : at === "first"
-    ? (trim ? trim.in : Math.min(0.05, Math.max(0, duration / 2)))
-    : (trim ? Math.min(trim.out, duration || trim.out) : Math.max(0, duration - 0.05));
+  v.currentTime = timeOf(duration, trim);
   await new Promise<void>((resolve) => { v.onseeked = () => resolve(); setTimeout(resolve, 3000); });
   const c = cv(v.videoWidth, v.videoHeight);
   c.getContext("2d")!.drawImage(v, 0, 0);
-  return c.toDataURL("image/jpeg", .92);
+  return { data: c.toDataURL("image/jpeg", .92), duration };
 }
 
 /** 把某一帧做成新的图片节点（默认连到视频节点） */

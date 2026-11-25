@@ -94,7 +94,8 @@ function seedPixel(x, y) {
         c.check('hi 指到新版本', after.hi === 1, { hi: after.hi });
         c.check('新版本长边 = 2048（2K）', Math.max(newest.w, newest.h) === 2048, { w: newest.w, h: newest.h });
         c.check('新版本短边 = 1536（4:3 不变形）', Math.min(newest.w, newest.h) === 1536, { w: newest.w, h: newest.h });
-        c.check('新版本 url 指向后端落的 hd_*.png（/assets/output/ 或 /output/）', /^\/(assets\/)?output\/hd_[0-9a-f]+\.png$/.test(String(newest.url || '')), newest.url);
+        // 登录态（租户已绑定）结果落在 /assets/users/{uid}/output/，未登录才是 /assets/output/ 或 /output/
+        c.check('新版本 url 指向后端落的 hd_*.png（/output/、/assets/output/ 或登录后的 /assets/users/<uid>/output/）', /^\/(?:assets\/(?:users\/\d+\/)?)?output\/hd_[0-9a-f]+\.png$/.test(String(newest.url || '')), newest.url);
 
         const outFile = H.fileForUrl(newest.url) || '';
         const outExists = fs.existsSync(outFile);

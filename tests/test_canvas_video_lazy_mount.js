@@ -47,7 +47,7 @@ console.log('[2] hover 才挂载（.nbody pointerenter，只重渲染这一个�
 ok(/const \[hoverNode, setHoverNode\] = useState\(false\);/.test(nodeViewTop), 'hover 状态在 NodeView 层（不进 store）');
 ok(/onPointerEnter=\{node\.kind === "image" \|\| node\.kind === "video" \? \(\) => setHoverNode\(true\) : undefined\}/.test(nodeView), '.nbody pointerenter 同时覆盖图片（GIF）和视频');
 ok(/onPointerLeave=\{node\.kind === "image" \|\| node\.kind === "video" \? \(\) => setHoverNode\(false\) : undefined\}/.test(nodeView), '.nbody pointerleave 收回 hover');
-ok(/<Body \{\.\.\.p\} out=\{out\} running=\{running\} hover=\{hoverNode\} \/>/.test(nodeView), 'hover 传给 Body');
+ok(/<Body \{\.\.\.p\} out=\{out\} running=\{running\}(?: parsing=\{parsing\})? hover=\{hoverNode\} \/>/.test(nodeView), 'hover 传给 Body');
 ok(/hover=\{p\.hover\} \/>;/.test(bodyFn), 'Body 传给 VideoBody');
 ok(!/store\.(patchGen|set|updateNode)\([^)]*hover/.test(nodeView), 'hover 不写画布文档');
 
