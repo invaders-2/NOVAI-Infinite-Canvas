@@ -20,6 +20,11 @@
 地址改成 /assets/uploads/…（不带 token）。单文件 >500MB 跳过、单请求累计 >4GB 停止、
 并发 ≤4、15s 无数据算断、单文件时长按体量放宽、总预算 30 分钟（见 MEDIA_* 常量）；同一 URL 命中已存在文件时直接复用（文件名按 URL 哈希，幂等）。
 
+分享凭据（2026-11 收紧）：分享链接里的 ?token= 不再是整机局域网口令，而是这条分享自己的令牌
+（与 ?share= 同值）。它只能：读这条分享的只读快照（GET /api/canvas-share/<token>）、读这张画布
+里引用到的 /output、/assets、/apps 媒体文件；不能克隆（克隆会在分享者机器上建画布）、不能调其它接口。
+撤销分享 / 过期后立刻失效。中间件入口见 share_scoped_request_allowed()。
+
 环境变量：
     NOVAI_SHARE_PAGE_URL  整体覆盖分享页面地址（dev / 反向代理 / 测试用），默认按局域网 IP 拼。
 
@@ -247,7 +252,8 @@ def revoke_share(canvas_id: str) -> bool:
             return False
         store["shares"] = kept
         save_store(store)
-        return True
+    forget_share_scope()
+    return True
 
 
 # ---------------------------------------------------------------- 地址与快照
@@ -273,19 +279,167 @@ def page_url_base(request: Request) -> str:
 
 
 def share_url(share: Dict[str, Any], request: Request) -> str:
+    """分享链接：?share=<分享令牌>&token=<分享令牌>。
+
+    以前这里拼的是整机局域网口令，拿到链接的人能调本机全部接口。现在 token 位置放的是
+    这条分享自己的令牌（只读快照 + 本画布引用的媒体），参数名不变，旧版 NOVAI 收到新链接时
+    照旧把它当口令带去取快照 / 媒体，无需升级就能用。"""
     base = page_url_base(request)
-    url = base + ("&" if "?" in base else "?") + "share=" + urllib.parse.quote(str(share.get("token") or ""))
+    share_token = urllib.parse.quote(str(share.get("token") or ""))
+    url = base + ("&" if "?" in base else "?") + "share=" + share_token
     lan_auth_enabled = deps.get("LAN_AUTH_ENABLED")
-    load_lan_token = deps.get("LOAD_LAN_TOKEN")
-    if callable(lan_auth_enabled) and callable(load_lan_token):
+    enabled = True
+    if callable(lan_auth_enabled):
         try:
-            if lan_auth_enabled():
-                token = str(load_lan_token() or "")
-                if token:
-                    url += "&token=" + urllib.parse.quote(token)
+            enabled = bool(lan_auth_enabled())
         except Exception:
-            pass
+            enabled = True
+    if enabled and share_token:
+        url += "&token=" + share_token
     return url
+
+
+# ---------------------------------------------------------------- 分享令牌的访问范围
+
+SHARE_COOKIE_NAME = "novai_share_key"
+_SCOPE_CACHE_SECONDS = 15.0
+_SCOPE_CACHE: Dict[str, Tuple[float, str, frozenset]] = {}
+_SCOPE_LOCK = threading.Lock()
+_SHARE_API_RE = re.compile(r"^/api/canvas-share/([A-Za-z0-9_-]{16,64})/?$")
+
+
+def _normalize_media_path(path: str) -> str:
+    try:
+        value = urllib.parse.unquote(str(path or ""))
+    except Exception:
+        value = str(path or "")
+    return value.replace("\\", "/")
+
+
+def _media_path_of_ref(value: str) -> str:
+    """快照里的一个字符串 → 本机媒体路径（/output/…、/assets/…、/apps/…），不是就返回空串。"""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.startswith("/") and not text.startswith("//"):
+        path = text.split("?", 1)[0].split("#", 1)[0]
+    elif text.lower().startswith("http://") or text.lower().startswith("https://"):
+        try:
+            parsed = urllib.parse.urlsplit(text)
+        except ValueError:
+            return ""
+        if str(parsed.hostname or "").lower() not in _local_host_names():
+            return ""
+        path = parsed.path or ""
+    else:
+        return ""
+    path = _normalize_media_path(path)
+    if not MEDIA_PATH_RE.match(path) or "/../" in path or path.endswith("/.."):
+        return ""
+    return path
+
+
+def _collect_media_paths(value: Any, out: set) -> None:
+    if isinstance(value, str):
+        path = _media_path_of_ref(value)
+        if path:
+            out.add(path)
+    elif isinstance(value, list):
+        for item in value:
+            _collect_media_paths(item, out)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _collect_media_paths(item, out)
+
+
+def share_media_paths(share: Dict[str, Any]) -> frozenset:
+    """这条分享的画布里引用到的本机媒体路径（带 15s 缓存，避免每张图都重读画布）。"""
+    token = str(share.get("token") or "")
+    canvas_id = str(share.get("canvas_id") or "")
+    now = time.monotonic()
+    with _SCOPE_LOCK:
+        cached = _SCOPE_CACHE.get(token)
+        if cached and cached[0] > now and cached[1] == canvas_id:
+            return cached[2]
+    paths: set = set()
+    loader = deps.get("LOAD_CANVAS")
+    if callable(loader) and canvas_id:
+        try:
+            _collect_media_paths(canvas_snapshot(loader(canvas_id)), paths)
+        except Exception:
+            paths = set()
+    frozen = frozenset(paths)
+    with _SCOPE_LOCK:
+        if len(_SCOPE_CACHE) > 256:
+            _SCOPE_CACHE.clear()
+        _SCOPE_CACHE[token] = (now + _SCOPE_CACHE_SECONDS, canvas_id, frozen)
+    return frozen
+
+
+def _active_share_or_none(token: str) -> Optional[Dict[str, Any]]:
+    value = str(token or "").strip()
+    if not value or len(value) < 16 or len(value) > 64:
+        return None
+    share = get_share(value)
+    if not share or is_expired(share):
+        return None
+    return share
+
+
+def share_scoped_request_allowed(path: Any, method: Any, candidates: Any = ()) -> str:
+    """局域网鉴权兜底：没带整机口令的请求，能不能凭「分享令牌」进来。
+
+    放行范围（只读）：
+    - GET/HEAD /api/canvas-share/<令牌>：路径里的令牌本身就是凭据（有效、未过期即可）；
+    - GET/HEAD /output|/assets|/apps 下的文件：candidates 里某个有效分享令牌，其画布引用了这个路径。
+    其它一律不放（含 clone、localize-media、/api/*）。返回命中的分享令牌，没命中返回空串。"""
+    verb = str(method or "").upper()
+    if verb not in ("GET", "HEAD"):
+        return ""
+    value = str(path or "")
+    match = _SHARE_API_RE.match(value)
+    if match:
+        share = _active_share_or_none(match.group(1))
+        return str(share.get("token")) if share else ""
+    media_path = _normalize_media_path(value)
+    if not MEDIA_PATH_RE.match(media_path):
+        return ""
+    seen = set()
+    for raw in candidates or ():
+        candidate = str(raw or "").strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        share = _active_share_or_none(candidate)
+        if not share:
+            continue
+        if media_path in share_media_paths(share):
+            return str(share.get("token"))
+    return ""
+
+
+def share_snapshot_path_public(path: Any, method: Any = "GET") -> bool:
+    """GET /api/canvas-share/<令牌> 对所有人放行：路由自己按令牌查，撤销返回 404、过期 410，
+    这样旧链接能看到「已撤销 / 已过期」而不是含糊的 401。"""
+    return str(method or "").upper() in ("GET", "HEAD") and bool(_SHARE_API_RE.match(str(path or "")))
+
+
+_SHARE_CLONE_RE = re.compile(r"^/api/canvas-share/([A-Za-z0-9_-]{16,64})/clone/?$")
+
+
+def share_scoped_denied_detail(path: Any, method: Any = "GET") -> str:
+    """分享令牌够不着的请求里，给「在别人电脑上直接点克隆」一句能看懂的话；其它返回空串走默认 401。"""
+    if str(method or "").upper() == "POST" and _SHARE_CLONE_RE.match(str(path or "")):
+        return "分享链接只能预览，不能在分享者的电脑上克隆；请在你自己的 NOVAI 里用「打开分享链接」克隆到本机。"
+    return ""
+
+
+def forget_share_scope(token: str = "") -> None:
+    with _SCOPE_LOCK:
+        if token:
+            _SCOPE_CACHE.pop(str(token), None)
+        else:
+            _SCOPE_CACHE.clear()
 
 
 def share_payload(share: Dict[str, Any], request: Request) -> Dict[str, Any]:
