@@ -101,7 +101,7 @@ export function CanvasApp({ backend, canvasId, name, host, onReady, winInset, ag
   // onReady 用引用保存：调用方每次渲染传新函数也不会触发重新载入画布（重载会冲掉还没保存的改动）
   const readyRef = useRef(onReady); readyRef.current = onReady;
   const store = ctl.store; const fileRef = useRef<HTMLInputElement>(null);
-  const uploadOpts = useRef<{ at?: { x: number; y: number }; target?: string; linkTo?: string; replace?: string; accept?: string }>({});
+  const uploadOpts = useRef<{ at?: { x: number; y: number }; target?: string; linkTo?: string | string[]; replace?: string; accept?: string }>({});
 
   useEffect(() => {
     applyTheme(store); const off = watchSystemTheme(store);

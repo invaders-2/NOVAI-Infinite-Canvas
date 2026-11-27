@@ -26,7 +26,7 @@ import { makeZip } from "../zip";
 import { novaiEntry, novaiName, novaiZipName, stamp } from "./downloadName";
 
 type At = Element | { x: number; y: number };
-const ITEMS: Array<[GenKind | "table", string, string]> = [["text", "文本", "脚本、广告词、品牌文案"], ["image", "图片", "宣传图、海报、封面"], ["video", "视频", "宣传视频、动画、电影"], ["audio", "音频", "音乐、配音、音效"], ["table", "多维表格", "逐行批量：一行一条生成任务"]];
+export const ITEMS: Array<[GenKind | "table", string, string]> = [["text", "文本", "脚本、广告词、品牌文案"], ["image", "图片", "宣传图、海报、封面"], ["video", "视频", "宣传视频、动画、电影"], ["audio", "音频", "音乐、配音、音效"], ["table", "多维表格", "逐行批量：一行一条生成任务"]];
 const iconOf = (t: GenKind | "table") => (t === "table" ? "grid" : TYPE_ICON[t]);
 
 export function createAt(ctl: Ctl, t: GenKind | "table", at: { x: number; y: number }, fromId: string | null = null): CanvasNode {

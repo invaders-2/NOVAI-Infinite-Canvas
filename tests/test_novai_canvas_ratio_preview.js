@@ -297,7 +297,7 @@ assert(nodeViewSrc.includes('prefers-reduced-motion: reduce') && nodeViewSrc.inc
 // 拖拽缩放只改宽高、不动比例，所以上面那条「比例没变就 return」正好把它挡在外面
 assert(viewportSrc.includes('store.updateNode(d.id, (n) => ({ ...n, w, h }))'), '拖右下角只写入宽高、不改 params.ratio');
 const rzStart = cssSrc.indexOf('.cn-root .rz:after');
-const rzEnd = cssSrc.indexOf('.cn-root .node.sel .rz');
+const rzEnd = cssSrc.indexOf('.cn-root .node.sel.chrome .rz');
 const rzRule = cssSrc.slice(rzStart, rzEnd);
 assert(rzStart > 0 && rzRule.length > 0, '找得到缩放手柄的样式');
 assert(!rzRule.includes('border-right') && !rzRule.includes('border-bottom'), '手柄不再用直角 L 的 border 画');
@@ -338,7 +338,7 @@ assert(/height:36px/.test(cssEmpty) && /border-radius:8px/.test(cssEmpty) && /pa
 assert(cssEmpty.includes('font-size:13px') && cssEmpty.includes('color:#fff'), '「上传」文字常显：13px 白字');
 assert(cssEmpty.includes('gap:6px'), '图标与文字间距 6');
 assert(cssSrc.includes('#ntb.ntb-empty-upload .ib svg.i{width:15px;height:15px'), 'upload 图标 15px');
-assert(/\.cn-root \.node\.sel \.rz\{opacity:1\}/.test(cssSrc), '手柄仍然只在选中时显示');
+assert(/\.cn-root \.node\.sel\.chrome \.rz\{opacity:1\}/.test(cssSrc), '手柄仍然只在选中时显示（且框选拖动期间先不显示）');
 
 /* ---------- 生成中占位：点生成那一帧就按原图比例（不等到结果回来） ---------- */
 (async () => {

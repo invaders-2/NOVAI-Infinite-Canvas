@@ -173,7 +173,7 @@ export function Viewport() {
   useLayoutEffect(() => {
     const store = ctl.store; const world = worldRef.current; const vp = vpRef.current;
     if (!world || !vp) return;
-    let raf = 0; let zinv = "";
+    let raf = 0; let zinv = ""; let zoomedOut = false; let farOut = false;
     const apply = () => {
       raf = 0;
       const v = store.state.view;
@@ -185,6 +185,23 @@ export function Viewport() {
       const raw = 1 / v.k;
       const z = raw <= 1 ? "1" : (Math.round(raw * 24) / 24).toFixed(3);
       if (z !== zinv) { zinv = z; world.style.setProperty("--zinv", z); }
+      // 只有缩小态才给分组 / 堆叠名字加「压过相邻节点 + 按节点屏幕宽度截断」两条规则（跨过 k=1 切一次，
+      // 不是每帧写）：k≥1 时分组 / 堆叠的标题和改动前逐像素一致。
+      const isZoomedOut = z !== "1";
+      if (isZoomedOut !== zoomedOut) {
+        zoomedOut = isZoomedOut;
+        if (isZoomedOut) world.dataset.zoomed = "1"; else delete world.dataset.zoomed;
+      }
+      // 再深一档（k<0.4）：240px 的节点只剩 40~70px，装不下「名字 + 状态」两样，这一档改成「只读标签模式」
+      // （只留图标 + 名字、名字回到 64px 下限，状态 / 功能组件让位）。0.4~1 之间保留状态与视图按钮。
+      // 阈值取 0.4（不是 0.5、也不是 0.3）：0.45 时 200px 的密集节点名字还有 ~58px（能读出「小图 1」）、
+      // 状态也在节点内；到 0.35 只剩 ~34px，6 个节点全是「小图…」分不出来 —— 那里就该让名字优先了。
+      // 同样只在跨档时写一次。
+      const isFarOut = v.k < 0.4;
+      if (isFarOut !== farOut) {
+        farOut = isFarOut;
+        if (isFarOut) world.dataset.far = "1"; else delete world.dataset.far;
+      }
       const gs = 24 * (v.k < .45 ? 2 : 1) * v.k;
       vp.style.backgroundSize = `${gs}px ${gs}px`;
       vp.style.backgroundPosition = `${v.x}px ${v.y}px`;
@@ -301,9 +318,11 @@ export function Viewport() {
       if (t.closest("textarea:not([readonly]),input:not([readonly])")) return;
       // ⌥ / Alt 拖动 = 复制一份（再按住 ⇧ 时保留输入连线），与旧画布一致
       if (e.altKey) {
+        // 按下要把选择换成它时先只给按压反馈，松手（副本落位）再亮选中态
+        const taking = !st.ui.sel.has(id);
         let sel = st.ui.sel;
         if (!sel.has(id)) sel = new Set([id]);
-        store.setUI({ sel, edge: null });
+        store.setUI({ sel, edge: null, pressing: taking ? id : null });
         // 拖分组 / 堆叠时成员一起复制
         const picked = new Set(sel);
         // 嵌套分组要递归带上所有层级的成员，否则内层组的成员会被留在原地
@@ -311,10 +330,12 @@ export function Viewport() {
         drag.current = { kind: "node", start: ctl.toWorld(e.clientX, e.clientY), moved: false, copy: e.shiftKey ? "edges" : "plain", orig: [...picked].map((sid) => { const n = store.node(sid)!; return { id: sid, x: n.x, y: n.y }; }) };
         vp.setPointerCapture(e.pointerId); return;
       }
+      // 这一下会把整份选择换成它（不是 ⇧/⌘ 追加、也不是按已选中的节点）：选中态先不亮，松手再一起出来
+      const taking = !e.shiftKey && !e.metaKey && !st.ui.sel.has(id);
       let sel = st.ui.sel;
       if (e.shiftKey || e.metaKey) { sel = new Set(sel); sel.has(id) ? sel.delete(id) : sel.add(id); }
       else if (!sel.has(id)) sel = new Set([id]);
-      store.setUI({ sel, edge: null });
+      store.setUI({ sel, edge: null, pressing: taking ? id : null });
       // 拖分组 = 连同组内节点一起移动（嵌套分组递归到所有层级）
       const moving = new Set(sel); memberIdsDeep(st.doc, sel).forEach((c) => { if (store.node(c)) moving.add(c); });
       drag.current = { kind: "node", start: ctl.toWorld(e.clientX, e.clientY), moved: false, orig: [...moving].map((sid) => { const n = store.node(sid)!; return { id: sid, x: n.x, y: n.y }; }) };
@@ -329,6 +350,8 @@ export function Viewport() {
     const additive = e.shiftKey || e.metaKey || e.ctrlKey;
     if (additive || (st.ui.leftDrag === "select" && e.pointerType !== "touch")) {
       drag.current = { kind: "marq", sx: e.clientX, sy: e.clientY, base: additive ? new Set(st.ui.sel) : new Set(), moved: false };
+      // 框选拖动期间先不亮选中态：白框 / 工具条 / 生成面板 / 加号 / 多选条都等松手
+      store.setUI({ marquee: true });
       if (st.ui.editText) (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur();
       vp.setPointerCapture(e.pointerId); return;
     }
@@ -403,6 +426,9 @@ export function Viewport() {
   }, [store, ctl]);
 
   const onPointerUp = useCallback((e: React.PointerEvent) => {
+    // 松手 / pointercancel：按压态与框选态一律复位 —— 放在 drag 早退之前，任何松手路径都不能把它们卡住，
+    // 否则选中态（工具条 / 面板 / 白框 / 加号 / 多选条）会一直不出来
+    if (store.state.ui.pressing || store.state.ui.marquee) store.setUI({ pressing: null, marquee: false });
     const d = drag.current; if (!d) return; drag.current = null; setPanning(false); const st = store.state;
     if (d.kind === "asset") {
       const over = d.moved && assetOverRef.current;
@@ -478,7 +504,9 @@ export function Viewport() {
     const lib = (window as unknown as { __novaiLibDrag?: Parameters<typeof placeItem>[1] }).__novaiLibDrag;
     if (lib) { delete (window as unknown as { __novaiLibDrag?: unknown }).__novaiLibDrag; void placeItem(ctl, lib, { x: e.clientX, y: e.clientY }); return; }
     const files = [...(e.dataTransfer?.files || [])];
-    if (files.length) void addFiles(store, files, at); else void dropSourceUrls(store, at, e.dataTransfer);
+    // addFiles 内部逐文件兜错；这里再兜一层，任何漏网的 reject 也要说出来 —— 不能「拖进去毫无反应」
+    if (files.length) void addFiles(store, files, at).catch((error) => store.toast(`${files.map((f) => f.name).join("、")} 上传失败：${error instanceof Error ? error.message : "未知错误"}`, 9000));
+    else void dropSourceUrls(store, at, e.dataTransfer);
   }, [ctl, store]);
 
   // 只有 #vp 标了落点：松手落在它上面的浮层（#sourceBrowserPanel 在线素材面板、左栏按钮、助手面板）时，
@@ -567,11 +595,32 @@ export function Viewport() {
   const handleAct = useCallback((node: CanvasNode, act: string, e: React.SyntheticEvent) => onNodeAct(ctl, node, act, e), [ctl]);
   const handleTextCommit = useCallback((id: string, text: string) => commitText(store, id, text), [store]);
   const conn = ui.conn;
+  /**
+   * 连线预览的压暗判定：端口连线（rev 或无 sources）沿用单源；多选加号带 sources 时，
+   * 所有选中源本身压暗，且只要有任一源连不上某节点、该节点也压暗（over 目标不压暗）。
+   */
+  const noconnOf = (id: string) => {
+    if (!conn || conn.over === id) return false;
+    if (conn.rev) return !!connectBlock(doc, id, conn.id);
+    const sources = conn.sources?.length ? conn.sources : [conn.id];
+    return sources.includes(id) || sources.some((from) => !!connectBlock(doc, from, id));
+  };
   // 参考线只在拖动节点时存在（每次 pointermove 都会重渲），所以直接在渲染时读一次精确的 1/k，
   // 不必为它订阅 view；也不能用 --zinv（那个值在 k≥1 时被钉成 1，会让线变粗）。
   const zinvExact = 1 / store.state.view.k;
+  // 多选灰框：正好盖住选中节点并集（含标题 24px、不留边），画在 #nodes 之前 → 灰只从节点空隙里透出来
+  const multi = ui.sel.size > 1;
+  const selBox = (() => {
+    // 灰框和加号一样等松手再出（TapNow）；节点选中和连线在拖动中就实时亮
+    if (!multi || ui.marquee) return null;
+    const picked = doc.nodes.filter((n) => ui.sel.has(n.id));
+    if (!picked.length) return null;
+    const x1 = Math.min(...picked.map((n) => n.x)), y1 = Math.min(...picked.map((n) => n.y + 24));
+    const x2 = Math.max(...picked.map((n) => n.x + n.w)), y2 = Math.max(...picked.map((n) => n.y + 24 + n.h));
+    return { left: x1, top: y1, width: x2 - x1, height: y2 - y1 };
+  })();
   return (
-    <div id="vp" ref={vpRef} className={(panning ? "panning" : "") + (ui.pick || ui.agentPick ? " picking" : "") + (ui.cmtMode ? " commenting" : "")}
+    <div id="vp" ref={vpRef} data-multi={multi ? "" : undefined} className={(panning ? "panning" : "") + (ui.pick || ui.agentPick ? " picking" : "") + (ui.cmtMode ? " commenting" : "")}
       style={{ backgroundSize: "24px 24px" }}
       onPointerDown={onPointerDown} onPointerMove={(e) => { onPointerMove(e); onHover(e); if (store.state.collab.transport) window.dispatchEvent(new CustomEvent("cn:cursor", { detail: ctl.toWorld(e.clientX, e.clientY) })); }} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
       onPointerLeave={() => { if (store.state.collab.transport) window.dispatchEvent(new CustomEvent("cn:cursor", { detail: null })); }}
@@ -579,6 +628,7 @@ export function Viewport() {
       onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); dropPayload(e); }}>
       <div id="world" ref={worldRef}>
         <Edges />
+        {selBox ? <div className="selbox" style={selBox} /> : null}
         {guides.map((g, i) => <div key={i} className={"snapguide " + g.axis} style={g.axis === "x" ? { left: g.at, top: g.from, height: g.to - g.from, width: zinvExact } : { top: g.at, left: g.from, width: g.to - g.from, height: zinvExact }} />)}
         <div id="nodes">
           {(() => { const hidden = hiddenIds(doc.nodes); return doc.nodes.filter((n) => !hidden.has(n.id)); })().sort((a, b) => (a.kind === "group" && !isStack(a) ? 0 : 1) - (b.kind === "group" && !isStack(b) ? 0 : 1)).map((n) => {
@@ -586,7 +636,7 @@ export function Viewport() {
             const queued = queuedIds.has(n.id);
             const bj = run ? null : batchOf(n).journal;
             const batchInfo = bj && n.kind !== "table" ? `${bj.rows.filter((r) => r.status === "completed").length}/${bj.rows.length} 行` : undefined;
-            return <NodeView key={n.id} node={n} sel={ui.sel.has(n.id)} modelName={(store.modelOf(n) || {}).name} run={run} editing={ui.editText === n.id} drop={conn?.over === n.id || dropStack === n.id} noconn={!!conn && conn.over !== n.id && !!connectBlock(doc, conn.rev ? n.id : conn.id, conn.rev ? conn.id : n.id)} hl={ui.hlNode === n.id} batchInfo={batchInfo} queued={queued}
+            return <NodeView key={n.id} node={n} sel={ui.sel.has(n.id)} pressing={ui.pressing === n.id} chrome modelName={(store.modelOf(n) || {}).name} run={run} editing={ui.editText === n.id} drop={conn?.over === n.id || dropStack === n.id} noconn={noconnOf(n.id)} hl={ui.hlNode === n.id} batchInfo={batchInfo} queued={queued}
               onAct={handleAct} onTextCommit={handleTextCommit} />;
           })}
         </div>

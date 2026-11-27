@@ -7,13 +7,13 @@ import { hostRoot } from "../../../novaiBridgeRoot";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
-import { addMention, afterInputsChanged, title } from "../actions";
+import { addMention, afterInputsChanged, connect, title } from "../actions";
 import { mentionable, mentionedIds, remapMention, unmentionedInputs } from "../mentions";
 import { PromptEditor } from "./PromptEditor";
 import { regenAsNew, requestForNode, rolesFor, ROLE_LABEL, runNode, selfInputRole, stopNode, type RunOpts } from "../engine";
 import { mjHdAllowed, mjSummary, MJ_SPEED_LABEL, type MjParams } from "../model";
-import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, DEFAULT_CAMERA, formatClock, genOf, withGen, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, NODE_BG, NODE_TAG, newNode, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatOptions, outputFormatShortLabel, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoResLabel, videoTimesLabel, VMODES, resRange, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
-import { batchInputWarnings, batchOf, batchRows, fillCandidates, fillTargetOf, OUTPUT_MODES, ownRefCount, planRow, rowsToRun, tableOf, withBatch, type BatchSettings } from "../table";
+import { bgColor, CAMERAS, cameraSummary, clamp, clampParams, connectBlock, DEFAULT_CAMERA, draftActive, draftExpiresDays, draftFinalResolutions, draftResolution, draftSupported, formatClock, genOf, withGen, gifFrameCountFor, gifFrameDurationFor, gifFrameSpec, GIF_FRAME_FALLBACK, isQualityDefault, MJ_VIDEO_MOTION_LABEL, mjVideoBatch, mjVideoBatchNote, mjVideoBatchOptions, mjVideoMotion, mjVideoTier, mjVideoType, NODE_BG, NODE_DEFAULT_SIZE, NODE_TAG, newNode, placeholderSpec, promptOnlyModel, qualityChoices, qualityLabel, qualityLevelsFor, tagColor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable, inputsOf, isGenKind, outOf, outputFormatForRequest, outputFormatOptions, outputFormatShortLabel, refsIn, sectionsOf, srcOf, textOf, TYPE_ICON, TYPE_LABEL, uid, videoDurationTagLabel, videoDurLabel, videoRatioLabel, videoRefHint, videoRatioFollowsFirstFrame, videoRatioOptions, videoResChoices, videoResLabel, videoTimesLabel, VMODES, type AudioParams, type CameraParams, type GenKind, type ImageParams, type ModelSpec, type TextParams, type VideoParams, type VideoMode } from "../model";
+import { batchInputWarnings, batchOf, batchRows, emptyTable, fillCandidates, fillTargetOf, OUTPUT_MODES, ownRefCount, planRow, rowsToRun, tableOf, withBatch, withTable, type BatchSettings } from "../table";
 import type { DepthModelStatus } from "../backend/types";
 import { useCtl, useS, type Ctl } from "./ctx";
 import { isSplitNode } from "./SplitNode";
@@ -24,7 +24,7 @@ import { ComboMenu } from "./combo";
 import { FloatMenuBar, FloatMenuButton } from "./FloatMenu";
 import { Icon, type IconName } from "./Icon";
 import { AnimatedSendIcon } from "./AnimatedSendIcon";
-import { download } from "./menus";
+import { ITEMS, download } from "./menus";
 import { saveNodeToLibrary } from "./Library";
 import { VendorLogo } from "./VendorLogo";
 import { ModalHead, openModal, openPop } from "./overlay";
@@ -39,16 +39,22 @@ import { OptimizeButton } from "./OptimizeButton";
 import { DurationSlider } from "./DurationSlider";
 import { EffortSlider } from "./EffortSlider";
 import { useEditorState } from "./editors/registry";
-import { draftToFinal, smartClip, trimToNode } from "../videoTools";
+import { draftToFinal, draftToFinalTask, smartClip, trimToNode } from "../videoTools";
 import { videoAiMenu } from "./VideoTools";
-import { parseMedia, parseMediaFrame } from "./parseMedia";
+import { sourceVideoOf } from "./TableViews";
+import { getParseSettings, parseMedia, parseMediaFrame, PARSE_TEMPLATES, setParseSettings, type ParseTemplate } from "./parseMedia";
 import { createSegRetake, replaceSourceWithTake, segRetakeOf, segRetakeReady, SegRetakeStrip, SEG_RETAKE_PH } from "./SegRetake";
 import type { CanvasStore } from "../store";
+
+/** 能作为「源」的节点：分组 / 堆叠、多维表格、生成类（拆分窗口除外）；分组 / 堆叠的成员由引擎展开 */
+function canSource(n: CanvasNode) { return n.kind === "group" || n.kind === "table" || (isGenKind(n.kind) && !isSplitNode(n)); }
 
 export function SelectionUI() {
   const ctl = useCtl(); const ui = useS((s) => s.ui); const doc = useS((s) => s.doc); useS((s) => s.view); const runtime = useS((s) => s.runtime);
   const editing = useEditorState();
-  const id = ui.sel.size === 1 && !ui.dragging && !editing ? [...ui.sel][0] : null;
+  // 选中态（白框 / 工具条 / 生成面板 / 加号 / 多选条）同一时刻出现：按压、拖节点、框选拖动期间都不出
+  const chromeOn = !ui.dragging && !editing && !ui.marquee;
+  const id = chromeOn && ui.sel.size === 1 ? [...ui.sel][0] : null;
   const node = id ? doc.nodes.find((n) => n.id === id) : undefined;
   const tbRef = useRef<HTMLDivElement>(null); const gpRef = useRef<HTMLDivElement>(null);
   /** 片段重拍节点：节点和生成面板之间多一条胶片条（选片段） */
@@ -67,13 +73,174 @@ export function SelectionUI() {
     if (gpRef.current) { const gw = gpRef.current.offsetWidth, gh = gpRef.current.offsetHeight; let top = b.y - sr.top + 14 + srH; const safeB = gpRef.current.closest(".cn-root.in-win") ? 76 : 8; /* 嵌在系统窗口里：底部给会弹出的 Dock 让位 */ if (top + gh > sr.height - safeB) top = Math.max(8, sr.height - gh - safeB); gp = { left: clamp(cx - gw / 2, minLeft(top, gh), sr.width - gw - 8), top }; if (srRef.current) strip = { left: gp.left, top: gp.top - srH, width: gw }; }
     if (JSON.stringify(tb) !== JSON.stringify(pos.tb) || JSON.stringify(gp) !== JSON.stringify(pos.gp) || JSON.stringify(strip) !== JSON.stringify(pos.sr || null)) setPos({ tb, gp, sr: strip });
   });
-  if (!node) return null;
+  // 选区级加号：只在多选（框选 / ⇧ 多选）时出现，位置是选中节点包围盒（含标题 24px）的右边 +64px、垂直居中。
+  // 单选走原工程那套单击选中态（描边 + 工具条 + 面板），右侧不再挂这颗加号。
+  const selNodes = chromeOn ? [...ui.sel].map((x) => doc.nodes.find((n) => n.id === x)).filter((n): n is CanvasNode => !!n) : [];
+  // 分组 / 堆叠 / 多维表格 / 生成类都能当源（拆分窗口除外）；选区里有不能当源的节点时整颗加号不出
+  const targets = selNodes.filter(canSource);
+  const sr = ctl.rect();
+  const plus = targets.length >= 2 && targets.length === selNodes.length ? (() => {
+    const box = targets.reduce((a, n) => ({ x1: Math.min(a.x1, n.x), x2: Math.max(a.x2, n.x + n.w), y1: Math.min(a.y1, n.y + 24), y2: Math.max(a.y2, n.y + 24 + n.h) }), { x1: Infinity, x2: -Infinity, y1: Infinity, y2: -Infinity });
+    const a = ctl.toScreen(box.x1, box.y1), b = ctl.toScreen(box.x2, box.y2);
+    return { left: clamp(b.x - sr.left + 12, 8, Math.max(8, sr.width - 28)), top: clamp((a.y + b.y) / 2 - sr.top - 10, 8, Math.max(8, sr.height - 28)) };
+  })() : null;
+  const plusEl = plus ? <AddInput key={"a" + targets.map((n) => n.id).join(",")} nodes={targets} at={plus} /> : null;
+  if (!node) return plusEl;
   const run = runtime[node.id];
   return <>
     <Toolbar key={"t" + node.id} refEl={tbRef} node={node} running={!!run} progress={run?.progress || 0} style={pos.tb || { left: -9999, top: -9999 }} />
     {segRetakeOf(node) ? <div className="segr-strip float enter" key={"r" + node.id} ref={srRef} style={pos.sr || { left: -9999, top: -9999 }} onPointerDown={(e) => e.stopPropagation()}><SegRetakeStrip node={node} /></div> : null}
     {isGenKind(node.kind) && !isSplitNode(node) ? <div id="gp" key={"g" + node.id} ref={gpRef} className={"float enter" + (node.kind === "video" ? " gp-video" : "")} style={pos.gp || { left: -9999, top: -9999 }} onPointerDown={(e) => e.stopPropagation()}><GenPanel node={node} /></div> : null}
+    {plusEl}
   </>;
+}
+
+/**
+ * 多选选区右侧的「+」：拖出去在落点新建一个空图片节点，接在**每个**选中节点的下游（选中节点 -> 新节点）；
+ * 点一下打开和 portMenu(out) 同一套「继续生成」菜单：新建文本 / 图片 / 视频 / 音频 / 多维表格节点，五个都接在选区下游。
+ * 预览线复用 ui.conn（Edges 的临时路径），松手前不往文档里写任何东西。
+ */
+function AddInput({ nodes, at }: { nodes: CanvasNode[]; at: { left: number; top: number } }) {
+  const ctl = useCtl(); const store = ctl.store;
+  const [live, setLive] = useState(false);
+  /** 拖动中的镜像状态：磁吸监听要在每帧同步判断，不能等 React state 重渲染 */
+  const liveRef = useRef(false);
+  const addRef = useRef<HTMLButtonElement>(null);
+  /** 拖到一半选中态被别处改掉（加号卸载）时也要收尾，别在松手那一刻凭空建节点 */
+  const abort = useRef<(() => void) | null>(null);
+  useEffect(() => () => abort.current?.(), []);
+  const ids = nodes.map((n) => n.id);
+  /**
+   * 有效源：组内成员如果也被一起选中，不再单独当源（分组展开时引擎已经包含它，重复连会让素材算两次）。
+   * 对每个选中的分组 / 堆叠，把它的后代 id 收进来，再从源列表里剔除（分组本身保留）。
+   */
+  const effIds = (() => {
+    const nested = new Set<string>();
+    const collect = (id: string) => {
+      const n = store.node(id);
+      for (const child of n?.children || []) {
+        if (nested.has(child)) continue;
+        nested.add(child);
+        collect(child);
+      }
+    };
+    nodes.filter((n) => n.kind === "group").forEach((g) => collect(g.id));
+    return ids.filter((id) => !nested.has(id));
+  })();
+  const hasGroup = nodes.some((n) => n.kind === "group");
+  // 分组只能连到生成节点：有分组源时隐藏「多维表格」
+  const menuItems = ITEMS.filter(([t]) => !(hasGroup && t === "table"));
+  // at 是 #layer 相对坐标；ctl.toWorld 要的是 client 坐标（内部会再减 rect.left/top），嵌在带标题栏的窗口里 rect 不为 0
+  const sr = ctl.rect();
+  // 磁吸：指针进入加号中心 60px 内，加号朝指针方向轻微偏移（最多 4px，按 20px 的尺寸收小）。
+  // 直接写 el.style.translate，不走 React state；触屏、拖动中、prefers-reduced-motion 都不做。
+  useEffect(() => {
+    const el = addRef.current; if (!el) return;
+    if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const R = 60, MAX = 4;
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse" || liveRef.current) return;
+      const r = ctl.rect();
+      const dx = e.clientX - (r.left + at.left + 10), dy = e.clientY - (r.top + at.top + 10);
+      const d = Math.hypot(dx, dy);
+      if (d > R || d < 0.5) { el.style.removeProperty("translate"); return; }
+      const k = (MAX * (1 - d / R)) / d;
+      el.style.setProperty("translate", (dx * k).toFixed(1) + "px " + (dy * k).toFixed(1) + "px");
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => { window.removeEventListener("pointermove", onMove); el.style.removeProperty("translate"); };
+  }, [ctl, at.left, at.top]);
+  /** 新节点接在这批选中节点的下游（选中节点 -> 新节点），然后选中它 */
+  const attach = (newId: string) => {
+    effIds.forEach((id) => connect(store, id, newId, { quiet: true, select: false }));
+    store.setUI({ sel: new Set([newId]), edge: null });
+  };
+  /**
+   * 菜单：点按加号 = 现有「继续生成」（在加号附近建下游）；
+   * 拖到空白处松手 = 和出线端口一样的「添加节点 · 自动连到选中的 N 个节点」（在落点附近建下游）。
+   */
+  const openMenu = (screenX: number, screenY: number, dropAt?: { x: number; y: number }) => {
+    const anchor = dropAt || ctl.toWorld(sr.left + at.left + 10, sr.top + at.top + 10);
+    openPop({ x: screenX + 14, y: screenY - 20 }, (close) => <>
+      <div className="mh">{dropAt ? `添加节点 · 自动连到选中的 ${effIds.length} 个节点` : `用选中的 ${effIds.length} 个节点继续生成`}</div>
+      {menuItems.map(([t, label, desc]) => <button key={t} className="mi" data-t={t} onClick={() => { close(); createTarget(t, anchor); }}>
+        <span className="ic"><Icon name={t === "table" ? "grid" : TYPE_ICON[t]} size="s" /></span>
+        <span>新建{label}节点<span className="d">{desc}</span></span>
+      </button>)}
+    </>);
+  };
+  /** 在 center 附近建一个类型节点（避开已有节点），接在每个选中节点的下游并选中它 */
+  const createTarget = (t: GenKind | "table", center: { x: number; y: number }) => {
+    const size = t === "table" ? { w: 420, h: 220 } : NODE_DEFAULT_SIZE[t];
+    let x = Math.round(center.x + 40), y = Math.round(center.y - size.h / 2);
+    const hit = (xx: number, yy: number) => store.state.doc.nodes.some((o) => o.kind !== "group" && xx < o.x + o.w + 16 && xx + size.w + 16 > o.x && yy < o.y + o.h + 40 && yy + size.h + 40 > o.y);
+    for (let i = 0; i < 24 && hit(x, y); i++) y += 48;
+    const fresh = t === "table"
+      ? withTable({ id: uid("t"), kind: "table", x, y, w: size.w, h: size.h, text: "多维表格" }, emptyTable())
+      : store.newNode(t, x, y);
+    store.addNodes([fresh], [], { select: false });
+    attach(fresh.id);
+  };
+  const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); e.stopPropagation();
+    const el = e.currentTarget; const pid = e.pointerId;
+    liveRef.current = true;
+    el.style.removeProperty("translate");
+    const sx = e.clientX, sy = e.clientY;
+    // 预览线从加号自己出发（多选没有单一节点可当起点）
+    const anchor = ctl.toWorld(sr.left + at.left + 10, sr.top + at.top + 10);
+    let moved = false;
+    try { el.setPointerCapture(pid); } catch { /* 指针已经没了 */ }
+    const stop = () => {
+      removeEventListener("pointermove", move); removeEventListener("pointerup", up);
+      removeEventListener("pointercancel", cancel); removeEventListener("keydown", esc, true);
+      try { el.releasePointerCapture(pid); } catch { /* 已经释放 */ }
+      abort.current = null;
+      liveRef.current = false;
+      setLive(false);
+    };
+    const cancel = () => { stop(); store.setUI({ conn: null }); };
+    abort.current = cancel;
+    const esc = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape") return;
+      ev.preventDefault(); ev.stopPropagation(); cancel();
+    };
+    const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 5) return;
+      if (!moved) { moved = true; setLive(true); }
+      // 和出线端口一致：指针下的节点，只要能成为每个选中节点的下游，就当落点（节点出 .drop 高亮）
+      const nodeEl = document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.(".node") as HTMLElement | null;
+      const hit = nodeEl?.dataset.id;
+      const doc = store.state.doc;
+      const over = hit && !ids.includes(hit) && effIds.every((from) => !connectBlock(doc, from, hit)) ? hit : null;
+      // 预览线仍只从加号拖到指针；压暗按有效源算
+      store.setUI({ conn: { id: effIds[0], rev: false, a: anchor, p: ctl.toWorld(ev.clientX, ev.clientY), sx, sy, over, sources: effIds } });
+    };
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      const c = store.state.ui.conn;
+      const over = c?.over || null;
+      stop(); store.setUI({ conn: null });
+      if (!moved) { openMenu(sx, sy); return; }
+      if (over) {
+        // 拖到节点上松手：和出线端口一样直接连，不新建节点；目标选中、源不再选中
+        const target = store.node(over); if (!target) return;
+        effIds.forEach((id) => connect(store, id, over, { quiet: true, select: false }));
+        store.setUI({ sel: new Set([over]), edge: null });
+        if (effIds.length > 1) store.toast(`已把 ${effIds.length} 个节点连成「${title(target)}」的输入`);
+        else { const src = store.node(effIds[0]); if (src) store.toast(`已连接：「${title(src)}」作为「${title(target)}」的第 ${inputsOf(store.state.doc, over).length} 个输入`); }
+        return;
+      }
+      // 空白处松手：和出线端口一样先弹「添加节点 · 自动连到…」，选完类型再在落点附近建下游节点
+      openMenu(ev.clientX, ev.clientY, ctl.toWorld(ev.clientX, ev.clientY));
+    };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+    addEventListener("pointercancel", cancel); addEventListener("keydown", esc, true);
+  };
+  return <button ref={addRef} type="button" className={"cn-add float" + (live ? " drag" : "")} title="拖出：拖到节点上连接 / 拖到空白处新建下游 / 点击：选择生成类型" aria-label="拖动连线或新建下游节点"
+    style={{ left: at.left, top: at.top, scale: 1 }} onPointerDown={onPointerDown}><Icon name="plus" animateOnHover={false} /></button>;
 }
 
 function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; running: boolean; progress: number; style: React.CSSProperties; refEl: React.RefObject<HTMLDivElement | null> }) {
@@ -142,11 +309,16 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
     const r = el.getBoundingClientRect(); void saveNodeToLibrary(ctl, node, { x: r.left, y: r.bottom + 6 });
   };
   const edit = (k: string, el: Element) => window.dispatchEvent(new CustomEvent("cn:editor", { detail: { kind: k, id: node.id, anchor: el } }));
+  // 草稿两段式：只有 caps 声明 draft 的模型才有入口；草稿任务 id 来自返回体，出成片时只发它 + 目标档位
+  const draftModel = node.kind === "video" ? store.modelOf(node) : undefined;
+  const draftTaskId = node.kind === "video" ? String(out?.draftTaskId || "").trim() : "";
+  const draftFinals = draftFinalResolutions(draftModel);
+  const finalRunning = running && !!(g?.params as VideoParams | undefined)?.draftTaskId;
   let items: React.ReactElement[] = [];
   // 生成中：视频节点参数条全禁用，工具条里只有「截帧」还能用（对齐 TapNow）；其它类型保持只有「停止」
   if (running) items = node.kind === "video"
-    ? [B("frame", "frame", "截帧（快捷键 1）", "截帧"), <span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))]
-    : [<span key="e" className="est" data-running="1">生成中</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))];
+    ? [B("frame", "frame", "截帧（快捷键 1）", "截帧"), <span key="e" className="est" data-running="1" {...(finalRunning ? { "data-final": "1" } : {})}>{finalRunning ? "成片生成中" : "生成中"}</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))]
+    : [<span key="e" className="est" data-running="1">{finalRunning ? "成片生成中" : "生成中"}</span>, B("stop", "x", "停止生成", "", () => stopNode(store, node.id))];
   // 图片工具条只留 局部重绘 / 调色 / 无损改图 + 更多；裁剪 / 旋转、涂鸦（文字 / 马赛克）、多角度、重打光、白膜、
   // 拆分图层、快速切分、扩图 / 擦除 / 标注 / 抠图 / 旋转 / 增强 / 调整像素都在「更多」里（registry.tsx MoreMenu，
   // 和条上按钮走同一套 openEditor / setEd 路由；2.0.08 收窄时漏过裁剪、涂鸦，已补回）。
@@ -156,13 +328,15 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
     // TapNow 视频工具栏：修剪 / 智能切镜 / AI 编辑（替换·移除·续写·重拍）/ 截帧 / 更多 ┃ 标签 ┃ 保存素材库 / 下载 / 全屏
     // 草稿模式出的低清版本最前面多一个「出成片」
     ...(segRetakeOf(node) ? [B("segreplace", "upload", "用这一版替换原视频：原节点多一个版本（可切回），用到它的剪辑时间线跟着换", "替换原视频", () => replaceSourceWithTake(store, node.id))] : []),
-    ...(out.draft ? [B("final", "sparkle", "按最高清晰度重新生成成片", "出成片", () => void draftToFinal(store, node))] : []),
+    ...(out.draft ? [B("final", "sparkle", draftTaskId && draftFinals.length
+      ? `草稿出成片：只发草稿任务 id + 目标档位（${draftFinals.join(" / ")}）；草稿 3 天内有效，可多次出`
+      : "按最高清晰度重新生成成片", "出成片", (el) => openDraftFinal(store, node, el, draftTaskId, draftFinals))] : []),
     B("trim", "scissors", "修剪：把使用区间裁成新视频节点", "", () => void trimToNode(store, node)),
     B("smartclip", "split", "智能切镜：按镜头拆成多个节点", "", () => void smartClip(store, node)),
     B("segretake", "camera", "片段重拍：截出要改的片段重新生成，结果放在右边的新节点", "片段重拍", () => { createSegRetake(ctl, node); }),
     <FloatMenuButton key="vai" icon="wand" label="AI 编辑" title="AI 编辑：替换 / 移除 / 续写 / 重拍" data={{ "data-tb": "vai", "data-tip": "AI 编辑：替换 / 移除 / 续写 / 重拍" }} onClick={(e) => videoAiMenu(store, node, e.currentTarget)} />,
     B("frame", "frame", "截帧（快捷键 1）", "截帧"),
-    B("parse", "wand", "解析：反推画面的提示词，自动生成一个文本节点", "解析", () => void parseMedia(ctl, node)),
+    B("parse", "wand", "解析：把视频拆成分镜表（每镜首帧、景别、运镜…），放在右边并连线", "解析", () => void parseMedia(ctl, node)),
     <FloatMenuButton key="vmore" icon="more" label="更多" title="更多" data={{ "data-tb": "vmore", "data-tip": "更多" }} onClick={(e) => videoMore(ctl, node, e.currentTarget)} />,
     <span key="s1" className="vsep" />, tagBtn(), <span key="s2" className="vsep" />,
     B("lib", "libadd", "保存到素材库", "", (el) => saveToLibrary(el)),
@@ -175,14 +349,45 @@ function Toolbar({ node, running, progress, style, refEl }: { node: CanvasNode; 
   // 多维表格：文件类操作（复制 / 导入 / 全屏）放顶部浮条，表内编辑（加行加列 / 分镜出片）留在节点底部 .tfoot。
   // 复制与导入走自定义事件交回 TableNodeBody，那里才有 CsvImportDialog 和 csvFromTable。
   else if (node.kind === "table") items = [
+    B("table-full", "expand", "全屏编辑表格", "全屏", () => window.dispatchEvent(new CustomEvent("cn:tabledoc", { detail: node.id }))),
     B("csv-copy", "copy", "把整张表（不含输入通道列）复制成 CSV，第一行是列名", "复制 CSV", () => window.dispatchEvent(new CustomEvent("cn:tablecsv", { detail: { id: node.id, action: "copy" } }))),
     B("csv-import", "upload", "粘贴 CSV / TSV 替换整张表（保留标题、输入通道模式和列用途）", "导入 CSV", () => window.dispatchEvent(new CustomEvent("cn:tablecsv", { detail: { id: node.id, action: "import" } }))),
-    B("table-full", "expand", "全屏编辑表格", "全屏编辑", () => window.dispatchEvent(new CustomEvent("cn:tabledoc", { detail: node.id }))),
+    // 解析出来的分镜表（连着原视频）：再多两颗「重新解析」「定位原视频」
+    ...(() => {
+      const src = sourceVideoOf(store, node.id);
+      return src ? [<span key="s2" className="vsep" />,
+        B("reparse", "redo", "重新解析：按当前解析设置再解析一次原视频，生成一张新表", "重新解析", () => void parseMedia(ctl, src)),
+        B("locate-src", "link", "定位原视频", "定位原视频", () => ctl.focusNode(src.id))] : [];
+    })(),
   ];
   if (!items.length) return null;
   // 位置仍由 SelectionUI 用屏幕坐标算（pos.tb），这里只换外观/动效；
   // #ntb 在 .cn-root 层、不在画布 world 缩放下，所以显式 scale:1（别被 --zinv 放大）
   return <FloatMenuBar id="ntb" ref={refEl} show compensate className="float enter" style={{ ...style, scale: 1 }} onPointerDown={(e) => e.stopPropagation()}>{items}</FloatMenuBar>;
+}
+
+/**
+ * 「出成片」入口：草稿任务完成后列 caps 声明的成片档（1080p / 4k），选中就新建一个成片节点，
+ * 请求只发草稿任务 id + 目标档位；原草稿与它的结果保留，同一草稿可反复出片（各自独立计费）。
+ */
+function openDraftFinal(store: CanvasStore, node: CanvasNode, anchor: Element, draftTaskId: string, finals: string[]) {
+  const m = store.modelOf(node);
+  if (!draftSupported(m)) { void draftToFinal(store, node); return; }
+  if (!draftTaskId || !finals.length) {
+    store.toast(draftTaskId ? "该模型没有声明成片档位，暂时出不了成片（以服务端能力为准）" : "这个草稿没拿到草稿任务 id（旧版草稿）：只能按最高清晰度重新生成", 5600);
+    void draftToFinal(store, node);
+    return;
+  }
+  const days = draftExpiresDays(m);
+  openPop(anchor, (close) => <>
+    <div className="mh">出成片 · {m?.name || "草稿"}</div>
+    {finals.map((res) => <button key={res} className="mi" data-draft-final={res} onClick={() => { close(); void draftToFinalTask(store, node, draftTaskId, res); }}>
+      <span className="ic"><Icon name="sparkle" size="s" /></span>
+      <span>{res}<span className="d">{res === "4k" ? "4K 通道需已开通；不支持时改用 1080p 重试" : "默认成片档"}</span></span>
+      <span className="k">{res}</span>
+    </button>)}
+    <div className="mh">{days ? "草稿 " + days + " 天内有效" : "草稿在有效期内"} · 每次出成片是独立任务、分别计费，可重复出</div>
+  </>, "down", "left");
 }
 
 /* ---------------- 生成面板 ---------------- */
@@ -254,7 +459,7 @@ export function GenPanel({ node, runOpts, beforeSend }: { node: CanvasNode; /** 
   if (m && kind === "image" && imgIns.length && !m.i2i) warns.push(`${m.name} 不支持参考图，${imgIns.length} 张图片输入不会发送。`);
   else if (m && kind === "image" && imgIns.length > (m.maxRefs || 0)) warns.push(`${m.name} 最多接收 ${m.maxRefs} 张参考图，按连线顺序只发送前 ${m.maxRefs} 张。`);
   if (m && kind === "text" && imgIns.length && !m.vision) warns.push(`${m.name} 不读图片，${imgIns.length} 张图片输入会被忽略。`);
-  if (kind === "video") { const vp = p as VideoParams; if (["视频编辑", "视频延长", "参考视频生视频"].includes(vp.mode) && !ins.some((x) => x.node.kind === "video") && !tables.length && !(m && mentionedIds(g.prompt).has(node.id) && selfInputRole(kind, p, m, imgIns.length))) warns.push(`「${vp.mode}」需要连入一段视频。`); if (vp.mode === "数字人" && !(imgIns.length && ins.some((x) => x.node.kind === "audio"))) warns.push("「数字人」需要 1 张人像和 1 段音频。"); if (imgIns.length && vp.mode === "文生视频") warns.push("当前是文生视频，图片输入不会发送。切到「首帧」可以用上第 1 张图。"); }
+  if (kind === "video") { const vp = p as VideoParams; if (["视频编辑", "视频延长", "参考视频生视频"].includes(vp.mode) && !ins.some((x) => x.node.kind === "video") && !tables.length && !(m && mentionedIds(g.prompt).has(node.id) && selfInputRole(kind, p, m, imgIns.length))) warns.push(`「${vp.mode}」需要连入一段视频。`); if (vp.mode === "数字人" && !(imgIns.length && ins.some((x) => x.node.kind === "audio"))) warns.push("「数字人」需要 1 张人像和 1 段音频。"); if (imgIns.length && vp.mode === "文生视频") warns.push("当前是文生视频，图片输入不会发送。切到「首帧」可以用上第 1 张图。"); if (m?.mjVideo && !imgIns.length) warns.push("Midjourney 图生视频需要一张首帧图：把一张图片连到「首帧」（文档不支持文生视频）。"); }
   // 音频节点的输入现在会带一条「来源」连线（媒体节点再生成时自己也是输入），但音频模型还不收音频 / 图片参考
   if (kind === "audio" && ins.some((x) => x.node.kind !== "text" && x.node.kind !== "table")) warns.push("音频模型还不支持把音频 / 图片输入当参考：这条连线只表示来源，不会随请求发送。");
   // 提示词里 @ 了本节点，但当前模型 / 生成方式不收自己这条结果：说清楚，别让人以为发了
@@ -267,6 +472,10 @@ export function GenPanel({ node, runOpts, beforeSend }: { node: CanvasNode; /** 
     }
   }
   refsIn(g.prompt, ins).missing.forEach((r) => warns.push(`找不到引用「@${r}」：确认上游节点里有这一段。`));
+  // 长图 webpage 模式的参考图必须走 image_with_roles，后端一律 400：这里先把话说清楚，别等扣费失败
+  if (kind === "image" && String((p as ImageParams).skill || "").toLowerCase() === "webpage" && imgIns.length) {
+    warns.push(`webpage（网页长图）暂不支持参考图，后端会直接报错：改成「电商长图」或去掉 ${imgIns.length} 张参考图。`);
+  }
 
   const set = (patch: Partial<typeof p>) => store.patchGen(node.id, (gg) => ({ params: { ...gg.params, ...patch } as typeof p }));
   const send = () => { commitPrompt(draft); if (beforeSend && !beforeSend()) return; if (segRetakeOf(node) && !segRetakeReady(store, node.id)) return; runNode(store, node.id, runOpts).catch((err) => { console.error(err); store.toast("生成出错：" + (err instanceof Error ? err.message : String(err))); }); };
@@ -314,7 +523,10 @@ export function GenPanel({ node, runOpts, beforeSend }: { node: CanvasNode; /** 
     /** 只出提示词的模型（Context-IR）：不给视频参数，改成一行说明 */
     const promptOnly = promptOnlyModel(m);
     const imgs = ins.filter((x) => x.node.kind === "image");
-    const hasLast = (m?.modes || []).includes("首尾帧");
+    // MJ 图生视频：上游只有 image_to_video，但 caps 声明 supports_end_frame 时也给尾帧入口
+    // （第 2 张图按 last_frame 发 end_url，后端自动升级 start_end_* 档位）
+    const mjVideo = m?.mjVideo || null;
+    const hasLast = (m?.modes || []).includes("首尾帧") || mjVideo?.supportsEndFrame === true;
     // 首/尾帧只放模式真正指定成帧的图片（rolesFor 按生成方式给角色）；其它连进来的图片和视频
     // 都当作普通输入，在首尾帧旁边以缩略图列出，不再顶替帧位。
     const first = imgs.find((x) => roles.get(x.edge.id) === "first_frame");
@@ -374,7 +586,15 @@ export function GenPanel({ node, runOpts, beforeSend }: { node: CanvasNode; /** 
       </div>
       <PromptEditor node={node} className="vp-prompt" placeholder={ph} value={draft} onChange={onPrompt} onCommit={commitPrompt} onSend={send} onEscape={() => store.setUI({ sel: new Set(), pick: null })} />
       {promptOnly ? <div className="gp-note" data-prompt-only role="note"><Icon name="brain" size="s" /><span>该模型只返回提示词，不产视频：需再把结果喂给 MiniMax-H3 生成视频。</span></div> : null}
+      {mjVideo ? <div className="gp-note" data-mj-video-note role="note"><Icon name="image" size="s" /><span>{[
+        "Midjourney 图生视频：首帧图必填（不支持文生视频），只收 1 张",
+        mjVideo.supportsEndFrame ? "连一张「尾帧」会自动切到首尾帧模式（视频规格升到首尾帧档）" : "",
+        mjVideo.durationFixed ? "时长固定约 " + (Number(mjVideo.durationSeconds) || 5) + " 秒" : "",
+        "复用 MJ 出图任务图（task_id + 第 0–3 张）待后续：现在只支持直接传首帧图",
+      ].filter(Boolean).join("；")}</span></div> : null}
+      {!promptOnly && vp.draftTaskId ? <div className="gp-note" data-draft-final-note role="note"><Icon name="video" size="s" /><span>成片步：只发草稿任务 id + {videoResLabel(vp.res)}；提示词 / 参考素材 / 时长 / 比例 / seed 都沿用草稿，不会重发</span></div> : null}
       {tables.length ? <BatchPanel node={node} /> : null}
+      {draftActive(vp, m) ? <div className="gp-note" data-draft-note role="note"><Icon name="video" size="s" /><span>{["草稿 " + draftResolution(m) + " · 成片可选 " + (draftFinalResolutions(m).join(" 或 ") || "（未声明）") + (draftExpiresDays(m) ? " · 草稿 " + draftExpiresDays(m) + " 天有效" : " · 草稿有效期以服务端为准") + "；草稿出片后在节点上点「出成片」选档位", "其它分辨率已禁用（草稿阶段固定该档）"].join("；")}</span></div> : null}
       {unm.size ? <UnrefWarn node={node} ids={[...unm]} onAdd={() => commitPrompt(draft)} /> : null}
     {warns.map((w) => <div key={w} className="gp-warn"><Icon name="alert" size="s" /><span>{w}</span></div>)}
       {preview ? <div className="gp-prev"><pre>{JSON.stringify(previewOf(ctl, node), null, 2)}</pre></div> : null}
@@ -388,7 +608,7 @@ export function GenPanel({ node, runOpts, beforeSend }: { node: CanvasNode; /** 
           <i>·</i>
           <span data-vval="ratio">{videoRatioLabel(vp.ratio)}</span>
           <i>·</i>
-          <span data-vval="res">{vp.draft && resRange(m) ? `草稿 ${resRange(m)!.low}` : videoResLabel(vp.res)}</span>
+          <span data-vval="res">{draftActive(vp, m) ? `草稿 ${draftResolution(m)}` : videoResLabel(vp.res)}</span>
           <i>·</i>
           <span data-vval="dur">{videoDurLabel(vp.dur)}</span>
         </button>}
@@ -409,7 +629,7 @@ export function GenPanel({ node, runOpts, beforeSend }: { node: CanvasNode; /** 
   if (kind === "audio") { const ap = p as AudioParams; foot.push(pill("model", <><Icon name="sparkle" size="s" />{m?.name || (store.modelsOf(kind).length ? "选择模型" : "未配置模型")}<Icon name="down" size="xs" /></>), vline("v1"), pill("akind", <><Icon name="audio" size="s" />{ap.kind}</>), vline("v2"), pill("adur", <>{ap.dur}</>)); }
   // 图片 / 文本：TapNow 式单行文本（模型 ｜ 比例 · 尺寸 · 次数 · 风格 · 摄影机），点哪段开哪段弹层，能力不丢
   // 没模型时节段灰显（仍可点开看有哪些档位，弹层里的控件是禁用的）
-  const seg = (k: string, label: React.ReactNode, on = false, muted = !m) => <button key={"seg-" + k} className={"gp-seg" + (on ? " on" : "") + (muted ? " muted" : "")} data-p={k} data-seg={k} title={muted ? "还没有可用的模型，添加后可调" : undefined} onClick={(e) => paramPop(ctl, node, k, e.currentTarget)}>{label}</button>;
+  const seg = (k: string, label: React.ReactNode, on = false, muted = !m, disabled = false) => <button key={"seg-" + k} className={"gp-seg" + (on ? " on" : "") + (muted ? " muted" : "")} data-p={k} data-seg={k} disabled={disabled} title={muted ? "还没有可用的模型，添加后可调" : disabled ? "系列模式开启中，张数由系列张数决定" : undefined} onClick={(e) => paramPop(ctl, node, k, e.currentTarget)}>{label}</button>;
   const gdot = (k: string) => <i key={"gd-" + k} className="gp-dot">·</i>;
   const gline: React.ReactNode[] = [<button key="seg-model" className="gp-seg model" data-p="model" data-seg="model" onClick={(e) => paramPop(ctl, node, "model", e.currentTarget)}>{m?.name || (store.modelsOf(kind).length ? "选择模型" : "未配置模型")}</button>];
   if (kind === "image") {
@@ -427,7 +647,22 @@ export function GenPanel({ node, runOpts, beforeSend }: { node: CanvasNode; /** 
     // 透明背景的入口在「比例 · 尺寸」弹层里（RatioPop），底栏只保留一个「 · 透明」状态摘要
     const bgOn = ip.background === "transparent";
     const gifOn = outputFormatForRequest(ip.outputFormat) === "gif";
-    gline.push(<span key="gp-bar1" className="gp-bar" />, seg("ratio", <>{/^(auto|adaptive|自适应)$/i.test(ip.ratio) ? "原图比例" : ip.ratio} · {ip.size}{!bgOn && formats.length ? " · " + outputFormatShortLabel(ip.outputFormat) : ""}{bgOn ? " · 透明" : ""}</>), gdot("c1"), seg("count", <>{ip.count}×</>));
+    const skills = (m?.skill || []).map((value) => String(value).toLowerCase());
+    const skill = skills.length ? (skills.includes(String(ip.skill || "").toLowerCase()) ? String(ip.skill).toLowerCase() : skills[0]) : "";
+    const lengths = (m?.length || []).map((value) => String(value).toLowerCase());
+    const length = lengths.includes(String(ip.length || "").toLowerCase()) ? String(ip.length).toLowerCase() : (lengths.includes("medium") ? "medium" : lengths[0] || "");
+    const seriesOption = seriesCounts(m);
+    const seriesCount = Math.floor(Number(ip.seriesImages)) || 0;
+    const seriesOn = seriesOption.includes(seriesCount);
+    gline.push(<span key="gp-bar1" className="gp-bar" />);
+    // send_size=false 的模型（kling-v4-long-image）：后端不收 size / aspect_ratio，面板不为它渲染比例 / 尺寸
+    if (m?.sendSize !== false) {
+      gline.push(seg("ratio", <>{/^(auto|adaptive|自适应)$/i.test(ip.ratio) ? "原图比例" : ip.ratio} · {ip.size}{!bgOn && formats.length ? " · " + outputFormatShortLabel(ip.outputFormat) : ""}{bgOn ? " · 透明" : ""}</>), gdot("c1"));
+    }
+    gline.push(seg("count", <>{ip.count}×</>, false, !m, seriesOn));
+    if (skills.length) gline.push(gdot("cskill"), seg("skill", <>用途 {LONG_SKILL_LABEL[skill] || skill}</>, true));
+    if (lengths.length && skill === "ecommerce") gline.push(gdot("clength"), seg("length", <>{LONG_LENGTH_LABEL[length] || "篇幅"}</>));
+    if (seriesOption.length) gline.push(gdot("cseries"), seg("series", <>{seriesOn ? `系列 ${seriesCount} 张` : "系列模式"}</>, seriesOn));
     if (gifOn) gline.push(gdot("cgif"), seg("gifframes", <>{gifFrameCountFor(ip.frameCount, m)} 帧 · {gifFrameDurationFor(ip.frameDuration, m)}ms</>));
     if (m?.mj) gline.push(gdot("cmj"), seg("mj", <>{mjSummary(ip.mj)}</>, !!(ip.mj && (ip.mj.version || ip.mj.hd || typeof ip.mj.stylize === "number" || (ip.mj.speed && ip.mj.speed !== "fast")))));
     // 风格 / 摄影机按「模型真的会转发」才渲染（没有能力就不给入口，不置灰）
@@ -462,11 +697,11 @@ export function GenPanel({ node, runOpts, beforeSend }: { node: CanvasNode; /** 
           <span className="ord">{x.order + 1}</span>
           <span className="x" data-rm={x.edge.id} onPointerDown={(e) => { e.stopPropagation(); store.removeEdge(x.edge.id); afterInputsChanged(store, node.id); store.toast(`已移除输入「${title(x.node)}」`); }}><Icon name="x" size="xs" /></span>
         </button>); })}
-      <button className="sq tipT" data-p="addin" data-tip="添加输入" onClick={(e) => openPop(e.currentTarget, (close) => <>
+      {kind === "image" && String((p as ImageParams).skill || "").toLowerCase() === "webpage" ? null : <button className="sq tipT" data-p="addin" data-tip="添加输入" onClick={(e) => openPop(e.currentTarget, (close) => <>
         <button className="mi" onClick={() => { close(); store.setUI({ pick: node.id }); store.toast("点画布上的节点，把它连成这个节点的输入；Esc 结束"); }}><Icon name="cursor" size="s" />从画布选择</button>
         <button className="mi" onClick={() => { close(); window.dispatchEvent(new CustomEvent("cn:upload", { detail: { at: { x: node.x - 360, y: node.y + 120 }, linkTo: node.id } })); }}><Icon name="upload" size="s" />上传图片</button>
         <button className="mi" onClick={() => { close(); store.setUI({ drawer: "assets" }); window.dispatchEvent(new CustomEvent("cn:lib-link", { detail: node.id })); }}><Icon name="folder" size="s" />从素材库选择</button>
-      </>)}><Icon name="plus" size="s" /></button>
+      </>)}><Icon name="plus" size="s" /></button>}
       <span className="grow" />
       <button className={"linkbtn" + (preview ? " on" : "")} data-p="preview" onClick={() => store.setUI({ preview: !preview })}><Icon name="text" size="xs" />请求预览</button>
       {peekView}
@@ -651,6 +886,26 @@ async function applyAudio(ctl: Ctl, node: CanvasNode, source: CanvasNode) {
   }
 }
 
+/** 「更多 › 解析设置」：选分镜模板（本机记住），「保存并解析」直接按新模板跑一次工具条上的「解析」 */
+function parseSettingsPop(ctl: Ctl, node: CanvasNode, anchor: Element) {
+  openPop(anchor, (close) => <ParseSettingsPanel onDone={(go) => { close(); if (go) void parseMedia(ctl, node); }} />);
+}
+function ParseSettingsPanel({ onDone }: { onDone: (go: boolean) => void }) {
+  const [tpl, setTpl] = useState<ParseTemplate>(() => getParseSettings().template);
+  const save = (go: boolean) => { setParseSettings({ template: tpl }); onDone(go); };
+  return <div data-parse-settings style={{ width: 300 }}>
+    <div className="mh">分镜模板</div>
+    {PARSE_TEMPLATES.map((t) => <button key={t.id} className={"mi" + (tpl === t.id ? " on" : "")} data-tpl={t.id} onClick={() => setTpl(t.id)}>
+      <Icon name="grid" size="s" /><span style={{ flex: 1, display: "flex", flexDirection: "column" }}>{t.label}<span className="d">{t.desc}</span></span>
+    </button>)}
+    <div className="msep" />
+    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", padding: "6px 6px 2px" }}>
+      <button className="btn" data-parse-save onClick={() => save(false)}>保存</button>
+      <button className="btn solid" data-parse-go onClick={() => save(true)}>保存并解析</button>
+    </div>
+  </div>;
+}
+
 /** 视频结果动作的「更多」：首帧/尾帧截帧、设为视频封面、应用到画布、下载、全屏（对齐 TapNow） */
 function videoMore(ctl: Ctl, node: CanvasNode, anchor: Element) {
   const store = ctl.store;
@@ -661,6 +916,7 @@ function videoMore(ctl: Ctl, node: CanvasNode, anchor: Element) {
       <button className="mi" data-tbk="firstframe" onClick={fire("firstframe")}><Icon name="frame" size="s" /><span style={{ flex: 1 }}>首帧</span><span className="k">2</span></button>
       <button className="mi" data-tbk="lastframe" onClick={fire("lastframe")}><Icon name="frame" size="s" /><span style={{ flex: 1 }}>尾帧</span><span className="k">3</span></button>
       <button className="mi" data-tbk="parseframe" onClick={() => { close(); void parseMediaFrame(ctl, node); }}><Icon name="wand" size="s" /><span style={{ flex: 1 }}>解析当前帧</span><span className="k">反推提示词</span></button>
+      <button className="mi" data-tbk="parsesettings" onClick={() => { close(); parseSettingsPop(ctl, node, anchor); }}><Icon name="grid" size="s" /><span style={{ flex: 1 }}>解析设置</span><span className="k">{PARSE_TEMPLATES.find((t) => t.id === getParseSettings().template)?.label}</span></button>
       <div className="msep" />
       <button className="mi" data-tbk="setcover" onClick={fire("setcover")}><Icon name="star" size="s" />设为视频封面</button>
       <button className="mi" data-tbk="applycanvas" onClick={fire("applycanvas")}><Icon name="libadd" size="s" />应用到画布</button>
@@ -760,6 +1016,17 @@ function BatchPanel({ node }: { node: CanvasNode }) {
   </div>;
 }
 function RowThumb({ src, kind }: { src: string; kind: string }) { return <ThumbImg src={src} width={28} fallback={<i><Icon name={kind === "video" ? "video" : kind === "audio" ? "audio" : "image"} size="xs" /></i>} />; }
+
+/** 长图用途 / 篇幅的界面文案（取值来自 caps：ecommerce/webpage、short/medium/long） */
+const LONG_SKILL_LABEL: Record<string, string> = { ecommerce: "电商长图", webpage: "网页长图" };
+const LONG_LENGTH_LABEL: Record<string, string> = { short: "短篇", medium: "中篇", long: "长篇" };
+/** 系列模式的张数候选：caps.series 的 min–max（kling-v4-image 2–4） */
+function seriesCounts(m?: ModelSpec): number[] {
+  if (!m?.series) return [];
+  const out: number[] = [];
+  for (let n = Math.max(1, m.series.min); n <= m.series.max; n++) out.push(n);
+  return out;
+}
 
 /* ---------------- 参数弹层 ---------------- */
 function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, anchor: Element) {
@@ -913,25 +1180,73 @@ function paramPop(ctl: ReturnType<typeof useCtl>, node: CanvasNode, k: string, a
       })}
     </>;
   });
+  if (k === "skill") return pop((close) => {
+    const skills = (mm.skill || []).map((value) => String(value).toLowerCase());
+    const currentSkill = String((cur().g.params as ImageParams).skill || "").toLowerCase();
+    const picked = skills.includes(currentSkill) ? currentSkill : skills[0];
+    return <>
+      <div className="mh">用途 · {mm.name}</div>
+      {skills.map((value) => <button key={value} className={"mi" + (picked === value ? " on" : "")} data-skill={value} aria-pressed={picked === value} onClick={() => { close(); set(value === "webpage" ? { skill: value, length: undefined } : { skill: value }); }}>
+        <span className="ic"><Icon name="layout" size="s" /></span>
+        <span>{LONG_SKILL_LABEL[value] || value}<span className="d">{value === "webpage" ? "网页长图：暂不支持参考图" : "电商长图：可用参考图（≤" + (mm.maxRefs || 3) + " 张）"}</span></span>
+        {picked === value ? <span className="k"><Icon name="check" size="s" /></span> : null}
+      </button>)}
+    </>;
+  });
+  if (k === "length") return pop((close) => {
+    const lengths = (mm.length || []).map((value) => String(value).toLowerCase());
+    const currentLength = String((cur().g.params as ImageParams).length || "").toLowerCase();
+    const picked = lengths.includes(currentLength) ? currentLength : (lengths.includes("medium") ? "medium" : lengths[0]);
+    return <>
+      <div className="mh">篇幅 · 电商长图</div>
+      {lengths.map((value) => <button key={value} className={"mi" + (picked === value ? " on" : "")} data-length={value} aria-pressed={picked === value} onClick={() => { close(); set({ length: value }); }}>
+        <span className="ic"><Icon name="list" size="s" /></span>
+        <span>{LONG_LENGTH_LABEL[value] || value}{value === "medium" ? <span className="d">默认</span> : null}</span>
+        {picked === value ? <span className="k"><Icon name="check" size="s" /></span> : null}
+      </button>)}
+    </>;
+  });
+  if (k === "series") return pop((close) => {
+    const counts = seriesCounts(mm);
+    const currentSeries = Math.floor(Number((cur().g.params as ImageParams).seriesImages)) || 0;
+    if (!counts.length) return null;
+    return <>
+      <div className="mh">系列模式 · {counts[0]}–{counts[counts.length - 1]} 张同一组</div>
+      {counts.map((count) => <button key={count} className={"mi" + (currentSeries === count ? " on" : "")} data-series={count} aria-pressed={currentSeries === count} onClick={() => { close(); set({ seriesImages: count }); }}>
+        <span className="ic"><Icon name="layers" size="s" /></span>
+        <span>{count} 张<span className="d">同一个系列连着出，不按张数拆任务</span></span>
+        {currentSeries === count ? <span className="k"><Icon name="check" size="s" /></span> : null}
+      </button>)}
+      <div className="msep" />
+      <button className={"mi" + (currentSeries ? "" : " on")} data-series="off" aria-pressed={!currentSeries} onClick={() => { close(); set({ seriesImages: undefined }); }}>
+        <span className="ic"><Icon name="x" size="s" /></span>
+        <span>关闭系列模式<span className="d">按张数一次出</span></span>
+        {currentSeries ? null : <span className="k"><Icon name="check" size="s" /></span>}
+      </button>
+    </>;
+  });
   if (k === "ratio") return pop(() => <RatioPop node={node} model={mm} disabled={dis} />);
   if (k === "mj") return pop(() => <MjPop node={node} model={mm} disabled={dis} />);
   if (k === "gifframes") return pop(() => <GifFramePop node={node} model={mm} disabled={dis} />, "gif-frame-pop");
   if (k === "count") return pop((close) => {
-    const options = mm.batchUnknown ? [1] : [4, 2, 1];
+    // 张数选项按 caps 的 n_max 展开（modelCaps.ts 的 ui.batch），从多到少排；上限未知时只给 1
+    const options = mm.batchUnknown ? [1] : [...(mm.batch?.length ? mm.batch : [1])].sort((a, b) => b - a);
     return <><div className="mh">一次生成几张</div>{options.map((c) => <button key={c} className={"mi" + ((cur().g.params as ImageParams).count === c ? " on" : "")} disabled={dis || !mm.batch?.includes(c)} onClick={() => { close(); set({ count: c }); }}>{c}×<span className="k">{!dis && mm.batch?.includes(c) ? (c > 1 ? (store.state.ui.batchMode === "stack" ? "堆叠在本节点" : "铺开成新节点") : "") : "该模型不支持"}</span></button>)}
       {/* MJ 上游一次就回 4 张单图、只扣一次费：这里选的只是「取几张进画布」，不是发几次任务 */}
       {mm.mj ? <div className="mh">上游一次出 4 张候选 + 1 张四宫格，这里决定入画布几张；四宫格免费附带</div> : null}
+      {seriesCounts(mm).includes(Math.floor(Number((cur().g.params as ImageParams).seriesImages)) || 0) ? <div className="mh">系列模式开启中：张数由「系列模式」决定，这里选的张数不会下发</div> : null}
     </>;
   });
   if (k === "vtimes") return pop((close) => <><div className="mh">一次生成几条</div>{[4, 2, 1].map((c) => <button key={c} className={"mi" + (((cur().g.params as VideoParams).times || 1) === c ? " on" : "")} disabled={dis || !(mm.times || [1]).includes(c)} onClick={() => { close(); set({ times: c }); }}>{c}×<span className="k">{!dis && (mm.times || [1]).includes(c) ? (c > 1 ? "每条单独计费" : "") : "该模型不支持"}</span></button>)}</>);
-  if (k === "mode") return pop((close) => <><div className="mh">生成方式 · 会按输入自动选择</div>{(Object.keys(VMODES) as Array<keyof typeof VMODES>).map((x) => { const ok = (mm.modes || []).includes(x); return <button key={x} className={"mi" + ((cur().g.params as VideoParams).mode === x ? " on" : "")} disabled={!ok || dis} onClick={() => { close(); set({ mode: x }); }}><span style={{ flex: 1 }}>{x}<span className="d">{ok ? (x === "参考生视频" ? "最多 " + mm.maxRefs + " 张参考图" : VMODES[x].need) : mm.name + " 不支持"}</span></span><span className="k tnum">{VMODES[x].api}</span></button>; })}</>);
+  // 生成方式只列这个模型真支持的：caps.modes 里没有的（如 magi-2 的视频编辑 / 延长）不渲染，更不下发
+  if (k === "mode") return pop((close) => <><div className="mh">生成方式 · 会按输入自动选择</div>{((Object.keys(VMODES) as Array<keyof typeof VMODES>).filter((x) => (mm.modes || []).includes(x))).map((x) => <button key={x} className={"mi" + ((cur().g.params as VideoParams).mode === x ? " on" : "")} disabled={dis} onClick={() => { close(); set({ mode: x }); }}><span style={{ flex: 1 }}>{x}<span className="d">{x === "参考生视频" ? "最多 " + mm.maxRefs + " 张参考图" : VMODES[x].need}</span></span><span className="k tnum">{VMODES[x].api}</span></button>)}</>);
   if (k === "vratio") return pop(() => <VRatioPop node={node} m={mm} disabled={dis} />);
   // 视频参数是最高的一层（方式 / 分辨率 / 草稿 / 比例 / 时长 / 音频），单独放宽高度上限，别被 420 截掉
   if (k === "vset") return pop(() => <VideoSetPop node={node} m={mm} disabled={dis} />, "vset-pop");
-  if (k === "vres") { const rr = resRange(mm); const vp0 = cur().g.params as VideoParams; const list = mm.res || []; return pop((close) => <>
-    <div className="mh">分辨率</div>
-    <OptCards cols={list.length} items={list.map((r) => ({ key: r, label: r, on: vp0.res === r && !vp0.draft, disabled: dis, pick: () => { close(); set({ res: r, draft: false }); } }))} />
-    <DraftRow on={!!vp0.draft} disabled={dis} range={rr} onToggle={() => { close(); set({ draft: !vp0.draft }); }} />
+  if (k === "vres") { const vp0 = cur().g.params as VideoParams; const list = mm.res || []; const draftOn = draftActive(vp0, mm); const fixed = draftResolution(mm); return pop((close) => <>
+    <div className="mh">分辨率{draftOn ? "（草稿阶段固定 " + fixed + "）" : ""}</div>
+    <OptCards cols={list.length} items={list.map((r) => ({ key: r, label: r, on: draftOn ? r === fixed : vp0.res === r, disabled: dis || (draftOn && r !== fixed), pick: () => { close(); set({ res: r }); } }))} />
+    {draftSupported(mm) ? <DraftRow on={draftOn} disabled={dis} res={fixed} finals={draftFinalResolutions(mm)} expiresDays={draftExpiresDays(mm)} onToggle={() => { close(); set({ draft: !vp0.draft }); }} /> : null}
   </>); }
   if (k === "dur") return pop(() => <DurPop node={node} m={mm} disabled={dis} />);
   if (k === "vgenmode") return pop((close) => <><div className="mh">生成模式</div><div className="seg wrap">{(mm.genModes || []).map((x) => <button key={x} className={(cur().g.params as VideoParams).genMode === x ? "on" : ""} disabled={dis} onClick={() => { close(); set({ genMode: x }); }}>{x}</button>)}</div></>);
@@ -966,11 +1281,13 @@ function useSourceBox(node: CanvasNode, kind: GenKind): SourceBox | null {
  * 右侧用画布统一的胶囊开关（`.sw`：36×20 胶囊 + 16px 圆钮，开态走 --solid），
  * 和「记忆开关 / 技能启用 / 广角镜头 / 锁定比例」是同一个控件；行本身也可以点。
  */
-function DraftRow({ on, disabled = false, range, onToggle }: { on: boolean; disabled?: boolean; range?: { low: string; high: string } | null; onToggle: () => void }) {
-  const caption = range ? `先按 ${range.low} 出草稿，满意后再按 ${range.high} 出成片` : "该模型只有一档分辨率";
-  const locked = disabled || !range;
+function DraftRow({ on, disabled = false, res, finals, expiresDays, onToggle }: { on: boolean; disabled?: boolean; res: string; finals: string[]; expiresDays: number | null; onToggle: () => void }) {
+  const caption = finals.length
+    ? `草稿 ${res} · 成片可选 ${finals.join(" 或 ")}${expiresDays ? ` · 草稿 ${expiresDays} 天有效` : " · 草稿有效期以服务端为准"}`
+    : `草稿 ${res}（该模型没有声明成片档位）`;
+  const locked = disabled || !res || !finals.length;
   return <div className="draft-mode" data-p="vdraft" data-vopt="draft" data-on={on ? "" : undefined}
-    data-locked={locked ? "" : undefined} title={caption} onClick={() => { if (!locked) onToggle(); }}>
+    data-draft-res={res} data-draft-finals={finals.join(",")} data-locked={locked ? "" : undefined} title={caption} onClick={() => { if (!locked) onToggle(); }}>
     <span className="tx">
       <span className="t">草稿模式</span>
       <span className="d">{caption}</span>
@@ -1055,6 +1372,17 @@ function RatioPop({ node, model, disabled = false }: { node: CanvasNode; model?:
   return <>
     <div className="mh">分辨率</div>
     <OptCards cols={(m.sizes || []).length} items={(m.sizes || []).map((s) => ({ key: s, label: s, on: p.size === s, disabled, pick: () => chooseSize(s) }))} />
+    {m.exactSizePair || m.minSide || m.sizeStep ? <div className="gp-note" data-mai-size><Icon name="help" size="s" /><span>精确像素：宽高各自 ≥{m.minSide || 768}、{m.sizeStep || 32} 的倍数向下取（1000 → 992），总像素 ≤4194304；请求里按宽高成对下发，档位算出的尺寸会自动收进范围。</span></div> : null}
+    {(m.backgroundAllowed || []).length ? <>
+      <div className="mh">背景</div>
+      <div className="seg" data-p="background-model">
+        {(m.backgroundAllowed || []).map((value) => {
+          const key = String(value).toLowerCase();
+          const on = key === "auto" ? !p.background || String(p.background).toLowerCase() === "auto" : String(p.background || "").toLowerCase() === key;
+          return <button key={key} className={on ? "on" : ""} data-background={key} disabled={disabled} onClick={() => set({ background: key === "auto" ? undefined : (key as ImageParams["background"]) })}>{key === "auto" ? "自动" : key === "opaque" ? "不透明" : key}</button>;
+        })}
+      </div>
+    </> : null}
     {m.nativeBackground ? <>
       <div className="mh">背景</div>
       <div className="seg" data-p="background">
@@ -1118,24 +1446,92 @@ function VideoSetPop({ node, m, disabled = false }: { node: CanvasNode; m: Model
   const set = (patch: Partial<VideoParams>) => store.patchGen(node.id, (g) => ({ params: { ...(g.params as VideoParams), ...patch } }));
   const shape = (r: string) => ratioShape(r, 16);
   const modes = ((m.modes || []) as VideoMode[]).filter((x) => x in VMODES);
-  const rr = resRange(m);
+  // 草稿入口只看 caps.draft；草稿步固定档位，其它分辨率禁用（不是静默忽略）
+  const draftOn = draftActive(p, m);
+  const fixedDraftRes = draftResolution(m);
+  // 只有一档画质的模型（magi-2 固定 1080p）不给一个只有一项的分辨率下拉，底栏已经写明这档
+  const resChoices = videoResChoices(m);
+  const refHint = videoRefHint(m);
+  const followsFirstFrame = videoRatioFollowsFirstFrame(m, p.mode);
+  const ratios = videoRatioOptions(m, p.mode);
   return <div className="vset" data-vset={m.id}>
     <div className="vset-model"><span className="n">{m.name}</span>{m.specSource === "guess" ? <span className="d">参数按名字推断</span> : <span className="d">这个模型支持的参数</span>}</div>
     {modes.length ? <><div className="mh">生成方式</div><div className="seg wrap">{modes.map((x) => <button key={x} data-vopt={"mode:" + x} className={p.mode === x ? "on" : ""} disabled={disabled} title={VMODES[x].need} onClick={() => set({ mode: x })}>{x}</button>)}</div></> : null}
+    {refHint ? <div className="vset-note" data-vset-refs={[m.imageRefMax, m.videoRefMax, m.audioRefMax].map((n) => Number(n) || 0).join("/")}>{refHint}</div> : null}
     {(m.res || []).length ? <>
-      <div className="mh">分辨率</div>
-      <OptCards cols={(m.res || []).length} items={(m.res || []).map((r) => ({ key: r, label: r, on: p.res === r && !p.draft, disabled, attrs: { "data-vopt": "res:" + r }, pick: () => set({ res: r, draft: false }) }))} />
-      {rr ? <DraftRow on={!!p.draft} disabled={disabled} range={rr} onToggle={() => set({ draft: !p.draft })} /> : null}
+      {resChoices.length ? <>
+        <div className="mh">{(m.mjVideo ? "视频规格" : "分辨率") + (draftOn ? "（草稿阶段固定 " + fixedDraftRes + "）" : "")}</div>
+        <OptCards cols={resChoices.length} items={resChoices.map((r) => ({ key: r, label: r, on: draftOn ? r === fixedDraftRes : p.res === r, disabled: disabled || (draftOn && r !== fixedDraftRes), attrs: { "data-vopt": "res:" + r }, pick: () => set({ res: r }) }))} />
+      </> : null}
+      {draftSupported(m) ? <DraftRow on={draftOn} disabled={disabled} res={fixedDraftRes} finals={draftFinalResolutions(m)} expiresDays={draftExpiresDays(m)} onToggle={() => set({ draft: !p.draft })} /> : null}
     </> : null}
-    {(m.ratios || []).length ? <>
+    {ratios.length ? <>
       <div className="mh">比例</div>
-      <OptCards cols={4} items={videoRatioChoices(m.ratios || []).map(({ value, label }) => ({ key: value, label, shape: shape(value), on: sameVideoRatio(p.ratio, value), disabled, attrs: { "data-vopt": "ratio:" + value }, pick: () => set({ ratio: value }) }))} />
+      <OptCards cols={4} items={videoRatioChoices(ratios).map(({ value, label }) => ({ key: value, label, shape: shape(value), on: sameVideoRatio(p.ratio, value), disabled, attrs: { "data-vopt": "ratio:" + value }, pick: () => set({ ratio: value }) }))} />
+      {followsFirstFrame ? <div className="vset-note" data-vset-follows>首帧方式画幅跟随首帧：不单独发比例字段，「原图比例」= 用首帧图的画幅</div> : null}
     </> : null}
     <div className="vset-dur" data-vset-dur>
       <DurationSlider node={node} model={m} disabled={disabled} />
     </div>
+    {m.mjVideo ? <MjVideoRows node={node} m={m} p={p} disabled={disabled} /> : null}
     {m.audio ? <><div className="mh">生成音频</div><div className="seg"><button data-vopt="sound:on" className={p.sound ? "on" : ""} disabled={disabled} onClick={() => set({ sound: true })}>开启</button><button data-vopt="sound:off" className={!p.sound ? "on" : ""} disabled={disabled} onClick={() => set({ sound: false })}>关闭</button></div></> : null}
+    {/* 内容审核开关：只有 caps 带这个布尔位的模型才出现（默认关，只有打开时才随请求发 nsfw_check） */}
+    {m.nsfw ? <div className="draft-mode" data-p="vnsfw" data-nsfw data-on={p.nsfw ? "" : undefined} onClick={() => { if (!disabled) set({ nsfw: p.nsfw !== true }); }}>
+      <span className="tx">
+        <span className="t">内容审核</span>
+        <span className="d">{p.nsfw ? "会先做内容审核，稍慢/可能有审核成本" : "默认关：不请求审核，不产生审核延迟与成本"}</span>
+      </span>
+      <button type="button" className={"sw" + (p.nsfw ? " on" : "")} role="switch" aria-checked={p.nsfw === true} aria-label="内容审核" disabled={disabled}
+        onClick={(event) => { event.stopPropagation(); set({ nsfw: p.nsfw !== true }); }} />
+    </div> : null}
   </div>;
+}
+/**
+ * Midjourney 图生视频的专属参数（只有 caps.mj_video 的模型渲染）：
+ * 视频规格 → video_type（480p/720p，有尾帧自动换 start_end_* 档）、运动幅度 low/high、
+ * 批次 1/2/4（费用 ×N）、动效模式（auto 必须复用 MJ 任务，当前固定手动）。
+ * 时长上游固定约 5 秒（DurationSlider 只读）、比例跟随首帧（ratios 为空），所以这里都不给。
+ */
+function MjVideoRows({ node, m, p, disabled = false }: { node: CanvasNode; m: ModelSpec; p: VideoParams; disabled?: boolean }) {
+  const store = useCtl().store;
+  const set = (patch: Partial<VideoParams>) => store.patchGen(node.id, (g) => ({ params: { ...(g.params as VideoParams), ...patch } }));
+  const spec = m.mjVideo;
+  if (!spec) return null;
+  const motions = spec.motions || [];
+  const batches = mjVideoBatchOptions(m);
+  const motion = mjVideoMotion(m, p.motion);
+  const batch = mjVideoBatch(m, p.mjBatch);
+  const { roles } = rolesFor("video", p, m, inputsOf(store.state.doc, node.id));
+  const hasEndFrame = [...roles.values()].includes("last_frame");
+  // 面板显示的就是真正会发出去的档位：1080p/4k 这类残留值先按最近档收（480p/720p）
+  const tier = mjVideoTier(m, p.res);
+  const videoType = mjVideoType(m, tier, hasEndFrame);
+  const tierLabel = (tier || "按档位") + (hasEndFrame ? " · 首尾帧" : "") + (videoType ? " · " + videoType : " · 后端按档位推导");
+  const taskId = String(p.mjTaskId || "").trim();
+  const animate = taskId && String(p.animateMode || "").trim() === "auto" ? "auto" : "manual";
+  return <>
+    <div className="mh">视频类型</div>
+    <div className="vset-note" data-mj-video-type={videoType || tier}>{tierLabel}</div>
+    {motions.length ? <>
+      <div className="mh">运动幅度</div>
+      <div className="seg" data-mj-motion={motions.join(",")}>
+        {motions.map((value) => <button key={value} className={motion === value ? "on" : ""} data-mj-motion-opt={value} disabled={disabled} onClick={() => set({ motion: value })}>{MJ_VIDEO_MOTION_LABEL[value] || value}</button>)}
+      </div>
+    </> : null}
+    {batches.length ? <>
+      <div className="mh">批次</div>
+      <div className="seg" data-mj-batch={batches.join(",")}>
+        {batches.map((value) => <button key={value} className={batch === value ? "on" : ""} data-mj-batch-opt={value} disabled={disabled} onClick={() => set({ mjBatch: value })}>{value}×</button>)}
+      </div>
+      <div className="vset-note" data-mj-batch-note>{mjVideoBatchNote(m, batch, tier)}</div>
+    </> : null}
+    <div className="mh">动效模式</div>
+    <div className="seg" data-mj-animate={taskId ? "auto" : "manual"}>
+      <button data-mj-animate-opt="manual" className={animate === "manual" ? "on" : ""} disabled={disabled || !!taskId} title="没有复用 MJ 任务时固定手动">手动</button>
+      <button data-mj-animate-opt="auto" className={animate === "auto" ? "on" : ""} disabled={disabled || !taskId} title="自动模式必须复用 MJ 任务并指明第 0–3 张候选">自动</button>
+    </div>
+    <div className="vset-note" data-mj-reuse-note>复用 MJ 出图任务图（task_id + 第 0–3 张）待后续：当前只能直接传首帧图</div>
+  </>;
 }
 function DurPop({ node, m, disabled = false }: { node: CanvasNode; m: ModelSpec; disabled?: boolean }) {
   return <DurationSlider node={node} model={m} disabled={disabled} />;
@@ -1160,7 +1556,8 @@ function VRatioPop({ node, m, disabled = false }: { node: CanvasNode; m: ModelSp
   const shape = (r: string) => ratioShape(r, 16);
   return <>
     <div className="mh">比例</div>
-    <OptCards cols={4} items={videoRatioChoices(m.ratios || []).map(({ value, label }) => ({ key: value, label, shape: shape(value), on: sameVideoRatio(p.ratio, value), disabled, pick: () => set(value) }))} />
+    <OptCards cols={4} items={videoRatioChoices(videoRatioOptions(m, p.mode)).map(({ value, label }) => ({ key: value, label, shape: shape(value), on: sameVideoRatio(p.ratio, value), disabled, pick: () => set(value) }))} />
+    {videoRatioFollowsFirstFrame(m, p.mode) ? <div className="vset-note" data-vset-follows>首帧方式画幅跟随首帧：不单独发比例字段，「原图比例」= 用首帧图的画幅</div> : null}
   </>;
 }
 

@@ -108,7 +108,7 @@ export const SHORTCUTS: Shortcut[] = [
       if (st.ui.drawer) { store.setUI({ drawer: null }); return true; }
       if (st.ui.editCell) { store.setUI({ editCell: null }); return true; }
       if (st.ui.editText) { (document.getElementById("txtEdit") as HTMLTextAreaElement | null)?.blur(); return true; }
-      store.setUI({ sel: new Set(), edge: null }); return true;
+      store.setUI({ sel: new Set(), edge: null, pressing: null }); return true;
     },
   },
   {

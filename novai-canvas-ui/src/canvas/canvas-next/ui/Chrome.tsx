@@ -1461,6 +1461,7 @@ function MultiBar() {
   }, [selKey, nodes.length, layoutInfo.targets.length, layoutInfo.blocked.length, layoutInfo.reason, store]);
   // 单个分组不再走底部条：分组自己的工具都浮在组框上方（ui/LegacyNodes.tsx 的 GroupTools）
   if (nodes.length < 2) return null;
+  // 框选拖动中就出现、直接出现不做进场动画（TapNow）
   const layoutable = layoutInfo.targets.length >= 2;
   const runnable = runnableIds(store, nodes); const b = batches[runKeyOf(nodes)];
   // 多选条挂在 #layer 上（不在画布 world 的缩放里），屏幕像素就是最终大小：
@@ -1622,26 +1623,40 @@ function Comments() {
 }
 
 /* ---------- 抽屉：素材 / 历史 ---------- */
+/**
+ * cn:lib-link 常常在抽屉还没挂载时就发出（菜单里 setUI({drawer}) 和事件在同一帧，监听器要等挂载后的 effect），
+ * 这里在模块级先接住，抽屉首次渲染时消费；抽屉已挂载时仍走组件自己的监听。
+ */
+let pendingLibLink: string | string[] | null = null;
+// 只补加载顺序，不在 Node 测试 / SSR 环境注册（ratio_preview 等单测会直接 eval 这个 bundle）
+if (typeof window !== "undefined") window.addEventListener("cn:lib-link", (e) => { pendingLibLink = (e as CustomEvent).detail ?? null; });
+
 function Drawer({ kind }: { kind: "assets" | "history" }) {
   const ctl = useCtl(); const store = ctl.store; const doc = useS((s) => s.doc); const runs = useS((s) => s.runs);
-  const [type, setType] = useState("all"); const [q, setQ] = useState(""); const [target, setTarget] = useState<string | null>(null);
-  useEffect(() => { const on = (e: Event) => setTarget((e as CustomEvent).detail); addEventListener("cn:lib-link", on); return () => removeEventListener("cn:lib-link", on); }, []);
+  const [type, setType] = useState("all"); const [q, setQ] = useState(""); const [target, setTarget] = useState<string | string[] | null>(() => pendingLibLink);
+  // detail 可能是单个节点 id（单选链路）或多选加号发来的 id 数组：统一存下来，下面归一成 targets
+  useEffect(() => {
+    pendingLibLink = null;
+    const on = (e: Event) => { const d = (e as CustomEvent).detail; pendingLibLink = null; setTarget(Array.isArray(d) ? d : d || null); };
+    addEventListener("cn:lib-link", on); return () => removeEventListener("cn:lib-link", on);
+  }, []);
   const close = () => store.setUI({ drawer: null });
   if (kind === "history") return <HistoryDrawer close={close} />;
   const assets = doc.nodes.filter((n) => (n.kind === "image" || n.kind === "video") && outOf(n) && (!q || title(n).includes(q)));
   const favs = assets.filter((n) => genOf(n).fav);
-  const link = target ? store.node(target) : null;
+  const targets = (target ? (Array.isArray(target) ? target : [target]) : []).map((id) => store.node(id)).filter((n): n is CanvasNode => !!n);
+  const link = targets[0] || null;
   const use = (n: CanvasNode) => {
-    const at = link || null; const c = at ? { x: at.x - 330, y: at.y + 100 } : ctl.center();
+    const at = link; const c = at ? { x: at.x - 330, y: at.y + 100 } : ctl.center();
     const made = store.newNode(n.kind as GenKind, c.x - 120, c.y - 120, { title: genOf(n).title, uploaded: true, hist: [outOf(n)!], w: n.w, h: n.h });
-    store.addNodes([made], at ? [{ id: uid("e"), from: made.id, to: at.id }] : [], { select: !at });
-    if (at) { store.setUI({ sel: new Set([at.id]) }); setTarget(null); store.toast(`已作为「${title(at)}」的输入`); } else store.toast("已添加到画布");
+    store.addNodes([made], targets.map((t) => ({ id: uid("e"), from: made.id, to: t.id })), { select: !targets.length });
+    if (targets.length) { store.setUI({ sel: new Set(targets.map((t) => t.id)) }); setTarget(null); store.toast(targets.length > 1 ? `已作为 ${targets.length} 个节点的输入` : `已作为「${title(targets[0])}」的输入`); } else store.toast("已添加到画布");
   };
   return <div className="drawer float" id="drawer" onPointerDown={(e) => e.stopPropagation()}>
     <div className="dh"><Icon name="folder" size="s" />素材库<span className="sp" /><button className="ib" style={{ width: 28, height: 28 }} onClick={() => { setTarget(null); close(); }}><Icon name="x" size="s" /></button></div>
     <div className="dsearch"><Icon name="search" size="s" /><input placeholder="搜索素材" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} /></div>
     <div className="dbody">
-      {link ? <div className="gp-warn" style={{ margin: "0 0 8px" }}><Icon name="link" size="s" /><span>点一张素材，作为「{title(link)}」的输入</span></div> : null}
+      {targets.length ? <div className="gp-warn" style={{ margin: "0 0 8px" }}><Icon name="link" size="s" /><span>{targets.length > 1 ? `点一张素材，作为 ${targets.length} 个选中节点的输入` : `点一张素材，作为「${title(targets[0])}」的输入`}</span></div> : null}
       <LibrarySection q={q} />
       <ElementsSection q={q} />
       <div className="sec"><span>收藏</span><span className="tnum">{favs.length}</span></div>

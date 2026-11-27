@@ -132,7 +132,7 @@ const stack = (id, children, x, y, w, h) => group(id, children, x, y, w, h, { te
         const gfSrc = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/groupFit.ts'), 'utf8');
         ['export function minGroupSize', 'export function growGroupFrames', 'export function growOwnerFrames', 'memberIdsDeep'].forEach((needle) => ok(gfSrc.includes(needle), 'groupFit 含 ' + needle));
         const css = fs.readFileSync(path.join(root, 'novai-canvas-ui/src/canvas/canvas-next/ui/canvas-next.css'), 'utf8');
-        ok(css.includes('.gnode.sel .rz{z-index:31}'), '分组选中时 resize 手柄抬到成员之上（普通节点不改）');
+        ok(css.includes('.gnode.sel.chrome .rz{z-index:31}'), '分组选中时 resize 手柄抬到成员之上（普通节点不改）');
     }
 
     console.log('[PASS] 分组缩放：最小尺寸按成员 / 只扩不缩 / 成员变大扩父组 / 手柄层级（4 组）');

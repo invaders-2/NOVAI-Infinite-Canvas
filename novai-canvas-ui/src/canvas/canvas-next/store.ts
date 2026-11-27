@@ -29,7 +29,8 @@ export type RunLog = {
 const small = (u?: string) => (u && (!u.startsWith("data:") || u.length < 4000) ? u : undefined);
 export const compactRun = (x: RunLog): RunLog => ({ ...x, thumb: small(x.thumb), out: x.out ? { ...x.out, url: small(x.out.url), frame: small(x.out.frame), text: x.out.text?.slice(0, 2000) } : undefined, prompt: x.prompt?.slice(0, 500) });
 export type Toast = { id: number; html: string; out?: boolean; /** 可点动作（例如点开面板）；只存在内存里 */ action?: () => void };
-export type Conn = { id: string; rev: boolean; a: { x: number; y: number }; p: { x: number; y: number }; sx: number; sy: number; over: string | null };
+/** 连线预览。sources 只在多选加号这种「一批源」场景出现（端口连线是单源，不传） */
+export type Conn = { id: string; rev: boolean; a: { x: number; y: number }; p: { x: number; y: number }; sx: number; sy: number; over: string | null; sources?: string[] };
 
 export type UIState = {
   sel: Set<string>;
@@ -57,6 +58,17 @@ export type UIState = {
   preview: boolean;
   batchMode: "stack" | "spread";
   dragging: boolean;
+  /**
+   * 正按着的节点 id：只在「这一下会把选择换成它」时才有值（⇧/⌘ 追加、按已选中的节点都不进）。
+   * 非空期间选中态（工具条 / 生成面板 / 白框 / 加号）整体不出现，松手或取消才一起弹出来；
+   * 程序化选中不写这个字段，所以生成完成、快捷键选中都是立刻显示。
+   */
+  pressing: string | null;
+  /**
+   * 框选拖动中（空白处按下 → 松手）：期间不亮任何选中态（白框 / 工具条 / 生成面板 / 加号 / 多选条），
+   * 松手后才跟单选那套一起进场；点空白（没有拖动）同样会先置 true、松手即复位。
+   */
+  marquee: boolean;
   theme: "dark" | "light";
   themePref: "dark" | "light" | "system";
   /** 左键拖动空白：select = 框选（TapNow 默认，中键 / 空格拖动平移）；pan = 平移（旧习惯，Shift 拖动框选） */
@@ -140,7 +152,7 @@ export class CanvasStore {
     this.state = {
       canvasId, name, doc: { nodes: [], edges: [], comments: [] }, version: null, saving: "idle", loaded: false,
       view: { x: 0, y: 0, k: 1 },
-      ui: { sel: new Set(), edge: null, drawer: null, filesOpen: false, agentOpen: typeof innerWidth === "number" ? innerWidth > 760 : true, agentFull: false, mini: null, hideEdges: false, snap: false, guides: true, cmtMode: false, pick: null, replace: null, agentPick: false, conn: null, editText: null, editCell: null, hlEdge: null, hlNode: null, preview: false, batchMode: "stack", dragging: false, theme: "dark", themePref: pref, leftDrag, parsing: new Set<string>() },
+      ui: { sel: new Set(), edge: null, drawer: null, filesOpen: false, agentOpen: typeof innerWidth === "number" ? innerWidth > 760 : true, agentFull: false, mini: null, hideEdges: false, snap: false, guides: true, cmtMode: false, pick: null, replace: null, agentPick: false, conn: null, editText: null, editCell: null, hlEdge: null, hlNode: null, preview: false, batchMode: "stack", dragging: false, pressing: null, marquee: false, theme: "dark", themePref: pref, leftDrag, parsing: new Set<string>() },
       runtime: {}, batches: {}, runs: [], models: [], toasts: [], undo: [], redo: [],
       collab: { clientId: null, transport: null, peers: [] },
     };

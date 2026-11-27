@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { afterInputsChanged, title } from "../actions";
 import { edgePathD, edgeSideOf, inPoint, outPoint } from "../edgeGeometry";
 import { inputsOf } from "../model";
@@ -12,13 +12,23 @@ export const Edges = memo(function Edges() {
   // 会让整个连线层（含每条边的 inputsOf 排序）每 token 重渲一次。生成开始/结束才需要重画。
   const doc = useS((s) => s.doc); const ui = useS((s) => s.ui);
   const running = useS((s) => Object.keys(s.runtime).join(","));
+  // 视频「解析」中的分镜表：连进来的线走虚线流动（原型 v3），和生成中的扫光区分开
+  const parsingIds = useS((s) => [...s.ui.parsing].join(","));
   const perf = usePerf();
   const seen = useRef<Set<string> | null>(null);
   const isNew = (id: string) => { if (!seen.current) return false; return !seen.current.has(id); };
   useEffect(() => { seen.current = new Set(doc.edges.map((e) => e.id)); });
+  // 悬停节点：它的直接上下游连线提亮一档（TapNow）。只在连线层本地记，不写 store，悬停变化只重渲这一层
+  const [hov, setHov] = useState<string | null>(null);
+  useEffect(() => {
+    const on = (ev: PointerEvent) => { const el = (ev.target as Element | null)?.closest?.(".cn-root #nodes .node") as HTMLElement | null; const id = el?.dataset.id || null; setHov((p) => (p === id ? p : id)); };
+    document.addEventListener("pointerover", on); return () => document.removeEventListener("pointerover", on);
+  }, []);
+  const multi = ui.sel.size > 1;
   // 收在堆叠里的节点不单独显示：连到它们的线改连到堆叠上（TapNow），同一对端点只画一条
   const owner = stackOwners(doc.nodes);
   const live = new Set(running ? running.split(",") : []);
+  const parsingSet = new Set(parsingIds ? parsingIds.split(",") : []);
   const byId = new Map(doc.nodes.filter((n) => !owner.has(n.id)).map((n) => [n.id, n]));
   const items: React.ReactElement[] = []; const pairs = new Set<string>();
   for (const e of doc.edges) {
@@ -28,11 +38,14 @@ export const Edges = memo(function Edges() {
     // 出线侧按当前几何重算：数据里的 fromSide 是排版当时的快照，节点拖走后会绕大圈
     const side = edgeSideOf(a, b);
     const p1 = outPoint(a, side), p2 = inPoint(b); const d = edgePathD(p1, p2, side);
-    const sel = ui.edge === e.id || ui.sel.has(b.id) || ui.sel.has(a.id);
+    // 连线三档（TapNow）：平时 --edge → 悬停 / 单选节点的直接上下游 near → 多选（含框选拖动中）或选中连线 sel。线宽不变
+    const touch = ui.sel.has(b.id) || ui.sel.has(a.id);
+    const sel = ui.edge === e.id || (multi && touch);
+    const near = !sel && (touch || (!ui.dragging && (hov === a.id || hov === b.id)));
     const draw = isNew(e.id);
     const flow = live.has(b.id) && !live.has(a.id);
     items.push(<path key={"h" + e.id} className="hit" data-edge={e.id} d={d} />);
-    items.push(<path key={e.id} className={"e" + (sel ? " sel" : "") + (draw ? " draw" : "") + (ui.hlEdge === e.id ? " hl" : "") + (flow ? " gen" : "")} data-edge={e.id} d={d} {...(draw ? { pathLength: 1 } : {})} />);
+    items.push(<path key={e.id} className={"e" + (sel ? " sel" : "") + (near ? " near" : "") + (draw ? " draw" : "") + (ui.hlEdge === e.id ? " hl" : "") + (flow ? " gen" : "") + (parsingSet.has(b.id) ? " flow" : "")} data-edge={e.id} d={d} {...(draw ? { pathLength: 1 } : {})} />);
     // 生成中：同 TapNow，沿连线方向（上游 → 正在生成的节点）扫过一段高光，2s 一轮。
     // 流畅优先模式下不做 SMIL 扫光（每轮要重算渐变 offset 并重绘整条路径），改用 .gen 的静态高亮：
     // 线宽/颜色与扫光底色一致，仍然看得出「这条线在给生成中的节点供料」。
@@ -53,9 +66,14 @@ export const Edges = memo(function Edges() {
     }
     if (viaStack) continue;
     const ins = inputsOf(doc, b.id); const ord = ins.findIndex((x) => x.edge.id === e.id);
-    if (ins.length > 1 || sel) items.push(<g key={"b" + e.id} className={"badge" + (ui.edge === e.id || ui.sel.has(b.id) ? " sel" : "")} data-edge-badge={e.id} transform={`translate(${p2.x - 14},${p2.y})`}><circle r="8" /><text>{ord + 1}</text></g>);
+    if (ins.length > 1 || sel || touch) items.push(<g key={"b" + e.id} className={"badge" + (ui.edge === e.id || ui.sel.has(b.id) ? " sel" : "")} data-edge-badge={e.id} transform={`translate(${p2.x - 14},${p2.y})`}><circle r="8" /><text>{ord + 1}</text></g>);
   }
-  if (ui.conn) { const c = ui.conn; const from = c.rev ? c.p : c.a, to = c.rev ? c.a : c.p; items.push(<path key="tmp" className="tmp" d={edgePathD(from, to, to.x >= from.x ? "right" : "left")} />); }
+  if (ui.conn) {
+    const c = ui.conn;
+    // 多选加号：每个源节点的出口各拉一条预览线汇到指针（TapNow），一眼看出这几个都会接进去
+    if (!c.rev && c.sources?.length) c.sources.forEach((sid) => { const s = byId.get(owner.get(sid) || sid); if (!s) return; const side = c.p.x >= s.x + s.w / 2 ? "right" : "left"; items.push(<path key={"tmp" + sid} className="tmp" d={edgePathD(outPoint(s, side), c.p, side)} />); });
+    else { const from = c.rev ? c.p : c.a, to = c.rev ? c.a : c.p; items.push(<path key="tmp" className="tmp" d={edgePathD(from, to, to.x >= from.x ? "right" : "left")} />); }
+  }
   return <svg id="edges" className={ui.hideEdges ? "hidden" : ""}>{items}</svg>;
 });
 

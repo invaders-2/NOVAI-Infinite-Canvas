@@ -17,7 +17,7 @@ assert.ok(node.includes('data-p="model"') || read('novai-canvas-ui/src/canvas/ca
 const fav = (css.match(/\.cn-root \.favstar\{[^}]*\}/) || [''])[0];
 assert.ok(/right:8px/.test(fav) && /top:8px/.test(fav) && !/top:34px/.test(fav), 'favstar 贴右上角');
 assert.ok(/\.cn-root \.node:has\(\.favstar\) \.vstrip\{right:38px\}/.test(css), 'favstar 出现时版本条向左让位');
-assert.ok(/\.node\.sel \.favstar,\.cn-root \.node:hover \.favstar,\.cn-root \.favstar\.on\{display:grid\}/.test(css), 'hover/选中/已收藏仍显示');
+assert.ok(/\.node\.sel\.chrome \.favstar,\.cn-root \.node:hover \.favstar,\.cn-root \.favstar\.on\{display:grid\}/.test(css), 'hover/选中/已收藏仍显示（选中态挂 .chrome 后选择器同步）');
 assert.ok(/z-index:4/.test(fav), 'favstar 在版本/替换控件之上');
 // ---- task-32：替换按钮左上角 ----
 const replaceBtn = (node.match(/<button className="node-replace"[\s\S]*?<\/button>/) || [''])[0];
