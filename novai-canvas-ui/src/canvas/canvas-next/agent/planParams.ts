@@ -6,7 +6,7 @@
 import {
   DEFAULT_CAMERA, STYLES, VMODES, clampQuality, clampThinking, isQualityDefault, normalizeStyle,
   outputFormatForRequest, outputFormatLabel, outputFormatOptions, qualityChoices, qualityLabel,
-  qualityLevelsFor, resRange, thinkLevelLabel, thinkLevelsFor, thinkingAvailable,
+  qualityLevelsFor, thinkLevelLabel, thinkLevelsFor, thinkingAvailable,
   type CameraParams, type ImageOutputFormat, type MjParams, type ModelSpec,
 } from "../model";
 import { ratioDisplayLabel } from "../originalRatio";
@@ -611,7 +611,8 @@ export function patchPlanStep(step: PlanStep, kind: PlanKind, models: ModelSpec[
       if (!optionSpec.genModes?.length) genMode = "";
       if (!optionSpec.turbo) turbo = false;
       if (!optionSpec.multiShot) multiShot = false;
-      if (!resRange(optionSpec)) draft = false;
+      // 草稿入口只由 caps.draft 声明（其它模型没有草稿，别给一个点了也不生效的开关）
+      if (!optionSpec.draft) draft = false;
       if (!optionSpec.audio) audio = false;
     }
     if (kind === "image") {
@@ -834,7 +835,7 @@ export function clampRowParams(kind: PlanKind, row: ApproveRow, spec: ModelSpec 
   else if (row.genMode && !genModes.includes(row.genMode)) out.genMode = genModes[0];
   if (!spec.turbo) out.turbo = false;
   if (!spec.multiShot) out.multiShot = false;
-  if (!resRange(spec)) out.draft = false;
+  if (!spec.draft) out.draft = false;
   if (!spec.audio) out.audio = false;
   return out;
 }
@@ -965,8 +966,8 @@ function videoUnifiedGroups(targets: number[], specs: Array<ModelSpec | undefine
 
   const perf: UnifiedItem[] = [];
   if (every((spec) => spec.turbo === true)) perf.push({ key: "turbo", label: "加速", options: onOffOptions((on) => ({ turbo: on })) });
-  // 草稿只在两档以上清晰度的模型上可用（节点面板的草稿行也是这个门槛）
-  if (every((spec) => !!resRange(spec))) perf.push({ key: "draft", label: "草稿", hint: "按最低清晰度先出草稿，出成片再按所选清晰度", options: onOffOptions((on) => ({ draft: on })) });
+  // 草稿只给后端 caps 声明 draft 的模型（节点面板的草稿行也是这个门槛）
+  if (every((spec) => spec.draft === true)) perf.push({ key: "draft", label: "草稿", hint: "先出草稿，再用「出成片」选成片档位", options: onOffOptions((on) => ({ draft: on })) });
   if (every((spec) => spec.multiShot === true)) perf.push({ key: "multiShot", label: "多镜头", options: onOffOptions((on) => ({ multiShot: on })) });
   if (perf.length) groups.push({ title: "性能", items: perf });
   return groups;

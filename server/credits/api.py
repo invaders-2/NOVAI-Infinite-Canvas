@@ -161,7 +161,7 @@ def admin_pricing(request: Request) -> Dict[str, Any]:
 @router.get("/api/credits/price")
 def credits_price(request: Request, model: str = "", kind: str = "",
                   width: int = 0, height: int = 0, duration: float = 0.0,
-                  quality: str = "", rows: int = 1, size: str = "",
+                  quality: str = "", rows: int = 1, size: str = "", resolution: str = "",
                   tokens_in: int = -1, tokens_out: int = -1,
                   provider: str = "") -> Dict[str, Any]:
     if config.auth_enabled():
@@ -173,6 +173,8 @@ def credits_price(request: Request, model: str = "", kind: str = "",
         "quality": str(quality or ""),
         "rows": int(rows or 1),
         "size": str(size or ""),
+        # 视频档位：midjourney-video 的虚拟模型靠它区分 480p / 720p 两个计费 id
+        "resolution": str(resolution or "").strip(),
     }
     if tokens_in >= 0:
         params["tokens_in"] = int(tokens_in)

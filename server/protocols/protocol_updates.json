@@ -937,6 +937,587 @@
           "note": "文档确证（L6537–L6563）；只留档，生成侧仍只下发 svg.model"
         }
       ]
+    },
+    {
+      "provider_id": "apimart",
+      "name": "APIMart",
+      "version": 6,
+      "released_at": "2026-11-25",
+      "summary": "文档 2026-11-25 版增量：新增 4 个图像模型（kling-v4-image / kling-v4-long-image / mai-image-2.7 / mai-image-2.7-flash）；记录 apimart-zoe 文档声明参考上限 30/10/10 但能力表仍按上传队列 9/3/3（不放开）；veo3.1 ext 档按分辨率分档报价；协议侧补 webhook 密钥口径、任务查询 language、用量与请求日志参数、定价接口契约、上传配额响应头、Suno wav 端点弃用。价目新增 4 个模型并更新 veo3.1-quality-ext / -lite-ext 的三档价。",
+      "docs_url": "https://docs.apimart.ai/en/api-reference/images/kling-v4-image/generation",
+      "new_models": {
+        "chat": [],
+        "image": [
+          "kling-v4-image",
+          "kling-v4-long-image",
+          "mai-image-2.7",
+          "mai-image-2.7-flash"
+        ],
+        "video": [],
+        "audio": []
+      },
+      "protocol_changes": [
+        {
+          "field": "webhook_secret",
+          "from": "≥16 字符；取值只有请求体与控制台两层",
+          "to": "secret 8–256 字节（UTF-8 计字节，CJK 一字 3 字节），禁空白/控制字符；优先级 请求体 webhook_secret > 控制台 Callback signing > 旧版通知设置；轮换后旧密钥最长再签 20 分钟",
+          "note": "文档确证（L79868–L79882、L79933–L79938）；项目不用 webhook，接入时按 8–256 字节校验并做 20 分钟双密钥窗口。"
+        },
+        {
+          "field": "request_logs",
+          "from": "GET /v1/logs/requests 只记「明细、游标分页、watermark」",
+          "to": "单条查询可用同步调用的 X-Oneapi-Request-Id 头或异步 task_id；sync 支持 start/end_timestamp、type=all|consume|error、model、token_id、limit 1–1000、cursor；watermark=服务器时间-300s；对账建议 end 不晚于 watermark、下一轮从上一轮 end 前 10 分钟起、按 (id,type) 去重；cost_credits = USD × 10",
+          "note": "文档确证（L53891–L53973）；零余额也能查。项目没接日志对账，这些参数决定将来能否增量拉。"
+        },
+        {
+          "field": "usage_endpoint",
+          "from": "GET /v1/usage 只记 start/end/group_by 与返回字段",
+          "to": "start/end（unixtime 或 RFC3339，[start,end)，≤31 天）、model（逗号分隔 ≤50、精确大小写不敏感）、group_by=none|model|date|model,date、tz=IANA（默认 Asia/Shanghai）、scope=key|account；60 次/分/Key，同参数结果缓存 60s（X-Usage-Cache: hit|miss）；数据自 2026-04-27；503 usage_unavailable 不得当 0",
+          "note": "文档确证（L54567–L54755）；接用量面板时按此口径，X-Usage-Cache 可省调用。"
+        },
+        {
+          "field": "pricing_model_endpoint",
+          "from": "GET /v1/pricing/model 只记端点与 price_source",
+          "to": "model 支持别名；spec 参数 resolution/size/quality/duration(1–3600)/n(1–100)；返回 unit=per_image|per_call|per_second|per_million_tokens、unit_prices、total_usd、estimated、price_source=membership|user_override|group|default、canonical_model、spec_source、price_factors、membership_tier；60 次/分/Key；错误码 no_valid_pricing / model_not_found / 429",
+          "note": "文档确证（L53983–L54035）；接「调用前报价」要按 no_valid_pricing 分支，unit 枚举决定乘数量。"
+        },
+        {
+          "field": "public_pricing_contract",
+          "from": "GET /api/pricing/model（免鉴权）只记字段名",
+          "to": "只读 data.pricing；rates=标价、effective_rates=实付（不要自己乘）；extras.tools[x].price 是标价要自己乘 price_factor；unit=usd_per_1000_queries|usd_per_page；tier_count>1 才有 tiers（不能靠 billing_type 判断）；字段缺省=不适用（不是 0/免费），显式 0=免费；limits.supports_cache_read/write 是能力位；pricing_mode=standard|image_modalities 互斥",
+          "note": "文档确证（L35691–L35890）；本轮价目增量就是按这个口径取的 effective_rates 与 tier_count（tools/apimart_pricing.py 已按它实现 --api-model）。"
+        },
+        {
+          "field": "task_query_language",
+          "from": "GET /v1/tasks/{id} 不带语言参数",
+          "to": "GET /v1/tasks/{task_id}?language=en 取 10 种语言 error.message（en/zh/ja/ko/ru/fr/de/id/pt/es，两字母码、大小写不敏感、去空白；zh-CN 不认）；只影响 error.message",
+          "note": "文档确证（L79595–L79612、L57126）；项目现在把上游 error.message 原样抛给用户，加 ?language=zh 是一行改动，本轮未接线（I12）。"
+        },
+        {
+          "field": "task_billing_status",
+          "from": "",
+          "to": "任务响应 data.billing_status：pending/processing → held（data.cost 为预扣）；completed → settled；failed → refunded 且 cost=0",
+          "note": "文档确证（L10759–L10772，kling-v4-long-image 新页）；是否全平台任务都有未知（U22），要拿它做预扣/结算展示需实测。"
+        },
+        {
+          "field": "upload_quota_headers",
+          "from": "上传只记 retention_days / overage{...} / quota{limit,used,remaining,window_hours,reset_at}",
+          "to": "响应头 X-Upload-Quota-Limit / -Remaining / -Reset；无限账号 quota={unlimited:true}；错误 overage.reason=overage_not_enabled|needs_reconfirm|insufficient_balance|insufficient_key_quota；图片校验 40MP / 单边 32768px / GIF ≤500 帧；另 1000 请求/Key/60s 独立限流",
+          "note": "文档确证（L80444–L80488）；项目上传仍不传 retention_days（I7 遗留），这些头只在做上传计费展示时用。"
+        },
+        {
+          "field": "music_endpoints",
+          "from": "音乐走 generate + 轮询；vox 已标注弃用",
+          "to": "POST /v1/music/generations/wav 弃用（仍兼容，等价于新端点 + formats:[wav]）；新端点 POST /v1/music/generations/download；vox 也已弃用",
+          "note": "文档确证（L77240、L77280、L76668）；项目不直接调 wav，无影响，留档。"
+        }
+      ],
+      "model_caps": [],
+      "parameter_changes": [
+        {
+          "model": "veo3.1-quality-ext",
+          "field": "tiers",
+          "from": "单档 per_call gold=1.0 USD/秒",
+          "to": "按分辨率三档标价：720P 0.703125 / 1080P 0.7265625 / 4K 0.890625 USD/秒；gold（实付）默认档 0.5625",
+          "note": "来源 GET https://apimart.ai/api/pricing/model?model=veo3.1-quality-ext（2026-11-25 实测，paid=gold）；降价且档位细化，旧单档估价偏高。"
+        },
+        {
+          "model": "veo3.1-lite-ext",
+          "field": "tiers",
+          "from": "单档 per_call gold=0.07 USD/秒",
+          "to": "按分辨率三档标价：720P 0.046875 / 1080P 0.0703125 / 4K 0.234375 USD/秒；gold（实付）默认档 0.0375",
+          "note": "来源 GET https://apimart.ai/api/pricing/model?model=veo3.1-lite-ext（2026-11-25 实测）；720P 降、4K 反而更贵。"
+        },
+        {
+          "model": "apimart-zoe",
+          "field": "ref_max / video_ref_max / audio_ref_max",
+          "from": "9 / 3 / 3（与通用上传队列一致）",
+          "to": "保持 9 / 3 / 3：文档声明 图 30（L36104）/ 视频 10（L36118）/ 音频 10（L36126），但上传分支只取前 9 图 / 3 视频 / 3 音频，按文档值下发会让编辑器允许 30 张却静默只发 9 张 → 暂不放开，放开前需实测超限请求（U23）",
+          "note": "文档确证 L36104 / L36118 / L36126；本轮把口径记进能力表注释与 catalog notes，代码值不变。"
+        },
+        {
+          "model": "kling-v4-image",
+          "field": "caps（新增）",
+          "from": "无条目",
+          "to": "ratios auto+8、resolution 2K/4K/8K、n 1–9、series 2–4、ref_max 10（只收公网 URL）、mask_url=false",
+          "note": "文档确证（L10312–L10350）；新增 caps 字段 series 已同步 protocol_updates.py 白名单。"
+        },
+        {
+          "model": "kling-v4-long-image",
+          "field": "caps（新增）",
+          "from": "无条目",
+          "to": "skill ecommerce|webpage（必填）、length short|medium|long（仅 ecommerce）、resolution 1K/2K、n=1、send_size=false、ref_max 3",
+          "note": "文档确证（L10634–L10674）；size/aspect_ratio/width/height/mask_url/sequential_* 传了就 400，所以请求体不下发 size。"
+        },
+        {
+          "model": "mai-image-2.7 / -flash",
+          "field": "caps（新增）",
+          "from": "无条目",
+          "to": "ratios 任意 1:4–4:1、resolution 1K/2K、n=1、ref_max 5、background auto|opaque、精确像素按 width/height 成对（每边 ≥768、总像素 ≤4194304、向下取 32 的倍数）",
+          "note": "文档确证（L11378–L11456）；精确像素口径与 GPT-Image 的 3840 长边规则不同，新增 min_side/size_step/exact_size_pair 字段并已同步白名单。"
+        }
+      ]
+    },
+    {
+      "provider_id": "apimart",
+      "name": "APIMart",
+      "version": 7,
+      "released_at": "2026-11-25",
+      "summary": "文档 2026-11-25 版增量（第二轮）：Seedance 2.5 草稿模式两段式落地（draft / draft_task_id，cap 字段 draft / draft_resolution=480p / draft_final_resolutions=[1080p,4k] / draft_expires_days=3）；上传固定 retention_days=3 并保留响应 bytes/retention_days/expires_at；seedance-2.5 参考上限按实际上传队列对齐 9/3/3（文档声明 30/10/10，未放开）；7 个「仅定价页 + 定价接口」证据的 chat 模型进内置清单（include_builtin=1 可见）；Midjourney 图生视频（i2v）落地为虚拟视频模型 midjourney-video：端点 POST /v1/midjourney/generations/video、只有图生视频（固定 FAST、约 5 秒、无文生视频），image_urls 或 task_id+index 二选一，motion/video_type/mj_batch/尾帧 end_url 按文档下发，end_url 自动升级 start_end_*，按 midjourney@video / @video-720p × batch_size 计费。；音频分类修正（2026-11-26）：上游 /v1/models?expand=category 实测 audio 共 5 个，补 gpt-audio-mini（tiered_token，音频对话走 /v1/chat/completions）；Lyria 3.5 是 flowmusic 的 version 取值，不是独立模型 ID。",
+      "docs_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-5/generation",
+      "new_models": {
+        "chat": [
+          "gemini-4-carbon",
+          "gemini-4-hydrogen",
+          "gemini-4-neon",
+          "gpt-6.2-astra",
+          "gpt-6.2-sol",
+          "claude-fable-5.2",
+          "qwen4-max"
+        ],
+        "image": [],
+        "video": [
+          "midjourney-video"
+        ],
+        "audio": [
+          "gpt-audio-mini"
+        ]
+      },
+      "protocol_changes": [
+        {
+          "field": "upload_retention_days",
+          "from": "上传不传 retention_days，跟随控制台默认档（文档明说默认不一定是 3 天，默认是 7/15/30 时每次上传都按字节计费）",
+          "to": "APIMart 上传（/v1/uploads/images、/v1/uploads/videos|files、/v1/uploads/audios）统一带 ?retention_days=3，APIMART_UPLOAD_RETENTION_DAYS 可覆盖为 3/7/15/30；响应里的 bytes / retention_days / expires_at 保留到上传缓存条目与最近一次上传结果，缓存 TTL 优先用 expires_at（上限 2 天）",
+          "note": "文档确证（L80789–L80912：只认 URL query，form 字段无效；3 天档在免费额度内，超出或长档按字节计费；响应含 bytes/retention_days/expires_at）；402/429 按现有错误路径原样透出，不做配额 UI 与超额计费展示。"
+        },
+        {
+          "field": "seedance_video_draft_mode",
+          "from": "能力表只有注释留档，没有草稿入口",
+          "to": "seedance-2.5：draft=true → 正常请求 + draft:true，resolution 强制 480p（传其它档本地 400）；draft_task_id → 只发 model/draft_task_id/resolution(1080p|4k)/output_format/return_last_frame/watermark，绝不重发 prompt/image_urls/image_with_roles/video_urls/audio_urls/duration/size/aspect_ratio/seed/generate_audio/audio/omni_reference_task_type/generation_type/camerafixed/web_search/tools；draft 与 draft_task_id 互斥；草稿 3 天过期",
+          "note": "文档确证（L46524–L46602：继承字段同值也 400，草稿固定 480p，成片默认 1080p，草稿 3 天过期；seedance-2-5-flash 不支持草稿见 L45662）。cap 字段已同步 protocol_updates.py 白名单（draft / draft_resolution / draft_final_resolutions / draft_expires_days）。"
+        },
+        {
+          "field": "chat_pricing_only_models",
+          "from": "",
+          "to": "7 个只有定价页 + GET /api/pricing/model 200 证据的 chat 模型进入 APIMART_BUILTIN_MODEL_IDS['chat']，GET /api/model-caps?include_builtin=1 下发 kind=chat 的极小 caps（空档位，不编造参数）",
+          "note": "文档 196 页 0 命中；定价接口对乱写 id 返回 404，返回 200 只能证明「在售」，能否真调用仍未知（U19）；claude-fable-5.2 命名与 opus/sonnet 体系不同（U20），但定价接口返回该 id，故收入并标 confidence=medium。本轮无网络，无法复测定价接口。"
+        },
+        {
+          "field": "midjourney_video_model",
+          "from": "MJ 图生视频只在能力表注释与价目里留档，画布没有视频模型入口",
+          "to": "APIMart 下新增虚拟视频模型 midjourney-video（上游 model 固定 midjourney、端点 POST /v1/midjourney/generations/video、请求体不带 model）；能力 caps：modes=[image_to_video]、durations=[5]、resolutions=[480p,720p]、batch=[1,2,4]、ref_max=1，加 mj_video 子对象（motions/video_types/start_end_video_types/animate_modes/billing/billing_by_tier/endpoint/upstream_model/requires_first_frame/supports_end_frame/duration_seconds）",
+          "note": "文档确证（L19884–L20060 端点页、L20400–L20520 参数与计费表）：只有图生视频、固定 FAST、约 5 秒、无文生视频；image_urls（首帧 1 张，≤12 MiB）或 task_id+index(0–3) 二选一；motion low|high 默认 high（不影响计费）；video_type 4 个值，默认 vid_1.1_i2v_480；batch_size 1|2|4 默认 1（按 N 倍计费）；animate_mode manual|auto（auto 必须 task_id+index）；end_url 设了自动升级 start_end_*。图片模型 midjourney 的 mj.video 也改为同一份常量下发（以前 _caps_payload 把 video 整段丢掉）。"
+        },
+        {
+          "field": "midjourney_video_request_fields",
+          "from": "CanvasVideoRequest 没有 MJ 视频字段，跑 MJ 视频会被通用视频链路按 /v1/videos/generations 提交",
+          "to": "CanvasVideoRequest 新增 motion / video_type / mj_batch / end_image / mj_task_id / mj_index / animate_mode；只有模型名命中 midjourney-video 且平台是 apimart 时才组装 MJ 视频请求体：prompt + image_urls[1] 或 task_id+index + end_url(可选) + video_type + motion + batch_size + animate_mode，其它模型一律不下发这些字段",
+          "note": "本地 400：非 apimart 平台、生成方式不是 image_to_video、既无首帧图也无 mj_task_id、首帧图与 mj_task_id 同时给、mj_index 不在 0–3 或没有 mj_task_id、animate_mode=auto 缺 task_id/index、motion 不在 low|high、mj_batch 不在 1|2|4、video_type 不在 4 个值。轮询沿用既有 APIMart 视频任务 GET /v1/tasks/{id}。"
+        },
+        {
+          "field": "midjourney_video_billing",
+          "from": "价目已有 midjourney@video / midjourney@video-720p，但没有模型引用，画布报价会走 conservative 兜底",
+          "to": "midjourney-video 报价按 video_type 归到 480p / 720p 两档，预扣模型直接用 midjourney@video / midjourney@video-720p，rows = batch_size（费用 = 单价 × batch）；价目缺键或估算落到 pricing_fallback 时本地 500 显式失败，绝不按 0 计",
+          "note": "价目 gold 单价：midjourney@video 0.2 USD/次（2 积分成本）、midjourney@video-720p 0.4 USD/次（4 积分成本）；batch=4 时 480p 成本 8 积分、720p 成本 16 积分。结算沿用预扣参数（同一 billing id + rows），上游没返回 cost 时保守估价与预扣一致，不会二次抬价。"
+        }
+      ],
+      "model_caps": [
+        {
+          "model": "seedance-2.5",
+          "kind": "video",
+          "caps": {
+            "draft": true,
+            "draft_resolution": "480p",
+            "draft_final_resolutions": [
+              "1080p",
+              "4k"
+            ],
+            "draft_expires_days": 3,
+            "ref_max": 9,
+            "video_ref_max": 3,
+            "audio_ref_max": 3
+          }
+        },
+        {
+          "model": "midjourney-video",
+          "kind": "video",
+          "caps": {
+            "modes": [
+              "image_to_video"
+            ],
+            "durations": [
+              5
+            ],
+            "resolutions": [
+              "480p",
+              "720p"
+            ],
+            "ratios": [],
+            "batch": [
+              1,
+              2,
+              4
+            ],
+            "ref_max": 1
+          }
+        }
+      ],
+      "parameter_changes": [
+        {
+          "model": "seedance-2.5",
+          "field": "ref_max / video_ref_max / audio_ref_max",
+          "from": "30 / 10 / 10（文档声明值）",
+          "to": "9 / 3 / 3（与通用上传分支 image_limit=9 / video_payload[:3] / audios[:3] 一致）",
+          "note": "文档 L46346 / L46822–L46824 声明图 30 / 视频 10 / 音频 10，但上传分支只取前 9 图 / 3 视频 / 3 音频，按文档值下发会让编辑器允许 30 张却静默只发 9 张 → 与 apimart-zoe 同口径按实际队列写 9/3/3；放开前需实测超限请求（U23），到时同时改上传分支与能力表。"
+        },
+        {
+          "model": "seedance-2.5",
+          "field": "draft caps（新增）",
+          "from": "无",
+          "to": "draft=true、draft_resolution=480p、draft_final_resolutions=[1080p,4k]、draft_expires_days=3",
+          "note": "文档确证（L46524–L46602）；成片计费：草稿按 480p，成片按请求档位（草稿阶段有原始参考视频时按 1080P-input / 4K-input 档，预扣沿用草稿时长）。"
+        }
+      ]
+    },
+    {
+      "provider_id": "apimart",
+      "name": "APIMart",
+      "version": 8,
+      "released_at": "2026-11-26",
+      "summary": "文档 2026-11-26 增量：新增视频模型 magi-2（Sand AI，固定 1080p / 4–30 整秒 / 默认带声 / 参考上限按提交队列 9-3-3）。协议侧首次给 nsfw_check 落语义（默认 false，显式开才发）；omni_reference_task_type 取值域收窄到 auto|reference（edit/extend 直接 400）；图生视频不含 21:9、auto/省略跟随首帧；参考上限仍按我方通用分支 9/3/3 记（文档 10/5/5，U23 样本 +1）。196 个共有文档页正文 0 变化。",
+      "docs_url": "https://docs.apimart.ai/en/api-reference/videos/magi-2/generation",
+      "new_models": {
+        "chat": [],
+        "image": [],
+        "video": [
+          "magi-2"
+        ],
+        "audio": []
+      },
+      "protocol_changes": [
+        {
+          "field": "nsfw_check",
+          "from": "能力表无该键、请求体不拼（只在注释里提到）",
+          "to": "nsfw_check:boolean，默认 false；只有用户显式开启且模型能力表声明才发 nsfw_check:true",
+          "note": "文档确证（L40741–L40746）：true 才用 omni-moderation-latest 审 prompt 与输入图；false/省略不产生审核成本与延迟。本轮只给 magi-2 开放（caps.nsfw_check=true），其它模型不下发该字段。"
+        },
+        {
+          "field": "reference_media_caps",
+          "from": "文档口径按模型抄：apimart-zoe 图 30 / 视频 10 / 音频 10，seedance-2.5 30/10/10",
+          "to": "magi-2 文档 图 10 / 视频 5 / 音频 5（L40786 / L40802 / L40806），能力表仍按实际提交队列写 9 / 3 / 3",
+          "note": "通用分支硬截断 image_payload[:9] / video_payload[:3] / audios[:3]；按文档值下发会让编辑器允许 10 张却只发 9 张。U23（文档上限 vs 实际队列）样本从 1 个模型增至 2 个（apimart-zoe + magi-2），放开需实测超限请求。"
+        },
+        {
+          "field": "omni_reference_task_type",
+          "from": "auto（默认）| reference | edit | extend（统一入口按 mode 映射）",
+          "to": "magi-2 只收 auto（默认）| reference；edit / extend 一律 HTTP 400",
+          "note": "文档确证（L40780–L40782、L40889–L40891）。能力表 modes 不收 video_edit / video_extend，并新增 reject_edit_modes 标记让提交分支本地先拦，不把注定 400 的请求发上游（避免白等一次失败）。"
+        },
+        {
+          "field": "first_frame_ratio",
+          "from": "首帧/首尾帧也发 aspect_ratio",
+          "to": "magi-2 图生视频不含 21:9；省略 aspect_ratio 或传 auto = 跟随首帧比例（ratio_follows_first_frame 机制）",
+          "note": "文档确证（L40764–L40766、L40903）。首帧方式整段不发 aspect_ratio；文生视频/参考生视频仍可显式选 6 个比例 + auto。"
+        }
+      ],
+      "model_caps": [
+        {
+          "model": "magi-2",
+          "kind": "video",
+          "caps": {
+            "ratios": [
+              "16:9",
+              "9:16",
+              "1:1",
+              "4:3",
+              "3:4",
+              "21:9",
+              "auto"
+            ],
+            "resolutions": [
+              "1080p"
+            ],
+            "durations": [
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30
+            ],
+            "modes": [
+              "text_to_video",
+              "image_to_video",
+              "start_end_to_video",
+              "reference_to_video"
+            ],
+            "ref_max": 9,
+            "video_ref_max": 3,
+            "audio_ref_max": 3,
+            "audio_default_on": true,
+            "ratio_follows_first_frame": true,
+            "nsfw_check": true
+          }
+        }
+      ],
+      "parameter_changes": [
+        {
+          "model": "magi-2",
+          "field": "duration",
+          "from": "",
+          "to": "4–30 连续整秒（默认 5）；seconds 是别名，同时发必须相等",
+          "note": "文档 L40752–L40758：0 / 小数 / 越界 400。能力表用 durations=4..30，默认落 5。"
+        },
+        {
+          "model": "magi-2",
+          "field": "resolution",
+          "from": "",
+          "to": "固定 1080p（省略也是 1080p；其它值 400）",
+          "note": "文档 L40760–L40762 / L40906；能力表 resolutions 只留 [1080p]，编辑器不再给其它档。"
+        },
+        {
+          "model": "magi-2",
+          "field": "aspect_ratio",
+          "from": "",
+          "to": "16:9(默认)/9:16/1:1/4:3/3:4/21:9 + auto；图生视频不含 21:9",
+          "note": "文档 L40764–L40766；auto/省略 = 跟随首帧，靠 caps.ratio_follows_first_frame 在首帧方式下不发比例字段。"
+        },
+        {
+          "model": "magi-2",
+          "field": "audio",
+          "from": "",
+          "to": "generate_audio 默认 true（audio 是别名，不得冲突）",
+          "note": "文档 L40768–L40774 / L40907；能力表 audio_field=generate_audio、audio_default_on=true（关声音要显式发 false）。"
+        },
+        {
+          "model": "magi-2",
+          "field": "nsfw_check",
+          "from": "",
+          "to": "默认 false；用户显式开启才发 nsfw_check:true",
+          "note": "文档 L40741–L40746；true 时用 omni-moderation-latest 审核 prompt 与输入图，会增加延迟与审核成本。"
+        },
+        {
+          "model": "magi-2",
+          "field": "ref_max / video_ref_max / audio_ref_max",
+          "from": "",
+          "to": "9 / 3 / 3（文档 10 / 5 / 5）",
+          "note": "文档 L40786 / L40798 / L40802 / L40806；通用提交分支只取前 9 图 / 3 视频 / 3 音频，与 apimart-zoe、seedance-2.5 同口径（U23 证据 +1）。"
+        },
+        {
+          "model": "magi-2",
+          "field": "modes",
+          "from": "",
+          "to": "text_to_video / image_to_video / start_end_to_video / reference_to_video（不含 video_edit、video_extend）",
+          "note": "文档 L40889–L40891：视频编辑与延长不可用；本地对 edit/extend 直接 400。"
+        }
+      ]
+    },
+    {
+      "provider_id": "apimart",
+      "name": "APIMart",
+      "version": 9,
+      "released_at": "2026-11-27",
+      "summary": "纠正历史覆盖：seedance-2.5 恢复 4k 与 30/10/10；apimart-zoe 参考上限 30/10/10（文档 L46346 / L46822–L46824 / L36104 等）。2026-11-27 起参考上限改为按能力表声明下发，本版本把 v2/v7 钉死的旧值改回，draft 四字段沿用 v7。",
+      "docs_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-5/generation",
+      "new_models": {
+        "chat": [],
+        "image": [],
+        "video": [],
+        "audio": []
+      },
+      "protocol_changes": [
+        {
+          "field": "reference_media_caps",
+          "from": "参考上限按通用上传队列硬截断（图 9 / 视频 3 / 音频 3）；v2 把 seedance-2.5 分辨率钉死为 480p/720p/1080p，v7 又把 seedance-2.5 参考上限钉成 9/3/3",
+          "to": "参考上限改为按能力表声明下发（caps 的 ref_max / video_ref_max / audio_ref_max），此版本纠正旧覆盖：seedance-2.5 恢复 4k 与 30/10/10，apimart-zoe 为 30/10/10",
+          "note": "文档 L46346 / L46822–L46824 声明 seedance-2.5 图 30 / 视频 10 / 音频 10 且分辨率含 4k；L36104 等声明 apimart-zoe 图 30 / 视频 10 / 音频 10。2026-11-27 起提交分支按能力表声明值下发，但覆盖值优先级高于代码表，已应用旧版本的用户必须靠本版本改回。"
+        }
+      ],
+      "model_caps": [
+        {
+          "model": "seedance-2.5",
+          "kind": "video",
+          "caps": {
+            "resolutions": [
+              "480p",
+              "720p",
+              "1080p",
+              "4k"
+            ],
+            "ref_max": 30,
+            "video_ref_max": 10,
+            "audio_ref_max": 10,
+            "draft": true,
+            "draft_resolution": "480p",
+            "draft_final_resolutions": [
+              "1080p",
+              "4k"
+            ],
+            "draft_expires_days": 3
+          }
+        },
+        {
+          "model": "apimart-zoe",
+          "kind": "video",
+          "caps": {
+            "ref_max": 30,
+            "video_ref_max": 10,
+            "audio_ref_max": 10
+          }
+        }
+      ],
+      "parameter_changes": []
+    },
+    {
+      "provider_id": "apimart",
+      "name": "APIMart",
+      "version": 10,
+      "released_at": "2026-11-27",
+      "summary": "纠正 magi-2 参考上限：文档 L40786/L40796–L40806 为图 10/视频 5/音频 5，v8 曾按上传队列写 9/3/3，现已改为按能力表声明下发；另补回 midjourney 图片模型 mj.video（v2 覆盖整块替换 mj 时丢失，versions/speeds/hd 与代码表同值）。",
+      "docs_url": "https://docs.apimart.ai/en/api-reference/videos/magi-2/generation",
+      "new_models": {
+        "chat": [],
+        "image": [],
+        "video": [],
+        "audio": []
+      },
+      "protocol_changes": [
+        {
+          "field": "reference_media_caps",
+          "from": "magi-2 参考上限按上传队列写 9 / 3 / 3（v8）",
+          "to": "magi-2 按文档声明 图 10 / 视频 5 / 音频 5（与 APIMART_VIDEO_MODEL_CAPS 同值）",
+          "note": "文档 L40786 / L40796–L40806；2026-11-27 起提交分支按能力表声明值下发，覆盖值不同步纠正的话编辑器仍只允许 9 图 / 3 视频 / 3 音频。"
+        }
+      ],
+      "model_caps": [
+        {
+          "model": "magi-2",
+          "kind": "video",
+          "caps": {
+            "ref_max": 10,
+            "video_ref_max": 5,
+            "audio_ref_max": 5
+          }
+        },
+        {
+          "model": "midjourney",
+          "kind": "image",
+          "caps": {
+            "mj": {
+              "versions": [
+                "8.2",
+                "8.1",
+                "7",
+                "6.1",
+                "5.2",
+                "5.1"
+              ],
+              "speeds": [
+                "fast",
+                "turbo",
+                "relax"
+              ],
+              "hd": [
+                "8.2",
+                "8.1"
+              ],
+              "video": {
+                "endpoint": "/v1/midjourney/generations/video",
+                "upstream_model": "midjourney",
+                "input_sources": [
+                  "image_urls",
+                  "task_id"
+                ],
+                "requires_first_frame": true,
+                "supports_end_frame": true,
+                "duration_seconds": 5,
+                "duration_fixed": true,
+                "motions": [
+                  "low",
+                  "high"
+                ],
+                "motion_default": "high",
+                "video_types": [
+                  "vid_1.1_i2v_480",
+                  "vid_1.1_i2v_720",
+                  "vid_1.1_i2v_start_end_480",
+                  "vid_1.1_i2v_start_end_720"
+                ],
+                "video_type_default": "vid_1.1_i2v_480",
+                "base_by_tier": {
+                  "480p": "vid_1.1_i2v_480",
+                  "720p": "vid_1.1_i2v_720"
+                },
+                "start_end_by_tier": {
+                  "480p": "vid_1.1_i2v_start_end_480",
+                  "720p": "vid_1.1_i2v_start_end_720"
+                },
+                "start_end_video_types": [
+                  "vid_1.1_i2v_start_end_480",
+                  "vid_1.1_i2v_start_end_720"
+                ],
+                "animate_modes": [
+                  "manual",
+                  "auto"
+                ],
+                "batch": [
+                  1,
+                  2,
+                  4
+                ],
+                "batch_default": 1,
+                "index_min": 0,
+                "index_max": 3,
+                "billing": [
+                  "midjourney@video",
+                  "midjourney@video-720p"
+                ],
+                "billing_by_tier": {
+                  "480p": "midjourney@video",
+                  "720p": "midjourney@video-720p"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "parameter_changes": [
+        {
+          "model": "magi-2",
+          "field": "ref_max / video_ref_max / audio_ref_max",
+          "from": "9 / 3 / 3（v8 覆盖值）",
+          "to": "10 / 5 / 5（文档与能力表声明值）",
+          "note": "文档 L40786 / L40796–L40806：图 10 / 视频 5 / 音频 5；v8 按当时上传队列的 9/3/3 写死，现已放开。"
+        },
+        {
+          "model": "midjourney",
+          "field": "mj.video",
+          "from": "缺失：v2 的 mj 覆盖整块替换代码表，mj.video 被顶掉",
+          "to": "与 APIMART_MJ_VIDEO_CAPS 同值补回（versions / speeds / hd 不变）",
+          "note": "v2 写 mj 时还没有 MJ 视频能力，合并按顶层字段整块替换、不补子键；补回后 /api/model-caps 的图片 midjourney 与代码表一致。"
+        }
+      ]
     }
   ]
 }

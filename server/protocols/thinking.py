@@ -93,10 +93,9 @@ THINK_MODEL_LEVELS: Dict[str, Tuple[str, ...]] = {
     "gpt-6-astra": _FIVE, "gpt-6-luna": _FIVE, "gpt-6-sol": _FIVE,
     "gpt-6.1-sol": _FIVE, "gpt-6.1-terra": _FIVE,
     "gpt-5.2": _FOUR, "gpt-5.4": _FOUR, "gpt-5.4-mini": _FOUR, "gpt-5.5": _FOUR,
-    "gpt-5.4-pro": _PRO_THREE, "gpt-5.5-pro": _PRO_THREE, "gpt-5.2-codex": _PRO_THREE,
+    "gpt-5.4-pro": _PRO_THREE, "gpt-5.2-codex": _PRO_THREE,
     # 老 ID：保守 4 档 + 老 wire 映射（官方已无模型页）
     "gpt-5": _FOUR, "gpt-5.1": _FOUR, "gpt-5-mini": _FOUR, "gpt-5-chat-latest": _FOUR,
-    "gpt-5.1-codex": _FOUR, "gpt-5.1-codex-max": _FOUR, "gpt-5.1-codex-mini": _FOUR,
     "gpt-5.3-codex": _FOUR,
     # Gemini（VENDOR-REASONING §2.2；-thinking 别名沿用基础模型的档位）
     "gemini-3-pro-preview": _levels("low", "high"),
@@ -107,24 +106,34 @@ THINK_MODEL_LEVELS: Dict[str, Tuple[str, ...]] = {
     "gemini-3.1-flash-lite-preview": _THREE, "gemini-4-argon": _THREE,
     "gemini-2.5-pro": _THREE, "gemini-2.5-flash": _THREE, "gemini-2.5-flash-lite": _THREE,
     # DeepSeek V4（§4.4；旧 R1/V3 只有开关/不可用，不进表）
-    "deepseek-v4-pro": _THREE_LHM, "deepseek-v4-flash": _THREE_LHM, "deepseek-flash": _THREE_LHM,
+    "deepseek-v4-pro": _THREE_LHM, "deepseek-v4-flash": _THREE_LHM,
     # Qwen3.8（§4.5；canonical high wire 到 xhigh，所以 UI 三档是 低/中/高）
     "qwen3.8-max": _THREE, "qwen3.8-max-0902": _THREE, "qwen3.8-flash": _THREE,
     "qwen3.8-2.4t-a95b": _THREE, "qwen3.8-27b": _THREE,
     # Kimi K3（§4.6）
-    "kimi-k3": _THREE_LHM, "kimi-k3.1-pro": _THREE_LHM,
+    "kimi-k3": _THREE_LHM,
     # GLM（§4.7）
     "glm-5.2": _FIVE, "glm-5.3": _THREE_LHM, "glm-5.3-flash": _THREE_LHM,
-    "glm-5.3-flashx": _THREE_LHM,
 }
+
+# 历史兼容、上游无此 ID（2026-11-26 CATEGORY-AUDIT §3.6 核对 /v1/models?expand=category 得出）。
+# 以前它们是显式档位条目，会让「用户自己登记了同名模型」拿到一个上游根本不存在的模型的档位。
+# 2026-11-27 从真值源里摘掉，只在这里留档，不参与任何解析：
+#   * gpt-5.1-codex / -max / -mini：上游 codex 只有 gpt-5.3-codex
+#   * gpt-5.5-pro：上游 pro 档是 gpt-5.4-pro
+#   * glm-5.3-flashx / kimi-k3.1-pro / deepseek-flash / deepseek-ocr：上游只有 glm-5.3-flash /
+#     kimi-k3 / deepseek-v4-flash，没有 flashx / k3.1-pro / 裸 deepseek-flash / deepseek-ocr
+THINK_MODEL_LEGACY_GHOST_IDS: Tuple[str, ...] = (
+    "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini", "gpt-5.5-pro",
+    "glm-5.3-flashx", "kimi-k3.1-pro", "deepseek-flash", "deepseek-ocr",
+)
 
 # 显式证据：capability / levels 分开标（默认 documented；老 ID 与别名标 inferred）。
 THINK_MODEL_EVIDENCE: Dict[str, Dict[str, str]] = {
     model: {"capability": EVIDENCE_DOCUMENTED, "levels": EVIDENCE_DOCUMENTED}
     for model in THINK_MODEL_LEVELS
 }
-for _old in ("gpt-5", "gpt-5.1", "gpt-5-mini", "gpt-5-chat-latest",
-             "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini", "gpt-5.3-codex",
+for _old in ("gpt-5", "gpt-5.1", "gpt-5-mini", "gpt-5-chat-latest", "gpt-5.3-codex",
              "gpt-5.2-codex"):
     # OpenAI 已无这些老 ID 的模型页；按同族保守裁剪（文档没写 -> inferred）
     THINK_MODEL_EVIDENCE[_old] = {"capability": EVIDENCE_INFERRED, "levels": EVIDENCE_INFERRED}
@@ -132,7 +141,7 @@ for _alias in ("gemini-3-pro-preview-thinking", "gemini-3.1-pro-preview-thinking
                "gemini-3-flash-preview-thinking"):
     # 别名模型沿用基础模型档位，别名本身文档没写 -> 档位 inferred
     THINK_MODEL_EVIDENCE[_alias] = {"capability": EVIDENCE_INFERRED, "levels": EVIDENCE_INFERRED}
-for _inferred in ("deepseek-v4-flash", "glm-5.3-flash", "glm-5.3-flashx"):
+for _inferred in ("deepseek-v4-flash", "glm-5.3-flash"):
     THINK_MODEL_EVIDENCE[_inferred] = {"capability": EVIDENCE_INFERRED, "levels": EVIDENCE_INFERRED}
 
 # 明确「没有强度档位」的模型（只有开关或完全不支持）。命中优先于族规则，避免伪造档位。
@@ -141,8 +150,6 @@ THINK_MODEL_NO_THINK: Tuple[str, ...] = (
     "gpt-5.2-pro", "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano",
     # Gemini：明确关闭思考的别名
     "gemini-3-flash-preview-nothinking",
-    # DeepSeek：R1/V3 系列只有开关 / 当前 APIMart 账号不可用
-    "deepseek-ocr",
     # Kimi：K2.x 只有 thinking 开关
     "kimi-k2-thinking",
 )
@@ -182,8 +189,7 @@ THINK_MODEL_NO_THINK_PATTERNS: Tuple["re.Pattern[str]", ...] = (
 
 # OpenAI 老 ID 使用保守 wire（low→minimal 等）；分族 wire 之外的单模型覆盖。
 _OPENAI_LEGACY_WIRE_KEYS: Tuple[str, ...] = (
-    "gpt-5", "gpt-5.1", "gpt-5-mini", "gpt-5-chat-latest",
-    "gpt-5.1-codex", "gpt-5.1-codex-max", "gpt-5.1-codex-mini", "gpt-5.3-codex",
+    "gpt-5", "gpt-5.1", "gpt-5-mini", "gpt-5-chat-latest", "gpt-5.3-codex",
 )
 
 # Anthropic：兼容层 reasoning_effort = Ignored（实测 APIMart 透传后 400），/chat/completions 的

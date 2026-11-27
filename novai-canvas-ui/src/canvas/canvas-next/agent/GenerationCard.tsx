@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { AgentTaskPlan } from "../backend/types";
 import {
   DEFAULT_CAMERA, STYLES, genOf, isQualityDefault, outputFormatLabel, outputFormatOptions,
-  qualityChoices, qualityLabel, resRange, thinkLevelLabel, thinkLevelsFor, thinkingAvailable,
+  qualityChoices, qualityLabel, thinkLevelLabel, thinkLevelsFor, thinkingAvailable,
   type ImageOutputFormat, type MjParams, type ModelSpec,
 } from "../model";
 import { Icon } from "../ui/Icon";
@@ -505,7 +505,7 @@ export function GenerationCard({ plan, models, busy, onApprove, onDiscard, onFoc
       r.turbo ? "on" : "off", r.turbo ? "开" : "关", differs("turbo"),
       [{ value: "off", label: "关", pick: () => set(i, { turbo: false }) },
         { value: "on", label: "开", pick: () => set(i, { turbo: true })}])] : [];
-    const draftItems: ParamItem[] = resRange(spec) ? [item("draft", "草稿",
+    const draftItems: ParamItem[] = spec?.draft ? [item("draft", "草稿",
       r.draft ? "on" : "off", r.draft ? "开" : "关", differs("draft"),
       [{ value: "off", label: "关", pick: () => set(i, { draft: false }) },
         { value: "on", label: "开", pick: () => set(i, { draft: true })}])] : [];

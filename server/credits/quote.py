@@ -9,6 +9,7 @@ server/credits/pricing.py 保留价目加载/档位工具，本模块负责：
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, Optional, Tuple
 
 from server.credits import config, model_map, pricing
@@ -23,6 +24,29 @@ PER_CALL_CANDIDATES = {"midjourney": 4}
 def _per_call_model_key(record: Dict[str, Any], target: str = "", model: str = "") -> str:
     """取价目 record 的 id（或 model_map 的 target / 原始模型名）作为分摊表的 key。"""
     return str((record or {}).get("id") or target or model or "").strip().lower()
+
+
+# 画布视频的「虚拟模型」：上游没有这个 model id，价格按档位映射到 APIMart 的两个 per_call 计费 id。
+# 不做这层映射的话，/api/credits/price?model=midjourney-video 会落到 conservative 高价（按秒 × 5 秒），
+# 和实际预扣（midjourney@video / @video-720p × rows）不一致。
+MJ_VIDEO_VIRTUAL_MODEL = "midjourney-video"
+MJ_VIDEO_BILLING_BY_TIER = {
+    "480p": "midjourney@video",
+    "720p": "midjourney@video-720p",
+}
+
+
+def _mj_video_billing_id(model: Any, params: Optional[Dict[str, Any]]) -> str:
+    raw = str(model or "").strip()
+    if "@" in raw:
+        # 已经是计费 id（midjourney@video / @video-720p），别再往虚拟模型上映射
+        return ""
+    name = re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")
+    if name != MJ_VIDEO_VIRTUAL_MODEL:
+        return ""
+    resolution = str((params or {}).get("resolution") or "").strip().lower()
+    tier = "720p" if re.search(r"720", resolution) else "480p"
+    return MJ_VIDEO_BILLING_BY_TIER[tier]
 
 
 def _conservative_record(category: str) -> Dict[str, Any]:
@@ -200,6 +224,17 @@ def estimate(kind: str, model: Any = "", params: Optional[Dict[str, Any]] = None
         if candidate is not None and not fb:
             record = candidate
             pricing_source = "direct"
+    if record is None:
+        # 虚拟视频模型 midjourney-video：按请求档位映射到 midjourney@video / @video-720p，
+        # 再走正常 per_call × rows（rows = batch_size）的估价；缺键时仍会落到 conservative 并标 fallback，
+        # 但生成/预扣入口（main.apimart_mj_video_price_quote）会显式 500，不会按 0 或错档收。
+        billing_id = _mj_video_billing_id(model, params)
+        if billing_id:
+            candidate, fallback_record, _un = pricing.resolve_model(billing_id, category)
+            if candidate is not None and not fallback_record:
+                record = candidate
+                pricing_source = "direct"
+                proxy_model = ""
     if conservative and record is not None and not max_mode:
         # 预扣/兜底估价：按该模型最高档价，保证「实际成本缺失时」也不会低于最高可能成本
         max_mode = True
@@ -283,7 +318,8 @@ def estimate(kind: str, model: Any = "", params: Optional[Dict[str, Any]] = None
             usd = gold * rows
     elif category == "audio":
         if max_mode:
-            tier = _best_tier(record, ("per_call",)) or _best_tier(record, ("per_second",))
+            tier = (_best_tier(record, ("per_call",)) or _best_tier(record, ("per_second",))
+                    or _best_tier(record, ("per_minute",)))
         else:
             tier = pricing.pick_audio_tier(record, params)
         if tier is None:
@@ -302,6 +338,16 @@ def estimate(kind: str, model: Any = "", params: Optional[Dict[str, Any]] = None
             except (TypeError, ValueError):
                 duration = 0.0
             usd = gold * (duration if duration > 0 else 1.0) * rows
+        elif unit == "per_minute":
+            # 转写类（whisper-1）按分钟计价：params.duration 是秒，没给就按 1 分钟估（不按 0 漏算）
+            try:
+                duration = float(params.get("duration") or 0)
+            except (TypeError, ValueError):
+                duration = 0.0
+            minutes = duration / 60.0 if duration > 0 else 1.0
+            usd = gold * minutes * rows
+            extra["minutes"] = round(minutes, 6)
+            extra["rows"] = rows
         else:
             usd = gold * rows
     elif category == "chat":

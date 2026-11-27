@@ -21,9 +21,54 @@ export const TYPE_ICON = { image: "image", video: "video", text: "text", audio: 
 export type CameraParams = { on: boolean; body: number; lens: number; focal: number; aperture: number };
 /** Midjourney 专属参数（只在模型规格带 mj 时出现）：version 为空 = 交给上游默认；"niji 7" 这种带 niji 前缀 */
 export type MjParams = { version?: string; speed?: string; hd?: boolean; stylize?: number };
-export type ImageParams = { model: string; ratio: string; size: string; /** 尺寸档（1K/2K/4K，来自方案卡 settings；原图比例按它算显式 WxH） */ resolution?: string; /** 「原图比例」选中的显式 WxH（不填则沿用尺寸档） */ sourceSize?: string; count: number; search: boolean; style: string; camera: CameraParams; mj?: MjParams; /** 质量档（后端 caps.qualities 里的一档）；不填 / auto = 不传 = 上游默认 */ quality?: string; /** 先思考（只有 caps.thinking_mode 的模型有）；undefined = 不传，交给模型决定 */ thinking?: boolean; /** 输出格式（后端 caps.output_formats）：gif / svg；不填 = 静态图（不发字段） */ outputFormat?: "gif" | "svg"; /** GIF 帧数（只有 outputFormat=gif 时下发）；不填 = caps 默认 9 */ frameCount?: number; /** GIF 每帧时长 ms（只有 outputFormat=gif 时下发）；不填 = 200 */ frameDuration?: number; /** 透明背景（后端 caps.native_background）：不填 = 不传字段（跟随上游默认）；目前只认 transparent */ background?: "transparent" };
+/**
+ * Midjourney 图生视频能力位（后端 caps.mj_video；图片模型 midjourney 的 mj.video 同一形状）。
+ * 只装后端确证下发的键，缺字段 = 这一项没有能力，前端不猜取值、不补默认档位。
+ */
+export type MjVideoSpec = {
+  /** 上游提交路径（仅标识，真正请求由后端发） */
+  endpoint?: string;
+  /** 上游模型 id（不进请求体） */
+  upstreamModel?: string;
+  /** 输入二选一：image_urls / task_id */
+  inputSources: string[];
+  requiresFirstFrame: boolean;
+  supportsEndFrame: boolean;
+  durationSeconds?: number;
+  durationFixed: boolean;
+  motions: string[];
+  motionDefault?: string;
+  videoTypes: string[];
+  videoTypeDefault?: string;
+  /** 档位 → video_type（无尾帧） */
+  baseByTier: Record<string, string>;
+  /** 档位 → video_type（有尾帧，自动升级 start_end_*） */
+  startEndByTier: Record<string, string>;
+  startEndVideoTypes: string[];
+  animateModes: string[];
+  batch: number[];
+  batchDefault?: number;
+  indexMin?: number;
+  indexMax?: number;
+  billing: string[];
+  /** 档位 → 计费 id（费 = 单价 × batch） */
+  billingByTier: Record<string, string>;
+};
+export type ImageParams = { model: string; ratio: string; size: string; /** 尺寸档（1K/2K/4K，来自方案卡 settings；原图比例按它算显式 WxH） */ resolution?: string; /** 「原图比例」选中的显式 WxH（不填则沿用尺寸档） */ sourceSize?: string; count: number; search: boolean; style: string; camera: CameraParams; mj?: MjParams; /** 质量档（后端 caps.qualities 里的一档）；不填 / auto = 不传 = 上游默认 */ quality?: string; /** 先思考（只有 caps.thinking_mode 的模型有）；undefined = 不传，交给模型决定 */ thinking?: boolean; /** 输出格式（后端 caps.output_formats）：gif / svg；不填 = 静态图（不发字段） */ outputFormat?: "gif" | "svg"; /** GIF 帧数（只有 outputFormat=gif 时下发）；不填 = caps 默认 9 */ frameCount?: number; /** GIF 每帧时长 ms（只有 outputFormat=gif 时下发）；不填 = 200 */ frameDuration?: number; /** 背景（后端 caps.native_background / caps.background）：不填 = 不传字段（跟随上游默认）；transparent 只给原生透明背景的模型，auto / opaque 只给 mai 这类声明了枚举的模型 */ background?: "transparent" | "auto" | "opaque"; /** 长图用途（后端 caps.skill，kling-v4-long-image 必填）：ecommerce / webpage */ skill?: string; /** 长图篇幅（后端 caps.length，只在 skill=ecommerce 生效）：short / medium / long */ length?: string; /** 系列模式张数（后端 caps.series，kling-v4-image 2–4）：不填 = 按普通 n 张出 */ seriesImages?: number };
 export type VideoMode = "文生视频" | "首帧" | "首尾帧" | "参考生视频" | "视频编辑" | "视频延长" | "参考视频生视频" | "数字人";
-export type VideoParams = { model: string; mode: VideoMode; ratio: string; res: string; dur: number; sound: boolean; times: number; /** 多镜头（高级设置） */ multiShot?: boolean; /** 生成模式（4K / 标准 / 专业…，仅规格声明的模型可用） */ genMode?: string; /** 极速模式（仅规格声明的模型可用） */ turbo?: boolean; /** 草稿模式（TapNow Draft Mode）：先按最低清晰度出草稿，满意后再出成片 */ draft?: boolean };
+export type VideoParams = { model: string; mode: VideoMode; ratio: string; res: string; dur: number; sound: boolean; times: number; /** 多镜头（高级设置） */ multiShot?: boolean; /** 生成模式（4K / 标准 / 专业…，仅规格声明的模型可用） */ genMode?: string; /** 极速模式（仅规格声明的模型可用） */ turbo?: boolean; /** 草稿模式（Seedance 两段式）：先按草稿档出 480p，满意后再出成片；只有 caps.draft 的模型可用 */ draft?: boolean; /** 成片步：草稿任务 id（这一段只发 model + draft_task_id + resolution，其余字段后端会忽略） */ draftTaskId?: string;
+  /** Midjourney 图生视频（只有 caps.mj_video 的模型带，其它模型一律不下发）：运动幅度 low / high */
+  motion?: string;
+  /** MJ 上游 batch_size（1/2/4）：一次出 N 条，费用按 N 倍计 */
+  mjBatch?: number;
+  /** 复用某次 MJ 出图任务的上游 task_id（不是画布任务 id）；与首帧图二选一 */
+  mjTaskId?: string;
+  /** 复用 MJ 出图任务的候选下标 0–3（必须配 mjTaskId） */
+  mjIndex?: number;
+  /** animate_mode：manual / auto（auto 必须 mjTaskId + 显式 mjIndex） */
+  animateMode?: string;
+  /** 内容审核开关（只有 caps 带该布尔位的模型才有）：只在打开时发 nsfw_check，默认不带 */
+  nsfw?: boolean; };
 export type TextParams = { model: string; search: boolean; /** 输出：文本 / 多维表格 / 分镜表 */ output?: "text" | "table" | "storyboard"; /** 模型强度档位（后端 model_caps.think 里的一档）；不填 = 不传 = 模型默认 */ think?: string };
 export type AudioParams = { model: string; kind: string; dur: string };
 export type ParamsOf<K extends GenKind> = K extends "image" ? ImageParams : K extends "video" ? VideoParams : K extends "text" ? TextParams : AudioParams;
@@ -46,6 +91,8 @@ export type GenOutput = {
   trim?: VideoTrim;
   /** 草稿模式出的低清版本：工具条显示「出成片」 */
   draft?: boolean;
+  /** 草稿任务 id（后端返回体的 task_id）：出成片时只发它 + 目标分辨率，成片任务另起 id 轮询 */
+  draftTaskId?: string;
   /** 音频波形（0~1），后端不给时前端从音频解码或用占位 */
   bars?: number[];
   meta?: { model?: string; ratio?: string; size?: string; at?: number; runId?: string; remote?: string; /** 上传文档的文件名 */ doc?: string; /** 后端返回的尺寸收敛说明（如 GIF 每帧尺寸被拼版上限缩小），写回后 toast 一次 */ notice?: string; /** 生成这一版时「@ 本节点」实际发出去的自我参考图：string = 那张源图；null = 明确没发（没有可用源图 / 模型不收）。字段缺失 = 这次改动之前的旧数据，读取时走旧回退（见 mentions.selfSourceOf） */ selfSrc?: string | null; /** 出这一版时用的提示词（归一比较见 mentions.samePromptAsVersion）：提示词没改 = 重复生成，不再带上一版结果；改过 = 用户在这张基础上改，仍带当前这一版当第一参考 */ prompt?: string };
@@ -113,10 +160,45 @@ export type ModelSpec = {
   gifFrames?: GifFrameSpec;
   /** 透明背景（后端 caps.native_background）；没有这个字段 = 不支持，面板不给入口 */
   nativeBackground?: boolean;
+  /** 系列模式张数区间（后端 caps.series）；没有 = 面板不给系列开关 */
+  series?: { min: number; max: number };
+  /** 长图用途（后端 caps.skill）；有才给「用途」入口 */
+  skill?: string[];
+  /** 长图篇幅（后端 caps.length，只在 skill=ecommerce 生效） */
+  length?: string[];
+  /** 上游接受的 background 枚举（后端 caps.background，mai：auto / opaque） */
+  backgroundAllowed?: string[];
+  /** 后端 caps.send_size：显式 false = 请求体不能带 size，面板不渲染比例 / 尺寸 */
+  sendSize?: boolean;
+  /** 后端 caps.exact_size_pair：精确像素按 width/height 成对下发（mai） */
+  exactSizePair?: boolean;
+  /** 精确像素约束（后端 caps.min_side / caps.size_step，mai：768 / 32） */
+  minSide?: number;
+  sizeStep?: number;
   /** 只返回提示词、不产视频（后端 caps.prompt_only）：面板隐藏视频参数，结果按提示词说明 */
   promptOnly?: boolean;
   // video
   modes?: VideoMode[]; res?: string[]; durs?: number[]; audio?: boolean; times?: number[]; multiShot?: boolean;
+  /** 声音默认开（后端 caps.audio_default_on）：新建节点 / 切到该模型时音频开关默认打开 */
+  audioDefaultOn?: boolean;
+  /** 参考上限（后端 caps.ref_max / video_ref_max / audio_ref_max）：面板按上限提示，缺哪条不提哪条 */
+  imageRefMax?: number;
+  videoRefMax?: number;
+  audioRefMax?: number;
+  /** 内容审核开关（后端 caps 的布尔能力位）；缺省 = 面板不给这个入口 */
+  nsfw?: boolean;
+  /** 首帧方式画幅跟随首帧（后端 caps.ratio_follows_first_frame）：比例列表丢 21:9 并提示 */
+  ratioFollowsFirstFrame?: boolean;
+  /** Seedance 草稿两段式（后端 caps.draft 声明才有；缺省 = 该模型不支持草稿） */
+  draft?: boolean;
+  /** 草稿阶段固定档位（caps.draft_resolution；缺省时回落最低档） */
+  draftRes?: string;
+  /** 成片可选档位（caps.draft_final_resolutions，原样；空 = 没有成片入口） */
+  draftFinals?: string[];
+  /** 草稿有效期天数（caps.draft_expires_days；缺省 = 不写死天数） */
+  draftExpiresDays?: number;
+  /** Midjourney 图生视频能力位（caps.mj_video）；缺省 = 这个模型没有 MJ 视频入口 */
+  mjVideo?: MjVideoSpec;
   /** 生成模式（TapNow 的 4K / 标准 / 专业 / 大 / 中 / 小）：只有服务商规格声明时才出现 */
   genModes?: string[];
   /** 极速模式（TapNow 的 turbo）：只有规格声明时才出现 */
@@ -210,10 +292,13 @@ export function durationSliderLevels(durs: number[] | undefined | null): { level
   for (const level of levels) labels[level] = level === "-1" ? "自动" : level + "s";
   return { levels, labels };
 }
-/** 模型默认时长：优先第一个正数档（-1=自动不参与默认，新建节点保持旧行为） */
+/** 上游多数视频模型的默认时长是 5 秒（文档口径 default 5） */
+const DEFAULT_VIDEO_SECONDS = 5;
+/** 模型默认时长：档位里有 5 秒就用上游默认的 5 秒，否则退第一个正数档（-1=自动不参与默认） */
 export function defaultVideoDuration(model: ModelSpec | null | undefined): number {
   const { auto, positive } = durationTiers(model?.durs);
-  return positive[0] ?? (auto ? -1 : 5);
+  if (positive.includes(DEFAULT_VIDEO_SECONDS)) return DEFAULT_VIDEO_SECONDS;
+  return positive[0] ?? (auto ? -1 : DEFAULT_VIDEO_SECONDS);
 }
 /** 换模型时时长收敛：合法值保留；「自动」只给支持 -1 的模型；否则收到最接近的正数档 */
 export function clampVideoDuration(model: ModelSpec | null | undefined, current: unknown): number {
@@ -242,10 +327,55 @@ export function videoResLabel(res: unknown): string {
   const text = String(res == null ? "" : res).trim();
   return !text || /^(自动|自适应|auto|adaptive)$/i.test(text) ? "自适应" : text;
 }
+/** 真实像素 → 档位标签（和视频档位同一套小写 p 写法）：按最短边定档，拿不到有效宽高就返回空串，不瞎猜 */
+export function resTierLabel(w: unknown, h: unknown): string {
+  const a = Number(w); const b = Number(h);
+  if (!(a > 0) || !(b > 0) || !Number.isFinite(a) || !Number.isFinite(b)) return "";
+  const short = Math.min(a, b);
+  if (short >= 2000) return "4K";
+  if (short >= 1400) return "2K";
+  if (short >= 1000) return "1080p";
+  if (short >= 660) return "720p";
+  if (short >= 420) return "480p";
+  return "";
+}
 /** 比例：adaptive / 自动 / 空 → 原图比例（用户口径：跟随源图比例） */
 export function videoRatioLabel(ratio: unknown): string {
   const text = String(ratio == null ? "" : ratio).trim();
   return !text || /^(自动|自适应|auto|adaptive)$/i.test(text) ? "原图比例" : text;
+}
+/**
+ * 视频参考素材上限的提示：全部来自后端 caps（图 ref_max / 视频 video_ref_max / 音频 audio_ref_max），
+ * 缺哪条就不提哪条；一条都没有返回空串（面板不渲染这行）。
+ */
+export function videoRefHint(model: ModelSpec | null | undefined): string {
+  const count = (value: unknown) => { const n = Math.floor(Number(value)); return Number.isFinite(n) && n > 0 ? n : 0; };
+  const images = count(model?.imageRefMax); const videos = count(model?.videoRefMax); const audios = count(model?.audioRefMax);
+  const parts: string[] = [];
+  if (images) parts.push("图 ≤" + images);
+  if (videos) parts.push("视频 ≤" + videos);
+  if (audios) parts.push("音频 ≤" + audios);
+  if (!parts.length) return "";
+  return "参考素材上限：" + parts.join(" · ") + (audios ? "；音频每段 2–30 秒、合计建议 ≤30 秒" : "");
+}
+/** 首帧 / 首尾帧方式下画幅跟随首帧（caps.ratio_follows_first_frame）：上游这些方式不收比例字段 */
+export function videoRatioFollowsFirstFrame(model: ModelSpec | null | undefined, mode?: unknown): boolean {
+  if (model?.ratioFollowsFirstFrame !== true) return false;
+  return mode === "首帧" || mode === "首尾帧";
+}
+/**
+ * 视频比例的可选值：图生视频（首帧 / 首尾帧）丢掉 21:9 —— 上游首帧方式只认前面几个画幅；
+ * 判据是 caps 的 ratio_follows_first_frame，不按模型名写死。
+ */
+export function videoRatioOptions(model: ModelSpec | null | undefined, mode?: unknown): string[] {
+  const ratios = Array.isArray(model?.ratios) ? model!.ratios! : [];
+  if (!videoRatioFollowsFirstFrame(model, mode)) return [...ratios];
+  return ratios.filter((ratio) => String(ratio).trim() !== "21:9");
+}
+/** 视频分辨率可选值：只有一档画质时不给下拉（底栏已经写明这档），避免弹出一个只有一项的分辨率 */
+export function videoResChoices(model: ModelSpec | null | undefined): string[] {
+  const list = Array.isArray(model?.res) ? model!.res! : [];
+  return list.length > 1 ? [...list] : [];
 }
 /** 次数：1× / 2× */
 export function videoTimesLabel(times: unknown): string {
@@ -498,7 +628,7 @@ const DEFAULTS: Record<GenKind, Partial<ModelSpec>> = {
 };
 /** 后端模型行 → 前端能力表。kind 由 capabilities 决定，能力细节按名字套预设。 */
 /** 服务商适配器给的面板规格（canvas/models 的 uiSpec）里，前端认的字段 */
-const UI_KEYS = ["ratios", "sizes", "batch", "batchUnknown", "maxRefs", "refNote", "i2i", "res", "durs", "modes", "audio", "times", "kinds", "adurs", "search", "style", "camera", "multiShot", "genModes", "turbo", "mj", "qualities", "thinkingMode", "promptOnly", "outputFormats", "gifFrames", "nativeBackground"] as const;
+const UI_KEYS = ["ratios", "sizes", "batch", "batchUnknown", "maxRefs", "refNote", "i2i", "res", "durs", "modes", "audio", "times", "kinds", "adurs", "search", "style", "camera", "multiShot", "genModes", "turbo", "mj", "qualities", "thinkingMode", "promptOnly", "outputFormats", "gifFrames", "nativeBackground", "series", "skill", "length", "backgroundAllowed", "sendSize", "exactSizePair", "minSide", "sizeStep", "draft", "draftRes", "draftFinals", "draftExpiresDays", "mjVideo", "audioDefaultOn", "imageRefMax", "videoRefMax", "audioRefMax", "nsfw", "ratioFollowsFirstFrame"] as const;
 function fromProvider(kind: GenKind, ui?: Record<string, unknown> | null): Partial<ModelSpec> {
   if (!ui || typeof ui !== "object" || (ui.kind && ui.kind !== kind)) return {};
   const out: Record<string, unknown> = {};
@@ -597,11 +727,24 @@ export function defaultParams(kind: GenKind, m?: ModelSpec): AnyParams {
   if (kind === "image") {
     // Midjourney 默认一次 4 张候选（batch 降序，batch[0] = 4；四宫格是免费赠品）；其它模型保持 1
     const count = m?.mj && Array.isArray(m.batch) && m.batch.length ? (Number(m.batch[0]) || 1) : 1;
-    return { model, ratio: m?.ratios?.includes("3:4") ? "3:4" : m?.ratios?.[0] || "1:1", size: m?.sizes?.includes("2K") ? "2K" : m?.sizes?.[0] || "1K", count, search: false, style: "无", camera: { ...DEFAULT_CAMERA } };
+    // 长图：用途必填、默认 ecommerce；篇幅只在 ecommerce 生效、默认 medium
+    const skills = (m?.skill || []).map((item) => String(item).toLowerCase());
+    const lengths = (m?.length || []).map((item) => String(item).toLowerCase());
+    const skill = skills.length ? (skills.includes("ecommerce") ? "ecommerce" : skills[0]) : "";
+    const length = skill === "ecommerce" && lengths.length ? (lengths.includes("medium") ? "medium" : lengths[0]) : "";
+    return { model, ratio: m?.ratios?.includes("3:4") ? "3:4" : m?.ratios?.[0] || "1:1", size: m?.sizes?.includes("2K") ? "2K" : m?.sizes?.[0] || "1K", count, search: false, style: "无", camera: { ...DEFAULT_CAMERA }, ...(skill ? { skill } : {}), ...(length ? { length } : {}) };
   }
   if (kind === "video") {
-    const rawRatio = m?.ratios?.[0] || "16:9";
-    return { model, mode: "文生视频", ratio: /^(auto|adaptive|自适应)$/i.test(rawRatio) ? "adaptive" : rawRatio, res: m?.res?.includes("720p") ? "720p" : m?.res?.[0] || "720p", dur: defaultVideoDuration(m), sound: false, times: 1 };
+    // MJ 图生视频没有画幅字段（caps 的 ratios 为空）：默认就表达成「原图比例」
+    const rawRatio = mjVideoSpec(m) && !(m?.ratios || []).length ? "adaptive" : m?.ratios?.[0] || "16:9";
+    // 没有「文生视频」的模型（MJ 图生视频只有「首帧」）：默认就用它支持的第一种方式，别先发一个必然 400 的方式
+    const modes = m?.modes || [];
+    const mode: VideoMode = modes.length && !modes.includes("文生视频") ? modes[0] : "文生视频";
+    // MJ 图生视频的默认档位只听 caps 的 video_type_default（480p），不套通用「优先 720p」
+    const mjTier = mjVideoDefaultTier(m);
+    const res = mjTier && (m?.res || []).includes(mjTier) ? mjTier : m?.res?.includes("720p") ? "720p" : m?.res?.[0] || "720p";
+    // 声音默认开只听 caps.audio_default_on（缺字段 = 沿用默认关）；内容审核有该能力位时默认关
+    return { model, mode, ratio: /^(auto|adaptive|自适应)$/i.test(rawRatio) ? "adaptive" : rawRatio, res, dur: defaultVideoDuration(m), sound: m?.audio === true && m?.audioDefaultOn === true, times: 1, ...(m?.nsfw ? { nsfw: false } : {}), ...(mjVideoSpec(m) ? { motion: mjVideoMotion(m), mjBatch: mjVideoBatch(m), animateMode: "manual" } : {}) };
   }
   if (kind === "text") return { model, search: false, output: "text" };
   return { model, kind: m?.kinds?.[0] || "音乐", dur: m?.adurs?.[0] || "自适应" };
@@ -644,10 +787,28 @@ export function clampParams(kind: GenKind, p: AnyParams, m: ModelSpec): AnyParam
       q.frameCount = gifFrameCountFor(q.frameCount, m);
       q.frameDuration = gifFrameDurationFor(q.frameDuration, m);
     } else { delete q.frameCount; delete q.frameDuration; }
-    // 透明背景只认后端 caps.native_background（没有 = 不支持，参数里也不留）；
-    // 透明只能出 PNG，和 GIF / SVG 的输出格式互斥，两边互斥时以透明为准（服务端同样会强制 png）
-    if (!m.nativeBackground) delete q.background;
-    else if (q.background === "transparent") { delete q.outputFormat; delete q.frameCount; delete q.frameDuration; }
+    // 长图用途 / 篇幅 / 系列张数：只认新模型声明的取值（换模型后不留别家的值）
+    const skills = (Array.isArray(m.skill) ? m.skill : []).map((item) => String(item).toLowerCase());
+    if (skills.length) {
+      const wanted = String(q.skill || "").trim().toLowerCase();
+      q.skill = skills.includes(wanted) ? wanted : skills.includes("ecommerce") ? "ecommerce" : skills[0];
+    } else delete q.skill;
+    const lengths = (Array.isArray(m.length) ? m.length : []).map((item) => String(item).toLowerCase());
+    if (lengths.length && q.skill === "ecommerce") {
+      const wanted = String(q.length || "").trim().toLowerCase();
+      q.length = lengths.includes(wanted) ? wanted : lengths.includes("medium") ? "medium" : lengths[0];
+    } else delete q.length;
+    const series = m.series;
+    const seriesCount = Math.floor(Number(q.seriesImages));
+    if (series && Number.isFinite(seriesCount) && seriesCount >= series.min && seriesCount <= series.max) q.seriesImages = seriesCount;
+    else delete q.seriesImages;
+    // send_size=false：像素尺寸由后端按档位折算 resolution，显式 WxH（原图比例）不再有意义
+    if (m.sendSize === false) delete q.sourceSize;
+    // 背景：透明只认 caps.native_background；其余只认 caps.background 枚举（mai：auto / opaque）
+    const backgrounds = (Array.isArray(m.backgroundAllowed) ? m.backgroundAllowed : []).map((item) => String(item).toLowerCase());
+    const bg = String(q.background || "").trim().toLowerCase();
+    if (bg === "transparent" && m.nativeBackground) { delete q.outputFormat; delete q.frameCount; delete q.frameDuration; }
+    else if (bg && bg !== "transparent" && backgrounds.includes(bg)) q.background = bg as ImageParams["background"];
     else delete q.background;
     return q;
   }
@@ -665,8 +826,31 @@ export function clampParams(kind: GenKind, p: AnyParams, m: ModelSpec): AnyParam
     q.dur = clampVideoDuration(m, q.dur);
     if (m.modes && m.modes.length && !m.modes.includes(q.mode)) q.mode = m.modes[0];
     if (!(m.times || [1]).includes(q.times || 1)) q.times = 1;
+    // 声音默认开：从别的模型切过来按新模型的默认起步；已经是这个模型就保留用户自己的开关
+    if (m.audio && m.audioDefaultOn && String((p as VideoParams).model || "") !== m.id) q.sound = true;
     if (!m.audio) q.sound = false;
+    // 内容审核开关只属于声明该能力位的模型：别家模型上残留的真值一律清掉（请求里不带）
+    if (!m.nsfw) delete q.nsfw; else q.nsfw = q.nsfw === true;
     if (!m.multiShot) q.multiShot = false;
+    // 草稿两段式只属于声明 draft 的模型：换到别的模型时两个字段都清掉（请求里永远不带）；
+    // 成片步与 draft 互斥，目标档位收敛进 caps 的成片档
+    if (!draftSupported(m)) { delete q.draft; delete q.draftTaskId; }
+    else if (q.draftTaskId) { delete q.draft; q.res = draftFinalResolution(q, m); }
+    // MJ 图生视频：这些字段只属于声明 mj_video 的模型；换到别的模型时全部清掉，
+    // 档位按 caps 的 480p/720p 收敛（1080p/4k 面板上根本不给，残留值在这里被收掉）
+    if (mjVideoSpec(m)) {
+      q.motion = mjVideoMotion(m, q.motion);
+      q.mjBatch = mjVideoBatch(m, q.mjBatch);
+      if (!String(q.mjTaskId || "").trim()) { delete q.mjTaskId; delete q.mjIndex; }
+      q.animateMode = mjVideoAnimateMode(m, q);
+      // 画幅跟随首帧（caps 的 ratios 为空）：比例表达成「原图比例」，别把上一家的 21:9 显示成有效值
+      if (!(m.ratios || []).length) q.ratio = "adaptive";
+      // 档位决定计费：换到 MJ 视频时回到 caps 的默认档（480p），不继承别家的 720p/1080p；已经是 MJ 则保留用户选的档
+      const mjDefaultTier = mjVideoDefaultTier(m);
+      if (mjDefaultTier && String((p as VideoParams).model || "") !== m.id) q.res = mjDefaultTier;
+    } else {
+      delete q.motion; delete q.mjBatch; delete q.mjTaskId; delete q.mjIndex; delete q.animateMode;
+    }
     return q;
   }
   if (kind === "text") {
@@ -923,5 +1107,165 @@ export function resRange(m: ModelSpec | undefined): { low: string; high: string 
   const sorted = list.slice().sort((a, b) => (tierNum(a) || 0) - (tierNum(b) || 0));
   return sorted[0] === sorted[sorted.length - 1] ? null : { low: sorted[0], high: sorted[sorted.length - 1] };
 }
-/** 草稿模式下真正发出去的清晰度 */
-export function draftRes(p: VideoParams, m: ModelSpec | undefined): string { const r = resRange(m); return p.draft && r ? r.low : p.res; }
+/** 草稿入口只由后端 caps 决定：没有 draft 声明的模型（含 seedance-2.5-flash）没有这个入口 */
+export function draftSupported(m: ModelSpec | undefined): boolean { return m?.draft === true; }
+
+/** 成片可选档位：只认 caps.draft_final_resolutions，缺失就是没有成片入口（不拿 resolutions 猜） */
+export function draftFinalResolutions(m: ModelSpec | undefined): string[] {
+  if (!draftSupported(m)) return [];
+  return [...new Set((Array.isArray(m?.draftFinals) ? m!.draftFinals! : []).map((item) => String(item || "").trim().toLowerCase()).filter(Boolean))];
+}
+
+/** 草稿阶段固定档位：caps.draft_resolution 优先；旧格式没给才回落最低档 */
+export function draftResolution(m: ModelSpec | undefined): string {
+  const fixed = String(m?.draftRes || "").trim().toLowerCase();
+  return fixed || resRange(m)?.low || "";
+}
+
+/** 草稿有效期天数：后端声明的原值；没声明返回 null（文案不写死 3 天） */
+export function draftExpiresDays(m: ModelSpec | undefined): number | null {
+  const days = Math.floor(Number(m?.draftExpiresDays));
+  return Number.isFinite(days) && days > 0 ? days : null;
+}
+
+/** 当前请求是不是草稿步：只有声明 draft 的模型才真正生效（其它模型上的旧值一律不发、不改清晰度） */
+export function draftActive(p: Pick<VideoParams, "draft">, m: ModelSpec | undefined): boolean {
+  return p.draft === true && draftSupported(m);
+}
+
+/** 当前请求是不是成片步：草稿任务 id 只对声明 draft 的模型生效 */
+export function draftFinalActive(p: Pick<VideoParams, "draftTaskId">, m: ModelSpec | undefined): boolean {
+  return !!String(p.draftTaskId || "").trim() && draftSupported(m);
+}
+
+/** 成片目标档位：只收 caps 的成片档；选的档不在里面按 1080p → 第一档收敛 */
+export function draftFinalResolution(p: Pick<VideoParams, "res">, m: ModelSpec | undefined): string {
+  const finals = draftFinalResolutions(m);
+  const want = String(p.res || "").trim().toLowerCase();
+  if (finals.includes(want)) return want;
+  return finals.includes("1080p") ? "1080p" : (finals[0] || want);
+}
+
+/** 草稿模式下真正发出去的清晰度（固定草稿档；非草稿 / 模型不支持时按用户选的档位） */
+export function draftRes(p: VideoParams, m: ModelSpec | undefined): string {
+  if (!draftActive(p, m)) return p.res;
+  return draftResolution(m) || p.res;
+}
+
+/* ---------- 视频 · Midjourney 图生视频（caps.mj_video） ---------- */
+export const MJ_VIDEO_MOTION_LABEL: Record<string, string> = { low: "低", high: "高" };
+export const MJ_VIDEO_ANIMATE_LABEL: Record<string, string> = { manual: "手动", auto: "自动" };
+
+/** 该模型有没有 MJ 图生视频能力（只认后端 caps.mj_video，缺字段 = 没有） */
+export function mjVideoSpec(m: ModelSpec | null | undefined): MjVideoSpec | null {
+  return m?.mjVideo ?? null;
+}
+
+/** 默认档位：caps 的 video_type_default 落在哪个档位（480p/720p），就默认哪档 */
+export function mjVideoDefaultTier(m: ModelSpec | null | undefined): string {
+  const spec = mjVideoSpec(m);
+  if (!spec) return "";
+  const wanted = String(spec.videoTypeDefault || "").trim();
+  for (const table of [spec.baseByTier, spec.startEndByTier]) {
+    const hit = Object.entries(table || {}).find(([, value]) => String(value || "").trim() === wanted);
+    if (hit) return String(hit[0]).trim().toLowerCase();
+  }
+  const tiers = (m?.res || []).map((tier) => String(tier || "").trim().toLowerCase());
+  return tiers.includes("480p") ? "480p" : tiers[0] || "";
+}
+
+/** 把请求档位收进模型的档位列表：MJ 视频只有 480p/720p，1080p/4k 这类残留值按最近档收（不原样发出去） */
+export function mjVideoTier(m: ModelSpec | null | undefined, tier: string): string {
+  const list = (m?.res || []).map((item) => String(item || "").trim().toLowerCase()).filter(Boolean);
+  if (!list.length) return "";
+  const wanted = String(tier || "").trim().toLowerCase();
+  if (list.includes(wanted)) return wanted;
+  return nearestTier(list, wanted);
+}
+
+/**
+ * 档位 + 有没有尾帧 → 上游 video_type（4 个值之一）。caps 没给这个映射时返回空串，
+ * 由请求改发 resolution 让后端按档位推导（不猜 video_type 的字面值）。
+ */
+export function mjVideoType(m: ModelSpec | null | undefined, tier: string, withEndFrame = false): string {
+  const spec = mjVideoSpec(m);
+  if (!spec) return "";
+  const key = String(tier || "").trim().toLowerCase();
+  const picked = String((withEndFrame ? spec.startEndByTier : spec.baseByTier)?.[key] || "").trim();
+  return picked;
+}
+
+/** 运动幅度：只认 caps 的 motions / motion_default，脏值回默认 */
+export function mjVideoMotion(m: ModelSpec | null | undefined, motion?: unknown): string {
+  const spec = mjVideoSpec(m);
+  if (!spec) return "";
+  const wanted = String(motion ?? "").trim().toLowerCase();
+  if (spec.motions.includes(wanted)) return wanted;
+  const fallback = String(spec.motionDefault || "").trim().toLowerCase();
+  return spec.motions.includes(fallback) ? fallback : spec.motions[0] || "";
+}
+
+/** 批次候选（caps 的 batch，1/2/4）：去重升序 */
+export function mjVideoBatchOptions(m: ModelSpec | null | undefined): number[] {
+  const spec = mjVideoSpec(m);
+  if (!spec) return [];
+  return [...new Set(spec.batch.filter((value) => Number.isFinite(value) && value >= 1))].sort((a, b) => a - b);
+}
+
+/** 批次收敛进 caps 的候选；没声明候选就按 1（上游默认） */
+export function mjVideoBatch(m: ModelSpec | null | undefined, batch?: unknown): number {
+  const options = mjVideoBatchOptions(m);
+  if (!options.length) return 1;
+  const wanted = Math.floor(Number(batch));
+  if (options.includes(wanted)) return wanted;
+  const fallback = Math.floor(Number(mjVideoSpec(m)?.batchDefault));
+  return options.includes(fallback) ? fallback : options[0];
+}
+
+/** animate_mode：auto 只在「复用 MJ 任务 + 显式候选下标」且 caps 声明了 auto 时成立，否则固定 manual */
+export function mjVideoAnimateMode(m: ModelSpec | null | undefined, p: Pick<VideoParams, "mjTaskId" | "mjIndex" | "animateMode">): "manual" | "auto" {
+  const spec = mjVideoSpec(m);
+  if (!spec) return "manual";
+  const taskId = String(p?.mjTaskId || "").trim();
+  const rawIndex = p?.mjIndex;
+  const hasIndex = rawIndex !== undefined && rawIndex !== null && String(rawIndex).trim() !== "" && Number.isInteger(Number(rawIndex)) && Number(rawIndex) >= 0;
+  return String(p?.animateMode || "").trim() === "auto" && spec.animateModes.includes("auto") && taskId && hasIndex ? "auto" : "manual";
+}
+
+/** 档位对应的计费 id（480p → midjourney@video，720p → midjourney@video-720p） */
+export function mjVideoBilling(m: ModelSpec | null | undefined, tier: string): string {
+  const spec = mjVideoSpec(m);
+  if (!spec) return "";
+  return String(spec.billingByTier?.[String(tier || "").trim().toLowerCase()] || "").trim();
+}
+
+/** 批次旁注：条数 × 倍率 × 计费 id（后端只回 credits，这里只解释「为什么 ×N」） */
+export function mjVideoBatchNote(m: ModelSpec | null | undefined, batch?: unknown, tier?: string): string {
+  const spec = mjVideoSpec(m);
+  if (!spec) return "";
+  const n = mjVideoBatch(m, batch);
+  const billing = mjVideoBilling(m, tier || mjVideoDefaultTier(m));
+  const tail = n > 1 ? "费用 ×" + n + (billing ? "（" + billing + " 单价 × " + n + "）" : "") : "费用按 1 条计" + (billing ? "（" + billing + "）" : "");
+  return "批次 " + n + "：一次出 " + n + " 条视频，" + tail;
+}
+
+/**
+ * 提交前的前端拦截（后端也会 400，但先在这里说清楚，别白扣费）：
+ * 首帧图必填（不支持文生视频）、首帧图与复用 MJ 任务二选一、候选下标 0–3、auto 缺参数。
+ * 返回 null = 可以发。
+ */
+export function mjVideoInputError(m: ModelSpec | null | undefined, p: VideoParams, hasFirstFrame: boolean): string | null {
+  const spec = mjVideoSpec(m);
+  if (!spec) return null;
+  const taskId = String(p?.mjTaskId || "").trim();
+  if (hasFirstFrame && taskId) return "首帧图与「复用 MJ 任务图」只能二选一：去掉一个再生成";
+  if (!hasFirstFrame && !taskId) return "Midjourney 图生视频需要一张首帧图（文档不支持文生视频）：连一张图片到「首帧」";
+  const min = Number.isFinite(Number(spec.indexMin)) ? Number(spec.indexMin) : 0;
+  const max = Number.isFinite(Number(spec.indexMax)) ? Number(spec.indexMax) : 3;
+  const rawIndex = p?.mjIndex;
+  const hasIndex = rawIndex !== undefined && rawIndex !== null && String(rawIndex).trim() !== "";
+  const index = Math.floor(Number(rawIndex));
+  if (taskId && hasIndex && !(index >= min && index <= max)) return "复用 MJ 任务图只能取第 " + min + "–" + max + " 张候选";
+  if (String(p?.animateMode || "").trim() === "auto" && (!taskId || !hasIndex)) return "自动模式必须复用 MJ 任务并指明第几张（第 " + min + "–" + max + " 张）；当前固定手动";
+  return null;
+}

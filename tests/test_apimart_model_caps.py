@@ -97,6 +97,121 @@ class ApimartImageCapsTableTests(unittest.TestCase):
                          main.APIMART_IMAGE_MODEL_CAPS["nano-banana-pro"])
         self.assertEqual(main.apimart_image_model_caps("cogview-4"), None)
 
+    def test_nano_banana_2_aliases_hit_31_family(self):
+        """nano-banana-2 / -2-ext / -2-lite / -2-lite-ext 是 3.1 家族的兼容别名（文档 L3337 / L4029），
+        不能落到 nano-banana（Gemini 2.5）旧规格：2K/4K、4 个 1:4/4:1/1:8/8:1 比例、mask_url 都要在。"""
+        full = main.apimart_image_model_caps("nano-banana-2")
+        self.assertIs(full, main.APIMART_IMAGE_MODEL_CAPS["gemini-3-1-flash-image-preview"])
+        for model in ("nano-banana-2", "nano-banana-2-ext", "gemini-3.1-flash-image-preview"):
+            caps = main.apimart_image_model_caps(model)
+            self.assertEqual(caps["resolutions"], ("0.5K", "1K", "2K", "4K"), model)
+            self.assertEqual(len(caps["ratios"]), 15, model)
+            self.assertIs(caps["mask_url"], True, model)
+        lite = main.apimart_image_model_caps("nano-banana-2-lite")
+        self.assertIs(lite, main.APIMART_IMAGE_MODEL_CAPS["gemini-3-1-flash-lite-image"])
+        for model in ("nano-banana-2-lite", "nano-banana-2-lite-ext"):
+            caps = main.apimart_image_model_caps(model)
+            self.assertEqual(caps["resolutions"], ("1K",), model)
+            self.assertEqual(len(caps["ratios"]), 15, model)
+            self.assertIs(caps["mask_url"], True, model)
+        # 旧规格（nano-banana）不能串味
+        legacy = main.apimart_image_model_caps("nano-banana")
+        self.assertEqual(legacy["resolutions"], ("1K",))
+        self.assertEqual(len(legacy["ratios"]), 11)
+        self.assertIs(legacy["mask_url"], False)
+
+    def test_builtin_gpt_image_2_5_has_no_bare_id(self):
+        # 上游 image 组只有 -ext / -flare / -sunburst，没有裸 gpt-image-2.5（2026-11-26 实测 /v1/models）
+        values = main.APIMART_BUILTIN_MODEL_IDS["image"]["gpt-image-2-5"]
+        self.assertEqual(values, ("gpt-image-2.5-flare", "gpt-image-2.5-sunburst"))
+        self.assertNotIn("gpt-image-2.5", values)
+
+
+class ApimartNewImageModels20261125Tests(unittest.TestCase):
+    """2026-11-25 新增的 4 个图像模型（kling-v4-image / -long-image / mai-image-2.7 / -flash）。"""
+
+    PROVIDER = {"id": "apimart", "protocol": "apimart"}
+
+    def test_kling_v4_image_caps(self):
+        caps = main.APIMART_IMAGE_MODEL_CAPS["kling-v4-image"]
+        self.assertEqual(caps["ratios"],
+                         ("auto", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9"))
+        self.assertEqual(caps["resolutions"], ("2K", "4K", "8K"))
+        self.assertEqual(caps["n_max"], 9)
+        self.assertEqual(caps["series"], {"min": 2, "max": 4})
+        self.assertEqual(caps["ref_max"], 10)
+        self.assertIs(caps["mask_url"], False)
+        # 文档只收公网 URL（本地图先走上传接口），所以不能发 base64
+        self.assertIs(caps["base64_refs"], False)
+
+    def test_kling_v4_long_image_caps(self):
+        caps = main.APIMART_IMAGE_MODEL_CAPS["kling-v4-long-image"]
+        self.assertEqual(caps["ratios"], ())
+        self.assertEqual(caps["resolutions"], ("1K", "2K"))
+        self.assertEqual(caps["n_max"], 1)
+        self.assertEqual(caps["ref_max"], 3)
+        self.assertEqual(caps["skill"], ("ecommerce", "webpage"))
+        self.assertEqual(caps["length"], ("short", "medium", "long"))
+        # size/aspect_ratio/width/height 传了就 400 → 请求体不下发 size
+        self.assertIs(caps["send_size"], False)
+
+    def test_mai_image_2_7_caps(self):
+        caps = main.APIMART_IMAGE_MODEL_CAPS["mai-image-2-7"]
+        self.assertEqual(caps["ratios"], ())          # 任意整数比例 1:4–4:1，不收敛
+        self.assertEqual(caps["resolutions"], ("1K", "2K"))
+        self.assertEqual(caps["n_max"], 1)
+        self.assertEqual(caps["ref_max"], 5)
+        self.assertIs(caps["base64_refs"], True)
+        self.assertEqual(caps["background"], ("auto", "opaque"))
+        self.assertTrue(caps["exact_size"])
+        self.assertTrue(caps["exact_size_pair"])
+        self.assertEqual(caps["min_side"], 768)
+        self.assertEqual(caps["max_pixels"], 4194304)
+        self.assertEqual(caps["size_step"], 32)
+        # 文档声明两版能力与参数完全一致 → -flash 复用同一条（最长 key 命中）
+        self.assertIs(main.apimart_image_model_caps("mai-image-2.7-flash"), caps)
+
+    def test_caps_payload_carries_new_fields(self):
+        kling = main.model_caps_for(self.PROVIDER, "kling-v4-image", "image")
+        self.assertEqual(kling["series"], {"min": 2, "max": 4})
+        self.assertEqual(kling["n_max"], 9)
+        long_image = main.model_caps_for(self.PROVIDER, "kling-v4-long-image", "image")
+        self.assertIs(long_image["send_size"], False)
+        self.assertEqual(long_image["skill"], ["ecommerce", "webpage"])
+        self.assertEqual(long_image["length"], ["short", "medium", "long"])
+        mai = main.model_caps_for(self.PROVIDER, "mai-image-2.7", "image")
+        self.assertEqual(mai["min_side"], 768)
+        self.assertEqual(mai["size_step"], 32)
+        self.assertTrue(mai["exact_size_pair"])
+        self.assertEqual(mai["background"], ["auto", "opaque"])
+
+    def test_mai_exact_size_rules_differ_from_gpt_image(self):
+        # 文档：两边 ≥768、总像素 ≤4194304、各自向下取 32 的倍数（1000x1000 → 992x992）
+        self.assertEqual(main.normalize_mai_image_size("1000x1000"), "992x992")
+        self.assertEqual(main.normalize_mai_image_size("2048x1152"), "2048x1152")
+        self.assertEqual(main.normalize_mai_image_size("512x512"), "768x768")
+        width, height = (int(part) for part in main.normalize_mai_image_size("2080x2048").split("x"))
+        self.assertLessEqual(width * height, 4194304)
+        self.assertEqual((width % 32, height % 32), (0, 0))
+        # 4:1 的 4096x1024 正好卡在上限内：MAI 不动，GPT-Image 的 3840 长边规则会缩
+        self.assertEqual(main.apimart_exact_size_value("4096x1024", main.APIMART_IMAGE_MODEL_CAPS["mai-image-2-7"]),
+                         "4096x1024")
+        self.assertNotEqual(main.normalize_gpt_image_2_size("4096x1024"), "4096x1024")
+
+    def test_new_resolution_tiers(self):
+        self.assertEqual(main.apimart_image_resolution_for_model("kling-v4-image", "8K"), "8K")
+        self.assertEqual(main.apimart_image_resolution_for_model("kling-v4-image", "4K"), "4K")
+        # 长图模型没有 4K：就近降到 2K
+        self.assertEqual(main.apimart_image_resolution_for_model("kling-v4-long-image", "4K"), "2K")
+        self.assertEqual(main.apimart_image_resolution_for_model("mai-image-2.7", "4K"), "2K")
+
+    def test_direct_image_batches_do_not_clamp_nine(self):
+        # kling-v4-image 单次能出 9 张：旧的写死 8 会吞掉一张
+        self.assertEqual(main.direct_image_request_batches(self.PROVIDER, "kling-v4-image", 9), [9])
+        self.assertEqual(main.direct_image_request_batches(self.PROVIDER, "mai-image-2.7", 3), [1, 1, 1])
+        # 没有能力表的模型仍保持旧行为（单次最多 8 张）
+        self.assertEqual(main.direct_image_request_batches(self.PROVIDER, "unknown-image-model", 9), [1] * 8)
+
 
 class ApimartNativeBackgroundTests(unittest.TestCase):
     """原生透明背景：只有文档确证支持 background 参数的模型才声明，前端据此显隐入口。"""
@@ -164,7 +279,9 @@ class ApimartImageResolutionClampTests(unittest.TestCase):
         self.assertEqual(main.apimart_image_resolution_from_size_for_model("2880x2880", "gpt-image-2"), "4k")
 
     def test_lite_stays_1k(self):
-        self.assertEqual(main.apimart_image_resolution_for_model("nano-banana-lite", "4K"), "1K")
+        # 真别名是 nano-banana-2-lite（文档 L4029）；旧的 nano-banana-lite key 从来命不中，已删
+        self.assertEqual(main.apimart_image_resolution_for_model("nano-banana-2-lite", "4K"), "1K")
+        self.assertEqual(main.apimart_image_resolution_for_model("nano-banana-2-lite-ext", "2K"), "1K")
         self.assertEqual(main.apimart_image_resolution_for_model("gemini-3-1-flash-lite-image", "2K"), "1K")
 
     def test_nano_banana_stays_1k(self):
@@ -284,6 +401,75 @@ class ApimartVideoAudioCapsTests(unittest.TestCase):
         # 上游字段名按模型来：Seedance / Zoe 用 generate_audio，Wan / Vidu / PixVerse / FLUX / Kling 用 audio
         self.assertIn("body[apimart_audio_field] = bool(payload.generate_audio)", source)
         self.assertIn("body[apimart_audio_field] = True", source)
+
+
+class ApimartMagi2CapsTests(unittest.TestCase):
+    """magi-2（文档 2026-11-26 L40642–L40910）：固定 1080p / 4–30 整秒 / 默认带声 / 参考 10-5-5 / 无编辑延长。"""
+
+    provider = {"id": "apimart", "protocol": "apimart", "base_url": "https://apib.ai"}
+
+    def caps(self):
+        return main.model_caps_for(self.provider, "magi-2", "video") or {}
+
+    def test_caps_table_entry(self):
+        table = main.APIMART_VIDEO_MODEL_CAPS["magi-2"]
+        self.assertEqual(tuple(range(4, 31)), tuple(table["durations"]))
+        self.assertEqual(("1080p",), tuple(table["resolutions"]))
+        self.assertEqual(("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto"), tuple(table["ratios"]))
+        self.assertEqual("aspect_ratio", table["ratio_key"])
+        self.assertTrue(table["ratio_follows_first_frame"])   # 图生视频不含 21:9，auto/省略跟随首帧
+        self.assertTrue(table["omni_task_type"])
+        self.assertTrue(table["reject_edit_modes"])           # edit/extend 上游 400 → 本地先拦
+        self.assertEqual("generate_audio", table["audio_field"])
+        self.assertTrue(table["audio_default_on"])
+        self.assertTrue(table["seed"])
+        self.assertFalse(table["watermark"])
+        self.assertTrue(table["nsfw_check"])
+        # 2026-11-27：通用提交分支改为按本表声明下发 → 按文档写 10 / 5 / 5
+        self.assertEqual((10, 5, 5), (table["ref_max"], table["video_ref_max"], table["audio_ref_max"]))
+
+    def test_caps_payload(self):
+        caps = self.caps()
+        self.assertEqual(list(range(4, 31)), caps["durations"])
+        self.assertEqual(["1080p"], caps["resolutions"])
+        self.assertEqual(["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto"], caps["ratios"])
+        self.assertEqual(["text_to_video", "image_to_video", "start_end_to_video", "reference_to_video"],
+                         caps["modes"])
+        self.assertNotIn("video_edit", caps["modes"])
+        self.assertNotIn("video_extend", caps["modes"])
+        self.assertTrue(caps["audio"])
+        self.assertTrue(caps["audio_default_on"])           # 前端据此把音频开关默认打开
+        self.assertTrue(caps["ratio_follows_first_frame"])  # 首帧方式整段不发比例
+        self.assertTrue(caps["nsfw_check"])
+        self.assertEqual((10, 5, 5), (caps["ref_max"], caps["video_ref_max"], caps["audio_ref_max"]))
+
+    def test_nsfw_flag_only_on_magi2(self):
+        for model in ("seedance-2.5", "apimart-zoe", "kling-v4", "gemini-omni-1.2-flash"):
+            self.assertNotIn("nsfw_check", main.model_caps_for(self.provider, model, "video") or {}, model)
+
+    def test_builtin_video_ids_include_magi2(self):
+        self.assertEqual(("magi-2",), main.APIMART_BUILTIN_MODEL_IDS["video"]["magi-2"])
+
+    def test_bool_flags_only_when_table_declares(self):
+        # 字段缺失 = 后端不掌握：没声明的模型不会凭空多出这两个位
+        for model in ("MiniMax-H3", "gemini-omni-1.2-flash", "veo3.1-fast"):
+            caps = main.model_caps_for(self.provider, model, "video") or {}
+            self.assertNotIn("audio_default_on", caps, model)
+            self.assertNotIn("ratio_follows_first_frame", caps, model)
+        # 声明了 audio_default_on（默认有声、关声要显式发 false）的模型才带；它不跟随首帧
+        seedance = main.model_caps_for(self.provider, "seedance-2.0", "video") or {}
+        self.assertIs(seedance.get("audio_default_on"), True)
+        self.assertNotIn("ratio_follows_first_frame", seedance)
+        # 只声明跟随首帧、声音默认关（audio_default_on 显式 False）的模型只带后者
+        kling = main.model_caps_for(self.provider, "kling-v4", "video") or {}
+        self.assertIs(kling.get("ratio_follows_first_frame"), True)
+        self.assertNotIn("audio_default_on", kling)
+
+    def test_update_package_whitelist_keeps_new_bool_flags(self):
+        normalized = main._protocol_updates.normalize_caps({
+            "audio_default_on": True, "ratio_follows_first_frame": True, "nsfw_check": True})
+        self.assertEqual(normalized, {"audio_default_on": True, "ratio_follows_first_frame": True,
+                                      "nsfw_check": True})
 
 
 if __name__ == "__main__":

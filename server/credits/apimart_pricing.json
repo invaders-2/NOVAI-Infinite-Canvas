@@ -6,15 +6,15 @@
   "captured_html_sha256": "47aeca884b6c57893655e397e07d4f80ec214ef753591c7da55cc7bcc43789e4",
   "parsed_at": "2026-10-24T01:36:46+0800",
   "credit_usd": 0.1,
-  "note": "构建期解析产物，运行时不联网；价格单位 USD/计费单位，credits = usd / 0.1。2026-11-18 增量条目（seedance-2-5-flash、midjourney@video、midjourney@video-720p、gpt-5.6-sol 与 seedance-2.5 的 4K 档）的 source 标为 api:pricing/model@2026-11-18，数值取自文档的 Model Pricing API（GET /api/pricing/model，免鉴权实测），gold=会员实付价、official=标价、platinum/diamond 按 0.95/0.9 推导"
+  "note": "构建期解析产物，运行时不联网；价格单位 USD/计费单位，credits = usd / 0.1。2026-11-18 增量条目（seedance-2-5-flash、midjourney@video、midjourney@video-720p、gpt-5.6-sol 与 seedance-2.5 的 4K 档）的 source 标为 api:pricing/model@2026-11-18，数值取自文档的 Model Pricing API（GET /api/pricing/model，免鉴权实测），gold=会员实付价、official=标价、platinum/diamond 按 0.95/0.9 推导；增量条目（kling-v4-image、kling-v4-long-image、mai-image-2.7、mai-image-2.7-flash、veo3.1-quality-ext、veo3.1-lite-ext）的 source 标为 api:pricing/model@2026-11-25，数值取自 Model Pricing API（GET /api/pricing/model，免鉴权实测），gold=会员实付价、official=标价、platinum/diamond 按 0.95/0.9 推导；增量条目（gpt-audio-mini、gpt-4o-mini-tts、whisper-1）的 source 标为 api:pricing/model@2026-11-26（2026-11-26 实测），whisper-1 是 per_minute 单位、接口只给 price_per_minute=0.006 单档（gold=official）；增量条目（magi-2, apimart-zoe, kling-v4-flash, gpt-image-2.6-ext, gpt-image-2.6-flare, gpt-image-2.6-sunburst, minimax-h3-image, minimax-h3-image-highspeed, muse-video-ext, gemini-omni-1.2-flash, gemini-omni-1.2-flash-ext, claude-fable-5.2, gemini-3-pro-preview-nothinking, gemini-4-carbon, gemini-4-hydrogen, gemini-4-neon, gpt-6.1-terra, gpt-6.2-astra, gpt-6.2-sol, qwen4-max）的 source 标为 api:pricing/model@2026-11-26，数值取自 Model Pricing API（GET /api/pricing/model，免鉴权实测），gold=会员实付价、official=标价、platinum/diamond 按 0.95/0.9 推导；结构不支持的缺口（未落价）：muse-image-ext；claude-haiku-4-5 / claude-sonnet-4-5 / claude-opus-4-5 三个基础 ID 用 alias_map 指到日期版（GET /api/pricing/model 的 resolved_from 实测分别指向 claude-*-4-5-2025xxxx、rates/effective_rates 与已有条目逐档一致，故不新增 models 行）；2026-11-27 别名收口：veo3.1-fast-ext 自映射 -> veo3.1-fast-ext（veo3.1-fast）；veo3.1-quality-ext 删自映射（已有 models 行，直查命中）；veo3.1-lite-ext 删自映射（已有 models 行，直查命中）；清掉指向 7 个已下线 ID 的别名键 17 个：seedance-1-5-pro, seedance15pro, deepseek-r1-250528, deepseekr1250528, deepseek-v3-0324, deepseekv30324, deepseek-v3.2-exp, deepseekv32exp, gemini-2.5-flash-lite, gemini25flashlite, gpt-5-chat-latest, gpt5chatlatest, gpt-5.2-codex, gpt52codex, deepseekv3.2exp, gemini2.5flashlite, gpt5.2codex。models 行保持不动（历史价档），只是不再被任何存活别名指向"
  },
  "coverage": {
-  "models_total": 345,
+  "models_total": 372,
   "by_category": {
-   "image": 52,
-   "video": 59,
-   "audio": 43,
-   "chat": 191
+   "image": 61,
+   "video": 65,
+   "chat": 200,
+   "audio": 46
   },
   "index_total": 297,
   "detail_pages_used": 49,
@@ -14178,10 +14178,22 @@
      "spec": "default",
      "unit": "per_second",
      "raw_unit": "秒",
-     "gold": {"usd": 0.4, "credits": 4},
-     "platinum": {"usd": 0.36, "credits": 3.6},
-     "diamond": {"usd": 0.32, "credits": 3.2},
-     "official": {"usd": 0.4, "credits": 4},
+     "gold": {
+      "usd": 0.4,
+      "credits": 4
+     },
+     "platinum": {
+      "usd": 0.36,
+      "credits": 3.6
+     },
+     "diamond": {
+      "usd": 0.32,
+      "credits": 3.2
+     },
+     "official": {
+      "usd": 0.4,
+      "credits": 4
+     },
      "source": "pixverse-official-speech"
     }
    ],
@@ -15481,7 +15493,7 @@
      },
      "source": "page:detail"
     },
-{
+    {
      "spec": "4K-input",
      "unit": "per_second",
      "raw_unit": "秒",
@@ -15507,7 +15519,7 @@
       "diamond"
      ]
     },
-{
+    {
      "spec": "4K",
      "unit": "per_second",
      "raw_unit": "秒",
@@ -15533,7 +15545,7 @@
       "diamond"
      ]
     },
-{
+    {
      "spec": "token-4K-input 4K · 有参考视频",
      "unit": "per_1m_tokens",
      "raw_unit": "1M tokens",
@@ -15559,7 +15571,7 @@
       "diamond"
      ]
     },
-{
+    {
      "spec": "token-4K 4K · 无参考视频",
      "unit": "per_1m_tokens",
      "raw_unit": "1M tokens",
@@ -16329,34 +16341,85 @@
    "id": "veo3.1-lite-ext",
    "name": "veo3.1-lite-ext",
    "category": "video",
-   "billing": "per_call",
-   "spec_dimension": "spec",
+   "billing": "per_second",
+   "spec_dimension": "resolution_duration",
    "aliases": [],
    "tiers": [
     {
-     "spec": "default",
-     "unit": "per_call",
-     "raw_unit": "次",
+     "spec": "720P",
+     "unit": "per_second",
+     "raw_unit": "秒",
      "gold": {
-      "usd": 0.07,
-      "credits": 0.7
+      "usd": 0.0375,
+      "credits": 0.375
      },
      "platinum": {
-      "usd": 0.0665,
-      "credits": 0.665
+      "usd": 0.035625,
+      "credits": 0.35625
      },
      "diamond": {
-      "usd": 0.063,
-      "credits": 0.63
+      "usd": 0.03375,
+      "credits": 0.3375
      },
      "official": {
-      "usd": 0.0875,
-      "credits": 0.875
+      "usd": 0.046875,
+      "credits": 0.46875
      },
-     "source": "index",
+     "source": "api:pricing/model@2026-11-25",
      "derived": [
       "diamond",
-      "official",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "1080P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.05625,
+      "credits": 0.5625
+     },
+     "platinum": {
+      "usd": 0.0534375,
+      "credits": 0.534375
+     },
+     "diamond": {
+      "usd": 0.050625,
+      "credits": 0.50625
+     },
+     "official": {
+      "usd": 0.0703125,
+      "credits": 0.703125
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "4K",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.1875,
+      "credits": 1.875
+     },
+     "platinum": {
+      "usd": 0.178125,
+      "credits": 1.78125
+     },
+     "diamond": {
+      "usd": 0.16875,
+      "credits": 1.6875
+     },
+     "official": {
+      "usd": 0.234375,
+      "credits": 2.34375
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
       "platinum"
      ]
     }
@@ -16367,34 +16430,85 @@
    "id": "veo3.1-quality-ext",
    "name": "veo3.1-quality-ext",
    "category": "video",
-   "billing": "per_call",
-   "spec_dimension": "spec",
+   "billing": "per_second",
+   "spec_dimension": "resolution_duration",
    "aliases": [],
    "tiers": [
     {
-     "spec": "default",
-     "unit": "per_call",
-     "raw_unit": "次",
+     "spec": "720P",
+     "unit": "per_second",
+     "raw_unit": "秒",
      "gold": {
-      "usd": 1.0,
-      "credits": 10.0
+      "usd": 0.5625,
+      "credits": 5.625
      },
      "platinum": {
-      "usd": 0.95,
-      "credits": 9.5
+      "usd": 0.534375,
+      "credits": 5.34375
      },
      "diamond": {
-      "usd": 0.9,
-      "credits": 9.0
+      "usd": 0.50625,
+      "credits": 5.0625
      },
      "official": {
-      "usd": 1.25,
-      "credits": 12.5
+      "usd": 0.703125,
+      "credits": 7.03125
      },
-     "source": "index",
+     "source": "api:pricing/model@2026-11-25",
      "derived": [
       "diamond",
-      "official",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "1080P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.58125,
+      "credits": 5.8125
+     },
+     "platinum": {
+      "usd": 0.5521875,
+      "credits": 5.521875
+     },
+     "diamond": {
+      "usd": 0.523125,
+      "credits": 5.23125
+     },
+     "official": {
+      "usd": 0.7265625,
+      "credits": 7.265625
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "4K",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.7125,
+      "credits": 7.125
+     },
+     "platinum": {
+      "usd": 0.676875,
+      "credits": 6.76875
+     },
+     "diamond": {
+      "usd": 0.64125,
+      "credits": 6.4125
+     },
+     "official": {
+      "usd": 0.890625,
+      "credits": 8.90625
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
       "platinum"
      ]
     }
@@ -40536,6 +40650,3316 @@
      "source": "api:pricing/model@2026-11-18"
     }
    }
+  },
+  "kling-v4-image": {
+   "id": "kling-v4-image",
+   "name": "kling-v4-image",
+   "category": "image",
+   "billing": "per_image",
+   "spec_dimension": "resolution",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "2K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.0571432,
+      "credits": 0.571432
+     },
+     "platinum": {
+      "usd": 0.05428604,
+      "credits": 0.54286
+     },
+     "diamond": {
+      "usd": 0.05142888,
+      "credits": 0.514289
+     },
+     "official": {
+      "usd": 0.0571432,
+      "credits": 0.571432
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "4K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.0857144,
+      "credits": 0.857144
+     },
+     "platinum": {
+      "usd": 0.08142868,
+      "credits": 0.814287
+     },
+     "diamond": {
+      "usd": 0.07714296,
+      "credits": 0.77143
+     },
+     "official": {
+      "usd": 0.0857144,
+      "credits": 0.857144
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "8K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.1428568,
+      "credits": 1.428568
+     },
+     "platinum": {
+      "usd": 0.13571396,
+      "credits": 1.35714
+     },
+     "diamond": {
+      "usd": 0.12857112,
+      "credits": 1.285711
+     },
+     "official": {
+      "usd": 0.1428568,
+      "credits": 1.428568
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "input",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.0028568,
+      "credits": 0.028568
+     },
+     "platinum": {
+      "usd": 0.00271396,
+      "credits": 0.02714
+     },
+     "diamond": {
+      "usd": 0.00257112,
+      "credits": 0.025711
+     },
+     "official": {
+      "usd": 0.0028568,
+      "credits": 0.028568
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "kling-v4-long-image": {
+   "id": "kling-v4-long-image",
+   "name": "kling-v4-long-image",
+   "category": "image",
+   "billing": "per_image",
+   "spec_dimension": "resolution",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "1K-MEDIUM",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.4285712,
+      "credits": 4.285712
+     },
+     "platinum": {
+      "usd": 0.40714264,
+      "credits": 4.071426
+     },
+     "diamond": {
+      "usd": 0.38571408,
+      "credits": 3.857141
+     },
+     "official": {
+      "usd": 0.4285712,
+      "credits": 4.285712
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "1K-LONG",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.7142856,
+      "credits": 7.142856
+     },
+     "platinum": {
+      "usd": 0.67857132,
+      "credits": 6.785713
+     },
+     "diamond": {
+      "usd": 0.64285704,
+      "credits": 6.42857
+     },
+     "official": {
+      "usd": 0.7142856,
+      "credits": 7.142856
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "1K-SHORT",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.2142856,
+      "credits": 2.142856
+     },
+     "platinum": {
+      "usd": 0.20357132,
+      "credits": 2.035713
+     },
+     "diamond": {
+      "usd": 0.19285704,
+      "credits": 1.92857
+     },
+     "official": {
+      "usd": 0.2142856,
+      "credits": 2.142856
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "1K-WEBPAGE",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.5,
+      "credits": 5.0
+     },
+     "platinum": {
+      "usd": 0.475,
+      "credits": 4.75
+     },
+     "diamond": {
+      "usd": 0.45,
+      "credits": 4.5
+     },
+     "official": {
+      "usd": 0.5,
+      "credits": 5.0
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "2K-LONG",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.7857144,
+      "credits": 7.857144
+     },
+     "platinum": {
+      "usd": 0.74642868,
+      "credits": 7.464287
+     },
+     "diamond": {
+      "usd": 0.70714296,
+      "credits": 7.07143
+     },
+     "official": {
+      "usd": 0.7857144,
+      "credits": 7.857144
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "2K-MEDIUM",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.5,
+      "credits": 5.0
+     },
+     "platinum": {
+      "usd": 0.475,
+      "credits": 4.75
+     },
+     "diamond": {
+      "usd": 0.45,
+      "credits": 4.5
+     },
+     "official": {
+      "usd": 0.5,
+      "credits": 5.0
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "2K-SHORT",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.2571432,
+      "credits": 2.571432
+     },
+     "platinum": {
+      "usd": 0.24428604,
+      "credits": 2.44286
+     },
+     "diamond": {
+      "usd": 0.23142888,
+      "credits": 2.314289
+     },
+     "official": {
+      "usd": 0.2571432,
+      "credits": 2.571432
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "2K-WEBPAGE",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.5428568,
+      "credits": 5.428568
+     },
+     "platinum": {
+      "usd": 0.51571396,
+      "credits": 5.15714
+     },
+     "diamond": {
+      "usd": 0.48857112,
+      "credits": 4.885711
+     },
+     "official": {
+      "usd": 0.5428568,
+      "credits": 5.428568
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "input",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.0028568,
+      "credits": 0.028568
+     },
+     "platinum": {
+      "usd": 0.00271396,
+      "credits": 0.02714
+     },
+     "diamond": {
+      "usd": 0.00257112,
+      "credits": 0.025711
+     },
+     "official": {
+      "usd": 0.0028568,
+      "credits": 0.028568
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "mai-image-2.7": {
+   "id": "mai-image-2.7",
+   "name": "mai-image-2.7",
+   "category": "image",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "token",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "1K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.028,
+      "credits": 0.28
+     },
+     "platinum": {
+      "usd": 0.0266,
+      "credits": 0.266
+     },
+     "diamond": {
+      "usd": 0.0252,
+      "credits": 0.252
+     },
+     "official": {
+      "usd": 0.035,
+      "credits": 0.35
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "2K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.112,
+      "credits": 1.12
+     },
+     "platinum": {
+      "usd": 0.1064,
+      "credits": 1.064
+     },
+     "diamond": {
+      "usd": 0.1008,
+      "credits": 1.008
+     },
+     "official": {
+      "usd": 0.14,
+      "credits": 1.4
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {
+    "text_input": {
+     "gold": {
+      "usd": 4.0,
+      "credits": 40.0
+     },
+     "platinum": {
+      "usd": 3.8,
+      "credits": 38.0
+     },
+     "diamond": {
+      "usd": 3.6,
+      "credits": 36.0
+     },
+     "official": {
+      "usd": 5.0,
+      "credits": 50.0
+     }
+    },
+    "image_input": {
+     "gold": {
+      "usd": 6.4,
+      "credits": 64.0
+     },
+     "platinum": {
+      "usd": 6.08,
+      "credits": 60.8
+     },
+     "diamond": {
+      "usd": 5.76,
+      "credits": 57.6
+     },
+     "official": {
+      "usd": 8.0,
+      "credits": 80.0
+     }
+    },
+    "cached_text_input": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "cached_image_input": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "text_output": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "image_output": {
+     "gold": {
+      "usd": 27.2,
+      "credits": 272.0
+     },
+     "platinum": {
+      "usd": 25.84,
+      "credits": 258.4
+     },
+     "diamond": {
+      "usd": 24.48,
+      "credits": 244.8
+     },
+     "official": {
+      "usd": 34.0,
+      "credits": 340.0
+     }
+    }
+   }
+  },
+  "mai-image-2.7-flash": {
+   "id": "mai-image-2.7-flash",
+   "name": "mai-image-2.7-flash",
+   "category": "image",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "token",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "1K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.0088,
+      "credits": 0.088
+     },
+     "platinum": {
+      "usd": 0.00836,
+      "credits": 0.0836
+     },
+     "diamond": {
+      "usd": 0.00792,
+      "credits": 0.0792
+     },
+     "official": {
+      "usd": 0.011,
+      "credits": 0.11
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "2K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.0328,
+      "credits": 0.328
+     },
+     "platinum": {
+      "usd": 0.03116,
+      "credits": 0.3116
+     },
+     "diamond": {
+      "usd": 0.02952,
+      "credits": 0.2952
+     },
+     "official": {
+      "usd": 0.041,
+      "credits": 0.41
+     },
+     "source": "api:pricing/model@2026-11-25",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {
+    "text_input": {
+     "gold": {
+      "usd": 1.4,
+      "credits": 14.0
+     },
+     "platinum": {
+      "usd": 1.33,
+      "credits": 13.3
+     },
+     "diamond": {
+      "usd": 1.26,
+      "credits": 12.6
+     },
+     "official": {
+      "usd": 1.75,
+      "credits": 17.5
+     }
+    },
+    "image_input": {
+     "gold": {
+      "usd": 2.0,
+      "credits": 20.0
+     },
+     "platinum": {
+      "usd": 1.9,
+      "credits": 19.0
+     },
+     "diamond": {
+      "usd": 1.8,
+      "credits": 18.0
+     },
+     "official": {
+      "usd": 2.5,
+      "credits": 25.0
+     }
+    },
+    "cached_text_input": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "cached_image_input": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "text_output": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "image_output": {
+     "gold": {
+      "usd": 8.0,
+      "credits": 80.0
+     },
+     "platinum": {
+      "usd": 7.6,
+      "credits": 76.0
+     },
+     "diamond": {
+      "usd": 7.2,
+      "credits": 72.0
+     },
+     "official": {
+      "usd": 10.0,
+      "credits": 100.0
+     }
+    }
+   }
+  },
+  "gpt-audio-mini": {
+   "id": "gpt-audio-mini",
+   "name": "gpt-audio-mini",
+   "category": "audio",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "token",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 0.48,
+      "credits": 4.8
+     },
+     "platinum": {
+      "usd": 0.456,
+      "credits": 4.56
+     },
+     "diamond": {
+      "usd": 0.432,
+      "credits": 4.32
+     },
+     "official": {
+      "usd": 0.6,
+      "credits": 6.0
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 1.92,
+      "credits": 19.2
+     },
+     "platinum": {
+      "usd": 1.824,
+      "credits": 18.24
+     },
+     "diamond": {
+      "usd": 1.728,
+      "credits": 17.28
+     },
+     "official": {
+      "usd": 2.4,
+      "credits": 24.0
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "audio_input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 8.0,
+      "credits": 80.0
+     },
+     "platinum": {
+      "usd": 7.6,
+      "credits": 76.0
+     },
+     "diamond": {
+      "usd": 7.2,
+      "credits": 72.0
+     },
+     "official": {
+      "usd": 10.0,
+      "credits": 100.0
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "audio_output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 16.0,
+      "credits": 160.0
+     },
+     "platinum": {
+      "usd": 15.2,
+      "credits": 152.0
+     },
+     "diamond": {
+      "usd": 14.4,
+      "credits": 144.0
+     },
+     "official": {
+      "usd": 20.0,
+      "credits": 200.0
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 0.48,
+      "credits": 4.8
+     },
+     "platinum": {
+      "usd": 0.456,
+      "credits": 4.56
+     },
+     "diamond": {
+      "usd": 0.432,
+      "credits": 4.32
+     },
+     "official": {
+      "usd": 0.6,
+      "credits": 6.0
+     }
+    },
+    "output": {
+     "gold": {
+      "usd": 1.92,
+      "credits": 19.2
+     },
+     "platinum": {
+      "usd": 1.824,
+      "credits": 18.24
+     },
+     "diamond": {
+      "usd": 1.728,
+      "credits": 17.28
+     },
+     "official": {
+      "usd": 2.4,
+      "credits": 24.0
+     }
+    },
+    "audio_input": {
+     "gold": {
+      "usd": 8.0,
+      "credits": 80.0
+     },
+     "platinum": {
+      "usd": 7.6,
+      "credits": 76.0
+     },
+     "diamond": {
+      "usd": 7.2,
+      "credits": 72.0
+     },
+     "official": {
+      "usd": 10.0,
+      "credits": 100.0
+     }
+    },
+    "audio_output": {
+     "gold": {
+      "usd": 16.0,
+      "credits": 160.0
+     },
+     "platinum": {
+      "usd": 15.2,
+      "credits": 152.0
+     },
+     "diamond": {
+      "usd": 14.4,
+      "credits": 144.0
+     },
+     "official": {
+      "usd": 20.0,
+      "credits": 200.0
+     }
+    }
+   }
+  },
+  "gpt-4o-mini-tts": {
+   "id": "gpt-4o-mini-tts",
+   "name": "gpt-4o-mini-tts",
+   "category": "audio",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "token",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 0.48,
+      "credits": 4.8
+     },
+     "platinum": {
+      "usd": 0.456,
+      "credits": 4.56
+     },
+     "diamond": {
+      "usd": 0.432,
+      "credits": 4.32
+     },
+     "official": {
+      "usd": 0.6,
+      "credits": 6.0
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 9.6,
+      "credits": 96.0
+     },
+     "platinum": {
+      "usd": 9.12,
+      "credits": 91.2
+     },
+     "diamond": {
+      "usd": 8.64,
+      "credits": 86.4
+     },
+     "official": {
+      "usd": 12.0,
+      "credits": 120.0
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "audio_output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 9.6,
+      "credits": 96.0
+     },
+     "platinum": {
+      "usd": 9.12,
+      "credits": 91.2
+     },
+     "diamond": {
+      "usd": 8.64,
+      "credits": 86.4
+     },
+     "official": {
+      "usd": 12.0,
+      "credits": 120.0
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 0.48,
+      "credits": 4.8
+     },
+     "platinum": {
+      "usd": 0.456,
+      "credits": 4.56
+     },
+     "diamond": {
+      "usd": 0.432,
+      "credits": 4.32
+     },
+     "official": {
+      "usd": 0.6,
+      "credits": 6.0
+     }
+    },
+    "output": {
+     "gold": {
+      "usd": 9.6,
+      "credits": 96.0
+     },
+     "platinum": {
+      "usd": 9.12,
+      "credits": 91.2
+     },
+     "diamond": {
+      "usd": 8.64,
+      "credits": 86.4
+     },
+     "official": {
+      "usd": 12.0,
+      "credits": 120.0
+     }
+    },
+    "audio_output": {
+     "gold": {
+      "usd": 9.6,
+      "credits": 96.0
+     },
+     "platinum": {
+      "usd": 9.12,
+      "credits": 91.2
+     },
+     "diamond": {
+      "usd": 8.64,
+      "credits": 86.4
+     },
+     "official": {
+      "usd": 12.0,
+      "credits": 120.0
+     }
+    }
+   }
+  },
+  "whisper-1": {
+   "id": "whisper-1",
+   "name": "whisper-1",
+   "category": "audio",
+   "billing": "per_minute",
+   "spec_dimension": "per_minute",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "default",
+     "unit": "per_minute",
+     "raw_unit": "分钟",
+     "gold": {
+      "usd": 0.006,
+      "credits": 0.06
+     },
+     "platinum": {
+      "usd": 0.0057,
+      "credits": 0.057
+     },
+     "diamond": {
+      "usd": 0.0054,
+      "credits": 0.054
+     },
+     "official": {
+      "usd": 0.006,
+      "credits": 0.06
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "magi-2": {
+   "id": "magi-2",
+   "name": "magi-2",
+   "category": "video",
+   "billing": "per_second",
+   "spec_dimension": "resolution_duration",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "1080P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.08,
+      "credits": 0.8
+     },
+     "platinum": {
+      "usd": 0.076,
+      "credits": 0.76
+     },
+     "diamond": {
+      "usd": 0.072,
+      "credits": 0.72
+     },
+     "official": {
+      "usd": 0.08,
+      "credits": 0.8
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "apimart-zoe": {
+   "id": "apimart-zoe",
+   "name": "apimart-zoe",
+   "category": "video",
+   "billing": "per_second",
+   "spec_dimension": "resolution_duration",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "1080P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.4556,
+      "credits": 4.556
+     },
+     "platinum": {
+      "usd": 0.43282,
+      "credits": 4.3282
+     },
+     "diamond": {
+      "usd": 0.41004,
+      "credits": 4.1004
+     },
+     "official": {
+      "usd": 0.536,
+      "credits": 5.36
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "1080P-input",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.272,
+      "credits": 2.72
+     },
+     "platinum": {
+      "usd": 0.2584,
+      "credits": 2.584
+     },
+     "diamond": {
+      "usd": 0.2448,
+      "credits": 2.448
+     },
+     "official": {
+      "usd": 0.32,
+      "credits": 3.2
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "2K",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 1.122,
+      "credits": 11.22
+     },
+     "platinum": {
+      "usd": 1.0659,
+      "credits": 10.659
+     },
+     "diamond": {
+      "usd": 1.0098,
+      "credits": 10.098
+     },
+     "official": {
+      "usd": 1.32,
+      "credits": 13.2
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "2K-input",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.6596,
+      "credits": 6.596
+     },
+     "platinum": {
+      "usd": 0.62662,
+      "credits": 6.2662
+     },
+     "diamond": {
+      "usd": 0.59364,
+      "credits": 5.9364
+     },
+     "official": {
+      "usd": 0.776,
+      "credits": 7.76
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "480P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.0864,
+      "credits": 0.864
+     },
+     "platinum": {
+      "usd": 0.08208,
+      "credits": 0.8208
+     },
+     "diamond": {
+      "usd": 0.07776,
+      "credits": 0.7776
+     },
+     "official": {
+      "usd": 0.096,
+      "credits": 0.96
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "480P-input",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.0544,
+      "credits": 0.544
+     },
+     "platinum": {
+      "usd": 0.05168,
+      "credits": 0.5168
+     },
+     "diamond": {
+      "usd": 0.04896,
+      "credits": 0.4896
+     },
+     "official": {
+      "usd": 0.064,
+      "credits": 0.64
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "4K",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 1.2308,
+      "credits": 12.308
+     },
+     "platinum": {
+      "usd": 1.16926,
+      "credits": 11.6926
+     },
+     "diamond": {
+      "usd": 1.10772,
+      "credits": 11.0772
+     },
+     "official": {
+      "usd": 1.448,
+      "credits": 14.48
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "4K-input",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.7276,
+      "credits": 7.276
+     },
+     "platinum": {
+      "usd": 0.69122,
+      "credits": 6.9122
+     },
+     "diamond": {
+      "usd": 0.65484,
+      "credits": 6.5484
+     },
+     "official": {
+      "usd": 0.856,
+      "credits": 8.56
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "720P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.1836,
+      "credits": 1.836
+     },
+     "platinum": {
+      "usd": 0.17442,
+      "credits": 1.7442
+     },
+     "diamond": {
+      "usd": 0.16524,
+      "credits": 1.6524
+     },
+     "official": {
+      "usd": 0.216,
+      "credits": 2.16
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "720P-input",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.1088,
+      "credits": 1.088
+     },
+     "platinum": {
+      "usd": 0.10336,
+      "credits": 1.0336
+     },
+     "diamond": {
+      "usd": 0.09792,
+      "credits": 0.9792
+     },
+     "official": {
+      "usd": 0.128,
+      "credits": 1.28
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "kling-v4-flash": {
+   "id": "kling-v4-flash",
+   "name": "kling-v4-flash",
+   "category": "video",
+   "billing": "per_second",
+   "spec_dimension": "resolution_duration",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "720P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.0857144,
+      "credits": 0.857144
+     },
+     "platinum": {
+      "usd": 0.08142868,
+      "credits": 0.814287
+     },
+     "diamond": {
+      "usd": 0.07714296,
+      "credits": 0.77143
+     },
+     "official": {
+      "usd": 0.0857144,
+      "credits": 0.857144
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "720P-input",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.0571432,
+      "credits": 0.571432
+     },
+     "platinum": {
+      "usd": 0.05428604,
+      "credits": 0.54286
+     },
+     "diamond": {
+      "usd": 0.05142888,
+      "credits": 0.514289
+     },
+     "official": {
+      "usd": 0.0571432,
+      "credits": 0.571432
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "gpt-image-2.6-ext": {
+   "id": "gpt-image-2.6-ext",
+   "name": "gpt-image-2.6-ext",
+   "category": "image",
+   "billing": "per_image",
+   "spec_dimension": "resolution",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "flare@1K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.0085,
+      "credits": 0.085
+     },
+     "platinum": {
+      "usd": 0.008075,
+      "credits": 0.08075
+     },
+     "diamond": {
+      "usd": 0.00765,
+      "credits": 0.0765
+     },
+     "official": {
+      "usd": 0.010625,
+      "credits": 0.10625
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "official",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "flare@2K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.03,
+      "credits": 0.3
+     },
+     "platinum": {
+      "usd": 0.0285,
+      "credits": 0.285
+     },
+     "diamond": {
+      "usd": 0.027,
+      "credits": 0.27
+     },
+     "official": {
+      "usd": 0.0375,
+      "credits": 0.375
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "official",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "flare@4K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.04,
+      "credits": 0.4
+     },
+     "platinum": {
+      "usd": 0.038,
+      "credits": 0.38
+     },
+     "diamond": {
+      "usd": 0.036,
+      "credits": 0.36
+     },
+     "official": {
+      "usd": 0.05,
+      "credits": 0.5
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "official",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "sunburst@1K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.0085,
+      "credits": 0.085
+     },
+     "platinum": {
+      "usd": 0.008075,
+      "credits": 0.08075
+     },
+     "diamond": {
+      "usd": 0.00765,
+      "credits": 0.0765
+     },
+     "official": {
+      "usd": 0.010625,
+      "credits": 0.10625
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "official",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "sunburst@2K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.03,
+      "credits": 0.3
+     },
+     "platinum": {
+      "usd": 0.0285,
+      "credits": 0.285
+     },
+     "diamond": {
+      "usd": 0.027,
+      "credits": 0.27
+     },
+     "official": {
+      "usd": 0.0375,
+      "credits": 0.375
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "official",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "sunburst@4K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.04,
+      "credits": 0.4
+     },
+     "platinum": {
+      "usd": 0.038,
+      "credits": 0.38
+     },
+     "diamond": {
+      "usd": 0.036,
+      "credits": 0.36
+     },
+     "official": {
+      "usd": 0.05,
+      "credits": 0.5
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "official",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "gpt-image-2.6-flare": {
+   "id": "gpt-image-2.6-flare",
+   "name": "gpt-image-2.6-flare",
+   "category": "image",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "token",
+   "aliases": [],
+   "tiers": [],
+   "token_rates": {
+    "text_input": {
+     "gold": {
+      "usd": 4.0,
+      "credits": 40.0
+     },
+     "platinum": {
+      "usd": 3.8,
+      "credits": 38.0
+     },
+     "diamond": {
+      "usd": 3.6,
+      "credits": 36.0
+     },
+     "official": {
+      "usd": 5.0,
+      "credits": 50.0
+     }
+    },
+    "image_input": {
+     "gold": {
+      "usd": 6.4,
+      "credits": 64.0
+     },
+     "platinum": {
+      "usd": 6.08,
+      "credits": 60.8
+     },
+     "diamond": {
+      "usd": 5.76,
+      "credits": 57.6
+     },
+     "official": {
+      "usd": 8.0,
+      "credits": 80.0
+     }
+    },
+    "cached_text_input": {
+     "gold": {
+      "usd": 1.0,
+      "credits": 10.0
+     },
+     "platinum": {
+      "usd": 0.95,
+      "credits": 9.5
+     },
+     "diamond": {
+      "usd": 0.9,
+      "credits": 9.0
+     },
+     "official": {
+      "usd": 1.25,
+      "credits": 12.5
+     }
+    },
+    "cached_image_input": {
+     "gold": {
+      "usd": 1.6,
+      "credits": 16.0
+     },
+     "platinum": {
+      "usd": 1.52,
+      "credits": 15.2
+     },
+     "diamond": {
+      "usd": 1.44,
+      "credits": 14.4
+     },
+     "official": {
+      "usd": 2.0,
+      "credits": 20.0
+     }
+    },
+    "image_output": {
+     "gold": {
+      "usd": 24.0,
+      "credits": 240.0
+     },
+     "platinum": {
+      "usd": 22.8,
+      "credits": 228.0
+     },
+     "diamond": {
+      "usd": 21.6,
+      "credits": 216.0
+     },
+     "official": {
+      "usd": 30.0,
+      "credits": 300.0
+     }
+    }
+   }
+  },
+  "gpt-image-2.6-sunburst": {
+   "id": "gpt-image-2.6-sunburst",
+   "name": "gpt-image-2.6-sunburst",
+   "category": "image",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "token",
+   "aliases": [],
+   "tiers": [],
+   "token_rates": {
+    "text_input": {
+     "gold": {
+      "usd": 4.0,
+      "credits": 40.0
+     },
+     "platinum": {
+      "usd": 3.8,
+      "credits": 38.0
+     },
+     "diamond": {
+      "usd": 3.6,
+      "credits": 36.0
+     },
+     "official": {
+      "usd": 5.0,
+      "credits": 50.0
+     }
+    },
+    "image_input": {
+     "gold": {
+      "usd": 6.4,
+      "credits": 64.0
+     },
+     "platinum": {
+      "usd": 6.08,
+      "credits": 60.8
+     },
+     "diamond": {
+      "usd": 5.76,
+      "credits": 57.6
+     },
+     "official": {
+      "usd": 8.0,
+      "credits": 80.0
+     }
+    },
+    "cached_text_input": {
+     "gold": {
+      "usd": 1.0,
+      "credits": 10.0
+     },
+     "platinum": {
+      "usd": 0.95,
+      "credits": 9.5
+     },
+     "diamond": {
+      "usd": 0.9,
+      "credits": 9.0
+     },
+     "official": {
+      "usd": 1.25,
+      "credits": 12.5
+     }
+    },
+    "cached_image_input": {
+     "gold": {
+      "usd": 1.6,
+      "credits": 16.0
+     },
+     "platinum": {
+      "usd": 1.52,
+      "credits": 15.2
+     },
+     "diamond": {
+      "usd": 1.44,
+      "credits": 14.4
+     },
+     "official": {
+      "usd": 2.0,
+      "credits": 20.0
+     }
+    },
+    "image_output": {
+     "gold": {
+      "usd": 24.0,
+      "credits": 240.0
+     },
+     "platinum": {
+      "usd": 22.8,
+      "credits": 228.0
+     },
+     "diamond": {
+      "usd": 21.6,
+      "credits": 216.0
+     },
+     "official": {
+      "usd": 30.0,
+      "credits": 300.0
+     }
+    }
+   }
+  },
+  "minimax-h3-image": {
+   "id": "minimax-h3-image",
+   "name": "minimax-h3-image",
+   "category": "image",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "token",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "1K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.024,
+      "credits": 0.24
+     },
+     "platinum": {
+      "usd": 0.0228,
+      "credits": 0.228
+     },
+     "diamond": {
+      "usd": 0.0216,
+      "credits": 0.216
+     },
+     "official": {
+      "usd": 0.03,
+      "credits": 0.3
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "2K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.024,
+      "credits": 0.24
+     },
+     "platinum": {
+      "usd": 0.0228,
+      "credits": 0.228
+     },
+     "diamond": {
+      "usd": 0.0216,
+      "credits": 0.216
+     },
+     "official": {
+      "usd": 0.03,
+      "credits": 0.3
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "4K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.08,
+      "credits": 0.8
+     },
+     "platinum": {
+      "usd": 0.076,
+      "credits": 0.76
+     },
+     "diamond": {
+      "usd": 0.072,
+      "credits": 0.72
+     },
+     "official": {
+      "usd": 0.1,
+      "credits": 1.0
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {
+    "text_input": {
+     "gold": {
+      "usd": 2.1428568,
+      "credits": 21.428568
+     },
+     "platinum": {
+      "usd": 2.03571396,
+      "credits": 20.35714
+     },
+     "diamond": {
+      "usd": 1.92857112,
+      "credits": 19.285711
+     },
+     "official": {
+      "usd": 2.678571,
+      "credits": 26.78571
+     }
+    },
+    "image_input": {
+     "gold": {
+      "usd": 1.4285712,
+      "credits": 14.285712
+     },
+     "platinum": {
+      "usd": 1.35714264,
+      "credits": 13.571426
+     },
+     "diamond": {
+      "usd": 1.28571408,
+      "credits": 12.857141
+     },
+     "official": {
+      "usd": 1.785714,
+      "credits": 17.85714
+     }
+    },
+    "cached_text_input": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "cached_image_input": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "text_output": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "image_output": {
+     "gold": {
+      "usd": 3.5714288,
+      "credits": 35.714288
+     },
+     "platinum": {
+      "usd": 3.39285736,
+      "credits": 33.928574
+     },
+     "diamond": {
+      "usd": 3.21428592,
+      "credits": 32.142859
+     },
+     "official": {
+      "usd": 4.464286,
+      "credits": 44.64286
+     }
+    }
+   }
+  },
+  "minimax-h3-image-highspeed": {
+   "id": "minimax-h3-image-highspeed",
+   "name": "minimax-h3-image-highspeed",
+   "category": "image",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "token",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "1K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.04,
+      "credits": 0.4
+     },
+     "platinum": {
+      "usd": 0.038,
+      "credits": 0.38
+     },
+     "diamond": {
+      "usd": 0.036,
+      "credits": 0.36
+     },
+     "official": {
+      "usd": 0.05,
+      "credits": 0.5
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "2K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.04,
+      "credits": 0.4
+     },
+     "platinum": {
+      "usd": 0.038,
+      "credits": 0.38
+     },
+     "diamond": {
+      "usd": 0.036,
+      "credits": 0.36
+     },
+     "official": {
+      "usd": 0.05,
+      "credits": 0.5
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "4K",
+     "unit": "per_image",
+     "raw_unit": "张",
+     "gold": {
+      "usd": 0.152,
+      "credits": 1.52
+     },
+     "platinum": {
+      "usd": 0.1444,
+      "credits": 1.444
+     },
+     "diamond": {
+      "usd": 0.1368,
+      "credits": 1.368
+     },
+     "official": {
+      "usd": 0.19,
+      "credits": 1.9
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {
+    "text_input": {
+     "gold": {
+      "usd": 2.1428568,
+      "credits": 21.428568
+     },
+     "platinum": {
+      "usd": 2.03571396,
+      "credits": 20.35714
+     },
+     "diamond": {
+      "usd": 1.92857112,
+      "credits": 19.285711
+     },
+     "official": {
+      "usd": 2.678571,
+      "credits": 26.78571
+     }
+    },
+    "image_input": {
+     "gold": {
+      "usd": 2.8571432,
+      "credits": 28.571432
+     },
+     "platinum": {
+      "usd": 2.71428604,
+      "credits": 27.14286
+     },
+     "diamond": {
+      "usd": 2.57142888,
+      "credits": 25.714289
+     },
+     "official": {
+      "usd": 3.571429,
+      "credits": 35.71429
+     }
+    },
+    "cached_text_input": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "cached_image_input": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "text_output": {
+     "gold": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "platinum": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "diamond": {
+      "usd": 0.0,
+      "credits": 0.0
+     },
+     "official": {
+      "usd": 0.0,
+      "credits": 0.0
+     }
+    },
+    "image_output": {
+     "gold": {
+      "usd": 7.1428568,
+      "credits": 71.428568
+     },
+     "platinum": {
+      "usd": 6.78571396,
+      "credits": 67.85714
+     },
+     "diamond": {
+      "usd": 6.42857112,
+      "credits": 64.285711
+     },
+     "official": {
+      "usd": 8.928571,
+      "credits": 89.28571
+     }
+    }
+   }
+  },
+  "muse-video-ext": {
+   "id": "muse-video-ext",
+   "name": "muse-video-ext",
+   "category": "video",
+   "billing": "per_second",
+   "spec_dimension": "resolution_duration",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "720P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.002352,
+      "credits": 0.02352
+     },
+     "platinum": {
+      "usd": 0.0022344,
+      "credits": 0.022344
+     },
+     "diamond": {
+      "usd": 0.0021168,
+      "credits": 0.021168
+     },
+     "official": {
+      "usd": 0.00294,
+      "credits": 0.0294
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "gemini-omni-1.2-flash": {
+   "id": "gemini-omni-1.2-flash",
+   "name": "gemini-omni-1.2-flash",
+   "category": "video",
+   "billing": "per_second",
+   "spec_dimension": "resolution_duration",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "1080P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.0904,
+      "credits": 0.904
+     },
+     "platinum": {
+      "usd": 0.08588,
+      "credits": 0.8588
+     },
+     "diamond": {
+      "usd": 0.08136,
+      "credits": 0.8136
+     },
+     "official": {
+      "usd": 0.104,
+      "credits": 1.04
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "360P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.02,
+      "credits": 0.2
+     },
+     "platinum": {
+      "usd": 0.019,
+      "credits": 0.19
+     },
+     "diamond": {
+      "usd": 0.018,
+      "credits": 0.18
+     },
+     "official": {
+      "usd": 0.023,
+      "credits": 0.23
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "4K",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.1808,
+      "credits": 1.808
+     },
+     "platinum": {
+      "usd": 0.17176,
+      "credits": 1.7176
+     },
+     "diamond": {
+      "usd": 0.16272,
+      "credits": 1.6272
+     },
+     "official": {
+      "usd": 0.209,
+      "credits": 2.09
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "720P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.06,
+      "credits": 0.6
+     },
+     "platinum": {
+      "usd": 0.057,
+      "credits": 0.57
+     },
+     "diamond": {
+      "usd": 0.054,
+      "credits": 0.54
+     },
+     "official": {
+      "usd": 0.07,
+      "credits": 0.7
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "gemini-omni-1.2-flash-ext": {
+   "id": "gemini-omni-1.2-flash-ext",
+   "name": "gemini-omni-1.2-flash-ext",
+   "category": "video",
+   "billing": "per_second",
+   "spec_dimension": "resolution_duration",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "720P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.024,
+      "credits": 0.24
+     },
+     "platinum": {
+      "usd": 0.0228,
+      "credits": 0.228
+     },
+     "diamond": {
+      "usd": 0.0216,
+      "credits": 0.216
+     },
+     "official": {
+      "usd": 0.104,
+      "credits": 1.04
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "1080P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.024,
+      "credits": 0.24
+     },
+     "platinum": {
+      "usd": 0.0228,
+      "credits": 0.228
+     },
+     "diamond": {
+      "usd": 0.0216,
+      "credits": 0.216
+     },
+     "official": {
+      "usd": 0.209,
+      "credits": 2.09
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "360P",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.016,
+      "credits": 0.16
+     },
+     "platinum": {
+      "usd": 0.0152,
+      "credits": 0.152
+     },
+     "diamond": {
+      "usd": 0.0144,
+      "credits": 0.144
+     },
+     "official": {
+      "usd": 0.023,
+      "credits": 0.23
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    },
+    {
+     "spec": "4K",
+     "unit": "per_second",
+     "raw_unit": "秒",
+     "gold": {
+      "usd": 0.056,
+      "credits": 0.56
+     },
+     "platinum": {
+      "usd": 0.0532,
+      "credits": 0.532
+     },
+     "diamond": {
+      "usd": 0.0504,
+      "credits": 0.504
+     },
+     "official": {
+      "usd": 0.07,
+      "credits": 0.7
+     },
+     "source": "api:pricing/model@2026-11-26",
+     "derived": [
+      "diamond",
+      "platinum"
+     ]
+    }
+   ],
+   "token_rates": {}
+  },
+  "claude-fable-5.2": {
+   "id": "claude-fable-5.2",
+   "name": "claude-fable-5.2",
+   "category": "chat",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "input_output",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 6.4,
+      "credits": 64.0
+     },
+     "platinum": {
+      "usd": 6.08,
+      "credits": 60.8
+     },
+     "diamond": {
+      "usd": 5.76,
+      "credits": 57.6
+     },
+     "official": {
+      "usd": 8.0,
+      "credits": 80.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 32.0,
+      "credits": 320.0
+     },
+     "platinum": {
+      "usd": 30.4,
+      "credits": 304.0
+     },
+     "diamond": {
+      "usd": 28.8,
+      "credits": 288.0
+     },
+     "official": {
+      "usd": 40.0,
+      "credits": 400.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 6.4,
+      "credits": 64.0
+     },
+     "platinum": {
+      "usd": 6.08,
+      "credits": 60.8
+     },
+     "diamond": {
+      "usd": 5.76,
+      "credits": 57.6
+     },
+     "official": {
+      "usd": 8.0,
+      "credits": 80.0
+     }
+    },
+    "output": {
+     "gold": {
+      "usd": 32.0,
+      "credits": 320.0
+     },
+     "platinum": {
+      "usd": 30.4,
+      "credits": 304.0
+     },
+     "diamond": {
+      "usd": 28.8,
+      "credits": 288.0
+     },
+     "official": {
+      "usd": 40.0,
+      "credits": 400.0
+     }
+    }
+   }
+  },
+  "gemini-3-pro-preview-nothinking": {
+   "id": "gemini-3-pro-preview-nothinking",
+   "name": "gemini-3-pro-preview-nothinking",
+   "category": "chat",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "input_output",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 1.6,
+      "credits": 16.0
+     },
+     "platinum": {
+      "usd": 1.52,
+      "credits": 15.2
+     },
+     "diamond": {
+      "usd": 1.44,
+      "credits": 14.4
+     },
+     "official": {
+      "usd": 2.0,
+      "credits": 20.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 9.6,
+      "credits": 96.0
+     },
+     "platinum": {
+      "usd": 9.12,
+      "credits": 91.2
+     },
+     "diamond": {
+      "usd": 8.64,
+      "credits": 86.4
+     },
+     "official": {
+      "usd": 12.0,
+      "credits": 120.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 1.6,
+      "credits": 16.0
+     },
+     "platinum": {
+      "usd": 1.52,
+      "credits": 15.2
+     },
+     "diamond": {
+      "usd": 1.44,
+      "credits": 14.4
+     },
+     "official": {
+      "usd": 2.0,
+      "credits": 20.0
+     }
+    },
+    "output": {
+     "gold": {
+      "usd": 9.6,
+      "credits": 96.0
+     },
+     "platinum": {
+      "usd": 9.12,
+      "credits": 91.2
+     },
+     "diamond": {
+      "usd": 8.64,
+      "credits": 86.4
+     },
+     "official": {
+      "usd": 12.0,
+      "credits": 120.0
+     }
+    }
+   }
+  },
+  "gemini-4-carbon": {
+   "id": "gemini-4-carbon",
+   "name": "gemini-4-carbon",
+   "category": "chat",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "input_output",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 1.6,
+      "credits": 16.0
+     },
+     "platinum": {
+      "usd": 1.52,
+      "credits": 15.2
+     },
+     "diamond": {
+      "usd": 1.44,
+      "credits": 14.4
+     },
+     "official": {
+      "usd": 2.0,
+      "credits": 20.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 8.0,
+      "credits": 80.0
+     },
+     "platinum": {
+      "usd": 7.6,
+      "credits": 76.0
+     },
+     "diamond": {
+      "usd": 7.2,
+      "credits": 72.0
+     },
+     "official": {
+      "usd": 10.0,
+      "credits": 100.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 1.6,
+      "credits": 16.0
+     },
+     "platinum": {
+      "usd": 1.52,
+      "credits": 15.2
+     },
+     "diamond": {
+      "usd": 1.44,
+      "credits": 14.4
+     },
+     "official": {
+      "usd": 2.0,
+      "credits": 20.0
+     }
+    },
+    "output": {
+     "gold": {
+      "usd": 8.0,
+      "credits": 80.0
+     },
+     "platinum": {
+      "usd": 7.6,
+      "credits": 76.0
+     },
+     "diamond": {
+      "usd": 7.2,
+      "credits": 72.0
+     },
+     "official": {
+      "usd": 10.0,
+      "credits": 100.0
+     }
+    }
+   }
+  },
+  "gemini-4-hydrogen": {
+   "id": "gemini-4-hydrogen",
+   "name": "gemini-4-hydrogen",
+   "category": "chat",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "input_output",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 1.2,
+      "credits": 12.0
+     },
+     "platinum": {
+      "usd": 1.14,
+      "credits": 11.4
+     },
+     "diamond": {
+      "usd": 1.08,
+      "credits": 10.8
+     },
+     "official": {
+      "usd": 1.5,
+      "credits": 15.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 6.0,
+      "credits": 60.0
+     },
+     "platinum": {
+      "usd": 5.7,
+      "credits": 57.0
+     },
+     "diamond": {
+      "usd": 5.4,
+      "credits": 54.0
+     },
+     "official": {
+      "usd": 7.5,
+      "credits": 75.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 1.2,
+      "credits": 12.0
+     },
+     "platinum": {
+      "usd": 1.14,
+      "credits": 11.4
+     },
+     "diamond": {
+      "usd": 1.08,
+      "credits": 10.8
+     },
+     "official": {
+      "usd": 1.5,
+      "credits": 15.0
+     }
+    },
+    "output": {
+     "gold": {
+      "usd": 6.0,
+      "credits": 60.0
+     },
+     "platinum": {
+      "usd": 5.7,
+      "credits": 57.0
+     },
+     "diamond": {
+      "usd": 5.4,
+      "credits": 54.0
+     },
+     "official": {
+      "usd": 7.5,
+      "credits": 75.0
+     }
+    }
+   }
+  },
+  "gemini-4-neon": {
+   "id": "gemini-4-neon",
+   "name": "gemini-4-neon",
+   "category": "chat",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "input_output",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 2.4,
+      "credits": 24.0
+     },
+     "platinum": {
+      "usd": 2.28,
+      "credits": 22.8
+     },
+     "diamond": {
+      "usd": 2.16,
+      "credits": 21.6
+     },
+     "official": {
+      "usd": 3.0,
+      "credits": 30.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 12.0,
+      "credits": 120.0
+     },
+     "platinum": {
+      "usd": 11.4,
+      "credits": 114.0
+     },
+     "diamond": {
+      "usd": 10.8,
+      "credits": 108.0
+     },
+     "official": {
+      "usd": 15.0,
+      "credits": 150.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 2.4,
+      "credits": 24.0
+     },
+     "platinum": {
+      "usd": 2.28,
+      "credits": 22.8
+     },
+     "diamond": {
+      "usd": 2.16,
+      "credits": 21.6
+     },
+     "official": {
+      "usd": 3.0,
+      "credits": 30.0
+     }
+    },
+    "output": {
+     "gold": {
+      "usd": 12.0,
+      "credits": 120.0
+     },
+     "platinum": {
+      "usd": 11.4,
+      "credits": 114.0
+     },
+     "diamond": {
+      "usd": 10.8,
+      "credits": 108.0
+     },
+     "official": {
+      "usd": 15.0,
+      "credits": 150.0
+     }
+    }
+   }
+  },
+  "gpt-6.1-terra": {
+   "id": "gpt-6.1-terra",
+   "name": "gpt-6.1-terra",
+   "category": "chat",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "input_output",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 0.8,
+      "credits": 8.0
+     },
+     "platinum": {
+      "usd": 0.76,
+      "credits": 7.6
+     },
+     "diamond": {
+      "usd": 0.72,
+      "credits": 7.2
+     },
+     "official": {
+      "usd": 1.0,
+      "credits": 10.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 4.0,
+      "credits": 40.0
+     },
+     "platinum": {
+      "usd": 3.8,
+      "credits": 38.0
+     },
+     "diamond": {
+      "usd": 3.6,
+      "credits": 36.0
+     },
+     "official": {
+      "usd": 5.0,
+      "credits": 50.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 0.8,
+      "credits": 8.0
+     },
+     "platinum": {
+      "usd": 0.76,
+      "credits": 7.6
+     },
+     "diamond": {
+      "usd": 0.72,
+      "credits": 7.2
+     },
+     "official": {
+      "usd": 1.0,
+      "credits": 10.0
+     }
+    },
+    "output": {
+     "gold": {
+      "usd": 4.0,
+      "credits": 40.0
+     },
+     "platinum": {
+      "usd": 3.8,
+      "credits": 38.0
+     },
+     "diamond": {
+      "usd": 3.6,
+      "credits": 36.0
+     },
+     "official": {
+      "usd": 5.0,
+      "credits": 50.0
+     }
+    }
+   }
+  },
+  "gpt-6.2-astra": {
+   "id": "gpt-6.2-astra",
+   "name": "gpt-6.2-astra",
+   "category": "chat",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "input_output",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 6.4,
+      "credits": 64.0
+     },
+     "platinum": {
+      "usd": 6.08,
+      "credits": 60.8
+     },
+     "diamond": {
+      "usd": 5.76,
+      "credits": 57.6
+     },
+     "official": {
+      "usd": 8.0,
+      "credits": 80.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 32.0,
+      "credits": 320.0
+     },
+     "platinum": {
+      "usd": 30.4,
+      "credits": 304.0
+     },
+     "diamond": {
+      "usd": 28.8,
+      "credits": 288.0
+     },
+     "official": {
+      "usd": 40.0,
+      "credits": 400.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 6.4,
+      "credits": 64.0
+     },
+     "platinum": {
+      "usd": 6.08,
+      "credits": 60.8
+     },
+     "diamond": {
+      "usd": 5.76,
+      "credits": 57.6
+     },
+     "official": {
+      "usd": 8.0,
+      "credits": 80.0
+     }
+    },
+    "output": {
+     "gold": {
+      "usd": 32.0,
+      "credits": 320.0
+     },
+     "platinum": {
+      "usd": 30.4,
+      "credits": 304.0
+     },
+     "diamond": {
+      "usd": 28.8,
+      "credits": 288.0
+     },
+     "official": {
+      "usd": 40.0,
+      "credits": 400.0
+     }
+    }
+   }
+  },
+  "gpt-6.2-sol": {
+   "id": "gpt-6.2-sol",
+   "name": "gpt-6.2-sol",
+   "category": "chat",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "input_output",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 1.6,
+      "credits": 16.0
+     },
+     "platinum": {
+      "usd": 1.52,
+      "credits": 15.2
+     },
+     "diamond": {
+      "usd": 1.44,
+      "credits": 14.4
+     },
+     "official": {
+      "usd": 2.0,
+      "credits": 20.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 8.0,
+      "credits": 80.0
+     },
+     "platinum": {
+      "usd": 7.6,
+      "credits": 76.0
+     },
+     "diamond": {
+      "usd": 7.2,
+      "credits": 72.0
+     },
+     "official": {
+      "usd": 10.0,
+      "credits": 100.0
+     },
+     "source": "api:pricing/model@2026-11-26"
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 1.6,
+      "credits": 16.0
+     },
+     "platinum": {
+      "usd": 1.52,
+      "credits": 15.2
+     },
+     "diamond": {
+      "usd": 1.44,
+      "credits": 14.4
+     },
+     "official": {
+      "usd": 2.0,
+      "credits": 20.0
+     }
+    },
+    "output": {
+     "gold": {
+      "usd": 8.0,
+      "credits": 80.0
+     },
+     "platinum": {
+      "usd": 7.6,
+      "credits": 76.0
+     },
+     "diamond": {
+      "usd": 7.2,
+      "credits": 72.0
+     },
+     "official": {
+      "usd": 10.0,
+      "credits": 100.0
+     }
+    }
+   }
+  },
+  "qwen4-max": {
+   "id": "qwen4-max",
+   "name": "qwen4-max",
+   "category": "chat",
+   "billing": "per_1m_tokens",
+   "spec_dimension": "input_output",
+   "aliases": [],
+   "tiers": [
+    {
+     "spec": "input",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 1.4285712,
+      "credits": 14.285712
+     },
+     "platinum": {
+      "usd": 1.35714264,
+      "credits": 13.571426
+     },
+     "diamond": {
+      "usd": 1.28571408,
+      "credits": 12.857141
+     },
+     "official": {
+      "usd": 1.785714,
+      "credits": 17.85714
+     },
+     "source": "api:pricing/model@2026-11-26"
+    },
+    {
+     "spec": "output",
+     "unit": "per_1m_tokens",
+     "raw_unit": "1M tokens",
+     "gold": {
+      "usd": 4.2857144,
+      "credits": 42.857144
+     },
+     "platinum": {
+      "usd": 4.07142868,
+      "credits": 40.714287
+     },
+     "diamond": {
+      "usd": 3.85714296,
+      "credits": 38.57143
+     },
+     "official": {
+      "usd": 5.357143,
+      "credits": 53.57143
+     },
+     "source": "api:pricing/model@2026-11-26"
+    }
+   ],
+   "token_rates": {
+    "input": {
+     "gold": {
+      "usd": 1.4285712,
+      "credits": 14.285712
+     },
+     "platinum": {
+      "usd": 1.35714264,
+      "credits": 13.571426
+     },
+     "diamond": {
+      "usd": 1.28571408,
+      "credits": 12.857141
+     },
+     "official": {
+      "usd": 1.785714,
+      "credits": 17.85714
+     }
+    },
+    "output": {
+     "gold": {
+      "usd": 4.2857144,
+      "credits": 42.857144
+     },
+     "platinum": {
+      "usd": 4.07142868,
+      "credits": 40.714287
+     },
+     "diamond": {
+      "usd": 3.85714296,
+      "credits": 38.57143
+     },
+     "official": {
+      "usd": 5.357143,
+      "credits": 53.57143
+     }
+    }
+   }
   }
  },
  "alias_map": {
@@ -40599,11 +44023,11 @@
   "nano banana 2.1": "gemini-nano-banana-2.1",
   "nanobanana21": "gemini-nano-banana-2.1",
   "gemini-nano-banana-2.1": "gemini-nano-banana-2.1",
-  "nano-banana": "gemini-2.5-flash-image-preview",
-  "nanobanana": "gemini-2.5-flash-image-preview",
+  "nano-banana": "gemini-2.5-flash-image-preview-official",
+  "nanobanana": "gemini-2.5-flash-image-preview-official",
   "gemini-2.5-flash-image-preview": "gemini-2.5-flash-image-preview",
-  "nano-banana-2": "gemini-3.1-flash-image-preview",
-  "nanobanana2": "gemini-3.1-flash-image-preview",
+  "nano-banana-2": "gemini-3.1-flash-image-preview-official",
+  "nanobanana2": "gemini-3.1-flash-image-preview-official",
   "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image-preview",
   "nano-banana-2-ext": "gemini-3.1-flash-image-preview",
   "nanobanana2ext": "gemini-3.1-flash-image-preview",
@@ -40615,8 +44039,8 @@
   "gemini-3.1-flash-lite-image-ext": "gemini-3.1-flash-lite-image-ext",
   "nano-banana-ext": "gemini-2.5-flash-image-preview",
   "nanobananaext": "gemini-2.5-flash-image-preview",
-  "nano-banana-pro": "gemini-3-pro-image-preview",
-  "nanobananapro": "gemini-3-pro-image-preview",
+  "nano-banana-pro": "gemini-3-pro-image-preview-official",
+  "nanobananapro": "gemini-3-pro-image-preview-official",
   "gemini-3-pro-image-preview": "gemini-3-pro-image-preview",
   "nano-banana-pro-ext": "gemini-3-pro-image-preview",
   "nanobananaproext": "gemini-3-pro-image-preview",
@@ -40702,8 +44126,6 @@
   "seedance10profast": "seedance-1-0-pro-fast",
   "seedance-1-0-pro-quality": "seedance-1-0-pro-quality",
   "seedance10proquality": "seedance-1-0-pro-quality",
-  "seedance-1-5-pro": "seedance-1-5-pro",
-  "seedance15pro": "seedance-1-5-pro",
   "seedance-2.0": "seedance-2.0",
   "seedance20": "seedance-2.0",
   "seedance-2.0-face": "seedance-2.0-face",
@@ -40720,13 +44142,11 @@
   "skyreelsv4fast": "skyreels-v4-fast",
   "skyreels-v4-std": "skyreels-v4-std",
   "skyreelsv4std": "skyreels-v4-std",
-  "veo3.1-fast-ext": "veo3.1-fast-ext",
-  "veo31fastext": "veo3.1-fast-ext",
+  "veo3.1-fast-ext": "veo3.1-fast-ext（veo3.1-fast）",
+  "veo31fastext": "veo3.1-fast-ext（veo3.1-fast）",
   "veo3.1-fast-official": "veo3.1-fast-official",
   "veo31fastofficial": "veo3.1-fast-official",
-  "veo3.1-lite-ext": "veo3.1-lite-ext",
   "veo31liteext": "veo3.1-lite-ext",
-  "veo3.1-quality-ext": "veo3.1-quality-ext",
   "veo31qualityext": "veo3.1-quality-ext",
   "veo3.1-quality-official": "veo3.1-quality-official",
   "veo31qualityofficial": "veo3.1-quality-official",
@@ -40807,14 +44227,8 @@
   "deepseekr1": "deepseek-r1",
   "deepseek-r1-0528": "deepseek-r1-0528",
   "deepseekr10528": "deepseek-r1-0528",
-  "deepseek-r1-250528": "deepseek-r1-250528",
-  "deepseekr1250528": "deepseek-r1-250528",
-  "deepseek-v3-0324": "deepseek-v3-0324",
-  "deepseekv30324": "deepseek-v3-0324",
   "deepseek-v3.2": "deepseek-v3.2",
   "deepseekv32": "deepseek-v3.2",
-  "deepseek-v3.2-exp": "deepseek-v3.2-exp",
-  "deepseekv32exp": "deepseek-v3.2-exp",
   "deepseek-v4-flash": "deepseek-v4-flash",
   "deepseekv4flash": "deepseek-v4-flash",
   "deepseek-v4-pro": "deepseek-v4-pro",
@@ -40823,8 +44237,6 @@
   "deepseekv41flash": "deepseek-v4.1-flash",
   "gemini-2.5-flash": "gemini-2.5-flash",
   "gemini25flash": "gemini-2.5-flash",
-  "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
-  "gemini25flashlite": "gemini-2.5-flash-lite",
   "gemini-2.5-flash-nothinking": "gemini-2.5-flash-nothinking",
   "gemini25flashnothinking": "gemini-2.5-flash-nothinking",
   "gemini-2.5-flash-thinking": "gemini-2.5-flash-thinking",
@@ -40943,8 +44355,6 @@
   "gpt5": "gpt-5",
   "gpt-5-2025-08-07": "gpt-5-2025-08-07",
   "gpt520250807": "gpt-5-2025-08-07",
-  "gpt-5-chat-latest": "gpt-5-chat-latest",
-  "gpt5chatlatest": "gpt-5-chat-latest",
   "gpt-5-codex": "gpt-5-codex",
   "gpt5codex": "gpt-5-codex",
   "gpt-5-mini": "gpt-5-mini",
@@ -40979,8 +44389,6 @@
   "gpt52": "gpt-5.2",
   "gpt-5.2-chat-latest": "gpt-5.2-chat-latest",
   "gpt52chatlatest": "gpt-5.2-chat-latest",
-  "gpt-5.2-codex": "gpt-5.2-codex",
-  "gpt52codex": "gpt-5.2-codex",
   "gpt-5.2-pro": "gpt-5.2-pro",
   "gpt52pro": "gpt-5.2-pro",
   "gpt-5.3-codex": "gpt-5.3-codex",
@@ -41210,10 +44618,8 @@
   "wan3.0videoprime": "wan3.0-video-prime",
   "claudefable5.1": "claude-fable-5.1",
   "deepseekv3.2": "deepseek-v3.2",
-  "deepseekv3.2exp": "deepseek-v3.2-exp",
   "deepseekv4.1flash": "deepseek-v4.1-flash",
   "gemini2.5flash": "gemini-2.5-flash",
-  "gemini2.5flashlite": "gemini-2.5-flash-lite",
   "gemini2.5flashnothinking": "gemini-2.5-flash-nothinking",
   "gemini2.5flashthinking": "gemini-2.5-flash-thinking",
   "gemini2.5pro": "gemini-2.5-pro",
@@ -41256,7 +44662,6 @@
   "gpt5.1codexmini": "gpt-5.1-codex-mini",
   "gpt5.2": "gpt-5.2",
   "gpt5.2chatlatest": "gpt-5.2-chat-latest",
-  "gpt5.2codex": "gpt-5.2-codex",
   "gpt5.2pro": "gpt-5.2-pro",
   "gpt5.3codex": "gpt-5.3-codex",
   "gpt5.4": "gpt-5.4",
@@ -41358,7 +44763,53 @@
   "doubao-seedance-2-5-flash": "seedance-2-5-flash",
   "claude-opus-5-thinking": "claude-opus-5",
   "midjourney@video": "midjourney@video",
-  "midjourney@video-720p": "midjourney@video-720p"
+  "midjourney@video-720p": "midjourney@video-720p",
+  "magi-2": "magi-2",
+  "magi2": "magi-2",
+  "apimart-zoe": "apimart-zoe",
+  "apimartzoe": "apimart-zoe",
+  "kling-v4-flash": "kling-v4-flash",
+  "klingv4flash": "kling-v4-flash",
+  "gpt-image-2.6-ext": "gpt-image-2.6-ext",
+  "gptimage26ext": "gpt-image-2.6-ext",
+  "gpt-image-2.6-flare": "gpt-image-2.6-flare",
+  "gptimage26flare": "gpt-image-2.6-flare",
+  "gpt-image-2.6-sunburst": "gpt-image-2.6-sunburst",
+  "gptimage26sunburst": "gpt-image-2.6-sunburst",
+  "minimax-h3-image": "minimax-h3-image",
+  "minimaxh3image": "minimax-h3-image",
+  "minimax-h3-image-highspeed": "minimax-h3-image-highspeed",
+  "minimaxh3imagehighspeed": "minimax-h3-image-highspeed",
+  "muse-video-ext": "muse-video-ext",
+  "musevideoext": "muse-video-ext",
+  "gemini-omni-1.2-flash": "gemini-omni-1.2-flash",
+  "geminiomni12flash": "gemini-omni-1.2-flash",
+  "gemini-omni-1.2-flash-ext": "gemini-omni-1.2-flash-ext",
+  "geminiomni12flashext": "gemini-omni-1.2-flash-ext",
+  "claude-fable-5.2": "claude-fable-5.2",
+  "claudefable52": "claude-fable-5.2",
+  "gemini-3-pro-preview-nothinking": "gemini-3-pro-preview-nothinking",
+  "gemini3propreviewnothinking": "gemini-3-pro-preview-nothinking",
+  "gemini-4-carbon": "gemini-4-carbon",
+  "gemini4carbon": "gemini-4-carbon",
+  "gemini-4-hydrogen": "gemini-4-hydrogen",
+  "gemini4hydrogen": "gemini-4-hydrogen",
+  "gemini-4-neon": "gemini-4-neon",
+  "gemini4neon": "gemini-4-neon",
+  "gpt-6.1-terra": "gpt-6.1-terra",
+  "gpt61terra": "gpt-6.1-terra",
+  "gpt-6.2-astra": "gpt-6.2-astra",
+  "gpt62astra": "gpt-6.2-astra",
+  "gpt-6.2-sol": "gpt-6.2-sol",
+  "gpt62sol": "gpt-6.2-sol",
+  "qwen4-max": "qwen4-max",
+  "qwen4max": "qwen4-max",
+  "claude-haiku-4-5": "claude-haiku-4-5-20251001",
+  "claudehaiku45": "claude-haiku-4-5-20251001",
+  "claude-sonnet-4-5": "claude-sonnet-4-5-20250929",
+  "claudesonnet45": "claude-sonnet-4-5-20250929",
+  "claude-opus-4-5": "claude-opus-4-5-20251101",
+  "claudeopus45": "claude-opus-4-5-20251101"
  },
  "fallback": {
   "image": "gemini-nano-banana-2.1",

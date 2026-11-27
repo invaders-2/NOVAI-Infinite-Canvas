@@ -1,13 +1,16 @@
-"""参考视频上传临时图床前的可选压缩（mock ffmpeg / 图床，不联网）。
+"""参考视频上传前的可选压缩（mock ffmpeg / 图床 / 原生上传，不联网）。
 
 守这些行为：
-  * 文件 > 24MB 或长边 > 1280 才压缩；压缩产物交给图床，上传完成（成功或失败）后必删；
-  * 长边缩到 1280、H.264、CRF 26、preset veryfast、AAC 128k；无音轨用 -an；
+  * 文件 > 24MB、长边 > 1280 或超过 APIMart 上传预算才压缩；压缩产物由图床与原生上传共用，
+    上传完成（成功或失败）后必删；
+  * 首档 长边 1280 / CRF 26；仍超预算按 960/30 → 720/32 → 480/34 逐级重压，取第一档 ≤ 预算；
   * 没装 ffmpeg / ffmpeg 失败 / 压缩后反而更大 → 原文件上传；
   * 宽高优先 ffprobe，没 ffprobe 用 opencv；
-  * 视频仍走临时图床，不碰 APIMart 上传分支。
+  * 顺序仍是临时图床优先，失败再用同一份压缩产物走 APIMart 原生上传；
+  * 原生上传 413 直接带结论返回，不再换上传路径重试。
 """
 import asyncio
+import json
 import os
 import sys
 from pathlib import Path
@@ -30,6 +33,9 @@ def _clean_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(main, "VIDEO_CLOUD_COMPRESS_THRESHOLD_BYTES", 1024)
     monkeypatch.setattr(main, "VIDEO_CLOUD_COMPRESS_MAX_EDGE", 1280)
+    main._APIMART_UPLOAD_CACHE.clear()
+    yield
+    main._APIMART_UPLOAD_CACHE.clear()
 
 
 def _source(tmp_path, size=4096):
@@ -69,8 +75,9 @@ def _stub_upload(monkeypatch, calls, error=None):
 
 class _FakeFFmpeg:
     def __init__(self, payload=b"compressed", returncode=0, stderr="", ffmpeg="/usr/bin/ffmpeg",
-                 ffprobe="/usr/bin/ffprobe"):
+                 ffprobe="/usr/bin/ffprobe", payloads=None):
         self.payload = payload
+        self.payloads = list(payloads or [])
         self.returncode = returncode
         self.stderr = stderr
         self.ffmpeg = ffmpeg
@@ -90,8 +97,9 @@ class _FakeFFmpeg:
         self.commands.append(list(cmd))
         out_path = cmd[-1]
         if self.returncode == 0:
+            payload = self.payloads.pop(0) if self.payloads else self.payload
             with open(out_path, "wb") as fh:
-                fh.write(self.payload)
+                fh.write(payload)
         return SimpleNamespace(returncode=self.returncode, stdout="", stderr=self.stderr)
 
     def install(self, monkeypatch):
@@ -99,8 +107,32 @@ class _FakeFFmpeg:
         monkeypatch.setattr(main.subprocess, "run", self.run)
 
 
-def _run_upload():
-    return asyncio.run(main.upload_video_for_apimart(None, PROVIDER, REF))
+class _FakeResponse:
+    def __init__(self, status_code, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text or json.dumps(payload or {}, ensure_ascii=False)
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json body")
+        return self._payload
+
+
+class _FakeClient:
+    """原生上传用的假 client：记录每次 POST，按预设状态码返回。"""
+
+    def __init__(self, status_code=404, payload=None, text=""):
+        self.response = _FakeResponse(status_code, payload, text)
+        self.calls = []
+
+    async def post(self, url, **kwargs):
+        self.calls.append({"url": url, **kwargs})
+        return self.response
+
+
+def _run_upload(client=None):
+    return asyncio.run(main.upload_video_for_apimart(client or _FakeClient(), PROVIDER, REF))
 
 
 def test_large_video_compresses_and_uploads_temp_product(monkeypatch, tmp_path, capsys):
@@ -159,6 +191,10 @@ def test_no_ffmpeg_uploads_original(monkeypatch, tmp_path, capsys):
     _stub_upload(monkeypatch, uploads)
     ffmpeg = _FakeFFmpeg(ffmpeg=None)
     ffmpeg.install(monkeypatch)
+    # 这台机器 /opt/homebrew/bin 里有真 ffmpeg；只 mock shutil.which 不够，系统目录也要清空
+    monkeypatch.setattr(main, "_system_media_dirs", lambda: [])
+    monkeypatch.setattr(main, "_bundled_ffmpeg_dirs", lambda: [])
+    monkeypatch.delenv("FFMPEG_PATH", raising=False)
 
     result = _run_upload()
 
@@ -250,22 +286,23 @@ def test_temp_file_creation_failure_falls_back_to_original(monkeypatch, tmp_path
     assert "创建临时文件失败" in capsys.readouterr().out
 
 
-def test_oversize_original_skips_compression_and_keeps_size_error(monkeypatch, tmp_path):
+def test_oversize_original_is_compressed_before_upload(monkeypatch, tmp_path):
     source = _source(tmp_path)
     monkeypatch.setattr(main, "output_file_from_url", lambda url: source)
-
-    def _too_large(url, allowed=("image/", "video/", "audio/")):
-        raise main.HTTPException(status_code=400, detail="媒体文件超过云端上传大小限制：4294967296 bytes")
-
-    monkeypatch.setattr(main, "local_media_path_for_cloud_upload", _too_large)
-    ffmpeg = _FakeFFmpeg()
+    _patch_probe(monkeypatch)
+    monkeypatch.setenv("APIMART_TRY_VIDEO_UPLOAD", "0")
+    uploads = _stub_upload(monkeypatch, [], error=main.HTTPException(
+        status_code=400, detail="媒体文件超过云端上传大小限制：4294967296 bytes"))
+    ffmpeg = _FakeFFmpeg(payload=b"x" * 512)
     ffmpeg.install(monkeypatch)
 
     result = _run_upload()
 
     assert result.startswith("ERR:APIMart 上传入口不可用"), result
     assert "超过云端上传大小限制" in result
-    assert ffmpeg.run_calls == 0, "超过图床上限的文件不应先烧 CPU 压缩"
+    assert ffmpeg.run_calls == 1, "压缩产物同时给图床和原生上传用，一次链路只压一次"
+    assert uploads[0]["path_override"] and uploads[0]["size"] == 512
+    assert not os.path.exists(uploads[0]["path_override"])
 
 
 def test_compressed_output_larger_falls_back_to_original(monkeypatch, tmp_path, capsys):
@@ -296,8 +333,9 @@ def test_temp_file_removed_even_when_upload_fails(monkeypatch, tmp_path):
 
     result = _run_upload()
 
-    assert result.startswith("ERR:APIMart 上传入口不可用"), result
+    assert result.startswith("ERR:参考视频上传失败"), result
     assert "all channels down" in result
+    assert "1MB" in result
     assert uploads[0]["path_override"]
     assert not os.path.exists(uploads[0]["path_override"]), "上传失败也要删临时文件"
 
@@ -357,3 +395,110 @@ def test_probe_dimensions_falls_back_to_opencv(monkeypatch):
 
     assert main.probe_video_dimensions("/x.mp4") == (1280, 720)
     assert cap.released is True
+
+
+def test_compressed_product_is_reused_for_native_upload(monkeypatch, tmp_path):
+    source = _source(tmp_path)
+    _patch_local(monkeypatch, source)
+    _patch_probe(monkeypatch)
+    uploads = _stub_upload(monkeypatch, [], error=main.HTTPException(status_code=502, detail="all channels down"))
+    ffmpeg = _FakeFFmpeg(payload=b"x" * 512)
+    ffmpeg.install(monkeypatch)
+    client = _FakeClient(200, {"url": "https://getapib.org/video/ref.mp4", "retention_days": 3})
+
+    result = _run_upload(client)
+
+    assert result == "https://getapib.org/video/ref.mp4"
+    assert ffmpeg.run_calls == 1, "一次上传链路只压一次"
+    assert len(client.calls) == 1, "原生上传只打一次 /v1/uploads/videos"
+    assert client.calls[0]["url"].endswith("/v1/uploads/videos?retention_days=3")
+    assert client.calls[0]["files"]["file"][1] == b"x" * 512, "原生上传必须用压缩后的文件，不能用原文件"
+    assert uploads[0]["bytes"] == b"x" * 512, "图床和原生上传共用同一份压缩产物"
+    assert not os.path.exists(uploads[0]["path_override"]), "成功也要删临时文件"
+
+
+def test_compression_ladder_stops_at_first_tier_within_budget(monkeypatch, tmp_path, capsys):
+    source = _source(tmp_path, size=4096)
+    _patch_local(monkeypatch, source)
+    _patch_probe(monkeypatch)
+    uploads = []
+    _stub_upload(monkeypatch, uploads)
+    monkeypatch.setattr(main, "APIMART_UPLOAD_BODY_LIMIT_BYTES", 1000)
+    ffmpeg = _FakeFFmpeg(payloads=[b"a" * 2000, b"b" * 900])
+    ffmpeg.install(monkeypatch)
+
+    result = _run_upload()
+
+    assert result == CLOUD_URL
+    assert ffmpeg.run_calls == 2, "首档仍超预算，要重压下一档就停"
+    first, second = ffmpeg.commands
+    assert first[first.index("-crf") + 1] == "26"
+    assert first[first.index("-vf") + 1] == "scale='min(1280,iw)':-2"
+    assert second[second.index("-crf") + 1] == "30"
+    assert second[second.index("-vf") + 1] == "scale='min(960,iw)':-2"
+    assert uploads[0]["size"] == 900, "用第一档 ≤ 预算的产物"
+    assert not os.path.exists(first[-1]), "逐级重压时要删掉上一档临时文件"
+    out = capsys.readouterr().out
+    assert "仍超 APIMart 上传预算" in out, out
+
+
+def test_compression_ladder_reports_min_tier_still_over_budget(monkeypatch, tmp_path):
+    source = _source(tmp_path, size=4096)
+    _patch_local(monkeypatch, source)
+    _patch_probe(monkeypatch, width=1080, height=1920)
+    uploads = _stub_upload(monkeypatch, [], error=main.HTTPException(status_code=502, detail="all channels down"))
+    monkeypatch.setattr(main, "APIMART_UPLOAD_BODY_LIMIT_BYTES", 1000)
+    ffmpeg = _FakeFFmpeg(payloads=[b"a" * 3000, b"b" * 2500, b"c" * 2000, b"d" * 1500])
+    ffmpeg.install(monkeypatch)
+    client = _FakeClient(413, text="<html><head><title>413 Request Entity Too Large</title></head></html>")
+
+    result = _run_upload(client)
+
+    assert result.startswith("ERR:参考视频上传失败"), result
+    assert ffmpeg.run_calls == 4, "1280/26 → 960/30 → 720/32 → 480/34 四档全试"
+    assert uploads[0]["size"] == 1500, "全都不行就用最小那档继续尝试"
+    assert "已压到最小档（1500 字节 / 270x480）仍超限" in result, result
+    assert "1MB" in result
+    assert len(client.calls) == 1
+    assert not os.path.exists(uploads[0]["path_override"])
+
+
+def test_long_video_compresses_only_first_tier(monkeypatch, tmp_path):
+    source = _source(tmp_path, size=4096)
+    _patch_local(monkeypatch, source)
+    _patch_probe(monkeypatch, width=1920, height=1080, duration=120.0)
+    uploads = _stub_upload(monkeypatch, [], error=main.HTTPException(status_code=502, detail="all channels down"))
+    monkeypatch.setattr(main, "APIMART_UPLOAD_BODY_LIMIT_BYTES", 1000)
+    ffmpeg = _FakeFFmpeg(payload=b"a" * 2000)
+    ffmpeg.install(monkeypatch)
+    client = _FakeClient(413, text="<html><head><title>413 Request Entity Too Large</title></head></html>")
+
+    result = _run_upload(client)
+
+    assert ffmpeg.run_calls == 1, "120 秒长视频只跑首档，不逐级重编码"
+    assert result.startswith("ERR:参考视频上传失败"), result
+    assert "已压到最小档（2000 字节 / 1280x720）仍超限" in result, result
+    assert "视频 120 秒" in result and "1MB 上限最多容纳约 30 秒" in result, result
+    assert not os.path.exists(uploads[0]["path_override"])
+
+
+def test_native_413_stops_after_first_upload_path(monkeypatch, tmp_path):
+    source = _source(tmp_path)
+    _patch_local(monkeypatch, source)
+    _patch_probe(monkeypatch)
+    _stub_upload(monkeypatch, [], error=main.HTTPException(
+        status_code=502, detail="<html><body><h1>502 Bad Gateway</h1> uguu down</body></html>"))
+    ffmpeg = _FakeFFmpeg(payload=b"x" * 512)
+    ffmpeg.install(monkeypatch)
+    client = _FakeClient(413, text="<html><head><title>413 Request Entity Too Large</title></head></html>")
+
+    result = _run_upload(client)
+
+    assert len(client.calls) == 1, "同一网关同一体积限制，413 后不再换路径重试"
+    assert client.calls[0]["url"].endswith("/v1/uploads/videos?retention_days=3")
+    assert result.startswith("ERR:参考视频上传失败"), result
+    assert "1MB" in result and "超限" in result, result
+    assert "临时图床也不可用" in result and "502 Bad Gateway" in result
+    assert "<html" not in result.lower() and "<h1" not in result.lower()
+    assert "Request Entity Too Large" not in result
+

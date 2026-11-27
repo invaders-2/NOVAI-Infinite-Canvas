@@ -179,6 +179,35 @@ class ApimartVideoBodyParamsTests(unittest.TestCase):
         self.assertEqual(main.apimart_video_modes("kling-v4-flash", flash),
                          list(flash["modes"]))
 
+    def test_apimart_zoe_reference_limits_follow_caps_declaration(self):
+        # 文档 L36104 / L36118 / L36126 声明图 30 / 视频 10 / 音频 10；2026-11-27 起通用上传分支
+        # 按能力表声明下发（不再硬截断 9/3/3）→ 能力表按文档写 30/10/10，/api/model-caps 同步同一组数字。
+        # 未知：上游是否真照收超限请求未经付费实测（U23）。
+        caps = main.model_caps_for({"id": "apimart", "protocol": "apimart"}, "apimart-zoe", "video")
+        self.assertEqual((caps["ref_max"], caps["video_ref_max"], caps["audio_ref_max"]), (30, 10, 10))
+        source = Path(main.__file__).read_text(encoding="utf-8")
+        self.assertIn('caps_ref_max = int((apimart_video_caps or {}).get("ref_max") or 9)', source)
+        self.assertIn("for ref_url in payload.videos[:caps_video_ref_max]:", source)
+        self.assertIn("for ref_url in (payload.audios or [])[:caps_audio_ref_max]:", source)
+
+    def test_seedance_2_5_draft_caps_and_reference_limits(self):
+        # 2026-11-25 第二轮：草稿能力进 /api/model-caps；2026-11-27 起参考上限按能力表声明下发
+        # （文档 L46612 起声明 30/10/10 → 能力表与 /api/model-caps 都写 30/10/10）。
+        caps = main.model_caps_for({"id": "apimart", "protocol": "apimart"}, "seedance-2.5", "video")
+        self.assertIs(caps.get("draft"), True)
+        self.assertEqual(caps.get("draft_resolution"), "480p")
+        self.assertEqual(caps.get("draft_final_resolutions"), ["1080p", "4k"])
+        self.assertEqual(caps.get("draft_expires_days"), 3)
+        self.assertEqual((caps["ref_max"], caps["video_ref_max"], caps["audio_ref_max"]), (30, 10, 10))
+        # flash 明确不支持 draft（L45662）：能力表与 caps 都不能出现该字段
+        self.assertNotIn("draft", main.APIMART_VIDEO_MODEL_CAPS["seedance-2-5-flash"])
+        flash = main.model_caps_for({"id": "apimart", "protocol": "apimart"}, "seedance-2-5-flash", "video")
+        self.assertNotIn("draft", flash)
+        # 草稿成片的分辨率档位与常规 resolutions 分开表达，避免前端把 480p 当成成片档
+        self.assertIn("1080p", caps["draft_final_resolutions"])
+        self.assertIn("4k", caps["draft_final_resolutions"])
+        self.assertNotIn("480p", caps["draft_final_resolutions"])
+
     def test_unknown_model_keeps_legacy_field_names(self):
         params = self.params("some-unknown-video", 20, "9:21", "1080p")
         self.assertEqual(params["duration"], 15)

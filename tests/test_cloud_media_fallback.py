@@ -28,6 +28,7 @@ TASK_VIDEO = "task_mock_cloud_video"
 MP4_BYTES = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom" + b"\x00" * 32
 MP3_BYTES = b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\x00" * 32
 HTML_PAGE = b"<!DOCTYPE html><html><head><title>file viewer</title></head><body>viewer</body></html>"
+HTML_413 = b"<html><head><title>413 Request Entity Too Large</title></head><body>nginx</body></html>"
 
 
 class _MockHandler(BaseHTTPRequestHandler):
@@ -79,7 +80,9 @@ class _MockHandler(BaseHTTPRequestHandler):
         if path.startswith("/v1/uploads/"):
             status = int(getattr(self.server, "upload_endpoint_status", 404) or 404)
             if status in (200, 201):
-                self._send(status, {"url": base + "/files/uploaded_asset"})
+                self._send(status, {"url": base + "/files/uploaded_asset", "retention_days": 3})
+            elif getattr(self.server, "upload_endpoint_html", False):
+                self._send(status, raw=HTML_413, content_type="text/html")
             else:
                 self._send(status, {"error": "mock upload endpoint missing", "path": path})
         elif path == "/v1/videos/generations":
@@ -214,7 +217,9 @@ class CloudMediaFallbackTests(unittest.TestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     def setUp(self):
+        main._APIMART_UPLOAD_CACHE.clear()
         self.server.upload_endpoint_status = 404
+        self.server.upload_endpoint_html = False
         self.server.cloud_status = 200
         self.server.litterbox_status = 500
         self.server.uguu_status = 200
@@ -337,8 +342,8 @@ class CloudMediaFallbackTests(unittest.TestCase):
         result = self._run_video(audios=["/assets/output/ref.mp3"])
         self.assertTrue(result.get("videos"), result)
         upload_paths = [item["path"] for item in self.posts("/v1/uploads/")]
-        self.assertEqual(upload_paths,
-                         ["/v1/uploads/audios", "/v1/uploads/files", "/v1/uploads/images"])
+        # /v1/uploads/files 实测 404、/v1/uploads/images 不收音频，只留 audios 这一条
+        self.assertEqual(upload_paths, ["/v1/uploads/audios"])
         self.assertFalse(self.posts("/litterbox/upload"), "音频不应再打一次注定失败的 Litterbox")
         self.assertEqual(len(self.posts("/uguu/upload")), 1, self.requests())
         body = self.posts("/v1/videos/generations")[0]["body"]
@@ -377,6 +382,49 @@ class CloudMediaFallbackTests(unittest.TestCase):
         self.assertTrue(result.get("videos"), result)
         self.assertEqual([item["path"] for item in self.posts("/v1/uploads/")], ["/v1/uploads/videos"])
         body = self.posts("/v1/videos/generations")[0]["body"]
+        self.assertEqual(body.get("video_urls"), [self.base + "/files/uploaded_asset"], body)
+
+    def test_apimart_video_native_413_fails_fast_with_friendly_text(self):
+        os.environ["APIMART_TRY_VIDEO_UPLOAD"] = "1"
+        self.server.uguu_status = 500
+        self.server.litterbox_status = 500
+        self.server.cloud_status = 500
+        self.server.upload_endpoint_status = 413
+        self.server.upload_endpoint_html = True
+        with self.assertRaises(main.HTTPException) as caught:
+            self._run_video(videos=["/assets/output/ref.mp4"])
+        detail = str(caught.exception.detail)
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertIn("输入视频无法转换为 APIMart 支持的格式", detail)
+        self.assertIn("参考视频上传失败", detail)
+        self.assertIn("1MB", detail)
+        self.assertIn("PUBLIC_BASE_URL", detail)
+        self.assertNotIn("<html", detail.lower())
+        self.assertNotIn("Request Entity Too Large", detail)
+        self.assertEqual([item["path"] for item in self.posts("/v1/uploads/")],
+                         ["/v1/uploads/videos"], "413 后不应再试另外两个上传路径")
+        self.assertEqual(self.posts("/v1/videos/generations"), [])
+
+    def test_apimart_video_native_upload_is_cached_across_runs(self):
+        os.environ["APIMART_TRY_VIDEO_UPLOAD"] = "1"
+        self.server.uguu_status = 500
+        self.server.litterbox_status = 500
+        self.server.cloud_status = 500
+        self.server.upload_endpoint_status = 200
+        first = self._run_video(videos=["/assets/output/ref.mp4"])
+        second = self._run_video(videos=["/assets/output/ref.mp4"])
+        self.assertTrue(first.get("videos"), first)
+        self.assertTrue(second.get("videos"), second)
+        self.assertEqual([item["path"] for item in self.posts("/v1/uploads/")],
+                         ["/v1/uploads/videos"], "第二次生成应命中缓存，不重复烧上传额度")
+        self.assertEqual(len(self.posts("/uguu/upload")), 1, "命中缓存后不应再试图床")
+        entries = list(main._APIMART_UPLOAD_CACHE.values())
+        self.assertEqual([entry["url"] for entry in entries],
+                         [self.base + "/files/uploaded_asset"])
+        ttl = entries[0]["expires_at"] - main.apimart_cache_now()
+        self.assertAlmostEqual(ttl, 2 * 24 * 60 * 60, delta=5,
+                               msg="retention_days=3 按 2 天上限收口")
+        body = self.posts("/v1/videos/generations")[-1]["body"]
         self.assertEqual(body.get("video_urls"), [self.base + "/files/uploaded_asset"], body)
 
     def test_apimart_video_native_upload_can_be_disabled(self):

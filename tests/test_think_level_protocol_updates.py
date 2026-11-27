@@ -101,7 +101,6 @@ class ThinkMappingTests(unittest.TestCase):
         self.assertEqual(thinking.think_levels_for_model("gpt-5.2"), four)
         self.assertEqual(thinking.think_levels_for_model("gpt-5.4-mini"), four)
         self.assertEqual(thinking.think_levels_for_model("gpt-5.4-pro"), pro)
-        self.assertEqual(thinking.think_levels_for_model("gpt-5.5-pro"), pro)
         self.assertEqual(thinking.think_levels_for_model("gpt-5.2-codex"), pro)
         # 老 ID：保守 4 档
         self.assertEqual(thinking.think_levels_for_model("gpt-5"), four)
@@ -109,6 +108,26 @@ class ThinkMappingTests(unittest.TestCase):
         self.assertEqual(thinking.think_levels_for_model("gpt-5-chat-latest"), four)
         self.assertIsNone(thinking.think_levels_for_model("gpt-4o-mini"))
         self.assertIsNone(thinking.think_levels_for_model("gpt-5.2-pro"))   # Responses API only
+
+    def test_legacy_ghost_ids_are_not_in_truth_table(self):
+        # 上游 /v1/models?expand=category 没有这 8 个 ID（CATEGORY-AUDIT §3.6 核对，2026-11-27 实测仍是 262+ 条
+        # 的全量清单里没有）→ 从真值源摘掉，只留在 THINK_MODEL_LEGACY_GHOST_IDS 里备查
+        for ghost in thinking.THINK_MODEL_LEGACY_GHOST_IDS:
+            self.assertNotIn(ghost, thinking.THINK_MODEL_LEVELS, ghost)
+            self.assertNotIn(ghost, thinking.THINK_MODEL_NO_THINK, ghost)
+        # 摘掉后不会再有任何"老 ID 保守 4 档"这类上游不存在的档位
+        self.assertIsNone(thinking.think_levels_for_model("gpt-5.1-codex"))
+        self.assertIsNone(thinking.think_levels_for_model("gpt-5.1-codex-max"))
+        self.assertIsNone(thinking.think_levels_for_model("deepseek-flash"))
+        self.assertIsNone(thinking.think_levels_for_model("deepseek-ocr"))
+        self.assertEqual(thinking.think_request_fields("apimart", "gpt-5.1-codex", "low"), {})
+        # 摘掉显式条目后只剩规则兜底：glm-5.x 只有开关（no-think），gpt-5.5-pro 落到 4 档而非 pro 3 档
+        self.assertIsNone(thinking.think_levels_for_model("glm-5.3-flashx"))
+        self.assertEqual(thinking.think_levels_for_model("gpt-5.5-pro"), ["low", "mid", "high", "xhigh"])
+        # 真实条目的档位一行都没动
+        self.assertEqual(thinking.think_levels_for_model("gpt-5.4-pro"), ["mid", "high", "xhigh"])
+        self.assertEqual(thinking.think_levels_for_model("glm-5.3-flash"), ["low", "high", "max"])
+        self.assertEqual(thinking.think_levels_for_model("deepseek-v4-flash"), ["low", "high", "max"])
 
     def test_openai_wire_mapping(self):
         self.assertEqual(self._fields("gpt-6.1-terra", "max"), {"reasoning_effort": "max"})
@@ -347,9 +366,10 @@ class ProtocolUpdatesTests(unittest.TestCase):
         self.assertEqual(provider["base_url"], "https://api.apimart.ai")
         self.assertEqual(provider["protocol"], "apimart")
         self.assertIn("chat_completions_stream_default", provider.get("protocol_fields") or {})
-        # v5（2026-11-18）起文本侧也有新增；音频仍必须是 0（TTS/转写/Lyria 走不了画布音乐接口）
+        # v5（2026-11-18）起文本侧也有新增；音频 v7（2026-11-26）起含 gpt-audio-mini
+        # （上游 /v1/models?expand=category 实测 audio）；TTS/转写/Lyria 仍不进清单
         self.assertEqual(body["applied"]["added_models"]["chat"], expected_models["chat"])
-        self.assertEqual(body["applied"]["added_models"]["audio"], [])
+        self.assertEqual(body["applied"]["added_models"]["audio"], expected_models["audio"])
         self.assertEqual(sum(len(v) for v in body["applied"]["added_models"].values()),
                          sum(len(v) for v in expected_models.values()))
         # 落盘 + 缓存失效后的 /api/config 能读到新模型
@@ -685,27 +705,42 @@ class ModelCapsAndAudioTests(unittest.TestCase):
         self.assertIn("text_to_video", video["modes"])
         self.assertIn("image_to_video", video["modes"])
 
-    def test_audio_update_list_only_contains_music_models(self) -> None:
-        # protocol_updates.json 的音频清单必须是空的：TTS/转写走 /audio/*，Lyria 需要必填 version，
-        # 画布音频节点只走 /v1/music/generations，放进去就是“点了就错”的入口。
+    def test_audio_update_list_only_contains_real_model_ids(self) -> None:
+        # 2026-11-26 改口径：音频清单不再强制为空——上游实测 audio 5 个里有 gpt-audio-mini（真实模型 ID，
+        # tiered_token，音频对话走 /v1/chat/completions）。仍然不许放 TTS/转写/Lyria：
+        # TTS/转写走 /audio/*，Lyria 是 flowmusic 的 version 取值（不是模型 ID）。
         response = fresh_client().get("/api/providers/protocol-updates")
         item = response.json()["items"][0]
-        self.assertEqual(item["new_models"]["audio"], [])
+        self.assertEqual(item["new_models"]["audio"], ["gpt-audio-mini"])
+        for bad in ("whisper", "tts", "lyria"):
+            self.assertFalse([m for m in item["new_models"]["audio"] if bad in m.lower()], bad)
         self.assertEqual(item["new_models"]["image"], ["gpt-image-2.6-ext", "gpt-image-2.6-flare",
                                                        "gpt-image-2.6-sunburst", "muse-image-ext",
                                                        "seedream-5-5",
-                                                       "minimax-h3-image", "minimax-h3-image-highspeed"])
+                                                       "minimax-h3-image", "minimax-h3-image-highspeed",
+                                                       # v6（2026-11-25 第一轮）新增的 4 个图像模型
+                                                       "kling-v4-image", "kling-v4-long-image",
+                                                       "mai-image-2.7", "mai-image-2.7-flash"])
         self.assertEqual(item["new_models"]["video"], ["muse-video-ext", "apimart-zoe", "kling-v4",
                                                       "kling-v4-flash", "gemini-omni-1.2-flash",
                                                       "gemini-omni-1.2-flash-ext", "veo3.1-fast",
                                                       "veo3.1-quality", "veo3.1-lite",
-                                                      "seedance-2-5-flash"])
+                                                      "seedance-2-5-flash",
+                                                      # v7（2026-11-25 第三轮）新增的 MJ 视频虚拟模型
+                                                      "midjourney-video",
+                                                      # v8（2026-11-26）新增的 MAGI-2
+                                                      "magi-2"])
         # v5（2026-11-18）起文本侧也有增量：文档在 SVG 作者模型表/集成页模型表里给出的新 ID
         self.assertEqual(item["new_models"]["chat"], ["gpt-5.2", "gpt-5.3-codex", "gpt-5.4",
                                                       "gpt-5.4-mini", "gpt-5.5", "gpt-5.6-sol",
                                                       "gpt-5.6-luna", "gpt-6-astra", "gpt-6-luna",
                                                       "gpt-6.1-sol", "claude-opus-5",
-                                                      "claude-opus-5-thinking"])
+                                                      "claude-opus-5-thinking",
+                                                      # v7：仅定价页/定价接口证据的 7 个（2026-11-25 第二轮）
+                                                      "gemini-4-carbon", "gemini-4-hydrogen",
+                                                      "gemini-4-neon", "gpt-6.2-astra",
+                                                      "gpt-6.2-sol", "claude-fable-5.2",
+                                                      "qwen4-max"])
 
 
     def test_ext_quality_documented_six_levels(self) -> None:
@@ -734,9 +769,15 @@ class ModelCapsAndAudioTests(unittest.TestCase):
         self.assertEqual(seedance["resolutions"], ["480p", "720p", "1080p", "4k"])
         self.assertIn("adaptive", seedance["ratios"])
         self.assertIn(-1, seedance["durations"])
+        # 2026-11-27：文档声明 图30/视频10/音频10，上传分支改为按能力表声明下发 → 能力表按文档写
         self.assertEqual(seedance["ref_max"], 30)
         self.assertEqual(seedance["video_ref_max"], 10)
         self.assertEqual(seedance["audio_ref_max"], 10)
+        # 草稿能力位（seedance-2.5 独有；flash 不支持）
+        self.assertIs(seedance["draft"], True)
+        self.assertEqual(seedance["draft_resolution"], "480p")
+        self.assertEqual(seedance["draft_final_resolutions"], ["1080p", "4k"])
+        self.assertEqual(seedance["draft_expires_days"], 3)
         mj = items["midjourney"]
         self.assertEqual(len(mj["ratios"]), 9)
         self.assertEqual(mj["sizes"], ["2K"])
@@ -826,7 +867,7 @@ class ModelCapsOverrideTests(unittest.TestCase):
         self.addCleanup(self._restore)
         main.save_api_providers([apimart_provider(
             image_models=["gpt-image-2.6-ext"],
-            video_models=["muse-video-ext"],
+            video_models=["muse-video-ext", "seedance-2.5", "apimart-zoe"],
         )])
         protocol_updates.load_protocol_updates(force=True)
 
@@ -868,7 +909,8 @@ class ModelCapsOverrideTests(unittest.TestCase):
         self.assertEqual(set(overrides), {"gpt-image-2.6-ext", "gpt-image-2.6-flare",
                                           "gpt-image-2.6-sunburst", "muse-image-ext", "muse-video-ext",
                                           "seedance-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
-                                          "minimax-h3-context-ir", "midjourney", "seedream-5-5"})
+                                          "minimax-h3-context-ir", "midjourney", "seedream-5-5",
+                                          "midjourney-video", "magi-2", "apimart-zoe"})
         self.assertEqual(len(overrides["gpt-image-2.6-ext"]["caps"]["ratios"]), 11)
         flare = overrides["gpt-image-2.6-flare"]["caps"]
         self.assertEqual(len(flare["ratios"]), 16)
@@ -879,10 +921,24 @@ class ModelCapsOverrideTests(unittest.TestCase):
         self.assertEqual(muse_video["kind"], "video")
         self.assertEqual(muse_video["caps"]["durations"], [10])
         seedance = overrides["seedance-2.5"]["caps"]
-        self.assertEqual(seedance["resolutions"], ["480p", "720p", "1080p"])
+        # v2 曾把分辨率钉死为 480p/720p/1080p，v9 纠正回文档声明的 4k 档
+        self.assertEqual(seedance["resolutions"], ["480p", "720p", "1080p", "4k"])
         self.assertIn("adaptive", seedance["ratios"])
         self.assertIn(-1, seedance["durations"])
-        self.assertEqual((seedance["ref_max"], seedance["video_ref_max"], seedance["audio_ref_max"]), (30, 10, 10))
+        # v7 曾按上传队列把 30/10/10 收成 9/3/3，v9 纠正回能力表声明值
+        self.assertEqual((seedance["ref_max"], seedance["video_ref_max"], seedance["audio_ref_max"]),
+                         (30, 10, 10))
+        self.assertIs(seedance["draft"], True)
+        self.assertEqual(seedance["draft_resolution"], "480p")
+        self.assertEqual(seedance["draft_final_resolutions"], ["1080p", "4k"])
+        self.assertEqual(seedance["draft_expires_days"], 3)
+        zoe = overrides["apimart-zoe"]["caps"]
+        # v9 只写参考上限三个字段，其余字段留给代码表（不钉死分辨率/时长等）
+        self.assertEqual(zoe, {"ref_max": 30, "video_ref_max": 10, "audio_ref_max": 10})
+        magi = overrides["magi-2"]["caps"]
+        # v10 把 v8 的 9/3/3 纠正为文档声明的 10/5/5
+        self.assertEqual((magi["ref_max"], magi["video_ref_max"], magi["audio_ref_max"]),
+                         (10, 5, 5))
         mj = overrides["midjourney"]["caps"]
         self.assertEqual(mj["sizes"], ["2K"])
         # 张数改成「一次提交最多 4 张候选、取几张入画布」的 n_max 口径，不再写 batch（batch 会顶掉默认张数）
@@ -890,10 +946,14 @@ class ModelCapsOverrideTests(unittest.TestCase):
         self.assertNotIn("batch", mj)
         self.assertEqual(mj["mj"]["speeds"], ["fast", "turbo", "relax"])
         self.assertEqual(mj["mj"]["hd"], ["8.2", "8.1"])
+        # v10 补回 v2 整块替换 mj 时丢掉的 video 能力位
+        self.assertEqual(mj["mj"]["video"]["video_types"][0], "vid_1.1_i2v_480")
         self.assertIs(overrides["minimax-h3-context-ir"]["caps"]["prompt_only"], True)
         # v3 给 seedream-5-5 声明了原生透明背景（文档确证 background=transparent，必须 PNG）
         self.assertIs(overrides["seedream-5-5"]["caps"]["native_background"], True)
-        self.assertEqual(len(body["applied"]["model_caps"]), 11)
+        # v7 追加 seedance-2.5 的草稿能力位、midjourney-video；v8 追加 magi-2；v9 追加
+        # seedance-2.5 的纠正覆盖与 apimart-zoe 的参考上限；v10 追加 magi-2 纠正与 midjourney mj → 18 条
+        self.assertEqual(len(body["applied"]["model_caps"]), 18)
         self.assertTrue(body["applied"]["parameter_changes"])
 
     def test_data_source_midjourney_caps_use_new_contract(self) -> None:
@@ -1037,16 +1097,257 @@ class ModelCapsOverrideTests(unittest.TestCase):
     def test_view_exposes_model_caps_and_parameter_changes(self) -> None:
         item = fresh_client().get("/api/providers/protocol-updates").json()["items"][0]
         self.assertEqual(item["latest_version"], main._protocol_updates.latest_version("apimart"))
-        self.assertEqual(len(item["model_caps"]), 11)
+        self.assertEqual(len(item["model_caps"]), 14)
         models = {cap["model"] for cap in item["model_caps"]}
         self.assertEqual(models, {"gpt-image-2.6-ext", "gpt-image-2.6-flare",
                                   "gpt-image-2.6-sunburst", "muse-image-ext", "muse-video-ext",
                                   "seedance-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
-                                  "minimax-h3-context-ir", "midjourney", "seedream-5-5"})
+                                  "minimax-h3-context-ir", "midjourney", "seedream-5-5",
+                                  "midjourney-video", "magi-2", "apimart-zoe"})
         self.assertTrue(item["parameter_changes"])
-        # v2 没有新模型时，v1 的新模型/协议变更仍要聚合展示；v3 加 seedream-5-5，v4 加 minimax-h3-image 两档
-        self.assertEqual(len(item["new_models"]["image"]), 7)
+        # v2 没有新模型时，v1 的新模型/协议变更仍要聚合展示；v3 加 seedream-5-5，v4 加 minimax-h3-image 两档，
+        # v6 再加 4 个图像模型 → 累计 11
+        self.assertEqual(len(item["new_models"]["image"]), 11)
         self.assertTrue(item["protocol_changes"])
+
+
+class DraftV7UpdateTests(unittest.TestCase):
+    """v7（2026-11-25 第二轮）：草稿能力位 / seedance-2.5 参考上限 9/3/3 / 上传 retention / 7 个 chat。"""
+
+    def test_v10_is_latest_and_pending_from_v6(self) -> None:
+        versions = [item["version"] for item in protocol_updates.updates_for("apimart")]
+        self.assertEqual(versions, list(range(1, 11)))
+        latest = protocol_updates.latest_update("apimart")
+        self.assertEqual(latest["version"], 10)
+        self.assertEqual(latest["released_at"], "2026-11-27")
+        self.assertEqual([item["version"] for item in protocol_updates.pending_updates("apimart", 6)],
+                         [7, 8, 9, 10])
+        self.assertEqual(protocol_updates.latest_version("apimart"), 10)
+
+    def test_v7_contents(self) -> None:
+        # 最新已经是 v8，这里按版本号取 v7 本身
+        v7 = next(item for item in protocol_updates.updates_for("apimart") if item["version"] == 7)
+        self.assertEqual(v7["new_models"]["chat"],
+                         ["gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon",
+                          "gpt-6.2-astra", "gpt-6.2-sol", "claude-fable-5.2", "qwen4-max"])
+        self.assertEqual(v7["new_models"]["image"], [])
+        # 第三轮在同一 v7 里补 MJ 图生视频：虚拟视频模型 midjourney-video
+        self.assertEqual(v7["new_models"]["video"], ["midjourney-video"])
+        caps = v7["model_caps"][0]
+        self.assertEqual((caps["model"], caps["kind"]), ("seedance-2.5", "video"))
+        normalized = caps["caps"]
+        self.assertIs(normalized["draft"], True)
+        self.assertEqual(normalized["draft_resolution"], "480p")
+        self.assertEqual(normalized["draft_final_resolutions"], ["1080p", "4k"])
+        self.assertEqual(normalized["draft_expires_days"], 3)
+        self.assertEqual((normalized["ref_max"], normalized["video_ref_max"],
+                          normalized["audio_ref_max"]), (9, 3, 3))
+        fields = {change["field"] for change in v7["protocol_changes"]}
+        self.assertIn("upload_retention_days", fields)
+        self.assertIn("seedance_video_draft_mode", fields)
+        # 同一 v7 内的 MJ 视频三条协议变更 + 一条视频模型 caps
+        for field in ("midjourney_video_model", "midjourney_video_request_fields",
+                      "midjourney_video_billing"):
+            self.assertIn(field, fields)
+        mj_video_caps = next(cap for cap in v7["model_caps"] if cap["model"] == "midjourney-video")
+        self.assertEqual(mj_video_caps["kind"], "video")
+        self.assertEqual(mj_video_caps["caps"]["modes"], ["image_to_video"])
+        self.assertEqual(mj_video_caps["caps"]["durations"], [5])
+        self.assertEqual(mj_video_caps["caps"]["resolutions"], ["480p", "720p"])
+        self.assertEqual(mj_video_caps["caps"]["batch"], [1, 2, 4])
+        self.assertEqual(mj_video_caps["caps"]["ref_max"], 1)
+
+    def test_v8_contents(self) -> None:
+        # v8（2026-11-26）：magi-2 的 caps 覆盖要连布尔位一起过白名单，否则更新包里这两个值会被丢
+        v8 = next(item for item in protocol_updates.updates_for("apimart") if item["version"] == 8)
+        self.assertEqual(v8["new_models"]["video"], ["magi-2"])
+        caps = v8["model_caps"][0]["caps"]
+        self.assertEqual(caps["resolutions"], ["1080p"])
+        self.assertEqual(caps["durations"], list(range(4, 31)))
+        self.assertIs(caps["audio_default_on"], True)
+        self.assertIs(caps["ratio_follows_first_frame"], True)
+        self.assertIs(caps["nsfw_check"], True)
+        self.assertEqual((caps["ref_max"], caps["video_ref_max"], caps["audio_ref_max"]), (9, 3, 3))
+
+    def test_apply_from_v6_swallows_v7_to_v10(self) -> None:
+        provider = {"id": "apimart", "protocol": "apimart", "chat_models": ["gpt-5.5"],
+                    "image_models": [], "video_models": [], "protocol_version": 6}
+        merged, applied = protocol_updates.apply_updates(
+            provider, protocol_updates.pending_updates("apimart", 6))
+        self.assertEqual(merged["protocol_version"], 10)
+        for model in ("gemini-4-carbon", "gpt-6.2-astra", "claude-fable-5.2", "qwen4-max"):
+            self.assertIn(model, merged["chat_models"])
+        self.assertEqual(applied["added_models"]["chat"][0], "gemini-4-carbon")
+        self.assertIn("qwen4-max", applied["added_models"]["chat"])
+        merged_caps = merged["model_caps_overrides"]["seedance-2.5"]["caps"]
+        self.assertIs(merged_caps["draft"], True)
+        self.assertEqual(merged_caps["draft_resolution"], "480p")
+        self.assertEqual((merged_caps["ref_max"], merged_caps["video_ref_max"],
+                          merged_caps["audio_ref_max"]), (30, 10, 10))
+        self.assertEqual(merged_caps["resolutions"], ["480p", "720p", "1080p", "4k"])
+        self.assertEqual(applied["model_caps"][0]["model"], "seedance-2.5")
+        self.assertIn("draft_final_resolutions", applied["model_caps"][0]["fields"])
+        self.assertEqual(applied["model_caps"][-1]["model"], "midjourney")
+        # /api/model-caps 用同一份覆盖：seedance-2.5 带草稿能力位、4k 与 30/10/10
+        provider = {"id": "apimart", "protocol": "apimart",
+                    "model_caps_overrides": merged["model_caps_overrides"]}
+        served = main.model_caps_for(provider, "seedance-2.5", "video")
+        self.assertIs(served["draft"], True)
+        self.assertEqual(served["draft_final_resolutions"], ["1080p", "4k"])
+        self.assertEqual(served["resolutions"], ["480p", "720p", "1080p", "4k"])
+        self.assertEqual((served["ref_max"], served["video_ref_max"], served["audio_ref_max"]),
+                         (30, 10, 10))
+        # v9 只给 zoe 写参考上限：分辨率/时长等仍由代码表下发
+        zoe = main.model_caps_for(provider, "apimart-zoe", "video")
+        self.assertEqual((zoe["ref_max"], zoe["video_ref_max"], zoe["audio_ref_max"]), (30, 10, 10))
+        self.assertEqual(zoe["resolutions"], ["480p", "720p", "1080p", "2k", "4k"])
+        self.assertIn("adaptive", zoe["ratios"])
+        # v10 把 v8 的 magi-2 9/3/3 纠正为 10/5/5
+        magi = main.model_caps_for(provider, "magi-2", "video")
+        self.assertEqual((magi["ref_max"], magi["video_ref_max"], magi["audio_ref_max"]),
+                         (10, 5, 5))
+        # v10 补回图片 midjourney 的 mj.video（v2 整块替换 mj 时被顶掉）
+        midjourney = main.model_caps_for(provider, "midjourney", "image")
+        self.assertEqual(midjourney["mj"]["video"]["video_types"][0], "vid_1.1_i2v_480")
+        # 同一 v7 的 MJ 视频：虚拟模型进视频清单，caps 覆盖写进 overrides，生成侧与 /api/model-caps 同一份
+        self.assertIn("midjourney-video", merged["video_models"])
+        mj_video = merged["model_caps_overrides"]["midjourney-video"]
+        self.assertEqual(mj_video["kind"], "video")
+        self.assertEqual(mj_video["caps"]["modes"], ["image_to_video"])
+        self.assertEqual(mj_video["caps"]["batch"], [1, 2, 4])
+        served_mj = main.model_caps_for(provider, "midjourney-video", "video")
+        self.assertEqual(served_mj["modes"], ["image_to_video"])
+        self.assertEqual(served_mj["durations"], [5])
+        self.assertEqual(served_mj["resolutions"], ["480p", "720p"])
+        self.assertEqual(served_mj["mj_video"]["video_types"][0], "vid_1.1_i2v_480")
+        self.assertEqual(served_mj["mj_video"]["billing"],
+                         ["midjourney@video", "midjourney@video-720p"])
+
+
+class CapsCorrectionV9V10Tests(unittest.TestCase):
+    """v9/v10（2026-11-27）：纠正 seedance-2.5、apimart-zoe、magi-2 的历史覆盖，并补回 midjourney mj.video。"""
+
+    def _v9(self) -> dict:
+        return next(item for item in protocol_updates.updates_for("apimart") if item["version"] == 9)
+
+    def _v10(self) -> dict:
+        return next(item for item in protocol_updates.updates_for("apimart") if item["version"] == 10)
+
+    def _stale_v2_seedance(self) -> dict:
+        return {
+            "model": "seedance-2.5",
+            "kind": "video",
+            "caps": {
+                "ratios": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"],
+                "resolutions": ["480p", "720p", "1080p"],
+                "durations": [-1] + list(range(4, 31)),
+                "n_max": 1,
+                "ref_max": 30,
+                "video_ref_max": 10,
+                "audio_ref_max": 10,
+            },
+        }
+
+    def _stale_v2_midjourney(self) -> dict:
+        return {
+            "model": "midjourney",
+            "kind": "image",
+            "caps": {"mj": {
+                "versions": ["8.2", "8.1", "7", "6.1", "5.2", "5.1"],
+                "speeds": ["fast", "turbo", "relax"],
+                "hd": ["8.2", "8.1"],
+            }},
+        }
+
+    def test_v9_contents(self) -> None:
+        v9 = self._v9()
+        self.assertEqual(v9["released_at"], "2026-11-27")
+        caps = {cap["model"]: cap["caps"] for cap in v9["model_caps"]}
+        self.assertEqual(set(caps), {"seedance-2.5", "apimart-zoe"})
+        seedance = caps["seedance-2.5"]
+        self.assertEqual(seedance["resolutions"], ["480p", "720p", "1080p", "4k"])
+        self.assertEqual((seedance["ref_max"], seedance["video_ref_max"], seedance["audio_ref_max"]),
+                         (30, 10, 10))
+        # draft 四字段照抄 v7，不依赖旧覆盖残留
+        self.assertIs(seedance["draft"], True)
+        self.assertEqual(seedance["draft_resolution"], "480p")
+        self.assertEqual(seedance["draft_final_resolutions"], ["1080p", "4k"])
+        self.assertEqual(seedance["draft_expires_days"], 3)
+        # zoe 只写参考上限，避免把分辨率/时长/模式一起钉死
+        self.assertEqual(caps["apimart-zoe"],
+                         {"ref_max": 30, "video_ref_max": 10, "audio_ref_max": 10})
+        changes = v9["protocol_changes"]
+        self.assertEqual([change["field"] for change in changes], ["reference_media_caps"])
+        self.assertIn("纠正旧覆盖", changes[0]["to"])
+        # v1–v8 从没给 zoe 写过 caps：它的问题只有参考上限，无需纠正别的字段
+        for update in protocol_updates.updates_for("apimart"):
+            if update["version"] < 9:
+                self.assertNotIn("apimart-zoe", {cap["model"] for cap in update["model_caps"]})
+
+    def test_v10_contents(self) -> None:
+        v10 = self._v10()
+        self.assertEqual(v10["released_at"], "2026-11-27")
+        caps = {cap["model"]: cap["caps"] for cap in v10["model_caps"]}
+        self.assertEqual(set(caps), {"magi-2", "midjourney"})
+        # 只写不一致的参考上限，不重写 magi-2 的分辨率/时长/模式
+        self.assertEqual(caps["magi-2"],
+                         {"ref_max": 10, "video_ref_max": 5, "audio_ref_max": 5})
+        # midjourney 只补 mj（v2 整块替换丢了 mj.video 子键），其余字段不写
+        self.assertEqual(set(caps["midjourney"]), {"mj"})
+        code_mj = json.loads(json.dumps(main.APIMART_IMAGE_MODEL_CAPS["midjourney"]["mj"]))
+        self.assertEqual(caps["midjourney"]["mj"], code_mj)
+        self.assertEqual(v10["protocol_changes"][0]["field"], "reference_media_caps")
+        self.assertIn("图 10 / 视频 5 / 音频 5", v10["protocol_changes"][0]["to"])
+        self.assertIn("纠正 magi-2 参考上限", v10["summary"])
+
+    def test_apply_from_v5_final_caps_are_correct(self) -> None:
+        """协议版本 5 的机器（空覆盖 / 带 v2 旧覆盖）应用 v6..v10 后必须拿到文档值。"""
+        cases = {
+            "空覆盖": {},
+            "v2 旧覆盖": {
+                "seedance-2.5": self._stale_v2_seedance(),
+                "midjourney": self._stale_v2_midjourney(),
+            },
+        }
+        for label, overrides in cases.items():
+            with self.subTest(label):
+                provider = {
+                    "id": "apimart", "protocol": "apimart", "protocol_version": 5,
+                    "image_models": [], "chat_models": [],
+                    "video_models": ["seedance-2.5", "apimart-zoe"], "audio_models": [],
+                    "model_caps_overrides": overrides,
+                }
+                merged, _applied = protocol_updates.apply_updates(
+                    provider, protocol_updates.pending_updates("apimart", 5))
+                self.assertEqual(merged["protocol_version"], 10)
+                seedance = merged["model_caps_overrides"]["seedance-2.5"]["caps"]
+                self.assertEqual(seedance["resolutions"], ["480p", "720p", "1080p", "4k"])
+                self.assertEqual((seedance["ref_max"], seedance["video_ref_max"],
+                                  seedance["audio_ref_max"]), (30, 10, 10))
+                self.assertIs(seedance["draft"], True)
+                self.assertEqual(seedance["draft_resolution"], "480p")
+                self.assertEqual(seedance["draft_final_resolutions"], ["1080p", "4k"])
+                self.assertEqual(seedance["draft_expires_days"], 3)
+                zoe = merged["model_caps_overrides"]["apimart-zoe"]["caps"]
+                self.assertEqual(zoe, {"ref_max": 30, "video_ref_max": 10, "audio_ref_max": 10})
+                # 编辑器/生成侧读同一份：最终下发值不再是旧覆盖的 3 档 / 9-3-3
+                for model in ("seedance-2.5", "apimart-zoe"):
+                    served = main.model_caps_for(merged, model, "video")
+                    self.assertEqual((served["ref_max"], served["video_ref_max"],
+                                      served["audio_ref_max"]), (30, 10, 10))
+                served_seedance = main.model_caps_for(merged, "seedance-2.5", "video")
+                self.assertEqual(served_seedance["resolutions"], ["480p", "720p", "1080p", "4k"])
+                self.assertIs(served_seedance["draft"], True)
+                magi = merged["model_caps_overrides"]["magi-2"]["caps"]
+                self.assertEqual((magi["ref_max"], magi["video_ref_max"], magi["audio_ref_max"]),
+                                 (10, 5, 5))
+                served_magi = main.model_caps_for(merged, "magi-2", "video")
+                self.assertEqual(served_magi["resolutions"], ["1080p"])
+                self.assertEqual((served_magi["ref_max"], served_magi["video_ref_max"],
+                                  served_magi["audio_ref_max"]), (10, 5, 5))
+                mj = main.model_caps_for(merged, "midjourney", "image")["mj"]
+                self.assertEqual(mj, json.loads(json.dumps(
+                    main.APIMART_IMAGE_MODEL_CAPS["midjourney"]["mj"])))
 
 
 if __name__ == "__main__":

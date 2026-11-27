@@ -16,7 +16,7 @@ import { applyElements, elementInputs, referenceInputs } from "./elements";
 import { nodeError } from "./errorText";
 import { excludeSelfRefsFlag, filterSelfRefs } from "./agent/selfRefs";
 import { autoSelfUrl, materialUrlOf, mentionedIds, plainPrompt, remapMention, replaceSourceInput, resolveMentions, selfSourceOf, sourceIdOf, sourceInputsOf, unmentionedInputs, type SentRef } from "./mentions";
-import { autoVideoMode, clamp, cloneParams, draftRes, expandGroupInputs, genOf, inputsOf, isGenKind, outOf, outputsOf, refsIn, textOf, uid, videoModeForCounts, videoModeMissingInput, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type InputRef, type ModelSpec, type TextParams, type VideoMode, type VideoParams } from "./model";
+import { autoVideoMode, clamp, cloneParams, draftActive, draftRes, expandGroupInputs, genOf, inputsOf, isGenKind, mjVideoSpec, outOf, outputsOf, refsIn, textOf, uid, videoModeForCounts, videoModeMissingInput, VMODES, withGen, type GenKind, type GenOutput, type ImageParams, type InputRef, type ModelSpec, type TextParams, type VideoMode, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
 import { batchOf, batchRows, channelIndexFromId, channelModesOf, CHANNEL_MODE_LABEL, groupInputs, groupNote, growRowsPrompt, inferChannelModesFromRows, keepMediaCells, mergeInputGroups, ownRefCount, padTableRows, parseListPlan, parseTableReply, perRowRowCount, planRepairPrompt, plannedChannelMode, planPrompt, planTextOf, refOrderText, tableChannels, tableInputWarnings, trimTableRows, withStoryboardMedia, emptyRunHint, fillTargetOf, planRow, repairPrompt, rowHasFirst, rowsToRun, STORYBOARD_COLUMNS, tableAutoSize, tableGenKindOf, tableOf, tablePrompt, withBatch, withTable, type BatchJournal, type BatchRow, type ChannelMode, type FillTarget, type InputGroupPlan, type ListPlan, type TableChannel, type TableData } from "./table";
 
@@ -30,7 +30,13 @@ export function rolesFor(kind: GenKind, p: unknown, m: ModelSpec | undefined, in
     if (kind === "text") { if (x.node.kind === "image" && m?.vision) roles.set(x.edge.id, "reference"); else ignored.add(x.edge.id); continue; }
     if (kind === "audio") { ignored.add(x.edge.id); continue; }
     const mode = (p as VideoParams).mode; const i = imgs.indexOf(x);
-    if (x.node.kind === "image") {
+    // MJ 图生视频只收 1 张首帧、可选 1 张尾帧（上游只有 image_to_video，不看生成方式）：
+    // 第 1 张 = 首帧、第 2 张 = 尾帧（caps 声明 supports_end_frame 时），其余忽略。
+    const mjVideo = mjVideoSpec(m);
+    if (x.node.kind === "image" && mjVideo) {
+      const role: GenInput["role"] | null = i === 0 ? "first_frame" : i === 1 && mjVideo.supportsEndFrame ? "last_frame" : null;
+      role ? roles.set(x.edge.id, role) : ignored.add(x.edge.id);
+    } else if (x.node.kind === "image") {
       const r: GenInput["role"] | null = mode === "首帧" ? (i === 0 ? "first_frame" : null) : mode === "首尾帧" ? (i === 0 ? "first_frame" : i === 1 ? "last_frame" : null) : mode === "参考生视频" || mode === "视频编辑" || mode === "参考视频生视频" ? (i < (m?.maxRefs ?? 0) ? "reference" : null) : mode === "数字人" ? (i === 0 ? "portrait" : null) : null;
       r ? roles.set(x.edge.id, r) : ignored.add(x.edge.id);
     } else if (x.node.kind === "video") {
@@ -181,7 +187,7 @@ export function buildRequest(store: CanvasStore, node: CanvasNode, row?: BatchRo
   }
   const vm = node.kind === "video" ? (eff as VideoParams).mode : undefined;
   // 草稿模式：按模型最低清晰度出片（请求预览里看到的就是实际发出的清晰度）
-  const params = node.kind === "video" && (eff as VideoParams).draft ? { ...(eff as VideoParams), res: draftRes(eff as VideoParams, m) } : eff;
+  const params = node.kind === "video" && draftActive(eff as VideoParams, m) ? { ...(eff as VideoParams), res: draftRes(eff as VideoParams, m) } : eff;
   // 表格行：按**最终真的发送的 inputs 顺序**（含生成节点自身连的图 / 元素图）编号，
   // 不能从行素材第 1 张开始数，否则模型按「图 N」会拿错图。
   const rowRefOrder = row ? refOrderText(inputs) : "";
@@ -225,7 +231,7 @@ export function requestForNode(store: CanvasStore, node: CanvasNode, row?: Batch
   const ctx = frozen.inputs.filter((x) => x.kind === "text" && (x.text || "").trim() && !mm.usedText.has(x.nodeId)).map((x) => x.text!.trim());
   const rowText = String((node.data as { rowText?: string } | undefined)?.rowText || "").trim();
   const vm = node.kind === "video" ? (g.params as VideoParams).mode : undefined;
-  const params = node.kind === "video" && (g.params as VideoParams).draft ? { ...(g.params as VideoParams), res: draftRes(g.params as VideoParams, m) } : g.params;
+  const params = node.kind === "video" && draftActive(g.params as VideoParams, m) ? { ...(g.params as VideoParams), res: draftRes(g.params as VideoParams, m) } : g.params;
   // 表格行节点：frozen 里记着这一行发送的输入，重新生成时清单照样附上
   const refOrder = (node.data as { tableRow?: unknown } | undefined)?.tableRow != null ? refOrderText(frozen.inputs) : "";
   return { ...frozen, nodeId: node.id, model: m, prompt: g.prompt, params, resolvedPrompt: [...ctx, applyElements(mm.text), rowText, refOrder].filter((s) => s.trim()).join("\n"), ...(vm ? { videoMode: { name: vm, api: VMODES[vm].api } } : {}) };
@@ -667,12 +673,18 @@ async function resumeRun(store: CanvasStore, node: CanvasNode, task: CanvasTask)
       if (e.type === "progress") store.patchRun(id, { progress: clamp(e.progress, .02, .99) });
     }, abort.signal);
     const cur = store.node(id); if (!cur) throw new GenError("STOPPED", "节点已被删除或撤销，生成结果未写回");
-    const draft = cur.kind === "video" && !!(genOf(cur).params as VideoParams).draft;
+    const nowParams = genOf(cur).params as VideoParams;
+    const draft = cur.kind === "video" && draftActive(nowParams, store.modelOf(cur));
     // 续跑拿不到当初的请求对象：按同一条组装路径以节点当前状态重建（任务发起后结果还没写回，口径一致），
     // 让新版本记录当初实际发出去的自我参考图，而不是等写回时从结果反推。
     // 提示词取节点当前值（任务发起后没改过，同一条组装路径），和首次生成写回的口径一致。
     const selfSrc = requestForNode(store, cur)?.selfSrc;
-    await applyRunResult(store, id, kind, outputs, { draft, selfSrc, prompt: genOf(cur).prompt });
+    // 离开画布期间跑完的草稿：后端结果里的 task_id 就是出成片要用的草稿任务 id，补到版本上
+    const upstreamDraftTask = draft ? String(task.result?.task_id || "") : "";
+    const outputsWithDraft = upstreamDraftTask && !outputs.some((out) => out.draftTaskId)
+      ? outputs.map((out) => ({ ...out, draftTaskId: upstreamDraftTask }))
+      : outputs;
+    await applyRunResult(store, id, kind, outputsWithDraft, { draft, selfSrc, prompt: genOf(cur).prompt });
     store.patchGen(id, { taskId: undefined });
     store.setRun(id, null);
     const done = store.node(id)!;

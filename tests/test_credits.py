@@ -166,6 +166,30 @@ class SchemaAndAdminTests(unittest.TestCase):
 
 
 class PricingTests(unittest.TestCase):
+    def test_nano_banana_aliases_use_official_pricing(self):
+        """alias_map 的这三个别名必须落到 -official 版（同文件 models[...].aliases 与文档
+        L1988 / L3337 都这么声明）。回归点：曾指向非官方版，少收 3.9~5.4 倍。"""
+        cases = {
+            "nano-banana": ("gemini-2.5-flash-image-preview-official", 0.0312),
+            "nano-banana-pro": ("gemini-3-pro-image-preview-official", 0.1072),
+            "nano-banana-2": ("gemini-3.1-flash-image-preview-official", 0.0536),
+            # 压缩拼写不能让别名绕过（resolve_model 会退到 compact 别名）
+            "nanobanana": ("gemini-2.5-flash-image-preview-official", 0.0312),
+            "nanobananapro": ("gemini-3-pro-image-preview-official", 0.1072),
+            "nanobanana2": ("gemini-3.1-flash-image-preview-official", 0.0536),
+        }
+        for alias, (target, gold) in cases.items():
+            record, fallback, _unmapped = pricing.resolve_model(alias, "image")
+            self.assertFalse(fallback, alias)
+            self.assertEqual(record["id"], target, alias)
+            quote = pricing.estimate("image", alias, {"rows": 1})
+            self.assertEqual(quote["model"], target, alias)
+            self.assertFalse(quote["pricing_fallback"], alias)
+            self.assertAlmostEqual(quote["cost_usd"], gold, places=6)
+        # -ext 系列对的是非官方/ext 通道，不能一起改
+        self.assertEqual(pricing.resolve_model("nano-banana-ext", "image")[0]["id"],
+                         "gemini-2.5-flash-image-preview")
+
     def test_image_resolution_tiers(self):
         low = pricing.estimate("image", "flux-3-image-klein", {"width": 1024, "height": 1024})
         high = pricing.estimate("image", "flux-3-image-klein", {"width": 2880, "height": 2880})
@@ -175,12 +199,182 @@ class PricingTests(unittest.TestCase):
         self.assertFalse(low["pricing_fallback"])
         self.assertGreater(low["price"], low["cost"])
 
+    def test_kling_v4_image_new_tiers_include_8k(self):
+        """2026-11-25 新增 kling-v4-image：2K/4K/8K 三档，8K 必须能被估价（旧口径只认到 4K）。"""
+        two_k = pricing.estimate("image", "kling-v4-image", {"size": "2048x2048", "rows": 1})
+        eight_k = pricing.estimate("image", "kling-v4-image", {"size": "8192x8192", "rows": 1})
+        self.assertEqual(two_k["matched_spec"], "2K")
+        self.assertEqual(eight_k["matched_spec"], "8K")
+        self.assertAlmostEqual(two_k["cost_usd"], 0.0571432, places=6)
+        self.assertAlmostEqual(eight_k["cost_usd"], 0.1428568, places=6)
+        self.assertFalse(eight_k["pricing_fallback"])
+
+    def test_mai_image_2_7_tiered_token_uses_precharge_tier(self):
+        """mai-image-2.7 是 tiered_token（image_modalities）+ 按档预扣：估价走 1K/2K 预扣价，
+        不能因为 token_rates 存在就按纯 token 计（那样会漏掉按档差价）。"""
+        one_k = pricing.estimate("image", "mai-image-2.7", {"size": "1024x1024", "rows": 1})
+        two_k = pricing.estimate("image", "mai-image-2.7", {"size": "2048x2048", "rows": 1})
+        self.assertEqual(one_k["matched_spec"], "1K")
+        self.assertEqual(two_k["matched_spec"], "2K")
+        self.assertEqual(one_k["unit"], "per_image")
+        self.assertAlmostEqual(one_k["cost_usd"], 0.028, places=6)
+        self.assertAlmostEqual(two_k["cost_usd"], 0.112, places=6)
+        self.assertFalse(one_k["pricing_fallback"])
+
+    def test_kling_v4_long_image_default_is_1k_medium(self):
+        """kling-v4-long-image 的 skill/length 在请求参数里看不到：没给尺寸时按接口默认档 1K-MEDIUM 估。"""
+        quote = pricing.estimate("image", "kling-v4-long-image", {"rows": 1})
+        self.assertEqual(quote["matched_spec"], "1K-MEDIUM")
+        self.assertAlmostEqual(quote["cost_usd"], 0.4285712, places=6)
+        self.assertFalse(quote["pricing_fallback"])
+
+    def test_veo_ext_tiers_split_by_resolution(self):
+        """veo3.1 ext 档改成 720P/1080P/4K 三档（2026-11-25 报价接口）；4k 没有数字后缀也要选中 4K 档。"""
+        hd = pricing.estimate("video", "veo3.1-quality-ext", {"duration": 8, "height": 1080})
+        uhd = pricing.estimate("video", "veo3.1-quality-ext", {"duration": 8, "resolution": "4k"})
+        self.assertEqual(hd["matched_spec"], "1080P")
+        self.assertEqual(uhd["matched_spec"], "4K")
+        self.assertAlmostEqual(hd["cost_usd"], 0.58125 * 8, places=6)
+        self.assertAlmostEqual(uhd["cost_usd"], 0.7125 * 8, places=6)
+
+    def test_veo_ext_aliases_resolve_to_real_models(self):
+        """veo3.1-*-ext 是 veo3.1-fast/quality/lite 的等价别名（文档 L47579）：
+        alias_map 不许自映射空转，三个 ID 都必须查到非零价。"""
+        payload = pricing.load()
+        aliases = payload.get("alias_map") or {}
+        # fast-ext 没有独立 models 行 → 指到真实行；quality/lite-ext 自带 models 行 → 删自映射直查
+        self.assertEqual(aliases.get("veo3.1-fast-ext"), "veo3.1-fast-ext（veo3.1-fast）")
+        for key in ("veo3.1-quality-ext", "veo3.1-lite-ext"):
+            self.assertNotIn(key, aliases, key)
+            self.assertIn(key, payload["models"], key)
+        for model in ("veo3.1-fast-ext", "veo3.1-quality-ext", "veo3.1-lite-ext"):
+            record, fallback, _unmapped = pricing.resolve_model(model, "video")
+            self.assertFalse(fallback, model)
+            self.assertTrue(record.get("tiers"), model)
+            quote = pricing.estimate("video", model, {"duration": 8, "resolution": "720p"})
+            self.assertFalse(quote["pricing_fallback"], model)
+            self.assertGreater(quote["cost_usd"], 0, model)
+            self.assertGreater(quote["cost"], 0, model)
+
+    def test_offline_model_ids_have_no_alias_entry(self):
+        """2026-11-27 实测已下线 / 不存在的 7 个 ID：别名键清掉，避免查价被别名命中。
+        models 行保留作历史价档（不再被任何存活别名指向）。"""
+        payload = pricing.load()
+        aliases = payload.get("alias_map") or {}
+        dead = ("deepseek-r1-250528", "deepseek-v3.2-exp", "deepseek-v3-0324", "gpt-5-chat-latest",
+                "gpt-5.2-codex", "gemini-2.5-flash-lite", "seedance-1-5-pro")
+        for model in dead:
+            self.assertNotIn(model.upper().lower(), aliases, model)
+        leaked = [key for key, value in aliases.items() if value in dead]
+        self.assertEqual(leaked, [], "别名仍指向已下线 ID")
+
+    def test_magi_2_per_second_price(self):
+        """magi-2（2026-11-26 报价接口）：固定 1080P、per_second gold 0.08 → 估价 = 0.08 × 秒数。"""
+        five = pricing.estimate("video", "magi-2", {"duration": 5, "resolution": "1080p"})
+        twelve = pricing.estimate("video", "magi-2", {"duration": 12, "resolution": "1080p"})
+        self.assertEqual(five["matched_spec"], "1080P")
+        self.assertFalse(five["pricing_fallback"])
+        self.assertEqual(five["unit"], "per_second")
+        self.assertAlmostEqual(five["cost_usd"], 0.08 * 5, places=6)
+        self.assertAlmostEqual(twelve["cost_usd"], 0.08 * 12, places=6)
+        self.assertAlmostEqual(five["cost"], 4.0, places=6)  # credits = usd × 10
+
+    def test_claude_base_ids_resolve_to_dated_models(self):
+        """定价页 2026-11-26 把展示名改成基础 ID：claude-*-4-5 用 alias_map 指到日期版，价格逐档一致。"""
+        cases = {
+            "claude-haiku-4-5": ("claude-haiku-4-5-20251001", 0.8, 4.0),
+            "claude-sonnet-4-5": ("claude-sonnet-4-5-20250929", 2.4, 12.0),
+            "claude-opus-4-5": ("claude-opus-4-5-20251101", 4.0, 20.0),
+        }
+        for base, (target, input_gold, output_gold) in cases.items():
+            record, fallback, _unmapped = pricing.resolve_model(base, "chat")
+            self.assertFalse(fallback, base)
+            self.assertEqual(record["id"], target, base)
+            quote = pricing.estimate("chat", base, {"tokens_in": 1000000, "tokens_out": 1000000})
+            self.assertFalse(quote["pricing_fallback"], base)
+            self.assertAlmostEqual(quote["cost_usd"], input_gold + output_gold, places=6)
+
     def test_video_per_second_scales_with_duration(self):
         five = pricing.estimate("video", "seedance-2.5", {"duration": 5, "height": 720})
         ten = pricing.estimate("video", "seedance-2.5", {"duration": 10, "height": 720})
         self.assertAlmostEqual(ten["cost"], five["cost"] * 2, places=4)
         self.assertGreater(ten["price"], ten["cost"])
         self.assertEqual(five["unit"], "per_second")
+
+    def test_seedance_draft_billing_uses_480p(self):
+        """草稿按 480p 预扣：用户传 4k 也只扣 480P 档，不能按成片全价扣。"""
+        payload = main.CanvasVideoRequest(
+            prompt="draft", provider_id="apimart", model="seedance-2.5",
+            duration=8, resolution="4k", draft=True)
+        params = main._credits_video_params(payload)
+        self.assertEqual(params["resolution"], "480p")
+        self.assertEqual(params["height"], 480)
+        self.assertIs(params.get("draft"), True)
+        quote = pricing.estimate("video", "seedance-2.5", params)
+        self.assertEqual(quote["matched_spec"], "480P")
+        self.assertFalse(quote["pricing_fallback"])
+
+    def test_seedance_draft_auto_duration_reserves_30s(self):
+        payload = main.CanvasVideoRequest(
+            prompt="draft auto", provider_id="apimart", model="seedance-2.5",
+            duration=-1, draft=True)
+        params = main._credits_video_params(payload)
+        self.assertEqual(params["duration"], 30)
+
+    def test_seedance_draft_final_uses_input_tier_and_draft_duration(self):
+        """成片：有原始参考视频时走 1080P-input；输出时长沿用草稿（11 秒）。"""
+        draft_payload = main.CanvasVideoRequest(
+            prompt="draft", provider_id="apimart", model="seedance-2.5", duration=11,
+            videos=["https://example.com/ref.mp4"])
+        main.apimart_draft_context_record("task_draft_pricing_x", draft_payload, 11)
+        self.addCleanup(main.APIMART_DRAFT_CONTEXT.pop, "task_draft_pricing_x", None)
+        final_payload = main.CanvasVideoRequest(
+            prompt="final", provider_id="apimart", model="seedance-2.5",
+            draft_task_id="task_draft_pricing_x", resolution="1080p")
+        params = main._credits_video_params(final_payload)
+        self.assertEqual(params["resolution"], "1080p")
+        self.assertEqual(params["duration"], 11)
+        self.assertIs(params["video_input"], True)
+        quote = pricing.estimate("video", "seedance-2.5", params)
+        self.assertEqual(quote["matched_spec"], "1080P-input")
+        draft_quote = pricing.estimate("video", "seedance-2.5", main._credits_video_params(
+            main.CanvasVideoRequest(prompt="draft", provider_id="apimart", model="seedance-2.5",
+                                    duration=11, draft=True)))
+        self.assertLess(draft_quote["cost_usd"], quote["cost_usd"])
+
+    def test_whisper_per_minute_tier(self):
+        """per_minute 单位的最小支持：引擎能选中 per_minute 档并按分钟计价。
+        duration 是秒：120s → 2 分钟 × 0.006 USD；没给时长按 1 分钟（不按 0 漏算）。
+        注意 APIMart 语音模型在 model_map 里是 postpaid（按 usage 结算，见 speech.py），
+        这里用 direct 映射单测计价公式本身，不代表线上 whisper 会预扣。"""
+        with mock.patch.object(model_map, "lookup",
+                               return_value={"mode": "direct", "target": "whisper-1"}):
+            two_minutes = pricing.estimate("audio", "whisper-1", {"duration": 120, "rows": 1})
+            unknown = pricing.estimate("audio", "whisper-1", {"rows": 1})
+        self.assertEqual(two_minutes["unit"], "per_minute")
+        self.assertEqual(two_minutes["matched_spec"], "default")
+        self.assertAlmostEqual(two_minutes["cost_usd"], 0.012, places=6)
+        self.assertAlmostEqual(two_minutes["cost"], 0.12, places=6)
+        self.assertAlmostEqual(two_minutes["minutes"], 2.0, places=6)
+        self.assertFalse(two_minutes["pricing_fallback"])
+        self.assertAlmostEqual(unknown["cost_usd"], 0.006, places=6)
+        self.assertAlmostEqual(unknown["minutes"], 1.0, places=6)
+
+    def test_speech_models_stay_postpaid_and_do_not_undercut_prepaid(self):
+        """2026-11-26 补了 3 条语音价目（gpt-audio-mini / gpt-4o-mini-tts / whisper-1），但他们的
+        model_map 映射是 postpaid（按 usage 结算，真实成本见 speech.py）；预扣兼容模式
+        （本测试文件全局 CREDIT_BILLING_MODE=prepaid）会落回 conservative，不会因为新价目把
+        TTS/转写的预扣价从 0.96 USD/次 悄悄改小。"""
+        for model in ("gpt-audio-mini", "gpt-4o-mini-tts", "whisper-1"):
+            mapping = model_map.lookup("apimart", "audio", model)
+            self.assertEqual(mapping.get("mode"), "postpaid", model)
+            record, fallback, _unmapped = pricing.resolve_model(model, "audio")
+            self.assertFalse(fallback, model)
+            self.assertEqual(record["category"], "audio", model)
+            quote = pricing.estimate("audio", model, {"rows": 1})
+            self.assertTrue(quote["pricing_fallback"], model)
+            self.assertEqual(quote["unit"], "per_call", model)
+            self.assertAlmostEqual(quote["cost_usd"], 0.96, places=6)
 
     def test_audio_per_call(self):
         quote = pricing.estimate("audio", "suno", {"rows": 1})

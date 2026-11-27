@@ -199,8 +199,9 @@ async function main(){
     console.log('[size-ratio] 经典 vs 智能逐项比对 ' + compared + ' 组');
 
     // ── 7. 档位缺失/非法时的兜底不变（不能抛异常、不能返回 undefined）──────────
-    ok(classic.apiImageSize('custom', '8k', '1:1', '', FREE_MODEL) === '1024x1024',
-        '未知档位按 1024 长边兜底（实际 ' + classic.apiImageSize('custom', '8k', '1:1', '', FREE_MODEL) + '）');
+    // 8k 现在是 Kling V4 Image 的已知档位（RES_LONG_SIDE 8192），兜底用例换成真正没收录的档位
+    ok(classic.apiImageSize('custom', '12k', '1:1', '', FREE_MODEL) === '1024x1024',
+        '未知档位按 1024 长边兜底（实际 ' + classic.apiImageSize('custom', '12k', '1:1', '', FREE_MODEL) + '）');
     ok(classic.apiImageSize('nonexistent-ratio', '1k', '', '', FREE_MODEL) === '1024x1024', '未知预置比例退回 square 1K');
     ok(classic.apiImageSize('custom', '1k', 'not-a-ratio', '', FREE_MODEL) === '1024x1024', '非法自定义比例退回 square 1K');
 

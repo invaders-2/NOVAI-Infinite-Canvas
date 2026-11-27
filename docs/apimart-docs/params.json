@@ -8,6 +8,22 @@
     "sha256": "da7f038a4cf98a3f09c2c9fdd960c2276885ed00c084aae551aebada968387fc",
     "locator_note": "citations.locator 里的 L<行号> 指该 sha256 的文件；复核前先比对 sha256。"
   },
+  "doc_corpus_20261125": {
+    "source": "https://docs.apimart.ai/llms-full.txt",
+    "fetched": "2026-11-25",
+    "bytes": 2528392,
+    "lines": 92103,
+    "sha256": "0393fa480b5dcc28b140f80277b3895b5b09fd548a9f15dc812cbed86c4eab82",
+    "locator_note": "2026-11-25 新增的 4 条 image 条目按这份语料取行号；doc_corpus 仍是既有 15 条的基线。"
+  },
+  "doc_corpus_20261126": {
+    "source": "https://docs.apimart.ai/llms-full.txt",
+    "fetched": "2026-11-26",
+    "bytes": 2539863,
+    "lines": 92372,
+    "sha256": "8b9f661cd8b95fff9c2f43d1e0663927ac2ffb02241793167beca323417e076c",
+    "locator_note": "2026-11-26 新增的 magi-2 条目按这份语料取行号（L40642–L40910）；doc_corpus 仍是既有 15 条的基线。"
+  },
   "field_semantics": {
     "ratios": "比例白名单（原样保留文档大小写）；null = 文档没有枚举 / 不适用",
     "resolutions": "分辨率档位白名单；null = 文档不提供可选档位（模型自定或不适用）",
@@ -928,6 +944,247 @@
         {
           "quote": "Videos include sound by default; omit this field. true does not change this behavior, and false is rejected.",
           "locator": "llms-full L82059"
+        }
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "kling-v4-image",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/kling-v4-image/generation",
+      "ratios": [
+        "auto",
+        "16:9",
+        "9:16",
+        "1:1",
+        "4:3",
+        "3:4",
+        "3:2",
+        "2:3",
+        "21:9"
+      ],
+      "resolutions": [
+        "2K",
+        "4K",
+        "8K"
+      ],
+      "qualities": null,
+      "n_max": 9,
+      "durations": null,
+      "modes": null,
+      "ref_max": 10,
+      "exact_size": false,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "像素 size 不支持（400）；aspect_ratio 是 size 别名且优先；n 1–9，系列模式(n>1 400)用 sequential_image_generation=auto + options.max_images 2–4；参考图只收公网 URL",
+      "citations": [
+        10193,
+        10312,
+        10314,
+        10316,
+        10322,
+        10328,
+        10334,
+        10346,
+        10350,
+        10478
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "kling-v4-long-image",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/kling-v4-long-image/generation",
+      "ratios": null,
+      "resolutions": [
+        "1K",
+        "2K"
+      ],
+      "qualities": null,
+      "n_max": 1,
+      "durations": null,
+      "modes": null,
+      "ref_max": 3,
+      "exact_size": null,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "不收 size/aspect_ratio/width/height（400）；skill 必填 ecommerce|webpage，length 仅 ecommerce(short|medium|long，默认 medium)；n 只能 1；输出宽 1024/2048、高随内容",
+      "citations": [
+        10508,
+        10634,
+        10636,
+        10640,
+        10644,
+        10662,
+        10666,
+        10674
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "mai-image-2.7",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/mai-image-2.7/generation",
+      "ratios": null,
+      "resolutions": [
+        "1K",
+        "2K"
+      ],
+      "qualities": null,
+      "n_max": 1,
+      "durations": null,
+      "modes": null,
+      "ref_max": 5,
+      "exact_size": true,
+      "max_long_edge": null,
+      "max_pixels": 4194304,
+      "min_pixels": null,
+      "notes": "size 支持任意整数比例 1:4–4:1 或像素 widthxheight（width/height 成对时优先级最高）；像素约束是「两边 ≥768、总像素 ≤4194304、各自向下取 32 倍数」，没有长边上限；auto 不支持（400）；图生图时尺寸参数全失效",
+      "citations": [
+        11145,
+        11369,
+        11375,
+        11380,
+        11382,
+        11390,
+        11418,
+        11430,
+        11444,
+        11452
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "mai-image-2.7-flash",
+      "kind": "image",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/mai-image-2.7/generation",
+      "ratios": null,
+      "resolutions": [
+        "1K",
+        "2K"
+      ],
+      "qualities": null,
+      "n_max": 1,
+      "durations": null,
+      "modes": null,
+      "ref_max": 5,
+      "exact_size": true,
+      "max_long_edge": null,
+      "max_pixels": 4194304,
+      "min_pixels": null,
+      "notes": "与 mai-image-2.7 同页声明能力参数完全一致，只差质量/速度/价格",
+      "citations": [
+        11150,
+        11340,
+        11486
+      ]
+    },
+    {
+      "provider": "apimart",
+      "model": "magi-2",
+      "kind": "video",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/magi-2/generation",
+      "ratios": [
+        "16:9",
+        "9:16",
+        "1:1",
+        "4:3",
+        "3:4",
+        "21:9",
+        "auto"
+      ],
+      "resolutions": [
+        "1080p"
+      ],
+      "qualities": null,
+      "n_max": 1,
+      "durations": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30
+      ],
+      "modes": [
+        "text_to_video",
+        "image_to_video",
+        "start_end_to_video",
+        "reference_to_video"
+      ],
+      "ref_max": 10,
+      "exact_size": null,
+      "max_long_edge": null,
+      "max_pixels": null,
+      "min_pixels": null,
+      "notes": "固定 1080p（resolution 只收 1080p，其它值 400；省略也是 1080p）；duration 4–30 连续整秒、默认 5（0/小数/越界 400），seconds 是别名且同时发必须相等；aspect_ratio 16:9（默认）/9:16/1:1/4:3/3:4/21:9 + auto 或省略（图生视频不含 21:9，auto/省略 = 跟随首帧）；generate_audio 默认 true，audio 是别名且不得冲突；seed 0..2147483647 或 -1（随机）；nsfw_check 默认 false，true 才用 omni-moderation-latest 审 prompt 与输入图；omni_reference_task_type 只有 auto（默认）|reference，edit/extend 直接 400（不支持视频编辑/延长/keyframe）。参考媒体：image_urls 图生视频 ≤2（首帧 + 可选尾帧）、参考模式与 image_with_roles(role=reference_image) 合计 ≤10；first_frame_image/last_frame_image 与 image_urls 二选一（尾帧必须配首帧）；video_urls ≤5、audio_urls ≤5（各 2–30 秒、合计建议 ≤30 秒，超出上游可能截断）；prompt ≤15000 字符。unsupported 400：mode、negative_prompt、watermark:true、camera_control、multi_shot/multi_prompt、element_list、video_list、voice_list、audio_setting、keyframe、video_url（单数）、omni_reference_task_type=edit/extend、resolution≠1080p。注意：ref_max 这里是文档值 10；我方能力表按实际提交队列写 9/3/3（通用分支 image_payload[:9]/video_payload[:3]/audios[:3] 会静默截断，U23 证据 +1）。",
+      "citations": [
+        {
+          "quote": "Fixed 1080p output, 4–30 seconds, with audio enabled by default.",
+          "locator": "llms-full L40646"
+        },
+        {
+          "quote": "Whether to run content moderation before submitting the video task. true: use omni-moderation-latest ... false or omitted ... (default)",
+          "locator": "llms-full L40741-L40746"
+        },
+        {
+          "quote": "Whole seconds from 4 to 30, default 5. Explicit 0, fractional values and out-of-range values return HTTP 400.",
+          "locator": "llms-full L40754"
+        },
+        {
+          "quote": "Alias for duration. If both are sent, their values must match.",
+          "locator": "llms-full L40758"
+        },
+        {
+          "quote": "Only 1080p is supported; omitting the field also produces 1080p. Other values return HTTP 400.",
+          "locator": "llms-full L40762"
+        },
+        {
+          "quote": "Text-to-video and reference-to-video support 16:9 (default), 9:16, 1:1, 4:3, 3:4 and 21:9. Image-to-video supports the first five ratios, excluding 21:9; omit the field or use auto to follow the first frame’s aspect ratio.",
+          "locator": "llms-full L40766"
+        },
+        {
+          "quote": "Whether to generate audio, default true. Set to false for output without an audio track. If audio is also sent, the values must match.",
+          "locator": "llms-full L40770"
+        },
+        {
+          "quote": "Supports auto (default) and reference. ... edit and extend are unsupported.",
+          "locator": "llms-full L40782"
+        },
+        {
+          "quote": "The 2-image limit applies only to image-to-video ... shares a combined limit of 10 with reference_image entries",
+          "locator": "llms-full L40786, L40798"
+        },
+        {
+          "quote": "Up to 5 reference videos ... Up to 5 reference audio clips ... combined duration of at most 30 seconds recommended",
+          "locator": "llms-full L40802, L40806"
+        },
+        {
+          "quote": "The following return HTTP 400 on submission: mode, negative_prompt, watermark: true, camera_control, multi_shot / multi_prompt, element_list, video_list, voice_list, audio_setting, intermediate keyframe inputs, omni_reference_task_type: edit / extend, singular video_url, and any resolution other than 1080p.",
+          "locator": "llms-full L40891"
         }
       ]
     }

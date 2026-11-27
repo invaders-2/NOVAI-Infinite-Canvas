@@ -66,7 +66,12 @@ const OFFICIAL_IMAGE_RES_LEVELS = {
     'seedream-5-5': ['1k', '1.5k', '2k'],
     'seedream-4.5': ['2k', '4k'],
     'seedream-4.0': ['1k', '2k', '4k'],
-    'agnes-image': ['1k', '2k', '3k', '4k']
+    'agnes-image': ['1k', '2k', '3k', '4k'],
+    // 2026-11-25 APIMart 文档新增（delta new_models）
+    'kling-v4-image': ['2k', '4k', '8k'],
+    'kling-v4-long-image': ['1k', '2k'],
+    'mai-image-2.7': ['1k', '2k'],
+    'mai-image-2.7-flash': ['1k', '2k']
 };
 const OFFICIAL_BACKGROUND_SUPPORTED = [
     'gpt-image-1',
@@ -110,9 +115,9 @@ const OFFICIAL_VIDEO_ASPECTS = {
     'veo-3': ['16:9', '9:16'],
     veo: ['16:9', '9:16']
 };
-const OFFICIAL_TIERS = ['0.5k', '768sq', '1k', 'quality', '1.5k', '2k', '3k', '4k'];
-const OFFICIAL_LONG_SIDE = { '0.5k': 768, '768sq': 768, '1k': 1536, quality: 1536, '1.5k': 1920, '2k': 2048, '3k': 3072, '4k': 3840 };
-const OFFICIAL_PIXEL_FALLBACK = { '0.5k': 262144, '768sq': 589824, '1k': 1572864, quality: 1572864, '1.5k': 3145728, '2k': 4194304, '3k': 9437184, '4k': 8294400 };
+const OFFICIAL_TIERS = ['0.5k', '768sq', '1k', 'quality', '1.5k', '2k', '3k', '4k', '8k'];
+const OFFICIAL_LONG_SIDE = { '0.5k': 768, '768sq': 768, '1k': 1536, quality: 1536, '1.5k': 1920, '2k': 2048, '3k': 3072, '4k': 3840, '8k': 8192 };
+const OFFICIAL_PIXEL_FALLBACK = { '0.5k': 262144, '768sq': 589824, '1k': 1572864, quality: 1572864, '1.5k': 3145728, '2k': 4194304, '3k': 9437184, '4k': 8294400, '8k': 37748736 };
 
 function blockOf(src, re){
     const m = src.match(re);
@@ -255,7 +260,12 @@ async function main(){
         ['generate_image_seedream_v5_pro', ['1k', '1.5k', '2k']],
         ['generate_image_seedream_v5', ['1k', '1.5k', '2k']],
         ['generate_image_seedream_v4_5', ['2k', '4k']],
-        ['generate_image_seedream_v4', ['1k', '2k', '4k']]
+        ['generate_image_seedream_v4', ['1k', '2k', '4k']],
+        // 2026-11-25 APIMart 文档新增
+        ['kling-v4-image', ['2k', '4k', '8k']],
+        ['kling-v4-long-image', ['1k', '2k']],
+        ['mai-image-2.7', ['1k', '2k']],
+        ['mai-image-2.7-flash', ['1k', '2k']]
     ];
     imageCases.forEach(([model, expected]) => {
         eq(classic.imageResLevelsFor(model), expected, '经典画布 imageResLevelsFor(' + model + ')');

@@ -114,10 +114,18 @@ class ModelCapsBuiltinTests(unittest.TestCase):
             all_builtin_ids.update(ids)
         for ids in main.APIMART_BUILTIN_MODEL_IDS["video"].values():
             all_builtin_ids.update(ids)
+        for ids in main.APIMART_BUILTIN_MODEL_IDS["chat"].values():
+            all_builtin_ids.update(ids)
         for item in extra:
             self.assertEqual(item["provider"], "apimart")
-            self.assertIn(item["kind"], ("image", "video"))
+            self.assertIn(item["kind"], ("chat", "image", "video"))
             self.assertIn(item["model"], all_builtin_ids)
+            if item["kind"] == "chat":
+                # chat 没有参数文档：只下发空档位（不编造比例/分辨率/时长）
+                self.assertEqual(item["ratios"], [], item["model"])
+                self.assertEqual(item["resolutions"], [], item["model"])
+                self.assertEqual(item["durations"], [], item["model"])
+                continue
             # prompt_only 的模型（MiniMax-H3-Context-IR）只有 modes/prompt_only，没有档位
             self.assertTrue(item.get("prompt_only") or item.get("ratios") or item.get("resolutions")
                             or item.get("durations"), item["model"])
@@ -131,6 +139,13 @@ class ModelCapsBuiltinTests(unittest.TestCase):
         self.assertIn("seedance-2.5", models)
         self.assertIn("seedance-1-0-pro-quality", models)
         self.assertIn("wan2.7-image", models)
+        # 2026-11-25 v7：7 个「仅定价页 + 定价接口」chat 模型只在内置清单里出现（kind=chat）
+        for chat_model in ("gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon",
+                           "gpt-6.2-astra", "gpt-6.2-sol", "claude-fable-5.2", "qwen4-max"):
+            self.assertIn(chat_model, models, chat_model)
+            row = next(item for item in extra if item["model"] == chat_model)
+            self.assertEqual(row["kind"], "chat")
+            self.assertIs(row["builtin"], True)
 
     def test_builtin_skips_registered_models(self) -> None:
         expanded = self._items("?include_builtin=1")

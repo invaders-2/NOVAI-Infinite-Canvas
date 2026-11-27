@@ -146,10 +146,11 @@ class ApimartOfficialSizeResolutionTests(unittest.TestCase):
 
     def test_dispatch_sends_ratio_and_tier(self):
         # APIMart 请求体真正下发的是「比例 + 档位」，档位来自本函数的映射
+        # （size 的字段名可被 size_field 改写 —— grok 用 aspect_ratio；档位在精确像素/静默档位时不下发）
         source = Path(main.__file__).read_text(encoding="utf-8")
-        self.assertIn("apimart_size, resolution = apimart_size_resolution(size)", source)
-        self.assertIn('"size": apimart_size', source)
-        self.assertIn('"resolution": resolution', source)
+        self.assertIn("apimart_size, _base_resolution = apimart_size_resolution(size)", source)
+        self.assertIn('body[apimart_caps.get("size_field") or "size"] = apimart_size', source)
+        self.assertIn('body["resolution"] = resolution', source)
 
 
 if __name__ == "__main__":

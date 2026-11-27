@@ -53,23 +53,31 @@ const OFFICIAL_IMAGE = {
     'seedream-4.5': { resLevels: ['2k', '4k'], ratios: SEEDREAM_8 },
     'seedream-4.0': { resLevels: ['1k', '2k', '4k'], ratios: SEEDREAM_8 },
     'agnes-image-25-flash': { resLevels: ['1k', '2k', '3k', '4k'], ratios: SEEDREAM_8, preset: 'agnes-image' },
-    'gpt-image-2': { resLevels: ['1k', '2k', '4k'], ratios: null }
+    'gpt-image-2': { resLevels: ['1k', '2k', '4k'], ratios: null },
+    // 2026-11-25 APIMart 文档新增（delta new_models）
+    'kling-v4-image': { resLevels: ['2k', '4k', '8k'], ratios: ['square', 'wide', 'story', 'landscape43', 'portrait43', 'landscape', 'portrait', 'ultrawide'] },
+    'kling-v4-long-image': { resLevels: ['1k', '2k'], ratios: [] },
+    'mai-image-2.7': { resLevels: ['1k', '2k'], ratios: null },
+    'mai-image-2.7-flash': { resLevels: ['1k', '2k'], ratios: null }
 };
 const OFFICIAL_VIDEO = {
+    // APIMart 的点号 id（能力表 key 是 seedance-2-5）；连字符的 doubao-* 是 Ark 口径，只有到 1080p
+    'seedance-2.5': { aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p', '4k'], duration: [4, 30] },
     'doubao-seedance-2-5-260628': { aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], duration: [4, 30] },
     'doubao-seedance-2-0-fast-260128': { aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], duration: [4, 15] },
     'doubao-seedance-2-0-260128': { aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p', '4k'], duration: [4, 15] },
     'doubao-seedance-1-0-pro-250528': { aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], duration: [2, 12] },
     'kling-v3': { aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p', '4k'], duration: [3, 15] },
     'kling-3.0-turbo': { aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p'], duration: [3, 15] },
-    'veo3.1-fast': { aspects: ['16:9', '9:16'], duration: [4, 8] },
-    'veo-3.1-fast': { aspects: ['16:9', '9:16'], duration: [4, 8] },
+    // VEO 3.1 走 ext 档：官方时长固定 8 秒（main.py veo3-1 durations=(8,)）
+    'veo3.1-fast': { aspects: ['16:9', '9:16'], duration: [8, 8] },
+    'veo-3.1-fast': { aspects: ['16:9', '9:16'], duration: [8, 8] },
     // Lovart 真实视频模型名（下划线 + v 前缀）
     'generate_video_seedance_v2_5': { aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], duration: [4, 30] },
     'generate_video_seedance_v2_0_fast': { aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], duration: [4, 15] },
     'generate_video_seedance_v2_0': { aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p', '4k'], duration: [4, 15] },
     'generate_video_kling_v3': { aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p', '4k'], duration: [3, 15] },
-    'generate_video_veo3_1': { aspects: ['16:9', '9:16'], duration: [4, 8] },
+    'generate_video_veo3_1': { aspects: ['16:9', '9:16'], duration: [8, 8] },
     'agnes-video-v2.0': { aspects: ['16:9', '9:16', '4:3', '1:1', '3:4', '21:9'], duration: [4, 12] },
     'some-unknown-video': { aspects: null, videoResolutions: null, duration: null }
 };
@@ -231,7 +239,10 @@ async function main(){
      ['generate_image_seedream_v5_pro', 'square', '1.5k', '1536x1536'],
      ['seedream-5-5', 'wide', '1.5k', '2048x1152'],
      ['seedream-5.0-lite', 'square', '3k', '3072x3072'],
-     ['agnes-image-25-flash', 'wide', '3k', '3936x2208']].forEach(([model, ratio, level, expected]) => {
+     ['agnes-image-25-flash', 'wide', '3k', '3936x2208'],
+     // 8K 只有 1:1 是文档原值（2048/4096/8192），其它比例按 8K 长边等比换算
+     ['kling-v4-image', 'square', '8k', '8192x8192'],
+     ['kling-v4-image', 'wide', '8k', '8192x4608']].forEach(([model, ratio, level, expected]) => {
         eq(classic.apiImageSize(ratio, level, '', '', model), expected, '经典画布 apiImageSize ' + model + ' ' + ratio + '@' + level);
         eq(smart.apiImageSize(ratio, level, '', '', model), expected, '智能画布 apiImageSize ' + model + ' ' + ratio + '@' + level);
     });

@@ -15,7 +15,11 @@
 数据来源分三层（优先级从高到低）：
     1) 页面内嵌 initialCatalog（图像模型：全部规格档 + 黄金/铂金/钻石/官方价）
     2) 模型详情页价格表（视频/音频：分辨率/时长/动作档位 + 四档价格）
-    3) 起步价索引表（全部 296 个模型：最低黄金价 + 计费单位；兜底，也用于未抓详情的模型）
+    3) 起步价索引（全部 239 个模型：h2 总表 + 4 个 h3 分组 + ul>li 行；兜底，也用于未抓详情的模型）
+
+视频/LLM/音频页面上没有逐档详表：逐档价用 --api-model 逐个打
+GET https://apimart.ai/api/pricing/model?model=<id>（免鉴权）补，配 --merge-into 只增量改这些模型。
+域名必须是 apimart.ai，api.apimart.ai 的同路径会间歇性返回 000。
 
 输出结构见 server/credits/apimart_pricing.json：
     source / credit_usd / coverage / models{id:{...tiers}} / alias_map / fallback
@@ -79,6 +83,16 @@ def _price_block(usd: Optional[float], derived: bool = False) -> Dict[str, Any]:
     if derived:
         data["derived"] = True
     return data
+
+
+def _token_rate_block(gold: float, official: Optional[float]) -> Dict[str, Any]:
+    """报价接口的一档 token 单价：gold=effective、official=rates；铂金/钻石按会员 0.95/0.9 推。"""
+    return {
+        "gold": _price_block(gold),
+        "platinum": _price_block(round(gold * MEMBER_PLATINUM_FACTOR, 8)),
+        "diamond": _price_block(round(gold * MEMBER_DIAMOND_FACTOR, 8)),
+        "official": _price_block(official),
+    }
 
 
 def _tier(spec: str, unit: str, gold: Optional[float], platinum: Optional[float],
@@ -176,32 +190,46 @@ CATEGORY_BY_BLOCK = {"图像": "image", "视频": "video", "LLM": "chat", "音�
 CATEGORY_BY_DETAIL = {"image": "image", "video": "video", "chat": "chat", "audio": "audio"}
 
 
+def _index_group_headers(html: str, start: int) -> List[Tuple[str, int, int, Optional[int]]]:
+    """h3 分组头（图像/视频/LLM/音频 + 可选 <span>计数</span>）→ [(组名, 段起, 段终, 声明条数)]。"""
+    pattern = re.compile(
+        r"<h3[^>]*>\s*(图像|视频|LLM|音频)\s*(?:<span[^>]*>\s*(\d+)\s*</span>)?\s*</h3>", re.S)
+    marks = [(m.start(), m.end(), m.group(1), int(m.group(2)) if m.group(2) else None)
+             for m in pattern.finditer(html, start)]
+    blocks: List[Tuple[str, int, int, Optional[int]]] = []
+    for idx, (pos, end, name, declared) in enumerate(marks):
+        end_pos = marks[idx + 1][0] if idx + 1 < len(marks) else len(html)
+        blocks.append((name, end, end_pos, declared))
+    return blocks
+
+
 def parse_index(html: str) -> List[Dict[str, Any]]:
-    """解析「全部 296 个 AI 模型起步价」四张表：模型 / 起步价 / 详情页链接。"""
-    marks = [(m.start(), _clean(m.group(1))) for m in re.finditer(r"<h3[^>]*>(.*?)</h3>", html, re.S)]
-    blocks: List[Tuple[str, int, int]] = []
-    for idx, (pos, text) in enumerate(marks):
-        if not any(block in text for block in INDEX_BLOCKS):
-            continue
-        if "·" not in text:
-            continue
-        end = marks[idx + 1][0] if idx + 1 < len(marks) else len(html)
-        blocks.append((text, pos, end))
+    """解析「全部 N 个 AI 模型起步价」索引：h2 总表 + 4 个 h3 分组 + 每组一个 ul>li 行。
+
+    2026-11-25 页面结构（旧版是 h3 带「·」的表 + <tr>）：总表标题在 <h2>，
+    分组是 <h3>图像<span>59</span></h3> 这种（图像/视频/LLM/音频，共 239 行），
+    每行是 <li> 里的两个 span：第一个是模型名（可包 <a href>），最后一个是起步价文本。
+    """
+    heading = re.search(r"<h2[^>]*>(.*?)</h2>", html, re.S)
+    if not heading or "个 AI 模型起步价" not in _clean(heading.group(1)):
+        raise SystemExit("[pricing] 找不到「全部 N 个 AI 模型起步价」总表标题：页面结构变了")
     rows: List[Dict[str, Any]] = []
-    for text, start, end in blocks:
-        block_name = text.split("·")[0].strip()
+    for block_name, start, end, declared in _index_group_headers(html, heading.end()):
         category = CATEGORY_BY_BLOCK.get(block_name)
         if not category:
             continue
-        for row_html in re.findall(r"<tr[^>]*>(.*?)</tr>", html[start:end], re.S):
-            cells = re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row_html, re.S)
-            if len(cells) < 2:
+        segment = html[start:end]
+        group_rows = 0
+        for row_html in re.findall(r"<li[^>]*>(.*?)</li>", segment, re.S):
+            spans = re.findall(r"<span[^>]*>(.*?)</span>", row_html, re.S)
+            if not spans:
                 continue
-            name = _clean(cells[0])
-            price_text = _clean(cells[1])
-            if not name or name == "模型":
+            name_html = spans[0]
+            name = _clean(name_html)
+            price_text = _clean(spans[-1]) if len(spans) > 1 else ""
+            if not name:
                 continue
-            href_match = re.search(r'href="([^"]+)"', cells[0])
+            href_match = re.search(r'href="([^"]+)"', name_html)
             rows.append({
                 "category": category,
                 "name": name,
@@ -209,8 +237,12 @@ def parse_index(html: str) -> List[Dict[str, Any]]:
                 "href": href_match.group(1) if href_match else "",
                 "tiers": parse_index_price(price_text),
             })
-    if len(rows) < 250:
-        raise SystemExit("[pricing] 起步价索引只解析到 %d 行（预期 ~296）：页面结构变了" % len(rows))
+            group_rows += 1
+        if declared is not None and declared != group_rows:
+            raise SystemExit("[pricing] %s 分组声明 %d 行、实际解析到 %d 行：页面结构变了"
+                             % (block_name, declared, group_rows))
+    if len(rows) < 200:
+        raise SystemExit("[pricing] 起步价索引只解析到 %d 行（预期 ~239）：页面结构变了" % len(rows))
     return rows
 
 
@@ -567,6 +599,211 @@ def _match_detail_ids(name: str, detail_ids: List[str]) -> List[str]:
     return prefixed[:1]
 
 
+# ---------------------------------------------------------------- 模型报价 API
+
+# 视频/LLM/音频没有页面详表：逐档价只能逐个打 GET /api/pricing/model?model=<id>（免鉴权）。
+# 域名必须是 apimart.ai：api.apimart.ai 的同路径会间歇性返回 000（2026-11-25 实测多次）。
+API_PRICING_BASE = "https://apimart.ai"
+API_SOURCE_PREFIX = "api:pricing/model"
+API_TOKEN_KEYS = ("text_input", "image_input", "cached_text_input", "cached_image_input",
+                  "text_output", "image_output")
+MEMBER_PLATINUM_FACTOR = 0.95
+MEMBER_DIAMOND_FACTOR = 0.90
+
+
+def fetch_api_model_pricing(model: str, base: str = API_PRICING_BASE, timeout: float = 20.0) -> Dict[str, Any]:
+    """GET {base}/api/pricing/model?model=<id> → data 段（调用方负责 --api-model 显式指定）。"""
+    import urllib.parse
+    import urllib.request
+
+    url = "%s/api/pricing/model?model=%s" % (base.rstrip("/"), urllib.parse.quote(str(model), safe=""))
+    # 不带 User-Agent 会被站点 403（curl 默认带 UA 所以手测是通的）
+    request = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (compatible; novai-pricing-parser/1)",
+        "Accept": "application/json",
+    })
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, dict):
+        raise SystemExit("[pricing] %s 的报价接口没有 data 段：%s" % (model, str(payload)[:200]))
+    return data
+
+
+def api_pricing_model_record(model: str, data: Dict[str, Any], source: str,
+                            spec_label: str = "") -> Dict[str, Any]:
+    """报价接口 data → 价目 record。
+
+    口径（D12）：rates=标价、effective_rates=实付；分辨率的标价是 resolution_prices，
+    实付是 resolution_paid_prices（gold）；platinum/diamond 按会员 factor 0.95/0.9 推。
+    tiered_token 模型（image_modalities）另外给 1K/2K 的预扣 per_image 档，估价走预扣价。
+    """
+    model_id = str(data.get("model_name") or model).strip()
+    list_prices = data.get("resolution_prices") or {}
+    paid_prices = data.get("resolution_paid_prices") or list_prices
+    billing_type = str(data.get("billing_type") or "").strip().lower()
+    default_spec = str(data.get("default_resolution") or data.get("default_spec") or "").strip()
+    token_pricing = data.get("pricing") if isinstance(data.get("pricing"), dict) else {}
+    pricing_mode = str(token_pricing.get("pricing_mode") or "").strip().lower()
+    token_rates: Dict[str, Any] = {}
+    if token_pricing:
+        effective = token_pricing.get("effective_rates") or {}
+        list_rates = token_pricing.get("rates") or {}
+        for key in API_TOKEN_KEYS:
+            gold = _num(effective.get(key))
+            if gold is None:
+                continue
+            token_rates[key] = _token_rate_block(gold, _num(list_rates.get(key)))
+        # 标准 chat 口径：接口的 rates 用 input/output（不是 text_input/text_output），旧逻辑只认后者
+        # → claude/gemini/gpt 这些 chat 模型会被落成空记录。只在 token 计费时兜底：per_second 视频模型
+        # 即使带 input/output 也不能当 chat 价（否则视频被按文本计价）。
+        if not token_rates and pricing_mode == "standard" and billing_type not in (UNIT_PER_SECOND, UNIT_PER_IMAGE):
+            for key in ("input", "output"):
+                gold = _num(effective.get(key))
+                if gold is None:
+                    continue
+                token_rates[key] = _token_rate_block(gold, _num(list_rates.get(key)))
+    tiers: List[Dict[str, Any]] = []
+    unit = UNIT_PER_SECOND if "per_second" in billing_type else UNIT_PER_IMAGE
+    # tiered_token 图像模型（gpt-image-2.6 家族）的 resolution_prices 是「比例@档位」预扣价（45 档）；
+    # 当前估价维度只有分辨率/质量、比例维度没进 schema → 这些档不落，估价按 token_rates 走。
+    ratio_keyed = bool(list_prices) and all(":" in str(spec) for spec in list_prices)
+    skip_ratio_tiers = pricing_mode == "image_modalities" and ratio_keyed
+    if not skip_ratio_tiers:
+        for spec, list_usd in list_prices.items():
+            gold = _num((paid_prices or {}).get(spec))
+            if gold is None:
+                gold = _num(list_usd)
+            tier = _tier(str(spec), unit, gold, None, None, _num(list_usd), source)
+            if tier:
+                tiers.append(tier)
+    # version_resolution（gpt-image-2.6-ext：flare/sunburst × 1K/2K/4K）：接口的 version_resolution_prices
+    # 是另一套 token 标价口径（与页面 fixed price 的 official 不同）→ official 按 gold/0.8 推导并标记。
+    version_prices = data.get("version_resolution_prices") or {}
+    version_paid = data.get("version_resolution_paid_prices") or version_prices
+    if isinstance(version_prices, dict) and version_prices:
+        for version, specs in version_prices.items():
+            if not isinstance(specs, dict):
+                continue
+            for res_spec, list_usd in specs.items():
+                gold = _num((version_paid.get(version) or {}).get(res_spec))
+                if gold is None:
+                    gold = _num(list_usd)
+                tier = _tier("%s@%s" % (version, res_spec), UNIT_PER_IMAGE, gold, None, None, None, source)
+                if tier:
+                    tiers.append(tier)
+    input_gold = _num(data.get("input_image_paid_price"))
+    if input_gold is None:
+        input_gold = _num(data.get("input_image_price"))
+    input_list = _num(data.get("input_image_price"))
+    if input_gold is not None and input_gold > 0:
+        tier = _tier("input", UNIT_PER_IMAGE, input_gold, None, None, input_list, source)
+        if tier:
+            tiers.append(tier)
+    # 预扣档（tiered_token 图像）：没传尺寸时估价的落点，顺序把默认档放前面
+    precharge = (data.get("precharge_prices") or {}).get("resolution_prices") if isinstance(
+        data.get("precharge_prices"), dict) else None
+    if isinstance(precharge, dict) and precharge and not skip_ratio_tiers:
+        for spec, list_usd in precharge.items():
+            gold = _num((list_prices or {}).get(spec))
+            if gold is None:
+                gold = _num(list_usd)
+            tier = _tier(str(spec), UNIT_PER_IMAGE, gold, None, None, _num(list_usd), source)
+            if tier and not any(item.get("spec") == tier["spec"] and item.get("unit") == UNIT_PER_IMAGE
+                                for item in tiers):
+                tiers.append(tier)
+    # 标准 chat：接口只给 input/output 两档 token 价 → 落成 input/output 两条 1M token 档（与页面口径同形）
+    if token_rates and not tiers and "input" in token_rates:
+        for key in ("input", "output"):
+            block = token_rates.get(key) or {}
+            gold = _num((block.get("gold") or {}).get("usd"))
+            if gold is None:
+                continue
+            tier = _tier(key, UNIT_PER_1M_TOKENS, gold,
+                         _num((block.get("platinum") or {}).get("usd")),
+                         _num((block.get("diamond") or {}).get("usd")),
+                         _num((block.get("official") or {}).get("usd")), source)
+            if tier:
+                tiers.append(tier)
+    # 单档模型（magi-2：只有 model_price/paid_price，没有分档价）：用实付价落一档，
+    # spec 由 --api-spec 指定（magi-2 文档固定 1080p），没给就用接口的 default_spec。
+    if not tiers and not token_rates and billing_type in (UNIT_PER_SECOND, UNIT_PER_IMAGE):
+        gold = _num(data.get("paid_price"))
+        if gold is None:
+            gold = _num(data.get("model_price"))
+        if gold is not None:
+            tier = _tier(spec_label or default_spec or "default", unit, gold, None, None,
+                         _num(data.get("model_price")), source)
+            if tier:
+                tiers.append(tier)
+    if default_spec and tiers:
+        tiers.sort(key=lambda tier: (0 if str(tier.get("spec")) == default_spec else 1,
+                                     str(tier.get("spec"))))
+    if token_rates:
+        billing = UNIT_PER_1M_TOKENS
+        category = "image" if pricing_mode == "image_modalities" else "chat"
+        dimension = "token" if category == "image" else "input_output"
+    elif unit == UNIT_PER_SECOND:
+        billing = UNIT_PER_SECOND
+        dimension = "resolution_duration"
+        category = "video"
+    else:
+        billing = UNIT_PER_IMAGE
+        dimension = "resolution"
+        category = "image"
+    return {
+        "id": model_id,
+        "name": model_id,
+        "category": category,
+        "billing": billing,
+        "spec_dimension": dimension,
+        "aliases": [],
+        "tiers": tiers,
+        "token_rates": token_rates,
+    }
+
+
+def apply_api_pricing(payload: Dict[str, Any], model: str, data: Dict[str, Any], source: str,
+                      spec_label: str = "") -> Optional[Dict[str, Any]]:
+    """把单个模型的实时报价合并进 payload（新模型直接加，已有模型整条替换档位）。
+
+    报价结构不是价目 schema 能表达时（比如没有 billing_type 的 muse-image-ext）返回 None，
+    调用方只打印缺口、不写空记录（空档位会在估价时被当 0，等于编价）。
+    """
+    models = payload.setdefault("models", {})
+    record = api_pricing_model_record(model, data, source, spec_label)
+    if not record.get("tiers") and not record.get("token_rates"):
+        return None
+    existing = models.get(model) or {}
+    for key in ("aliases", "specification", "limits"):
+        if existing.get(key) and not record.get(key):
+            record[key] = existing[key]
+    models[model] = record
+    alias_map = payload.setdefault("alias_map", {})
+    alias_map.setdefault(model.lower(), model)
+    alias_map.setdefault(_compact(model), model)
+    if record["id"] != model:
+        alias_map.setdefault(record["id"].lower(), model)
+    return record
+
+
+def _refresh_coverage(payload: Dict[str, Any], note: str = "") -> None:
+    """增量合并后重算 coverage（模型数/分类数），并把这次的口径写进 source.note。"""
+    models = payload.get("models") or {}
+    by_category: Dict[str, int] = {}
+    for record in models.values():
+        category = str(record.get("category") or "")
+        by_category[category] = by_category.get(category, 0) + 1
+    coverage = payload.setdefault("coverage", {})
+    coverage["models_total"] = len(models)
+    coverage["by_category"] = by_category
+    if note:
+        source = payload.setdefault("source", {})
+        current = str(source.get("note") or "")
+        if note not in current:
+            source["note"] = (current + "；" + note) if current else note
+
+
 def build(html: str, pages_dir: str = "") -> Dict[str, Any]:
     blob = decode_rsc(html)
     catalog = extract_initial_catalog(blob)
@@ -703,12 +940,55 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="解析 APIMart 价目页为结构化 JSON")
     parser.add_argument("--html", required=True, help="apimart.ai/zh/pricing 的 HTML")
     parser.add_argument("--pages", default="", help="模型详情页缓存目录（可选）")
-    parser.add_argument("--out", default=os.path.join("server", "credits", "apimart_pricing.json"))
+    parser.add_argument("--out", default="", help="输出路径；--merge-into 时默认回写该文件")
+    parser.add_argument("--merge-into", default="",
+                        help="在已有价目 JSON 上做增量（只改 --api-model 给出的模型），不整表重建")
+    parser.add_argument("--api-model", action="append", default=[],
+                        help="从 https://apimart.ai/api/pricing/model 拉单个模型的逐档价（可重复）")
+    parser.add_argument("--api-base", default=API_PRICING_BASE,
+                        help="报价接口域名，默认 https://apimart.ai（不要用 api.apimart.ai）")
+    parser.add_argument("--api-date", default="", help="source 里的日期，默认今天")
+    parser.add_argument("--api-spec", action="append", default=[],
+                        help="模型=规格名（只影响没有分档价的单档模型，如 magi-2=1080P；可重复）")
     args = parser.parse_args(argv)
+    if args.merge_into and not args.api_model:
+        parser.error("--merge-into 需要同时给 --api-model（增量只按模型合并）")
+    spec_labels: Dict[str, str] = {}
+    for item in args.api_spec:
+        model_key, _sep, spec_value = str(item).partition("=")
+        if model_key.strip() and spec_value.strip():
+            spec_labels[model_key.strip().lower()] = spec_value.strip()
     with open(args.html, "r", encoding="utf-8", errors="replace") as handle:
         html = handle.read()
-    payload = build(html, args.pages)
-    out_path = os.path.abspath(args.out)
+    if args.merge_into:
+        with open(args.merge_into, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        # 页面结构仍要校验一遍：抓下来的 HTML 和新解析器不匹配就直接报错，不静默写脏数据
+        parse_index(html)
+    else:
+        payload = build(html, args.pages)
+    merged: List[Tuple[str, str, int]] = []
+    skipped: List[str] = []
+    if args.api_model:
+        source = "%s@%s" % (API_SOURCE_PREFIX, args.api_date or time.strftime("%Y-%m-%d"))
+        for model in args.api_model:
+            data = fetch_api_model_pricing(model, args.api_base)
+            record = apply_api_pricing(payload, model, data, source,
+                                       spec_labels.get(model.strip().lower(), ""))
+            if record is None:
+                skipped.append(model)
+                print("[pricing] 缺口 %s：报价结构不是价目 schema 能表达（无分档/无 token 价）" % model)
+                continue
+            merged.append((model, str(record.get("category") or ""), len(record.get("tiers") or [])))
+        note = ("增量条目（%s）的 source 标为 %s，数值取自 Model Pricing API"
+                "（GET /api/pricing/model，免鉴权实测），gold=会员实付价、"
+                "official=标价、platinum/diamond 按 0.95/0.9 推导"
+                % (", ".join(item[0] for item in merged), source))
+        if skipped:
+            note += "；结构不支持的缺口（未落价）：%s" % "、".join(skipped)
+        _refresh_coverage(payload, note)
+    out_path = os.path.abspath(args.out or args.merge_into
+                               or os.path.join("server", "credits", "apimart_pricing.json"))
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as handle:
         json.dump(payload, handle, ensure_ascii=False, indent=1, sort_keys=False)
@@ -719,6 +999,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         coverage["models_total"], coverage["by_category"], coverage["index_total"],
         coverage["detail_pages_used"], coverage["models_with_detail_tiers"]))
     print("[pricing] 兜底：%s" % payload["fallback"])
+    for model, category, tier_count in merged:
+        print("[pricing] 增量 %s（%s，%d 档）" % (model, category, tier_count))
     return 0
 
 

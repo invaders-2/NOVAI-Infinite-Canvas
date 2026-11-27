@@ -18,8 +18,29 @@ import main
 
 # n_max / modes 现在是「缺失 = 后端不掌握」（不再下发 null / 空占位），所以是可选字段
 REQUIRED_KEYS = {"provider", "model", "kind", "ratios", "resolutions", "durations", "qualities"}
-# max_long_edge / max_pixels / min_pixels：精确像素生成模型（GPT-Image 家族）的像素上限，前端据此钳尺寸
-OPTIONAL_KEYS = {"n_max", "modes", "max_long_edge", "max_pixels", "min_pixels", "native_background"}
+# 可选字段白名单：能力表声明了才下发，没声明就不出现（字段缺失 = 后端不掌握）
+#   ref_max / video_ref_max / audio_ref_max：参考图/视频/音频上限
+#   audio / thinking_mode / native_background / prompt_only：布尔能力位
+#   max_long_edge / max_pixels / min_pixels：GPT-Image 家族的精确像素上限
+#   min_side / size_step / exact_size_pair：MAI 2.7 的精确像素口径（每边 ≥768、向下取 32 的倍数、宽高成对下发）
+#   series / skill / length / background / send_size：2026-11-25 新增（kling-v4-image 系列模式、
+#   kling-v4-long-image 的 skill/length 与不下发 size、mai 的 background 枚举）
+#   draft / draft_resolution / draft_final_resolutions / draft_expires_days：Seedance 2.5 草稿模式
+#   （draft=true 出 480p 草稿、成片 1080p/4k、草稿 3 天过期）
+OPTIONAL_KEYS = {
+    "n_max", "modes", "max_long_edge", "max_pixels", "min_pixels", "native_background",
+    "ref_max", "video_ref_max", "audio_ref_max", "audio", "thinking_mode", "prompt_only",
+    "output_formats", "gif_frames", "sizes", "batch", "mj", "exact_size",
+    "series", "skill", "length", "background", "send_size", "exact_size_pair",
+    "min_side", "size_step", "draft", "draft_resolution", "draft_final_resolutions",
+    "draft_expires_days",
+    # audio_default_on / ratio_follows_first_frame / nsfw_check：视频布尔能力位
+    # （能力表声明为真才下发，缺失 = 后端不掌握；audio_default_on 让编辑器把音频开关默认打开，
+    # ratio_follows_first_frame 让首帧方式收起比例选择，nsfw_check 打开内容审核开关）
+    "audio_default_on", "ratio_follows_first_frame", "nsfw_check",
+    # mj_video：Midjourney 图生视频的能力位（虚拟视频模型 midjourney-video 独有）
+    "mj_video",
+}
 
 
 def provider(pid, protocol, base_url="", image_models=(), video_models=(), enabled=True, image_model=""):
@@ -31,8 +52,11 @@ def provider(pid, protocol, base_url="", image_models=(), video_models=(), enabl
 def providers():
     return [
         provider("apimart", "apimart", "https://apib.ai",
-                 image_models=["gpt-image-2.5-ext", "gemini-3-pro-image-preview", "midjourney"],
-                 video_models=["seedance-2.5", "MiniMax-H3", "unknown-video-model"]),
+                 image_models=["gpt-image-2.5-ext", "gemini-3-pro-image-preview", "midjourney",
+                                "kling-v4-image", "kling-v4-long-image", "mai-image-2.7",
+                                "unknown-image-model"],
+                 video_models=["seedance-2.5", "MiniMax-H3", "magi-2", "seedance-2.0",
+                               "unknown-video-model"]),
         provider("agnes-ai", "openai", "https://apihub.agnes-ai.com",
                  image_models=["agnes-image-2.5-flash"],
                  video_models=["agnes-video-2.5", "agnes-video-2.5-flash", "agnes-video-v2.0"]),
@@ -77,9 +101,26 @@ class ModelCapsPayloadTests(unittest.TestCase):
         items = items_by()
         item = items[("apimart", "seedance-2.5", "video")]
         self.assertIn("16:9", item["ratios"])
-        self.assertEqual(item["durations"][0], 4)
+        # 首项 -1 = 「自动/自选时长」，是 2026-11-18 复核时补的合法值，不再是 4
+        self.assertEqual(item["durations"][0], -1)
+        self.assertIn(4, item["durations"])
         self.assertEqual(item["durations"][-1], 30)
         self.assertIn("1080p", item["resolutions"])
+
+    def test_apimart_video_bool_flags_follow_the_table(self):
+        items = items_by()
+        magi = items[("apimart", "magi-2", "video")]
+        self.assertIs(magi["audio_default_on"], True)
+        self.assertIs(magi["ratio_follows_first_frame"], True)
+        self.assertIs(magi["nsfw_check"], True)
+        # 默认有声的模型才带 audio_default_on（关声音要显式发 false）；它不跟随首帧
+        seedance = items[("apimart", "seedance-2.0", "video")]
+        self.assertIs(seedance["audio_default_on"], True)
+        self.assertNotIn("ratio_follows_first_frame", seedance)
+        # 能力表没声明的模型两个位都不出现（字段缺失 = 后端不掌握，不凭空补）
+        minimax = items[("apimart", "MiniMax-H3", "video")]
+        self.assertNotIn("audio_default_on", minimax)
+        self.assertNotIn("ratio_follows_first_frame", minimax)
 
     def test_agnes_caps(self):
         items = items_by()
@@ -112,7 +153,9 @@ class ModelCapsPayloadTests(unittest.TestCase):
 
     def test_models_without_authoritative_caps_are_absent(self):
         items = items_by()
-        self.assertNotIn(("apimart", "midjourney", "image"), items)
+        # midjourney 自 2026-11-18 起有权威条目（ratio/速度/HDR），改用真没表的 unknown-image-model
+        self.assertIn(("apimart", "midjourney", "image"), items)
+        self.assertNotIn(("apimart", "unknown-image-model", "image"), items)
         self.assertNotIn(("modelscope", "Tongyi-MAI/Z-Image-Turbo", "image"), items)
         self.assertNotIn(("apimart", "unknown-video-model", "video"), items)   # 未声明规格的型号不瞎编
         self.assertFalse([key for key in items if key[0] == "off"])
@@ -122,14 +165,18 @@ class ModelCapsPayloadTests(unittest.TestCase):
         self.assertEqual({key[0] for key in items}, {"apimart"})
 
     def test_cache_reads_providers_once_until_invalidated(self):
+        # 缓存的是「条目拼装结果」：配置指纹每次都要读一遍 providers（model_caps_overrides 可能变），
+        # 但同一个指纹下 _model_caps_items 只会跑一次。
         main.invalidate_model_caps_cache()
-        with patch.object(main, "load_api_providers", side_effect=providers) as loader:
+        loader_patch = patch.object(main, "load_api_providers", side_effect=providers)
+        items_patch = patch.object(main, "_model_caps_items", wraps=main._model_caps_items)
+        with loader_patch, items_patch as items:
             main._model_caps_payload(admin=True)
             main._model_caps_payload(admin=True)
-            self.assertEqual(loader.call_count, 1)
+            self.assertEqual(items.call_count, 1)
             main.invalidate_model_caps_cache()
             main._model_caps_payload(admin=True)
-            self.assertEqual(loader.call_count, 2)
+            self.assertEqual(items.call_count, 2)
         main.invalidate_model_caps_cache()
 
     def test_cache_rebuilds_when_config_signature_changes(self):
@@ -179,7 +226,7 @@ class ModelCapsConvergeTests(unittest.TestCase):
         self.assertEqual(out["ratio"], "9:16")
 
     def test_model_without_caps_is_untouched(self):
-        out = self.converge("midjourney", "image", ratio="7:5", size="1234x888", count=8)
+        out = self.converge("unknown-image-model", "image", ratio="7:5", size="1234x888", count=8)
         self.assertEqual((out["ratio"], out["size"], out["count"]), ("7:5", "1234x888", 8))
         self.assertEqual(out["notes"], [])
         self.assertIsNone(out["caps"])
@@ -206,7 +253,10 @@ class AgentToolConvergeTests(unittest.TestCase):
                 "canvas_id": "c1", "prompt": "海报", "ratio": "16:9", "size": "3840x2160", "count": 6})
         self.assertEqual(norm["ratio"], "3:2")
         self.assertEqual(norm["size"], "1536x1024")
-        self.assertEqual(norm["count"], 4)
+        # 张数不再被这里吞掉：请求几张保留几张，单次上限改用 max_batch 如实告诉执行端
+        self.assertEqual(norm["count"], 6)
+        self.assertEqual(norm["max_batch"], 4)
+        self.assertIn("一次最多 4 张", norm["batch_note"])
         self.assertTrue(norm["caps_notes"])
 
     def test_generate_video_validator_converges(self):

@@ -49,15 +49,17 @@ PROVIDER_OVERRIDABLE_FIELDS = (
 
 # 更新包可以附带「模型参数覆盖」：落到 provider.model_caps_overrides，/api/model-caps 合并后编辑器即用新参数。
 # 字段白名单与 /api/model-caps 的 caps 结构同源，未知字段直接丢掉（不制造前端不认识的键）。
-CAPS_LIST_FIELDS = ("ratios", "resolutions", "qualities", "modes", "output_formats", "sizes")
+CAPS_LIST_FIELDS = ("ratios", "resolutions", "qualities", "modes", "output_formats", "sizes",
+                    "skill", "length", "background", "draft_final_resolutions")
 CAPS_INT_LIST_FIELDS = ("durations", "batch")
 CAPS_INT_FIELDS = ("n_max", "max_long_edge", "max_pixels", "min_pixels", "ref_max",
-                   "video_ref_max", "audio_ref_max")
+                   "video_ref_max", "audio_ref_max", "min_side", "size_step", "draft_expires_days")
 CAPS_BOOL_FIELDS = ("exact_size", "mask_url", "base64_refs", "official_fallback", "send_resolution",
-                    "thinking_mode", "prompt_only", "native_background")
-CAPS_STR_FIELDS = ("fixed_resolution", "size_field", "response_version")
+                    "thinking_mode", "prompt_only", "native_background", "send_size", "exact_size_pair",
+                    "draft", "audio_default_on", "ratio_follows_first_frame", "nsfw_check")
+CAPS_STR_FIELDS = ("fixed_resolution", "size_field", "response_version", "draft_resolution")
 CAPS_FIELDS = CAPS_LIST_FIELDS + CAPS_INT_FIELDS + CAPS_BOOL_FIELDS + CAPS_STR_FIELDS
-CAPS_KINDS = ("image", "video")
+CAPS_KINDS = ("image", "video", "chat")
 
 
 def _clean_strings(value: Any) -> List[str]:
@@ -66,6 +68,62 @@ def _clean_strings(value: Any) -> List[str]:
         text = str(item if item is not None else "").strip()
         if text and text not in out:
             out.append(text)
+    return out
+
+
+MJ_VIDEO_LIST_FIELDS = ("motions", "video_types", "start_end_video_types", "animate_modes",
+                        "billing", "input_sources")
+MJ_VIDEO_STR_FIELDS = ("endpoint", "upstream_model", "motion_default", "video_type_default")
+MJ_VIDEO_TIER_MAPS = ("base_by_tier", "start_end_by_tier", "billing_by_tier")
+MJ_VIDEO_INT_FIELDS = ("batch_default", "index_min", "index_max", "duration_seconds")
+MJ_VIDEO_BOOL_FIELDS = ("requires_first_frame", "supports_end_frame", "duration_fixed")
+
+
+def _normalize_mj_video(value: Any) -> Dict[str, Any]:
+    """Midjourney 视频能力位（image 的 mj.video / video 的 mj_video 同一形状）；未知字段丢弃。"""
+    if not isinstance(value, dict) or not value:
+        return {}
+    out: Dict[str, Any] = {}
+    for field in MJ_VIDEO_LIST_FIELDS:
+        items = _clean_strings(value.get(field))
+        if items:
+            out[field] = items
+    for field in MJ_VIDEO_STR_FIELDS:
+        text = str(value.get(field) or "").strip()
+        if text:
+            out[field] = text
+    for field in MJ_VIDEO_TIER_MAPS:
+        source = value.get(field)
+        if not isinstance(source, dict):
+            continue
+        bucket = {}
+        for tier, target in source.items():
+            tier_text = str(tier or "").strip()
+            target_text = str(target or "").strip()
+            if tier_text and target_text:
+                bucket[tier_text] = target_text
+        if bucket:
+            out[field] = bucket
+    numbers = []
+    for item in (value.get("batch") if isinstance(value.get("batch"), list) else []):
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            continue
+        if number > 0 and number not in numbers:
+            numbers.append(number)
+    if numbers:
+        out["batch"] = numbers
+    for field in MJ_VIDEO_INT_FIELDS:
+        try:
+            number = int(value.get(field))
+        except (TypeError, ValueError):
+            continue
+        if number >= 0:
+            out[field] = number
+    for field in MJ_VIDEO_BOOL_FIELDS:
+        if field in value:
+            out[field] = bool(value.get(field))
     return out
 
 
@@ -107,6 +165,22 @@ def normalize_caps(value: Any) -> Dict[str, Any]:
             "speeds": _clean_strings(mj.get("speeds")),
             "hd": _clean_strings(mj.get("hd")),
         }
+        mj_video = _normalize_mj_video(mj.get("video"))
+        if mj_video:
+            out["mj"]["video"] = mj_video
+    # 系列模式张数区间（kling-v4-image 的 sequential_image_generation_options.max_images 2–4）
+    series = value.get("series")
+    if isinstance(series, dict) and series:
+        bucket = {}
+        for key in ("min", "max"):
+            try:
+                number = int(series.get(key))
+            except (TypeError, ValueError):
+                continue
+            if number > 0:
+                bucket[key] = number
+        if bucket:
+            out["series"] = bucket
     return out
 
 

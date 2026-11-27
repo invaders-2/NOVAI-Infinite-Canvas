@@ -89,7 +89,7 @@ eq(run('modelCapabilityFor("MiniMax-H3-Max", "aspects")'), ['16:9', '9:16', '1:1
 
 console.log('[4] 回归：其它模型区间不变，未收录模型仍回落 4-15');
 eq(range('kling-v3'), { min: 3, max: 15 }, 'videoDurationRange(kling-v3)');
-eq(range('veo3.1-fast'), { min: 4, max: 8 }, 'videoDurationRange(veo3.1-fast)');
+eq(range('veo3.1-fast'), { min: 8, max: 8 }, 'videoDurationRange(veo3.1-fast)：ext 档官方固定 8 秒');
 eq(range('doubao-seedance-2-5-260628'), { min: 4, max: 30 }, 'videoDurationRange(seedance-2.5)');
 eq(range('minimax-h3'), null, 'videoDurationRange(minimax-h3)（证据不足，不跟着改）');
 eq(clampRowDuration('minimax-h3', 2.48).bounds, { min: 4, max: 15 }, 'minimax-h3 仍回落 4-15');

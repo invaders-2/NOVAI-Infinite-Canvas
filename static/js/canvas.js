@@ -561,11 +561,12 @@ const SIZE_MAP = {
     ultrawide: { '1k':'2016x864', '2k':'2688x1152', '4k':'3840x1648' },
     ultratall: { '1k':'864x2016', '2k':'1152x2688', '4k':'1648x3840' }
 };
-const API_RES_LEVELS = ['0.5k','768sq','1k','quality','1.5k','2k','3k','4k'];
+const API_RES_LEVELS = ['0.5k','768sq','1k','quality','1.5k','2k','3k','4k','8k'];
 const API_RATIO_LABELS = {square:'正方形', portrait:'竖图', portrait43:'竖图', landscape:'横图', landscape43:'横图', story:'竖屏', wide:'宽屏', ultrawide:'超宽', ultratall:'超竖'};
-const RES_LONG_SIDE = { '0.5k':768, '768sq':768, '1k':1536, 'quality':1536, '1.5k':1920, '2k':2048, '3k':3072, '4k':3840 };
+// 8K 是 Kling V4 Image 的官方档（文档只给 1:1 = 2048/4096/8192），其余比例按本档长边等比换算。
+const RES_LONG_SIDE = { '0.5k':768, '768sq':768, '1k':1536, 'quality':1536, '1.5k':1920, '2k':2048, '3k':3072, '4k':3840, '8k':8192 };
 // 档位像素上限的唯一真值源是策略 tiers（shared/size-policy.js），这份常量只是策略取不到时的兜底
-const RES_PIXEL_LIMIT_FALLBACK = { '0.5k':262144, '768sq':589824, '1k':1572864, 'quality':1572864, '1.5k':3145728, '2k':4194304, '3k':9437184, '4k':8294400 };
+const RES_PIXEL_LIMIT_FALLBACK = { '0.5k':262144, '768sq':589824, '1k':1572864, 'quality':1572864, '1.5k':3145728, '2k':4194304, '3k':9437184, '4k':8294400, '8k':37748736 };
 function resPixelLimitFor(model){
     const limits = {};
     const tiers = sizePolicyFor(model).tiers;
@@ -878,6 +879,9 @@ const GEMINI_RATIO_KEYS = ['square', 'portrait14', 'portrait18', 'portrait', 'la
 const SEEDREAM_RATIO_KEYS = ['square', 'landscape43', 'portrait43', 'wide', 'story', 'landscape', 'portrait', 'ultrawide'];
 const MODEL_CAPABILITIES = [
     // ── 视频：官方宽高比 + 官方分辨率档 + 官方时长区间 [min, max] ──
+    // APIMart 的 2.5 上游 id 是点号 seedance-2.5（能力表 key 才用连字符）：4k + 4–30 秒（main.py:28684/28686）。
+    // 连字符的 doubao-seedance-2-5（Ark 名字）和 seedance-2-5-flash 都没有 4k，不能共用这一条。
+    { match: 'seedance-2.5', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p', '4k'], durationMin: 4, durationMax: 30 },
     { match: 'seedance-2-5', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 30 },
     { match: 'seedance_v2_5', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 30 },
     { match: 'seedance_v2_0_fast', aspects: ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive'], videoResolutions: ['480p', '720p', '1080p'], durationMin: 4, durationMax: 15 },
@@ -890,9 +894,10 @@ const MODEL_CAPABILITIES = [
     { match: 'kling-3.0-turbo', aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p'], durationMin: 3, durationMax: 15 },
     { match: 'kling-3-0-turbo', aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p'], durationMin: 3, durationMax: 15 },
     { match: 'kling', aspects: ['16:9', '9:16', '1:1'], videoResolutions: ['720p', '1080p', '4k'], durationMin: 3, durationMax: 15 },
-    { match: 'veo-3.1', aspects: ['16:9', '9:16'], durationMin: 4, durationMax: 8 },
-    { match: 'veo3.1', aspects: ['16:9', '9:16'], durationMin: 4, durationMax: 8 },
-    { match: 'veo3_1', aspects: ['16:9', '9:16'], durationMin: 4, durationMax: 8 },
+    // VEO 3.1 走 ext 档，官方时长固定 8 秒（main.py:29024 durations=(8,)）；发 4/6 秒会被上游拒。
+    { match: 'veo-3.1', aspects: ['16:9', '9:16'], durationMin: 8, durationMax: 8 },
+    { match: 'veo3.1', aspects: ['16:9', '9:16'], durationMin: 8, durationMax: 8 },
+    { match: 'veo3_1', aspects: ['16:9', '9:16'], durationMin: 8, durationMax: 8 },
     { match: 'veo-3', aspects: ['16:9', '9:16'] },
     { match: 'veo-2', aspects: ['16:9', '9:16', '1:1'] },
     { match: 'veo', aspects: ['16:9', '9:16'] },
@@ -916,6 +921,15 @@ const MODEL_CAPABILITIES = [
     // ── 图片：官方分辨率档位 + 官方比例集合（含下划线/连字符两种真实模型名写法）──
     // preset 指向 MODEL_TIER_PIXELS 的键，用于 0.5K/1.5K/3K 这类 SIZE_MAP 没覆盖的官方档位像素。
     // background 是原生透明背景能力（app 文档口径）：没标就是不支持，尺寸弹窗据此显隐「透明」。
+    // 2026-11-25 APIMart 文档新增（delta new_models）：
+    // kling-v4-long-image 不吃 size / aspect_ratio（ratios: [] 让比例格子全部隐藏，只留自定义），档位 1K/2K。
+    // kling-v4-image：auto + 8 个比例（auto 对应清晰度「自动」，比例键里没有 auto），档位 2K/4K/8K。
+    // mai-image-2.7 家族：比例 1:4–4:1 任意整数比（现有比例格子都在范围内 → 不声明 ratios 即不限制），
+    // background 只有 auto / opaque（transparent 上游 400）→ background: false。
+    { match: 'kling-v4-long-image', resLevels: ['1k', '2k'], ratios: [] },
+    { match: 'kling-v4-image', resLevels: ['2k', '4k', '8k'], ratios: ['square', 'wide', 'story', 'landscape43', 'portrait43', 'landscape', 'portrait', 'ultrawide'] },
+    { match: 'mai-image-2.7-flash', resLevels: ['1k', '2k'], background: false },
+    { match: 'mai-image-2.7', resLevels: ['1k', '2k'], background: false },
     { match: 'midjourney', resLevels: ['1k'] },
     { match: 'gpt-image-2.5-ext', resLevels: ['1k', '2k', '4k'], ratios: ['square', 'wide', 'story', 'landscape43', 'portrait43', 'landscape', 'portrait', 'landscape54', 'portrait45', 'ultrawide'], background: false },
     { match: 'gpt-image-2.6-ext', background: false },
@@ -6778,6 +6792,7 @@ const tableNodeApi = window.NovaTableNode({
     nowMs, responseErrorMessage, refreshIcons, renderNode, runGenerator, runVideoNode,
     showErrorModal,
     batchMediaLimit: node => node && node.useFrameRoles ? 2 : 1,
+    callLLM: (node, message, options = {}) => callCanvasLLM(node || {}, message, [], {noMedia:true, timeoutMs:180000, ...options}),
 });
 const {
     novaTableModel, addTableNode, syncTableNodeWidth, tableDropPortFor, connectNodes,

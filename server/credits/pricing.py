@@ -36,10 +36,10 @@ CATEGORY_FOR_KIND = {
 UNIT_FOR_KIND = {
     "image": ("per_image", "per_call"),
     "video": ("per_second", "per_call"),
-    "audio": ("per_call", "per_second"),
+    "audio": ("per_call", "per_second", "per_minute"),
     "chat": ("per_1m_tokens",),
 }
-RESOLUTION_ORDER = ["0.5K", "768SQ", "1K", "1.5K", "2K", "4K"]
+RESOLUTION_ORDER = ["0.5K", "768SQ", "1K", "1.5K", "2K", "4K", "8K"]
 RESOLUTION_AREA = {
     "0.5K": 300000,
     "768SQ": 590000,
@@ -47,6 +47,7 @@ RESOLUTION_AREA = {
     "1.5K": 2200000,
     "2K": 4000000,
     "4K": 8300000,
+    "8K": 33000000,
 }
 
 
@@ -135,9 +136,10 @@ def _spec_norm(value: Any) -> str:
 
 def _resolution_of(spec: str, width: int = 0, height: int = 0) -> str:
     text = _spec_norm(spec)
-    for token in ("0.5k", "768sq", "1.5k", "4k", "2k", "1k"):
+    # 8K 必须在 4K 之前判：kling-v4-image 有 2K/4K/8K 三档，档位名不含 4K
+    for token in ("0.5k", "768sq", "1.5k", "8k", "4k", "2k", "1k"):
         if token in text:
-            return {"0.5k": "0.5K", "768sq": "768SQ", "1.5k": "1.5K", "4k": "4K",
+            return {"0.5k": "0.5K", "768sq": "768SQ", "1.5k": "1.5K", "8k": "8K", "4k": "4K",
                     "2k": "2K", "1k": "1K"}[token]
     mp = re.search(r"(\d+(?:\.\d+)?)\s*mp", text)
     if mp:
@@ -153,6 +155,8 @@ def _resolution_of(spec: str, width: int = 0, height: int = 0) -> str:
 
 
 def _resolution_for_area(area: int) -> str:
+    if area >= 30000000:
+        return "8K"
     if area >= 6000000:
         return "4K"
     if area >= 2800000:
@@ -247,9 +251,16 @@ def pick_video_tier(record: Dict[str, Any], params: Optional[Dict[str, Any]] = N
     per_second = [tier for tier in tiers if tier.get("unit") == "per_second"]
     candidates = per_second or tiers
     width, height = _parse_dims(params)
-    target = int(height or 0) or (int(width * 9 / 16) if width else 720)
-    non_input = [tier for tier in candidates if "-input" not in _spec_norm(tier.get("spec")) and "参考视频" not in _spec_norm(tier.get("spec"))]
-    if non_input:
+    target = int(height or 0) or (int(width * 9 / 16) if width else 0)
+    if not target:
+        # 没有像素尺寸时按请求里的档位定目标（4k/2k 没有数字后缀，必须走这张表）
+        target = _video_resolution_value(str(params.get("resolution") or "")) or 720
+    input_tiers = [tier for tier in candidates if "-input" in _spec_norm(tier.get("spec")) or "参考视频" in _spec_norm(tier.get("spec"))]
+    non_input = [tier for tier in candidates if tier not in input_tiers]
+    if params.get("video_input") and input_tiers:
+        # Seedance 成片有原始参考视频输入：按文档走 1080P-input / 4K-input 档
+        candidates = input_tiers
+    elif non_input:
         candidates = non_input
     ranked: List[Tuple[float, Dict[str, Any]]] = []
     for tier in candidates:
@@ -267,7 +278,9 @@ def pick_video_tier(record: Dict[str, Any], params: Optional[Dict[str, Any]] = N
 
 
 def pick_audio_tier(record: Dict[str, Any], params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-    tiers = [tier for tier in record.get("tiers") or [] if tier.get("unit") in ("per_call", "per_second")]
+    # per_minute 是 whisper-1 这类转写模型的上游单位（2026-11-26 定价接口 billing_type=per_minute）
+    tiers = [tier for tier in record.get("tiers") or []
+             if tier.get("unit") in ("per_call", "per_second", "per_minute")]
     if not tiers:
         return None
     defaults = [tier for tier in tiers if _spec_norm(tier.get("spec")) in ("default", "默认")]

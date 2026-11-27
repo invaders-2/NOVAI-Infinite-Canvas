@@ -3,7 +3,7 @@
     "generated_by": "task-1 docs-researcher（APIMart 官方文档调研）",
     "channel": "docs.apimart.ai（/en 与 /cn 内容一致）",
     "corpus": "llms-full.txt 2513521 bytes / 92052 lines, sha256 94eb9c53d60e2ef7d7e57b152de7e66a296bfd628ea10f7890b4ec2e1ded205e",
-    "report": "docs/apimart-docs/REPORT.md（含 2026-11-18 增量节）+ REPORT-DELTA-20261118.md",
+    "report": "docs/apimart-docs/REPORT.md（含 2026-11-18 增量节）+ REPORT-DELTA-20261118.md + REPORT-DELTA-20261125.md（2026-11-25 增量：kling-v4-image / kling-v4-long-image / mai-image-2.7 / mai-image-2.7-flash；7 条仅定价页 chat 已标 confidence=low；imagen-4.0-apimart 与 seedance-1-5-pro 的文档页已消失）+ REPORT-DELTA-20261126.md（2026-11-26 增量：视频 magi-2 一页；196 个共有页正文 0 变化）",
     "rules": [
       "只收文档里能确证的模型 ID；别名单独成条并在 notes 里写 = 哪个正式 ID。",
       "efforts 只写 low/mid/high/xhigh/max 的子集，空数组 = 不下发该字段；条目的档位建议与 VENDOR-REASONING.md §4 保持一致（按上游真实能区分的档数收敛，不是一律 5 档）。",
@@ -54,25 +54,6 @@
       }
     },
     {
-      "id": "gpt-5-chat-latest",
-      "name": "GPT-5 Chat Latest",
-      "efforts": [
-        "low",
-        "mid",
-        "high",
-        "xhigh"
-      ],
-      "notes": "老一代 ID（OpenAI 官方已无对应模型页）。UI 给 4 档，但 wire 要整体下移一档：low->minimal、mid->low、high->medium、xhigh->high（推断：老一代 reasoning_effort 只到 high）。见 VENDOR-REASONING.md §4.1",
-      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
-      "inferred": true,
-      "wire_mapping": {
-        "low": "minimal",
-        "mid": "low",
-        "high": "medium",
-        "xhigh": "high"
-      }
-    },
-    {
       "id": "gpt-5-mini",
       "name": "GPT-5 Mini",
       "efforts": [
@@ -106,23 +87,6 @@
         "mid": "medium",
         "high": "high",
         "xhigh": "xhigh"
-      }
-    },
-    {
-      "id": "gpt-5.2-codex",
-      "name": "GPT-5.2 Codex",
-      "efforts": [
-        "low",
-        "mid",
-        "high"
-      ],
-      "notes": "codex 系在当前 OpenAI 文档里没有独立模型页，无 effort 枚举可引用 -> 保守 3 档（推断）。见 VENDOR-REASONING.md §4.1",
-      "source_url": "https://docs.apimart.ai/en/api-reference/texts/openai/responses",
-      "inferred": true,
-      "wire_mapping": {
-        "low": "low",
-        "mid": "medium",
-        "high": "high"
       }
     },
     {
@@ -305,7 +269,7 @@
         "mid",
         "high"
       ],
-      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
+      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2。2026-11-27 复核：上游 /v1/models 无此 ID，chat 端点连测 3 次（09:14 一次 + 重试 2 次）全部 HTTP 503「Please wait and try again later」→ 渠道瞬时不可用，保留但注明，未定性为下线",
       "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
       "inferred": true,
       "wire_mapping": {
@@ -322,7 +286,7 @@
         "mid",
         "high"
       ],
-      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
+      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2。2026-11-27 复核：上游 /v1/models 无此 ID，chat 端点连测 3 次（09:14 一次 + 重试 2 次）全部 HTTP 503「Please wait and try again later」→ 渠道瞬时不可用，保留但注明，未定性为下线",
       "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
       "inferred": true,
       "wire_mapping": {
@@ -330,31 +294,6 @@
         "mid": "medium",
         "high": "high"
       }
-    },
-    {
-      "id": "gemini-2.5-flash-lite",
-      "name": "Gemini 2.5 Flash Lite",
-      "efforts": [
-        "low",
-        "mid",
-        "high"
-      ],
-      "notes": "Gemini 官方文档确证：OpenAI 兼容层接受 reasoning_effort（minimal/low/medium/high，映射到 thinking_level），上游只有 4 个值没有 xhigh/max -> 收敛 3 档。注意：Gemini/DeepSeek 经 APIMart /v1/chat/completions 是否真转发该字段尚未实测（见 VENDOR-REASONING.md §6 V1）。 见 VENDOR-REASONING.md §2.2/§4.2",
-      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
-      "inferred": true,
-      "wire_mapping": {
-        "low": "low",
-        "mid": "medium",
-        "high": "high"
-      }
-    },
-    {
-      "id": "deepseek-r1-250528",
-      "name": "DeepSeek R1",
-      "efforts": [],
-      "notes": "文档原文『DeepSeek R1 推理模型』→ 确证是推理模型，但文档没写任何档位参数；R1 系通常不接受 effort，建议不下发该字段",
-      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
-      "inferred": false
     },
     {
       "id": "deepseek-v4-pro",
@@ -393,22 +332,6 @@
     {
       "id": "deepseek-v3.2",
       "name": "DeepSeek V3.2",
-      "efforts": [],
-      "notes": "同上",
-      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
-      "inferred": false
-    },
-    {
-      "id": "deepseek-v3.2-exp",
-      "name": "DeepSeek V3.2 Exp",
-      "efforts": [],
-      "notes": "同上",
-      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
-      "inferred": false
-    },
-    {
-      "id": "deepseek-v3-0324",
-      "name": "DeepSeek V3 0324",
       "efforts": [],
       "notes": "同上",
       "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
@@ -546,6 +469,521 @@
       "efforts": [],
       "notes": "= claude-opus-5 加 -thinking 后缀（L89183 的通用规则、L89192 的示例）；不是独立模型，计价与参数跟随 claude-opus-5",
       "source_url": "https://docs.apimart.ai/en/integrations/dev-tool/claude-code"
+    },
+    {
+      "id": "gemini-4-hydrogen",
+      "name": "gemini-4-hydrogen",
+      "efforts": [],
+      "notes": "仅定价页证据（apimart.ai/zh/pricing LLM 索引 + GET /api/pricing/model 返回 200，文档 196 页 0 命中）：输入 $1.2 / 输出 $6.0 每 100 万 token；2026-11-25 第一轮实测定价接口 200（乱写 id 返回 404）→ 升 medium，只能证明「在售」，真调用仍未验证（U19）；命名是否官方口径未确认；本轮环境无网络未复测",
+      "source_url": "https://apimart.ai/zh/pricing",
+      "inferred": true,
+      "confidence": "medium"
+    },
+    {
+      "id": "gemini-4-carbon",
+      "name": "gemini-4-carbon",
+      "efforts": [],
+      "notes": "仅定价页证据（apimart.ai/zh/pricing LLM 索引 + GET /api/pricing/model 返回 200，文档 196 页 0 命中）：输入 $1.6 / 输出 $8.0 每 100 万 token；2026-11-25 第一轮实测定价接口 200（乱写 id 返回 404）→ 升 medium，只能证明「在售」，真调用仍未验证（U19）；命名是否官方口径未确认；本轮环境无网络未复测",
+      "source_url": "https://apimart.ai/zh/pricing",
+      "inferred": true,
+      "confidence": "medium"
+    },
+    {
+      "id": "gemini-4-neon",
+      "name": "gemini-4-neon",
+      "efforts": [],
+      "notes": "仅定价页证据（apimart.ai/zh/pricing LLM 索引 + GET /api/pricing/model 返回 200，文档 196 页 0 命中）：输入 $2.4 / 输出 $12.0 每 100 万 token；2026-11-25 第一轮实测定价接口 200（乱写 id 返回 404）→ 升 medium，只能证明「在售」，真调用仍未验证（U19）；命名是否官方口径未确认；本轮环境无网络未复测",
+      "source_url": "https://apimart.ai/zh/pricing",
+      "inferred": true,
+      "confidence": "medium"
+    },
+    {
+      "id": "gpt-6.2-astra",
+      "name": "gpt-6.2-astra",
+      "efforts": [],
+      "notes": "仅定价页证据（apimart.ai/zh/pricing LLM 索引 + GET /api/pricing/model 返回 200，文档 196 页 0 命中）：输入 $6.4 / 输出 $32.0 每 100 万 token；2026-11-25 第一轮实测定价接口 200（乱写 id 返回 404）→ 升 medium，只能证明「在售」，真调用仍未验证（U19）；命名是否官方口径未确认；本轮环境无网络未复测",
+      "source_url": "https://apimart.ai/zh/pricing",
+      "inferred": true,
+      "confidence": "medium"
+    },
+    {
+      "id": "gpt-6.2-sol",
+      "name": "gpt-6.2-sol",
+      "efforts": [],
+      "notes": "仅定价页证据（apimart.ai/zh/pricing LLM 索引 + GET /api/pricing/model 返回 200，文档 196 页 0 命中）：输入 $1.6 / 输出 $8.0 每 100 万 token；2026-11-25 第一轮实测定价接口 200（乱写 id 返回 404）→ 升 medium，只能证明「在售」，真调用仍未验证（U19）；命名是否官方口径未确认；本轮环境无网络未复测",
+      "source_url": "https://apimart.ai/zh/pricing",
+      "inferred": true,
+      "confidence": "medium"
+    },
+    {
+      "id": "claude-fable-5.2",
+      "name": "claude-fable-5.2",
+      "efforts": [],
+      "notes": "仅定价页证据（apimart.ai/zh/pricing LLM 索引 + GET /api/pricing/model 返回 200，文档 196 页 0 命中）：输入 $6.4 / 输出 $32.0 每 100 万 token；2026-11-25 第一轮实测定价接口 200（乱写 id 返回 404）→ 升 medium，只能证明「在售」，真调用仍未验证（U19）；命名与 opus/sonnet 体系不同（U20），但定价接口返回该 id → 按「在售」收录；本轮环境无网络未复测",
+      "source_url": "https://apimart.ai/zh/pricing",
+      "inferred": true,
+      "confidence": "medium"
+    },
+    {
+      "id": "qwen4-max",
+      "name": "qwen4-max",
+      "efforts": [],
+      "notes": "仅定价页证据（apimart.ai/zh/pricing LLM 索引 + GET /api/pricing/model 返回 200，文档 196 页 0 命中）：输入 $1.4286 / 输出 $4.2857 每 100 万 token；2026-11-25 第一轮实测定价接口 200（乱写 id 返回 404）→ 升 medium，只能证明「在售」，真调用仍未验证（U19）；命名是否官方口径未确认；本轮环境无网络未复测",
+      "source_url": "https://apimart.ai/zh/pricing",
+      "inferred": true,
+      "confidence": "medium"
+    },
+    {
+      "id": "claude-fable-5",
+      "name": "Claude Fable 5",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored，不能发 reasoning_effort；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3；仅上游清单/无独立文档页（2026-11-27）（category=chat）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-fable-5.1",
+      "name": "Claude Fable 5.1",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored，不能发 reasoning_effort；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3；仅上游清单/无独立文档页（2026-11-27）（category=chat）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-haiku-4-5-20251001-thinking",
+      "name": "Claude Haiku 4.5 思考版（2025-10-01）",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "-thinking 是平台扩展别名（文档：所有模型都能加 -thinking）；Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored，不能发 reasoning_effort；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-opus-4-5",
+      "name": "Claude Opus 4.5",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored，不能发 reasoning_effort；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3；仅上游清单/无独立文档页（2026-11-27）（category=chat）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-opus-4-5-20251101-thinking",
+      "name": "Claude Opus 4.5 思考版（2025-11-01）",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "-thinking 是平台扩展别名；Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored，不能发 reasoning_effort；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-opus-4-6-thinking",
+      "name": "Claude Opus 4.6 思考版",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "-thinking 是平台扩展别名；Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored，不能发 reasoning_effort；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-opus-5-5",
+      "name": "Claude Opus 5.5",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored，不能发 reasoning_effort；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3；仅上游清单/无独立文档页（2026-11-27）（category=chat）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-sonnet-4-5",
+      "name": "Claude Sonnet 4.5",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored，不能发 reasoning_effort；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3；仅上游清单/无独立文档页（2026-11-27）（category=chat）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-sonnet-4-5-20250929-thinking",
+      "name": "Claude Sonnet 4.5 思考版（2025-09-29）",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "-thinking 是平台扩展别名；Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored，不能发 reasoning_effort；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-sonnet-4-6-thinking",
+      "name": "Claude Sonnet 4.6 思考版",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "-thinking 是平台扩展别名；Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored，不能发 reasoning_effort；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "claude-sonnet-5-5",
+      "name": "Claude Sonnet 5.5",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "Claude 官方文档：OpenAI 兼容层把 reasoning_effort 标为 Ignored，不能发 reasoning_effort；要控思考只能发 thinking:{type:\"enabled\", budget_tokens:N}，真生效需走 /v1/messages。见 VENDOR-REASONING.md §2.3/§4.3；仅上游清单/无独立文档页（2026-11-27）（category=chat）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/claude-messages",
+      "inferred": true
+    },
+    {
+      "id": "deepseek-r1",
+      "name": "DeepSeek R1",
+      "efforts": [],
+      "notes": "R1 只有思考开关、没有 reasoning_effort 档位（server/protocols/thinking.py 归 no-think）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "deepseek-v4.1-flash",
+      "name": "DeepSeek V4.1 Flash",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "notes": "DeepSeek V4 族（官方 low/high/max 三档，mid/xhigh 收敛到 high，见 VENDOR-REASONING §4.4）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "gemini-3-flash-preview-nothinking",
+      "name": "Gemini 3 Flash 预览版（关闭思考）",
+      "efforts": [],
+      "notes": "明确关闭思考的别名（thinking.py no-think，不下发 reasoning_effort）；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "gemini-3-flash-preview-thinking",
+      "name": "Gemini 3 Flash 预览版（思考版）",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "-thinking 是思考版别名，档位同 gemini-3-flash-preview（3 档），不增加档位；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "gemini-3.1-flash-lite-preview",
+      "name": "Gemini 3.1 Flash Lite 预览版",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "Gemini 3 系 3 档（low/mid/high，xhigh/max 收敛到 high）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "gemini-3.1-pro-preview-thinking",
+      "name": "Gemini 3.1 Pro 预览版（思考版）",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "-thinking 是思考版别名，档位同 gemini-3.1-pro-preview（3 档）；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "gemini-3.5-flash-lite",
+      "name": "Gemini 3.5 Flash Lite",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "gemini-3.7-flash",
+      "name": "Gemini 3.7 Flash",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "gemini-3.8-flash",
+      "name": "Gemini 3.8 Flash",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "gemini-4-argon",
+      "name": "Gemini 4 Argon",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "glm-5.2",
+      "name": "GLM-5.2",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "GLM-5.2 文档枚举 5 档（max/xhigh/high/medium/low），可直接发 reasoning_effort；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "glm-5.3",
+      "name": "GLM-5.3",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "notes": "GLM-5.3 只有 low/high/max（mid/xhigh 收敛到 high）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "glm-5.3-flash",
+      "name": "GLM-5.3 Flash",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "notes": "同 GLM-5.3 三档（低/高/max）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "gpt-4.1",
+      "name": "GPT-4.1",
+      "efforts": [],
+      "notes": "非推理模型（thinking.py no-think，不发 reasoning_effort）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions"
+    },
+    {
+      "id": "gpt-4.1-mini",
+      "name": "GPT-4.1 mini",
+      "efforts": [],
+      "notes": "非推理模型（thinking.py no-think）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions"
+    },
+    {
+      "id": "gpt-4o",
+      "name": "GPT-4o",
+      "efforts": [],
+      "notes": "非推理模型（thinking.py no-think）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions"
+    },
+    {
+      "id": "gpt-4o-mini",
+      "name": "GPT-4o mini",
+      "efforts": [],
+      "notes": "非推理模型（thinking.py no-think）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions"
+    },
+    {
+      "id": "gpt-5-nano",
+      "name": "GPT-5 nano",
+      "efforts": [],
+      "notes": "仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表；档位未文档化（thinking.py 未收录 gpt-5-nano）→ efforts 留空",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "gpt-5-pro",
+      "name": "GPT-5 Pro",
+      "efforts": [],
+      "notes": "仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表；档位未文档化（pro 档的官方 reasoning_effort 枚举未拿到）→ efforts 留空",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "gpt-5-search-api",
+      "name": "GPT-5 Search API",
+      "efforts": [],
+      "notes": "搜索类模型，无思考档位；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "gpt-5.4-nano",
+      "name": "GPT-5.4 nano",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh"
+      ],
+      "notes": "gpt-5.4 家族 4 档（low/mid/high/xhigh）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "gpt-5.4-pro",
+      "name": "GPT-5.4 Pro",
+      "efforts": [
+        "mid",
+        "high",
+        "xhigh"
+      ],
+      "notes": "pro 档只有 mid/high/xhigh（low 收敛到 mid，不发 max）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "gpt-5.6-terra",
+      "name": "GPT-5.6 Terra",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "gpt-5.6 家族 5 档（minimal/low/medium/high/xhigh/max 直映）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "gpt-6-sol",
+      "name": "GPT-6 Sol",
+      "efforts": [
+        "low",
+        "mid",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "notes": "gpt-6 家族 5 档；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "kimi-k3",
+      "name": "Kimi K3",
+      "efforts": [
+        "low",
+        "high",
+        "max"
+      ],
+      "notes": "Kimi K3 只有 low/high/max（mid/xhigh 收敛到 high）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "qwen3.8-2.4t-a95b",
+      "name": "Qwen3.8 2.4T A95B",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "Qwen3.8 三档（canonical high wire 到 xhigh，见 §4.5）；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "qwen3.8-27b",
+      "name": "Qwen3.8 27B",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "同 Qwen3.8 三档；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
+    },
+    {
+      "id": "qwen3.8-flash",
+      "name": "Qwen3.8 Flash",
+      "efforts": [
+        "low",
+        "mid",
+        "high"
+      ],
+      "notes": "同 Qwen3.8 三档；仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=chat），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://docs.apimart.ai/en/api-reference/texts/general/chat-completions",
+      "inferred": true
     }
   ],
   "image": [
@@ -840,7 +1278,7 @@
       "id": "imagen-4.0-apimart",
       "name": "Imagen 4.0",
       "efforts": [],
-      "notes": "n/size(默认16:9)/nsfw_check",
+      "notes": "n/size(默认16:9)/nsfw_check；[2026-11-25 文档页已消失：196 个 Source 锚点无该 URL、全文 grep imagen 0 命中；新定价页 initialCatalog 仍列出它 → 降级为「文档缺失」，不要删模型]",
       "source_url": "https://docs.apimart.ai/en/api-reference/images/imagen-4.0-apimart/generation"
     },
     {
@@ -975,6 +1413,86 @@
       "efforts": [],
       "notes": "[2026-11-13 批次补录] 参数与 minimax-h3-image 完全相同，只是加速通道",
       "source_url": "https://docs.apimart.ai/en/api-reference/images/minimax-h3-image-highspeed/generation"
+    },
+    {
+      "id": "kling-v4-image",
+      "name": "Kling V4 Image",
+      "notes": "[2026-11-25 新增页] size(auto 默认 + 16:9/9:16/1:1/4:3/3:4/3:2/2:3/21:9；不收像素尺寸，aspect_ratio 是 size 别名且优先)/resolution(2K 默认/4K/8K；1:1 时 2048/4096/8192)/n(1–9；系列模式必须省略 n 或给 1，n>1 直接 400)/sequential_image_generation(disabled 默认|auto)+sequential_image_generation_options.max_images(2–4，系列模式必填)/image_urls ≤10(只收公网 URL，每张 ≤30MB、两边 ≥300px、比例 2:5–5:2；本地图先用上传接口)/@Image1..@Image10/nsfw_check(默认 false)；width/height/mask_url/像素 size/watermark:true 一律 400；计费档 kling-v4-image@2K/@4K/@8K/@input；estimated_time 固定 60s 不能当倒计时，8K 单张可 >100MB（列表要用缩略图）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/kling-v4-image/generation"
+    },
+    {
+      "id": "kling-v4-long-image",
+      "name": "Kling V4 Long Image",
+      "notes": "[2026-11-25 新增页] 长图/商详页/网页设计，每请求固定 1 张；skill 必填(ecommerce|webpage)；length(short|medium|long，默认 medium，仅 ecommerce；webpage 传了 400)；resolution(1K 默认/2K，输出宽 1024/2048，高随内容，4K 不支持)；n 固定 1；watermark 只能 false；ecommerce 用 image_urls 1–3 张（必填），webpage 用 image_with_roles(style|subject 各 ≤1，可选)；size/aspect_ratio/width/height/mask_url/sequential_image_generation* 传了就 400（含 null/空串）；响应新增 data.billing_status(held/settled/refunded) 与 images[0].expires_at；计费 8 档 1K/2K × SHORT/MEDIUM/LONG/WEBPAGE + @input；long+2K 实测 2048x46615/63.9MB/432s",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/kling-v4-long-image/generation"
+    },
+    {
+      "id": "mai-image-2.7",
+      "name": "MAI Image 2.7",
+      "notes": "[2026-11-25 新增页] size 两种写法：任意整数比例 1:4–4:1（配 resolution 1K 默认/2K 出像素），或像素 widthxheight/width*height/width x height；width+height 成对时优先级最高（仅文生图）；像素约束：两边 ≥768、总像素 ≤4194304、各自向下取 32 的倍数（1000x1000 → 992x992）；n 固定 1（0/负数/>1 都 400）；image_urls ≤5（公网 URL 或 data:image base64；图生图时 size/resolution/width/height 全失效）；background(auto|opaque，transparent 400)；auto / 4K / auto_aspect_ratio / web_grounding 返回 400；quality/style/output_format/response_format/mask_url 被忽略；输出恒 PNG；计费 tiered_token(image_modalities)：1K 预扣 0.035 / 2K 0.14 USD",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/mai-image-2.7/generation"
+    },
+    {
+      "id": "mai-image-2.7-flash",
+      "name": "MAI Image 2.7 Flash",
+      "notes": "[2026-11-25 新增页] 与 mai-image-2.7 同一页、能力与参数完全一致，只差质量/速度/价格；像素约束、background、n=1、ref ≤5 全部同上；计费 tiered_token：1K 预扣 0.011 / 2K 0.041 USD",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/mai-image-2.7/generation"
+    },
+    {
+      "id": "dall-e-3",
+      "name": "DALL·E 3",
+      "efforts": [],
+      "notes": "仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=image），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "gpt-image-1",
+      "name": "GPT-Image-1",
+      "efforts": [],
+      "notes": "文档页参数（同页模型表只列 gpt-image-1.5-official，裸 gpt-image-1 只有上游清单，参数按同页推断）：size(默认1:1)/quality(默认auto)/background/moderation/output_format(默认png)/output_compression/image_urls/mask_url/n/nsfw_check；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-1/generation"
+    },
+    {
+      "id": "gpt-image-1.5",
+      "name": "GPT-Image-1.5",
+      "efforts": [],
+      "notes": "文档页参数（L4822 模型表 → gpt-image-1.5-official；裸 gpt-image-1.5 只有上游清单，参数按同页推断）：size(默认1:1)/quality(默认auto)/background/moderation/output_format(默认png)/output_compression/image_urls/mask_url/n/nsfw_check",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/gpt-image-1/generation"
+    },
+    {
+      "id": "grok-imagine-1.0-apimart",
+      "name": "Grok Imagine 1.0（APIMart 通道）",
+      "efforts": [],
+      "notes": "仅上游清单/无独立文档页（2026-11-27）：GET /v1/models?expand=category 实测在列（category=image），文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "grok-imagine-1.0-edit-apimart",
+      "name": "Grok Imagine 1.0 编辑（APIMart 通道）",
+      "efforts": [],
+      "notes": "仅上游清单/无独立文档页（2026-11-27）：category=image；文档语料 0 命中 → 参数未知，不建能力表",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "grok-imagine-1.5-edit-apimart",
+      "name": "Grok Imagine 1.5 编辑（APIMart 通道）",
+      "efforts": [],
+      "notes": "仅上游清单/无独立文档页（2026-11-27）：上游 doc 页 images/grok-imagine 只讲 grok-imagine-image / -image-quality / -image-2.0，1.5-edit 只有上游清单 → 参数未知",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "grok-imagine-image",
+      "name": "Grok Imagine Image",
+      "efforts": [],
+      "notes": "文档页参数（L9877–L9907 模型表）：aspect_ratio / resolution(1k|2k) / image_urls(1–5 张) / n(1–10) / nsfw_check，quality 不支持（只有 -quality 版收 quality）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/grok-imagine/generation"
+    },
+    {
+      "id": "grok-imagine-image-quality",
+      "name": "Grok Imagine Image Quality",
+      "efforts": [],
+      "notes": "文档页参数（L9881–L9896 模型表）：aspect_ratio / resolution(1k|2k) / image_urls(1–3 张) / n(1–10) / nsfw_check；quality 不支持（上游明确 None）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/images/grok-imagine/generation"
     }
   ],
   "video": [
@@ -1126,13 +1644,6 @@
       "source_url": "https://docs.apimart.ai/en/api-reference/videos/minimax-hailuo/generation"
     },
     {
-      "id": "seedance-1-5-pro",
-      "name": "Seedance 1.5 Pro",
-      "efforts": [],
-      "notes": "duration(默认5)/aspect_ratio(默认16:9)/resolution(默认720p)/seed/audio(默认true)/camerafixed/image_urls/image_with_roles",
-      "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-1-5-pro/generation"
-    },
-    {
       "id": "seedance-2.0",
       "name": "Seedance 2.0",
       "efforts": [],
@@ -1171,7 +1682,7 @@
       "id": "seedance-2.5",
       "name": "Seedance 2.5",
       "efforts": [],
-      "notes": "draft/draft_task_id/prompt/resolution(默认720p)/size(默认adaptive)/duration(默认5)/generate_audio(默认true)/watermark/seed/output_format(默认mp4)/omni_reference_task_type(默认auto)/image_urls/image_with_roles/video_urls/audio_urls/return_last_frame/tools",
+      "notes": "draft/draft_task_id/prompt/resolution(默认720p)/size(默认adaptive)/duration(默认5)/generate_audio(默认true)/watermark/seed/output_format(默认mp4)/omni_reference_task_type(默认auto)/image_urls/image_with_roles/video_urls/audio_urls/return_last_frame/tools；参考上限文档声明 图30/视频10/音频10，但本项目通用上传分支只取 9/3/3 → 能力表按实际队列写 9/3/3（放开前需实测超限请求，U23）；草稿模式（L46524–L46602）：draft:true 出 480p 草稿 → draft_task_id 出 1080p/4k 成片，草稿 3 天过期，继承字段同值也 400；flash 不支持草稿（L45662）",
       "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-5/generation"
     },
     {
@@ -1395,7 +1906,7 @@
       "id": "apimart-zoe",
       "name": "APIMart Zoe",
       "efforts": [],
-      "notes": "[2026-11-13 批次补录] 普通生成默认 720p/480p/1080p/2k/4k（草稿只认 480p）/比例 21:9~9:16 + adaptive/时长 4–30 或 -1/自带音轨/参考上限 图30 视频10 音频10；编辑参考走 omni_reference_task_type，不支持 extend",
+      "notes": "[2026-11-13 批次补录] 普通生成默认 720p/480p/1080p/2k/4k（草稿只认 480p）/比例 21:9~9:16 + adaptive/时长 4–30 或 -1/自带音轨/参考上限 图30 视频10 音频10；编辑参考走 omni_reference_task_type，不支持 extend；[2026-11-25 复核] 能力表参考上限仍按实际上传队列写 图 9 / 视频 3 / 音频 3：文档本轮声明图 30（L36104）/视频 10（L36118）/音频 10（L36126），但通用上传分支只取前 9 张图、3 段视频、3 段音频，超出会被静默截断；放开前需实测超限请求（U23）",
       "source_url": "https://docs.apimart.ai/en/api-reference/videos/apimart-zoe/generation"
     },
     {
@@ -1432,6 +1943,41 @@
       "efforts": [],
       "notes": "= seedance-2-5-flash 的官方别名（L45990）；参数与计价跟随正式 ID",
       "source_url": "https://docs.apimart.ai/en/api-reference/videos/seedance-2-5-flash/generation"
+    },
+    {
+      "id": "magi-2",
+      "name": "MAGI-2",
+      "efforts": [],
+      "notes": "[2026-11-26 新增页 L40642–L40910] 参数摘要：固定 1080p（resolution 只收 1080p，其它值 400）；duration 4–30 连续整秒（默认 5，0/小数/越界 400），seconds 是别名（同时发必须相等）；aspect_ratio 16:9（默认）/9:16/1:1/4:3/3:4/21:9 + auto 或省略（图生视频不含 21:9，auto/省略 = 跟随首帧）；generate_audio 默认 true（audio 是别名，不得冲突）；seed 0..2147483647 或 -1（随机）；nsfw_check 默认 false（true 才用 omni-moderation-latest 审 prompt 与输入图，显式开才发）；omni_reference_task_type 只有 auto（默认）|reference，edit/extend 直接 400；image_urls 图生视频 ≤2（首帧 + 可选尾帧）、参考模式与 image_with_roles(role=reference_image) 合计 ≤10；first_frame_image/last_frame_image 与 image_urls 二选一（尾帧必须配首帧）；video_urls ≤5、audio_urls ≤5（各 2–30 秒、合计建议 ≤30 秒）；prompt ≤15000 字符。不支持：草稿/编辑/延长/keyframe/billing_status/计费段。unsupported 400：mode、negative_prompt、watermark:true、camera_control、multi_shot/multi_prompt、element_list、video_list、voice_list、audio_setting、keyframe、video_url（单数）、omni_reference_task_type=edit/extend、resolution≠1080p。我方能力表参考上限按实际提交队列写 9/3/3（文档 10/5/5，通用分支 image_payload[:9]/video_payload[:3]/audios[:3] 会静默截断 → U23 证据 +1，与 apimart-zoe 同口径）",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/magi-2/generation"
+    },
+    {
+      "id": "Omni-Flash-Ext",
+      "name": "Omni Flash Ext",
+      "efforts": [],
+      "notes": "= gemini-omni-1.1-flash-ext（同一套文档参数：durations 4/6/8/10、比例 16:9|9:16、分辨率 360p/720p/1080p/4k）；真机 /v1/models 的 ID 是本条，文档示例写 gemini-omni-1.1-flash-ext（catalog 两条并存）",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "grok-imagine-1.0-video-apimart",
+      "name": "Grok Imagine 1.0 视频（APIMart 通道）",
+      "efforts": [],
+      "notes": "上游真机 ID（catalog 另有文档示例写法 grok-imagine-1.5-video-ext 的别名条目，同族）；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "grok-imagine-1.5-video-apimart",
+      "name": "Grok Imagine 1.5 视频（APIMart 通道）",
+      "efforts": [],
+      "notes": "上游真机 ID —— 文档示例写的 grok-imagine-1.5-video-ext 在 /v1/models 里不存在，真机用本 ID（catalog 另收别名条目）；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "wan2.6-i2v",
+      "name": "Wan2.6 i2v",
+      "efforts": [],
+      "notes": "文档页参数（wan2.6-i2v-flash 页 L51058 起；audio 一节明确「model 为 wan2.6-i2v 时不支持」）：image_urls 必填 1 张首帧 / prompt / negative_prompt(≤500) / resolution(720p|1080p，默认1080p) / duration(2–15，默认5) / audio(该型号不支持) / audio_url / prompt_extend / seed / watermark",
+      "source_url": "https://docs.apimart.ai/en/api-reference/videos/wan2.6/i2v-flash-generation"
     }
   ],
   "audio": [
@@ -1446,22 +1992,8 @@
       "id": "flowmusic",
       "name": "FlowMusic",
       "efforts": [],
-      "notes": "生成 POST /v1/music/generations（model=flowmusic，字段 title/sound_prompt/bpm/length 等）；其余操作 /coverFlowMusic、/extendFlowMusic、/lyricsFlowMusic、/replaceFlowMusic、/stemsFlowMusic、/uploadAudioFlowMusic、/videoClipFlowMusic、/downloadAudioFlowMusic；查询 GET /v1/music/tasks/{task_id}",
+      "notes": "生成 POST /v1/music/generations（model=flowmusic，字段 title/sound_prompt/bpm/length 等）；其余操作 /coverFlowMusic、/extendFlowMusic、/lyricsFlowMusic、/replaceFlowMusic、/stemsFlowMusic、/uploadAudioFlowMusic、/videoClipFlowMusic、/downloadAudioFlowMusic；查询 GET /v1/music/tasks/{task_id}；Lyria 3.5 是 version 取值不是模型 ID：请求体为 {\"model\":\"flowmusic\",\"version\":\"lyria-3.5\",...}（generate / cover / extend / replace 四页，如 L56840 起）；2026-11-26 修正：删除 catalog 里误列的 lyria-3.5 与 flowmusic-lyria-3.5 两条独立条目",
       "source_url": "https://docs.apimart.ai/en/api-reference/audios/flow-music/music"
-    },
-    {
-      "id": "lyria-3.5",
-      "name": "Lyria 3.5",
-      "efforts": [],
-      "notes": "[文档独有] FlowMusic 的 Lyria 3.5 专用版：generate/cover/extend/replace 四页，version 字段必填；项目 apimart_pricing.json 没有该 ID",
-      "source_url": "https://docs.apimart.ai/en/api-reference/audios/flow-music/music-lyria-3-5"
-    },
-    {
-      "id": "flowmusic-lyria-3.5",
-      "name": "Lyria 3.5（别名形式）",
-      "efforts": [],
-      "notes": "[文档独有] 同上",
-      "source_url": "https://docs.apimart.ai/en/api-reference/audios/flow-music/music-lyria-3-5"
     },
     {
       "id": "gpt-4o-mini-tts",
@@ -1476,6 +2008,36 @@
       "efforts": [],
       "notes": "[文档独有] POST /v1/audio/transcriptions，multipart/form-data；项目 apimart_pricing.json 没有该 ID",
       "source_url": "https://docs.apimart.ai/en/api-reference/audios/whisper-1"
+    },
+    {
+      "id": "gpt-audio-mini",
+      "name": "gpt-audio-mini",
+      "efforts": [],
+      "notes": "[2026-11-26 上游实测] APIMart /v1/models?expand=category 把该 id 归到 audio（262 个模型里 audio 只有 5 个：flowmusic / gpt-4o-mini-tts / gpt-audio-mini / suno / whisper-1）；计价 tiered_token（usd_per_million_tokens，输入/输出与 audio_input/audio_output 分开定价）；音频对话走 /v1/chat/completions 的 chat 形态，不是 /v1/audio/*；文档 196 页 0 命中 → 只有上游实测证据，无文档页",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "gpt-4o-mini-transcribe",
+      "name": "GPT-4o mini Transcribe（转写）",
+      "efforts": [],
+      "notes": "上游归 category=chat，实际走 /v1/audio/transcriptions → 语义覆盖表强制归 audio，不进对话列表；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    },
+    {
+      "id": "gpt-4o-transcribe",
+      "name": "GPT-4o Transcribe（转写）",
+      "efforts": [],
+      "notes": "上游 /v1/models 归 category=chat，但实际走 /v1/audio/transcriptions → 2026-11-27 语义覆盖表强制归 audio（main.APIMART_MODEL_SEMANTIC_OVERRIDES），不进对话列表；仅上游清单/无独立文档页（2026-11-27）",
+      "source_url": "https://api.apimart.ai/v1/models?expand=category"
+    }
+  ],
+  "hidden": [
+    {
+      "id": "omni-moderation-latest",
+      "name": "Omni Moderation（审核模型）",
+      "efforts": [],
+      "notes": "上游 /v1/models 归 category=chat，但它是**审核模型**，实际走 /v1/moderations（文档 moderations/omni-moderation-latest/generation），其它模型请求里的 nsfw_check=true 才会调用它 → 2026-11-27 语义覆盖表把它标 hidden，不进对话/音频列表；本文件保留此条只为说明它为什么不在列表里",
+      "source_url": "https://docs.apimart.ai/en/api-reference/moderations/omni-moderation-latest/generation"
     }
   ]
 }

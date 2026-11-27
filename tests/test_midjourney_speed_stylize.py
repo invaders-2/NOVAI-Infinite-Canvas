@@ -10,6 +10,7 @@
   4. 轮询到 FAILURE：code=9 重新提交并最终成功，code=24 不重试。
 """
 import asyncio
+import inspect
 import json
 import os
 import shutil
@@ -321,9 +322,11 @@ class MidjourneySpeedStylizeTests(unittest.TestCase):
         with mock.patch.object(main, "generate_ai_image", new=fake_generate):
             with self.assertRaises(RuntimeError):
                 asyncio.run(main.build_online_image_result(payload))
-        args = captured["args"]
-        self.assertEqual(args[-2], "fast", args)
-        self.assertEqual(args[-1], 750, args)
+        # 按形参名断言，不依赖位置：generate_ai_image 的形参顺序会随功能演进（本轮尾部加了
+        # skill / length / series_images，旧断言 args[-2]/args[-1] 会错位到 length/series_images）
+        bound = inspect.signature(main.generate_ai_image).bind(*captured["args"], **captured["kwargs"])
+        self.assertEqual(bound.arguments["midjourney_speed"], "fast", bound.arguments)
+        self.assertEqual(bound.arguments["midjourney_stylize"], 750, bound.arguments)
 
     # --- 张数：上游一次出 4 张候选，画布取前 N 张，只提交 1 次 ---
 
