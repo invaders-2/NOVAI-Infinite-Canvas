@@ -41,6 +41,8 @@
             confirmation:'on-ambiguity', reads:['table'], writes:[], title:'读取表格数据'},
         set_cell: {kind:'mutation', risk:'low', sideEffect:'local', idempotency:'keyed',
             confirmation:'on-ambiguity', reads:['table'], writes:['table'], title:'修改单元格'},
+        set_cells: {kind:'mutation', risk:'low', sideEffect:'local', idempotency:'keyed',
+            confirmation:'on-ambiguity', reads:['table'], writes:['table'], title:'批量修改单元格'},
         append_row: {kind:'mutation', risk:'low', sideEffect:'local', idempotency:'keyed',
             confirmation:'on-ambiguity', reads:['table'], writes:['table'], title:'追加表格行'},
         delete_row: {kind:'mutation', risk:'medium', sideEffect:'local', idempotency:'keyed',
@@ -51,8 +53,17 @@
             confirmation:'on-risk', reads:['table'], writes:['table'], title:'删除表格列'},
     };
 
+    /* 智能列（AI 列）：与 columns 平行的自然语言指令（空位 null）。
+       一条指令只作用于自己那一列，绝不把 columns 改成对象。 */
+    const AI_INSTRUCTION_MAX_CHARS = MAX_CELL_CHARS;
+    const AI_COLUMN_BATCH_ROWS = 20;
+    const AI_COLUMN_BATCH_ROWS_MAX = 50;
+    const AI_COLUMN_MAX_TOKENS = 8192;
+    const TABLE_SNAPSHOT_KIND = 'table-snapshot';
+
     function emptyTable(){
-        return {kind:TABLE_KIND, version:TABLE_VERSION, columns:[], rows:[], selectedRows:[], mergedGroups:[]};
+        return {kind:TABLE_KIND, version:TABLE_VERSION, columns:[], rows:[], selectedRows:[], mergedGroups:[],
+            aiColumns:[]};
     }
 
     /* 单元格可以是文字，也可以是**媒体**（用户自己往格子里上传/替换的图片、视频）。
@@ -75,14 +86,18 @@
         return Boolean(value && typeof value === 'object' && value.kind === MEDIA_CELL_KIND && value.url);
     }
 
-    // 单元格一律字符串化并截断（DX OS: 非字符串走 JSON.stringify）；媒体格不进文字流
-    function cellText(value){
+    // 单元格字符串化但不截断：批量写要按真实长度判超限，最终落盘的仍是 cellText
+    function rawCellText(value){
         if(value === null || value === undefined) return '';
         if(isMediaCell(value)) return '';
-        let text;
-        if(typeof value === 'string') text = value;
-        else if(typeof value === 'object'){ try { text = JSON.stringify(value); } catch(e){ text = String(value); } }
-        else text = String(value);
+        if(typeof value === 'string') return value;
+        if(typeof value === 'object'){ try { return JSON.stringify(value); } catch(e){ return String(value); } }
+        return String(value);
+    }
+
+    // 单元格一律字符串化并截断（DX OS: 非字符串走 JSON.stringify）；媒体格不进文字流
+    function cellText(value){
+        const text = rawCellText(value);
         return text.length > MAX_CELL_CHARS ? text.slice(0, MAX_CELL_CHARS) : text;
     }
 
@@ -100,13 +115,81 @@
         return out;
     }
 
+    /* 一条 AI 列指令：空白算没有（null），updatedAt 只接受有限数字（毫秒），
+       非法值归 0 —— 老数据/手写数据不能因为时间戳写法不同就整条丢掉。 */
+    function normalizeAiColumn(raw){
+        if(!raw || typeof raw !== 'object') return null;
+        const instruction = cellText(raw.instruction).trim().slice(0, AI_INSTRUCTION_MAX_CHARS);
+        if(!instruction) return null;
+        const updatedAt = Math.floor(Number(raw.updatedAt));
+        return {instruction, updatedAt: Number.isFinite(updatedAt) && updatedAt > 0 ? updatedAt : 0};
+    }
+
+    // 与 columns 定长对齐：截到同列数，缺的补 null（空位必须占位，否则列增删会对不上）
+    function normalizeAiColumns(raw, columnCount){
+        const count = Math.max(0, Math.floor(Number(columnCount) || 0));
+        const list = Array.isArray(raw) ? raw : [];
+        const out = new Array(count).fill(null);
+        list.slice(0, count).forEach((entry, index) => { out[index] = normalizeAiColumn(entry); });
+        return out;
+    }
+
+    /* 选区 {r0,c0,r1,c1}（0-based，含端点）：越界夹回表内，反序交换成左上/右下。
+       空表或字段不是有限数字时返回 null —— 这两种情况夹不出合法选区。 */
+    function clampSelection(raw, rowCount, colCount){
+        if(!raw || typeof raw !== 'object') return null;
+        const rows = Math.max(0, Math.floor(Number(rowCount) || 0));
+        const cols = Math.max(0, Math.floor(Number(colCount) || 0));
+        if(!rows || !cols) return null;
+        const nums = ['r0', 'c0', 'r1', 'c1'].map(key => Number(raw[key]));
+        if(nums.some(value => !Number.isFinite(value))) return null;
+        const clamp = (value, max) => Math.min(max - 1, Math.max(0, Math.floor(value)));
+        let [r0, c0, r1, c1] = nums.map((value, index) => clamp(value, index % 2 === 0 ? rows : cols));
+        if(r0 > r1){ const swap = r0; r0 = r1; r1 = swap; }
+        if(c0 > c1){ const swap = c0; c0 = c1; c1 = swap; }
+        return {r0, c0, r1, c1};
+    }
+
+    /** 选区归一化：table 尺寸变化后调用；非法/空表 → null。 */
+    function normalizeSelection(table, selection){
+        const t = normalizeTable(table).table;
+        return clampSelection(selection, t.rows.length, t.columns.length);
+    }
+
+    // 行/列被删后把选区重新夹回表内；夹不出来就整条清掉
+    function reclampSelection(table){
+        if(!table || !table.selection) return;
+        const selection = clampSelection(table.selection, table.rows.length, table.columns.length);
+        if(selection) table.selection = selection;
+        else delete table.selection;
+    }
+
+    // 缺字段算合法（老画布数据没有 aiColumns）；给了就必须是长度不超列数的 null/{instruction} 数组
+    function aiColumnsAreStrict(raw, columnCount){
+        if(raw.aiColumns === undefined || raw.aiColumns === null) return true;
+        if(!Array.isArray(raw.aiColumns) || raw.aiColumns.length > columnCount) return false;
+        return raw.aiColumns.every(entry => entry === null || entry === undefined
+            || (typeof entry === 'object'
+                && typeof entry.instruction === 'string'
+                && Boolean(entry.instruction.trim())
+                && entry.instruction.length <= AI_INSTRUCTION_MAX_CHARS
+                && Number.isFinite(Number(entry.updatedAt))));
+    }
+
+    function selectionIsStrict(raw, rowCount, colCount){
+        if(raw.selection === undefined || raw.selection === null) return true;
+        return Boolean(clampSelection(raw.selection, rowCount, colCount));
+    }
+
     function isStrict(raw){
         if(!raw || typeof raw !== 'object') return false;
         if(!Array.isArray(raw.columns) || !Array.isArray(raw.rows)) return false;
         if(raw.columns.length > MAX_COLUMNS || raw.rows.length > MAX_ROWS) return false;
         if(raw.columns.some(c => typeof c !== 'string' || !c.trim())) return false;
-        return raw.rows.every(row => Array.isArray(row) && row.length === raw.columns.length
-            && row.every(cell => typeof cell === 'string' || isMediaCell(cell)));
+        if(!raw.rows.every(row => Array.isArray(row) && row.length === raw.columns.length
+            && row.every(cell => typeof cell === 'string' || isMediaCell(cell)))) return false;
+        if(!selectionIsStrict(raw, raw.rows.length, raw.columns.length)) return false;
+        return aiColumnsAreStrict(raw, raw.columns.length);
     }
 
     /** 归一化任意输入为合法表格；永不抛错，越界静默修复。 */
@@ -125,18 +208,23 @@
             .map(Number).filter(v => Number.isInteger(v) && v >= 0 && v < rows.length);
         const mergedGroups = (Array.isArray(source.mergedGroups) ? source.mergedGroups : [])
             .filter(Array.isArray).map(g => g.map(Number).filter(Number.isInteger));
-        return {
-            table:{kind:TABLE_KIND, version:TABLE_VERSION, columns, rows, selectedRows, mergedGroups},
-            repaired,
-        };
+        const aiColumns = normalizeAiColumns(source.aiColumns, columns.length);
+        const selection = clampSelection(source.selection, rows.length, columns.length);
+        const table = {kind:TABLE_KIND, version:TABLE_VERSION, columns, rows, selectedRows, mergedGroups, aiColumns};
+        // 非法/越界的选区直接清掉，不留在表里等人再归一化一次
+        if(selection) table.selection = selection;
+        return {table, repaired};
     }
 
     /** 深拷贝（DX OS: n6） */
     function cloneTable(table){
         const t = normalizeTable(table).table;
-        return {kind:t.kind, version:t.version, columns:t.columns.slice(),
+        const clone = {kind:t.kind, version:t.version, columns:t.columns.slice(),
             rows:t.rows.map(r => r.slice()), selectedRows:t.selectedRows.slice(),
-            mergedGroups:t.mergedGroups.map(g => g.slice())};
+            mergedGroups:t.mergedGroups.map(g => g.slice()),
+            aiColumns:t.aiColumns.map(entry => (entry ? {instruction:entry.instruction, updatedAt:entry.updatedAt} : null))};
+        if(t.selection) clone.selection = {...t.selection};
+        return clone;
     }
 
     // 1-based 序号 → 0-based 下标（DX OS: Kh）
@@ -205,6 +293,25 @@
             next.rows[r][c] = isMediaCell(args.value) ? mediaCell(args.value.url, args.value.mediaType, args.value.name) : cellText(args.value);
             return next;
         }
+        if(opId === 'set_cells'){
+            if(!Array.isArray(args.cells)) throw new Error('批量修改需要 cells 数组。');
+            /* 先全部校验再统一落笔：任何一格非法都不能留下半批改动。
+               cellText 会静默截断，所以长度按原文另判一次。 */
+            const writes = args.cells.map(item => {
+                const cell = item && typeof item === 'object' ? item : {};
+                const r = rowIndex(next, cell.row);
+                const c = columnIndex(next, cell);
+                if(!isMediaCell(cell.value) && rawCellText(cell.value).length > MAX_CELL_CHARS){
+                    throw new Error('单元格内容不能超过 ' + MAX_CELL_CHARS + ' 字。');
+                }
+                const value = isMediaCell(cell.value)
+                    ? mediaCell(cell.value.url, cell.value.mediaType, cell.value.name)
+                    : cellText(cell.value);
+                return {r, c, value};
+            });
+            writes.forEach(item => { next.rows[item.r][item.c] = item.value; });
+            return next;
+        }
         if(opId === 'append_row'){
             if(next.rows.length >= MAX_ROWS) throw new Error('表格最多允许 ' + MAX_ROWS + ' 行。');
             const values = args.values;
@@ -222,18 +329,22 @@
             next.rows.splice(r, 1);
             next.selectedRows = next.selectedRows.filter(i => i !== r)
                 .map(i => (i > r ? i - 1 : i));
+            reclampSelection(next);
             return next;
         }
         if(opId === 'add_column'){
             if(next.columns.length >= MAX_COLUMNS) throw new Error('表格最多允许 ' + MAX_COLUMNS + ' 列。');
             next.columns = normalizeColumns(next.columns.concat([args.title]));
             next.rows = next.rows.map(row => row.concat(['']));
+            next.aiColumns = normalizeAiColumns(next.aiColumns.concat([null]), next.columns.length);
             return next;
         }
         if(opId === 'delete_column'){
             const c = columnIndex(next, args);
             next.columns.splice(c, 1);
             next.rows.forEach(row => row.splice(c, 1));
+            next.aiColumns = normalizeAiColumns(next.aiColumns.filter((_, index) => index !== c), next.columns.length);
+            reclampSelection(next);
             // 删列不改变行数，行选中状态原样保留
             return next;
         }
@@ -1318,6 +1429,277 @@
             + (summary.running ? '（在跑 ' + summary.running + '）' : '');
     }
 
+
+    /* ── 智能列（AI 列）/ 选区批量改写 / 对比回滚 ────────────────────
+       这一批只做数据层：算出要跑哪些行、怎么把模型输出按行回填、怎么比对与回滚。
+       真正的请求/写格由调用方（画布）用 set_cells 落地。 */
+
+    function aiColumnBatchSize(raw){
+        const value = Math.floor(Number(raw));
+        if(!Number.isFinite(value) || value < 1) return AI_COLUMN_BATCH_ROWS;
+        return Math.min(AI_COLUMN_BATCH_ROWS_MAX, value);
+    }
+
+    // 整行一个字都没有（也没有媒体）＝没东西可改写，规划时跳过
+    function rowHasContent(row){
+        return (Array.isArray(row) ? row : []).some(cell => isMediaCell(cell) || Boolean(rawCellText(cell).trim()));
+    }
+
+    /* 智能列执行计划：[{columnIndex, rows:[1-based 行号…]}]。
+       rows 用 1-based（与 set_cells 的 row 同一口径），columnIndex 与 columns 同下标（0-based）。 */
+    function planAiColumn(table, columnIndex, options={}){
+        const t = normalizeTable(table).table;
+        const index = Math.floor(Number(columnIndex));
+        if(!Number.isInteger(index) || index < 0 || index >= t.columns.length) return [];
+        const batchSize = aiColumnBatchSize(options.batchSize);
+        const wanted = Array.isArray(options.rows)
+            ? new Set(options.rows.map(Number).filter(value => Number.isInteger(value) && value > 0))
+            : null;
+        const rows = [];
+        t.rows.forEach((row, at) => {
+            const rowNumber = at + 1;
+            if(wanted && !wanted.has(rowNumber)) return;
+            if(!rowHasContent(row)) return;
+            rows.push(rowNumber);
+        });
+        const batches = [];
+        for(let at = 0; at < rows.length; at += batchSize){
+            batches.push({columnIndex: index, rows: rows.slice(at, at + batchSize)});
+        }
+        return batches;
+    }
+
+    /* cells 每项 {row, values:[各列原文]}；给字符串/数组时当作「只有目标列原文」。
+       options.columnName 优先，其次 options.columnIndex 从 columns 里取目标列名。 */
+    function aiColumnPrompt(instruction, cells, columns, options={}){
+        const names = (Array.isArray(columns) ? columns : []).map((name, index) => {
+            const text = String(name === null || name === undefined ? '' : name).trim();
+            return text || ('第 ' + (index + 1) + ' 列');
+        });
+        const targetIndex = Number.isInteger(Number(options.columnIndex)) ? Math.floor(Number(options.columnIndex)) : -1;
+        const targetName = String(options.columnName || (targetIndex >= 0 && names[targetIndex] ? names[targetIndex] : '')).trim()
+            || '未指定列';
+        const rows = (Array.isArray(cells) ? cells : []).map((entry, index) => {
+            const item = entry && typeof entry === 'object' && !Array.isArray(entry)
+                ? entry
+                : {values: Array.isArray(entry) ? entry : [entry]};
+            const rawRow = Number(item.row);
+            const row = Number.isInteger(rawRow) && rawRow > 0 ? rawRow : index + 1;
+            return {row, values: Array.isArray(item.values) ? item.values : [item.value]};
+        });
+        const rowLines = rows.map(item => {
+            const lines = names.length
+                ? names.map((name, col) => name + '：' + (rawCellText(item.values[col]).trim() || '（空）'))
+                : ['原文：' + (rawCellText(item.values[0]).trim() || '（空）')];
+            return '第 ' + item.row + ' 行\n' + lines.map(line => '  ' + line).join('\n');
+        });
+        return [
+            '你在为一个「多维表格」的智能列批量生成单元格内容。',
+            '目标列：「' + targetName + '」',
+            '本列指令（每一行都按它产出）：',
+            String(instruction || '').trim() || '（未填写指令：按目标列的列名理解，生成适合这一列的内容）',
+            '',
+            '表格列（按顺序）：' + (names.join('、') || '（无列名）'),
+            '逐行原文（行号就是表格里的行号）：',
+            rowLines.join('\n') || '（没有可处理的行）',
+            '',
+            '要求：',
+            '- 只为上面列出的每一行各产出一条结果，不要新增、删除或合并行。',
+            '- 行号必须与原文行号完全一致，不得改写。',
+            '- 只依据该行原文和指令改写，不要编造原文里没有的信息。',
+            '- 每条结果只写目标列该有的内容，不要带列名、行号、引号或 Markdown。',
+            '- 只返回一个 JSON 对象，不要 Markdown 代码块，不要解释：',
+            '{"values":[{"row":' + (rows[0] ? rows[0].row : 1) + ',"value":"改写后的单元格文本"}]}'
+        ].join('\n');
+    }
+
+    /* patch 是选中区域原文：二维数组，或 {values, rowOffset, colOffset, columnNames}。
+       带偏移时提示词里写整张表的真实行列号，调用方才能原样回填。 */
+    function rewritePatchOf(patch){
+        if(Array.isArray(patch)) return {values: patch, rowOffset: 0, colOffset: 0, columnNames: []};
+        const source = patch && typeof patch === 'object' ? patch : {};
+        const values = Array.isArray(source.values) ? source.values : (Array.isArray(source.rows) ? source.rows : []);
+        const offset = raw => {
+            const value = Math.floor(Number(raw));
+            return Number.isFinite(value) && value > 0 ? value : 0;
+        };
+        return {
+            values,
+            rowOffset: offset(source.rowOffset),
+            colOffset: offset(source.colOffset),
+            columnNames: (Array.isArray(source.columnNames) ? source.columnNames : []).map(name => String(name || '')),
+        };
+    }
+
+    function batchRewritePrompt(instruction, patch){
+        const region = rewritePatchOf(patch);
+        const rows = region.values.filter(Array.isArray);
+        const width = rows.reduce((max, row) => Math.max(max, row.length), 0);
+        const regionLine = rows.length
+            ? '选中区域：第 ' + (region.rowOffset + 1) + '–' + (region.rowOffset + rows.length)
+                + ' 行，第 ' + (region.colOffset + 1) + '–' + (region.colOffset + Math.max(1, width))
+                + ' 列（行列号都是整张表里的真实序号）'
+            : '选中区域：（空）';
+        const rowLines = rows.map((row, index) => {
+            const rowNumber = region.rowOffset + index + 1;
+            const cells = [];
+            for(let col = 0; col < Math.max(1, width); col += 1){
+                const colNumber = region.colOffset + col + 1;
+                const name = region.columnNames[col]
+                    ? region.columnNames[col] + '（第 ' + colNumber + ' 列）'
+                    : '第 ' + colNumber + ' 列';
+                cells.push('  ' + name + '：' + (rawCellText(row[col]).trim() || '（空）'));
+            }
+            return '第 ' + rowNumber + ' 行\n' + cells.join('\n');
+        });
+        return [
+            '你在批量改写一张「多维表格」中选中区域的单元格。',
+            '改写要求：',
+            String(instruction || '').trim() || '（未填写要求：保持原意，只做通顺化与去噪）',
+            '',
+            regionLine,
+            '区域原文：',
+            rowLines.join('\n') || '（没有可改写的单元格）',
+            '',
+            '要求：',
+            '- 只改写给出的格子：行号、列号必须原样照抄，不得新增、删除或合并行列。',
+            '- 每一格只输出改写后的单元格文本，不要带行列号、列名、引号或 Markdown。',
+            '- 不需要改写的格子可以不返回；返回的每一格都必须落在上面的行号、列号范围内。',
+            '- 只依据原文与要求改写，不要编造原文里没有的信息。',
+            '- 只返回一个 JSON 对象，不要 Markdown 代码块，不要解释：',
+            '{"values":[{"row":1,"col":1,"value":"改写后的单元格文本"}]}'
+        ].join('\n');
+    }
+
+    // 收 {row,value} 项：{"values":[…]}、顶层数组、多块 JSON、代码块都认
+    function aiValueItems(text){
+        const items = [];
+        const push = value => {
+            if(Array.isArray(value)) items.push(...value);
+            else if(value && typeof value === 'object'){
+                if(Array.isArray(value.values)) items.push(...value.values);
+                else if(value.row !== undefined) items.push(value);
+            }
+        };
+        const values = extractJsonValues(text);
+        if(values.length){ values.forEach(push); return {items, parsed:true}; }
+        const object = extractJsonObject(text);
+        if(object){ push(object); return {items, parsed:true}; }
+        const array = extractJsonArray(text);
+        if(array){ push(array); return {items, parsed:true}; }
+        return {items, parsed:false};
+    }
+
+    /* 解析智能列 / 批量改写的返回。成功哪些行（applied / values）、缺哪些行（missing）、
+       非法行号/重复行/缺失值（invalid）、超出预期的行（extra）全部报出来，不静默吞。
+       expectedRows 传行号数组（1-based）；传数字时按「前 N 行」理解。
+       带 col 的结果（选区批量改写）按「行:列」收进 cells，行列号都是 1-based。 */
+    function parseAiValues(text, expectedRows){
+        const expectedSource = Array.isArray(expectedRows)
+            ? expectedRows
+            : (Number.isInteger(Number(expectedRows)) && Number(expectedRows) > 0
+                ? Array.from({length:Number(expectedRows)}, (_, index) => index + 1)
+                : []);
+        const expected = Array.from(new Set(expectedSource
+            .map(Number).filter(value => Number.isInteger(value) && value > 0))).sort((a, b) => a - b);
+        const expectedSet = new Set(expected);
+        const {items, parsed} = aiValueItems(text);
+        /* 行级结果（智能列）按行号收；带 col 的单元格结果（选区批量改写）按「行:列」收。
+           两种输入共用这一套容错，调用方不用各写一份。 */
+        const values = {};
+        const cells = {};
+        const seen = new Set();
+        const seenRows = new Set();
+        const applied = [];
+        const invalid = [];
+        const extra = [];
+        items.forEach(item => {
+            if(!item || typeof item !== 'object' || Array.isArray(item)){
+                invalid.push({row:null, reason:'shape'});
+                return;
+            }
+            const rawRow = Number(item.row);
+            if(!Number.isInteger(rawRow) || rawRow < 1){
+                invalid.push({row:null, reason:'row'});
+                return;
+            }
+            const hasCol = item.col !== undefined && item.col !== null;
+            const rawCol = Number(item.col);
+            if(hasCol && (!Number.isInteger(rawCol) || rawCol < 1)){
+                invalid.push({row:rawRow, reason:'col'});
+                return;
+            }
+            if(item.value === undefined || item.value === null){
+                invalid.push({row:rawRow, reason:'value'});
+                return;
+            }
+            const value = cellText(item.value);
+            const address = hasCol ? rawRow + ':' + rawCol : String(rawRow);
+            if(!expectedSet.has(rawRow)){
+                extra.push(hasCol ? {row:rawRow, col:rawCol, value} : {row:rawRow, value});
+                return;
+            }
+            if(seen.has(address)){
+                invalid.push(hasCol ? {row:rawRow, col:rawCol, reason:'duplicate'} : {row:rawRow, reason:'duplicate'});
+                return;
+            }
+            seen.add(address);
+            seenRows.add(rawRow);
+            if(hasCol){ cells[address] = value; applied.push({row:rawRow, col:rawCol, value}); }
+            else { values[rawRow] = value; applied.push({row:rawRow, value}); }
+        });
+        const byAddress = (a, b) => a.row - b.row || (a.col || 0) - (b.col || 0);
+        applied.sort(byAddress);
+        extra.sort(byAddress);
+        const missing = expected.filter(row => !seenRows.has(row));
+        return {
+            ok: parsed && !invalid.length && !extra.length && !missing.length,
+            parsed,
+            applied,
+            values,
+            cells,
+            missing,
+            invalid,
+            extra,
+        };
+    }
+
+    // 逐格比对用的文本：媒体格比 URL，否则比 cellText（截断后的落盘值）
+    function diffCellText(value){
+        return isMediaCell(value) ? String(value.url || '') : cellText(value);
+    }
+
+    /* 逐格差异（先行后列），行/列都是 1-based：只列真正变化的格子。 */
+    function diffTables(before, after){
+        const a = normalizeTable(before).table;
+        const b = normalizeTable(after).table;
+        const rowCount = Math.max(a.rows.length, b.rows.length);
+        const colCount = Math.max(a.columns.length, b.columns.length);
+        const changes = [];
+        for(let row = 0; row < rowCount; row += 1){
+            for(let col = 0; col < colCount; col += 1){
+                const beforeValue = diffCellText(a.rows[row] ? a.rows[row][col] : '');
+                const afterValue = diffCellText(b.rows[row] ? b.rows[row][col] : '');
+                if(beforeValue === afterValue) continue;
+                changes.push({
+                    row: row + 1,
+                    col: col + 1,
+                    columnName: b.columns[col] !== undefined ? b.columns[col] : (a.columns[col] || ''),
+                    before: beforeValue,
+                    after: afterValue,
+                });
+            }
+        }
+        return changes;
+    }
+
+    /* 快照与 cloneTable 的区别：cloneTable 返回的就是一张可直接使用的表格；
+       快照外面套一层 kind='table-snapshot'，只能整体还原（cloneTable(snapshot.table)），
+       防止调用方把快照当表格局部改，改出与列数对不上的 aiColumns。 */
+    function tableSnapshot(table){
+        return {kind:TABLE_SNAPSHOT_KIND, version:TABLE_VERSION, table:cloneTable(table)};
+    }
+
     return {
         TABLE_KIND, TABLE_VERSION,
         MAX_COLUMNS, MAX_ROWS, MAX_CELL_CHARS, LLM_MAX_COLUMNS, LLM_MAX_ROWS,
@@ -1350,5 +1732,9 @@
         toIndex, columnIndex, rowIndex, applyOperation,
         DURATION_COLUMN_KEYS, durationColumnIndex, cellDuration,
         rowHeight, nodeSize, describeOperation, requiresConfirmation,
+        AI_INSTRUCTION_MAX_CHARS, AI_COLUMN_BATCH_ROWS, AI_COLUMN_BATCH_ROWS_MAX, AI_COLUMN_MAX_TOKENS,
+        TABLE_SNAPSHOT_KIND, normalizeAiColumns, normalizeSelection,
+        aiColumnBatchSize, planAiColumn, aiColumnPrompt, batchRewritePrompt,
+        parseAiValues, diffTables, tableSnapshot,
     };
 });

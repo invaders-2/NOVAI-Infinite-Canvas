@@ -19,6 +19,12 @@ import { durationTiers, genOf, inputsOf, isGenKind, outOf, srcOf, textOf, uid, t
 import { unmentionedInputs } from "./mentions";
 
 export const TABLE_LIMITS = { cols: 200, rows: 5000, llmCols: 40, llmRows: 200, cell: 20000 };
+/** 智能列指令的长度上限＝单元格上限（指令本身就是一段文本） */
+export const AI_INSTRUCTION_MAX_CHARS = TABLE_LIMITS.cell;
+/** 智能列（AI 列）：一条自然语言指令只作用于自己那一列（columns 仍是字符串数组，绝不被改成对象） */
+export type AiColumn = { instruction: string; updatedAt: number };
+/** 选区（0-based 含端点）：越界夹回表内，反序归一成左上/右下 */
+export type TableSelection = { r0: number; c0: number; r1: number; c1: number };
 export type TableData = {
   kind: "table"; version: 1;
   title: string;
@@ -34,7 +40,130 @@ export type TableData = {
   inputModesAuto?: string[];
   /** 每列的用途（和 columns 等长）；"" 或缺省 = 按列名自动识别，见 guessRole */
   roles?: string[];
+  /**
+   * 智能列（AI 列）：与 columns 定长平行的指令（null = 这一列不是智能列）。
+   * 老文档没有这个字段；归一化时按列数补齐 / 全空时整条清掉，绝不把 columns 改成对象。
+   */
+  aiColumns?: Array<AiColumn | null>;
+  /** 智能列用的模型（configId = provider::model，和文本节点的 params.model 同一种写法）；空 = 跟随当前画布第一个文本模型 */
+  aiModel?: string;
+  /** 智能列的系统提示词；空 = 内置默认 */
+  aiSystem?: string;
+  /** 选区存档（0-based 含端点）；拖动中的选区在界面层，这里只在文档里留下合法的一份 */
+  selection?: TableSelection;
+  /** 当前视图：缺省 = 表格；"card" = 创意视图（卡片墙，对齐 TapNow 分镜表的创意视图） */
+  view?: TableView;
+  /** 多视图（对齐 TapNow 分镜表的 Default / 创意视图 / 自建视图）；缺省时按 view 给两个内置视图 */
+  views?: TableViewDef[];
+  /** 当前打开的视图 id */
+  activeView?: string;
+  /** 字段类型（和 columns 等长）；"" 或缺省 = 按列名 / 列用途推断，见 colTypeOf */
+  types?: string[];
 };
+export type ColType = "text" | "single" | "multi" | "number" | "image";
+export const COL_TYPES: ColType[] = ["text", "single", "multi", "number"];
+export const COL_TYPE_LABEL: Record<ColType, string> = { text: "文本", single: "单选", multi: "多选", number: "数字", image: "图片" };
+const isColType = (x: unknown): x is ColType => typeof x === "string" && x in COL_TYPE_LABEL;
+/** 字段类型：手设的优先；否则图片列 = 图片，镜号 / 时长 = 数字，景别 / 机位 / 运镜 = 单选，其余文本 */
+export function colTypeOf(t: TableData, i: number): ColType {
+  const x = t.types?.[i]; if (isColType(x)) return x;
+  const role = rolesOf(t)[i]?.role;
+  if (role && ROLE_META[role].media) return "image";
+  const n = String(t.columns[i] || "").replace(/\s+/g, "");
+  if (/^(镜号|镜头|镜头号|序号|编号|时长|秒数)$/.test(n)) return "number";
+  if (/^(景别|机位|运镜)$/.test(n)) return "single";
+  return "text";
+}
+/** 单选 / 多选的候选：常用预设 + 这一列已经出现过的值 */
+export const SELECT_PRESETS: Record<string, string[]> = {
+  景别: ["大特写", "特写", "近景", "中景", "全景", "远景"],
+  机位: ["正面", "侧面", "背面", "平视", "俯拍", "仰拍", "顶拍", "过肩", "主观"],
+  运镜: ["固定", "推", "拉", "摇", "移", "跟", "升降", "环绕", "手持"],
+};
+export const splitMulti = (v: string) => String(v || "").split(/\s*[、,，/|]\s*/).map((x) => x.trim()).filter(Boolean);
+export function selectOptions(t: TableData, i: number): string[] {
+  const out = [...(SELECT_PRESETS[t.columns[i]] || [])];
+  t.rows.forEach((r) => splitMulti(r[i] || "").forEach((v) => { if (v.length <= 20 && !out.includes(v)) out.push(v); }));
+  return out.slice(0, 40);
+}
+export type TableView = "grid" | "card";
+export type FilterOp = "has" | "not" | "empty" | "filled";
+export type TableFilter = { col: string; op: FilterOp; value?: string };
+/** 一个视图：类型 + 隐藏的字段 + 筛选（全部满足）+ 一个排序 + 一个分组。字段按列名记，删列 / 改名后自动失效 */
+export type TableViewDef = { id: string; name: string; type: TableView; hidden?: string[]; filters?: TableFilter[]; sort?: { col: string; dir: "asc" | "desc" }; group?: string };
+export const FILTER_OPS: Array<[FilterOp, string]> = [["has", "包含"], ["not", "不包含"], ["empty", "为空"], ["filled", "不为空"]];
+export const TABLE_VIEW_LIMIT = 20;
+const DEFAULT_VIEWS: TableViewDef[] = [{ id: "default", name: "Default", type: "grid" }, { id: "creative", name: "创意视图", type: "card" }];
+export function viewsOf(t: TableData): TableViewDef[] { return t.views && t.views.length ? t.views : DEFAULT_VIEWS; }
+export function activeViewOf(t: TableData): TableViewDef {
+  const views = viewsOf(t);
+  if (!t.views || !t.views.length) return t.activeView ? views.find((v) => v.id === t.activeView) || views[0] : (t.view === "card" ? views[1] : views[0]);
+  return views.find((v) => v.id === t.activeView) || views[0];
+}
+/** 写回视图：views 落盘、activeView 指过去，view 跟着同步（老代码只认 view） */
+export function withViews(t: TableData, views: TableViewDef[], activeId: string): TableData {
+  const list = views.slice(0, TABLE_VIEW_LIMIT);
+  const active = list.find((v) => v.id === activeId) || list[0];
+  return { ...t, views: list, activeView: active.id, view: active.type === "card" ? "card" : undefined };
+}
+/** 当前视图要显示的列（隐藏了全部就全显示，免得表格空掉） */
+export function visibleCols(t: TableData, v: TableViewDef): number[] {
+  const hidden = new Set(v.hidden || []);
+  const cols = t.columns.map((_, i) => i).filter((i) => !hidden.has(t.columns[i]));
+  return cols.length ? cols : t.columns.map((_, i) => i);
+}
+const leadNum = (s: string) => { const m = /^\s*(-?\d+(?:\.\d+)?)/.exec(s); return m ? Number(m[1]) : null; };
+/** 筛选 → 排序 → 分组，返回原始行号（编辑仍按原始行号写回）；没分组时只有一组 key=null */
+export function viewRows(t: TableData, v: TableViewDef): Array<{ key: string | null; rows: number[] }> {
+  const at = (name: string) => t.columns.indexOf(name);
+  const filters = (v.filters || []).filter((f) => at(f.col) >= 0);
+  let rows = t.rows.map((_, i) => i).filter((r) => filters.every((f) => {
+    const cell = String(t.rows[r][at(f.col)] || "").trim(); const q = String(f.value || "").trim().toLowerCase();
+    if (f.op === "empty") return !cell;
+    if (f.op === "filled") return !!cell;
+    if (!q) return true;
+    const hit = cell.toLowerCase().includes(q);
+    return f.op === "has" ? hit : !hit;
+  }));
+  const sc = v.sort ? at(v.sort.col) : -1;
+  if (sc >= 0) {
+    const dir = v.sort!.dir === "desc" ? -1 : 1;
+    rows = [...rows].sort((a, b) => {
+      const x = String(t.rows[a][sc] || ""), y = String(t.rows[b][sc] || "");
+      if (!x !== !y) return x ? -1 : 1; // 空值总在最后
+      const nx = leadNum(x), ny = leadNum(y);
+      const d = nx !== null && ny !== null ? nx - ny : x.localeCompare(y, "zh-CN");
+      return (d || a - b) * dir;
+    });
+  }
+  const gc = v.group ? at(v.group) : -1;
+  if (gc < 0) return [{ key: null, rows }];
+  const groups = new Map<string, number[]>();
+  rows.forEach((r) => { const k = String(t.rows[r][gc] || "").trim(); if (!groups.has(k)) groups.set(k, []); groups.get(k)!.push(r); });
+  // 空值那组放最后
+  return [...groups.entries()].sort((a, b) => (a[0] ? 0 : 1) - (b[0] ? 0 : 1)).map(([key, list]) => ({ key, rows: list }));
+}
+function normalizeViews(raw: unknown): TableViewDef[] {
+  if (!Array.isArray(raw)) return [];
+  const str = (x: unknown, n: number) => (typeof x === "string" ? x.slice(0, n) : "");
+  const seen = new Set<string>();
+  return raw.slice(0, TABLE_VIEW_LIMIT).flatMap((item) => {
+    const v = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
+    const id = v ? str(v.id, 40) : "";
+    if (!v || !id || seen.has(id)) return [];
+    seen.add(id);
+    const filters = Array.isArray(v.filters) ? v.filters.slice(0, 10).flatMap((f) => {
+      const x = f && typeof f === "object" ? (f as Record<string, unknown>) : null;
+      const op = x && FILTER_OPS.some(([o]) => o === x.op) ? (x.op as FilterOp) : null;
+      return x && op && str(x.col, 120) ? [{ col: str(x.col, 120), op, ...(str(x.value, 200) ? { value: str(x.value, 200) } : {}) }] : [];
+    }) : [];
+    const sort = v.sort && typeof v.sort === "object" && str((v.sort as Record<string, unknown>).col, 120)
+      ? { col: str((v.sort as Record<string, unknown>).col, 120), dir: (v.sort as Record<string, unknown>).dir === "desc" ? "desc" as const : "asc" as const } : undefined;
+    const hidden = Array.isArray(v.hidden) ? v.hidden.map((h) => str(h, 120)).filter(Boolean).slice(0, 200) : [];
+    return [{ id, name: str(v.name, 40) || "视图", type: v.type === "card" ? "card" as const : "grid" as const,
+      ...(hidden.length ? { hidden } : {}), ...(filters.length ? { filters } : {}), ...(sort ? { sort } : {}), ...(str(v.group, 120) ? { group: str(v.group, 120) } : {}) }];
+  });
+}
 export type TextOutputMode = "text" | "table" | "storyboard";
 export const OUTPUT_MODES: Array<[TextOutputMode, string, string]> = [["text", "文本", "普通文字结果"], ["table", "多维表格", "整理成逐行可执行的任务表"], ["storyboard", "分镜表", "镜头 / 画面 / 运镜 / 时长 / 台词"]];
 export const STORYBOARD_COLUMNS = ["镜头", "画面", "运镜", "时长", "台词 / 字幕"];
@@ -141,6 +270,38 @@ export function withTable(node: CanvasNode, t: TableData): CanvasNode {
 
 /** 系统写入过模式的通道 id（脏值丢弃）；用来区分「用户手点」和「出表自动写」 */
 const autoModeIdsOf = (raw: unknown): string[] => Array.isArray(raw) ? [...new Set(raw.map((x) => String(x ?? "")).filter((x) => /^input-\d+$/.test(x)))] : [];
+/** AI 列指令：空白算没有（null）；updatedAt 只收有限正数，非法归 0 —— 老数据 / 手写数据不能因为时间戳写法不同就整条丢掉 */
+export function normalizeAiColumn(raw: unknown): AiColumn | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const instruction = String(r.instruction ?? "").trim().slice(0, AI_INSTRUCTION_MAX_CHARS);
+  if (!instruction) return null;
+  const at = Math.floor(Number(r.updatedAt));
+  return { instruction, updatedAt: Number.isFinite(at) && at > 0 ? at : 0 };
+}
+/** 与 columns 定长对齐：截到同列数，缺的补 null（空位必须占位，否则列增删会对不上） */
+export function normalizeAiColumns(raw: unknown, columnCount: number): Array<AiColumn | null> {
+  const count = Math.max(0, Math.floor(Number(columnCount) || 0));
+  const list = Array.isArray(raw) ? raw : [];
+  const out: Array<AiColumn | null> = new Array(count).fill(null);
+  list.slice(0, count).forEach((entry, index) => { out[index] = normalizeAiColumn(entry); });
+  return out;
+}
+/** 选区：越界夹回表内，反序交换成左上/右下；空表或字段不是有限数字时返回 null（这两种情况夹不出合法选区） */
+export function clampSelection(raw: unknown, rowCount: number, colCount: number): TableSelection | null {
+  if (!raw || typeof raw !== "object") return null;
+  const rows = Math.max(0, Math.floor(Number(rowCount) || 0));
+  const cols = Math.max(0, Math.floor(Number(colCount) || 0));
+  if (!rows || !cols) return null;
+  const r = raw as Record<string, unknown>;
+  const nums = ["r0", "c0", "r1", "c1"].map((k) => Number(r[k]));
+  if (nums.some((v) => !Number.isFinite(v))) return null;
+  const clamp = (v: number, max: number) => Math.min(max - 1, Math.max(0, Math.floor(v)));
+  let r0 = clamp(nums[0], rows), c0 = clamp(nums[1], cols), r1 = clamp(nums[2], rows), c1 = clamp(nums[3], cols);
+  if (r0 > r1) { const t = r0; r0 = r1; r1 = t; }
+  if (c0 > c1) { const t = c0; c0 = c1; c1 = t; }
+  return { r0, c0, r1, c1 };
+}
 /** 归一化（DX OS Mx）：列名去空补「未命名列」，行补齐列数，非字符串 stringify，截断 */
 export function normalizeTable(raw: unknown, llm: boolean): TableData | null {
   if (!raw || typeof raw !== "object") return null;
@@ -152,7 +313,12 @@ export function normalizeTable(raw: unknown, llm: boolean): TableData | null {
   // 图片单元格（内嵌的 data URL）不截断，截了图就坏了
   const cell = (v: unknown) => { const x = typeof v === "string" ? v : v == null ? "" : JSON.stringify(v); return /^data:image\//.test(x) ? x : x.slice(0, TABLE_LIMITS.cell); };
   const rows = r.rows.slice(0, maxR).map((row) => { const arr = Array.isArray(row) ? row : row && typeof row === "object" ? columns.map((c) => (row as Record<string, unknown>)[c]) : [row]; return columns.map((_, i) => cell(arr[i])); });
-  return { kind: "table", version: 1, title: typeof r.title === "string" && r.title ? r.title : "多维表格", columns, rows, ...(typeof r.sourceId === "string" ? { sourceId: r.sourceId } : {}), ...(r.inputMode === "shared" || r.inputMode === "sequence" || r.inputMode === "pair" ? { inputMode: r.inputMode } : {}), ...(Object.keys(channelModesOf(r.inputModes)).length ? { inputModes: channelModesOf(r.inputModes) } : {}), ...(!llm && Array.isArray(r.inputModesAuto) ? { inputModesAuto: autoModeIdsOf(r.inputModesAuto) } : {}), ...(Array.isArray(r.roles) && !llm && r.roles.some((x) => isRole(x)) ? { roles: columns.map((_, i) => (isRole(r.roles && (r.roles as unknown[])[i]) ? String((r.roles as unknown[])[i]) : "")) } : {}) };
+  // 智能列 / 选区 / 模型：老文档没有这些字段（算合法），有就按列数与表尺寸归一；全空时整条不写，不把旧文档改脏
+  const aiColumns = normalizeAiColumns(r.aiColumns, columns.length);
+  const selection = clampSelection(r.selection, rows.length, columns.length);
+  const aiModel = typeof r.aiModel === "string" ? r.aiModel.trim().slice(0, 200) : "";
+  const aiSystem = typeof r.aiSystem === "string" ? r.aiSystem.slice(0, 8000) : "";
+  return { kind: "table", version: 1, title: typeof r.title === "string" && r.title ? r.title : "多维表格", columns, rows, ...(typeof r.sourceId === "string" ? { sourceId: r.sourceId } : {}), ...(r.inputMode === "shared" || r.inputMode === "sequence" || r.inputMode === "pair" ? { inputMode: r.inputMode } : {}), ...(Object.keys(channelModesOf(r.inputModes)).length ? { inputModes: channelModesOf(r.inputModes) } : {}), ...(!llm && Array.isArray(r.inputModesAuto) ? { inputModesAuto: autoModeIdsOf(r.inputModesAuto) } : {}), ...(Array.isArray(r.roles) && !llm && r.roles.some((x) => isRole(x)) ? { roles: columns.map((_, i) => (isRole(r.roles && (r.roles as unknown[])[i]) ? String((r.roles as unknown[])[i]) : "")) } : {}), ...(!llm && aiColumns.some(Boolean) ? { aiColumns } : {}), ...(!llm && aiModel ? { aiModel } : {}), ...(!llm && aiSystem ? { aiSystem } : {}), ...(!llm && selection ? { selection } : {}), ...(!llm && r.view === "card" ? { view: "card" as const } : {}), ...(!llm && normalizeViews(r.views).length ? { views: normalizeViews(r.views) } : {}), ...(!llm && typeof r.activeView === "string" && r.activeView ? { activeView: r.activeView.slice(0, 40) } : {}), ...(!llm && Array.isArray(r.types) && r.types.some(isColType) ? { types: columns.map((_, i) => (isColType((r.types as unknown[])[i]) ? String((r.types as unknown[])[i]) : "")) } : {}) };
 }
 function normalizeLegacy(raw: unknown): TableData | null {
   const any = raw as any;

@@ -9,7 +9,7 @@
             pushUndo, defaultPoint, mediaKindForNode, mediaKindForRef, mediaKindForUpload,
             outputUrlValue, isMissingAssetUrl, canvasPreviewImgHtml, canvasVideoPreviewHtml,
             nowMs, responseErrorMessage, refreshIcons, renderNode, runGenerator, runVideoNode,
-            showErrorModal, generationStopRequested, onBatchSettled, batchMediaLimit,
+            showErrorModal, generationStopRequested, onBatchSettled, batchMediaLimit, callLLM,
         } = host || {};
 
 function novaTableModel(){
@@ -1044,7 +1044,10 @@ function tableNodeSignature(node){
     const modes = channels.map(channel => channel.id + '=' + channel.mode).join(',');
     // 手动上传进格子的素材也在签名里：改完不用显式 repaintTable 也不会留旧画面
     const manual = JSON.stringify(node.tableManualInputItems || {});
-    return [incoming, channels.length, items, modes, manual, state.columns.length, state.rows.length].join('|');
+    /* aiColumns 只在指令变化时变（写指令 / 清指令），进签名让表头 AI 按钮跟着刷新。
+       selection 不进签名：拖选是逐格重绘的轻量路径，进签名会把下游批量面板一起重建。 */
+    return [incoming, channels.length, items, modes, manual, state.columns.length, state.rows.length,
+        JSON.stringify(state.aiColumns || [])].join('|');
 }
 
 // 输入列单元格（DX OS: .table-media-cell）
@@ -1838,6 +1841,874 @@ function materializeLlmTable(llmNode, table, groups, plan){
     return created;
 }
 
+/* ─────────────── 智能列 / 选区批量改（界面层）───────────────
+   数据口径以 NovaTableModel 为准：table.selection 是 0-based 含端点的 {r0,c0,r1,c1}；
+   table.aiColumns 与 columns 定长平行（null 或 {instruction}）；planAiColumn 的 rows 是
+   1-based 行号；set_cells 收 {row, column, value}（1-based）。写格只走 applyOperation，
+   批量生成（runTableBatch / journal / channels / selectedRows）一条线都不碰。 */
+const TABLE_AI_BUSY_TITLE = '批量生成中，完成后再改';
+const TABLE_AI_NO_CHANNEL = '当前画布未提供 AI 通道';
+const TABLE_AI_NOTICE_MS = 5000;
+const TABLE_AI_DRAG_EDGE = 24;
+
+const tableAiViews = new WeakMap();
+const tableAiPreviews = new Map();
+const tableAiColumnPanels = new Map();
+const tableAiUndoStack = new Map();
+const tableAiColumnStates = new Map();
+const tableAiColumnRuns = new Set();
+const tableAiPreviewRuns = new Set();
+
+function tableAiEl(tag, className, text){
+    const el = document.createElement(tag);
+    if(className) el.className = className;
+    if(text !== undefined) el.textContent = text;
+    return el;
+}
+
+function tableAiNow(){ return typeof nowMs === 'function' ? nowMs() : Date.now(); }
+
+/* host 没给 AI 通道时返回 null：所有入口据此禁用，并统一提示同一句话。
+   通道签名是 (node, message, options) —— 必须把表格节点传下去，host 才能用节点上
+   配的 provider / model / systemPrompt（传空对象会静默退回默认 provider）。 */
+function tableAiChannel(){ return typeof callLLM === 'function' ? callLLM : null; }
+
+function tableAiEditableTarget(target){
+    if(!target) return false;
+    const tag = String(target.tagName || '').toUpperCase();
+    if(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if(target.isContentEditable) return true;
+    return /(?:table-cell-editor|table-head-editor)/.test(String(target.className || ''));
+}
+
+function tableAiRemoveElement(el){
+    if(!el) return;
+    const parent = el.parentNode;
+    if(!parent) return;
+    if(typeof parent.removeChild === 'function'){ parent.removeChild(el); el.parentNode = null; return; }
+    if(Array.isArray(parent.children)){
+        const at = parent.children.indexOf(el);
+        if(at >= 0) parent.children.splice(at, 1);
+    }
+    el.parentNode = null;
+}
+
+function tableAiBox(el){
+    if(!el || typeof el.getBoundingClientRect !== 'function') return {top:0, left:0, right:0, bottom:0, width:0, height:0};
+    return el.getBoundingClientRect() || {top:0, left:0, right:0, bottom:0, width:0, height:0};
+}
+
+/* 批量出图/出视频在跑：本表 tableBatchRunning（runTableBatch 挂在源表上的）、
+   批量 journal 里还有 running/deferred 行，或下游批量节点的运行/停止态。 */
+function tableAiBatchBusy(node){
+    const model = novaTableModel();
+    const state = ensureTableState(node);
+    if(!model || !state) return false;
+    if(node.tableBatchRunning) return true;
+    const journal = model.normalizeJournal(node.generationBatchJournal);
+    if(model.journalInflightRows(journal).length) return true;
+    return (nodes || []).filter(tableBatchTypeNode).some(gen => {
+        if(!generatorUpstreamTables(gen.id).some(item => item.id === node.id)) return false;
+        if(gen._batchRunning || Number(gen._batchRunCount) > 0) return true;
+        return typeof generationStopRequested === 'function' && Boolean(generationStopRequested(gen.id));
+    });
+}
+
+function tableAiCellAddress(target){
+    if(!target) return null;
+    let el = target;
+    if(typeof el.closest === 'function'){
+        const found = el.closest('[data-row][data-col]');
+        if(found) el = found;
+    }
+    const data = el.dataset || {};
+    const row = Number(data.row);
+    const col = Number(data.col);
+    if(!Number.isInteger(row) || !Number.isInteger(col) || row < 0 || col < 0) return null;
+    return {row, col};
+}
+
+function tableAiNodeForTarget(target){
+    if(!target || typeof target.closest !== 'function') return null;
+    const rootEl = target.closest('.table-node');
+    if(!rootEl) return null;
+    let hit = null;
+    (nodes || []).forEach(item => { if(item && item._tableEl === rootEl) hit = item; });
+    return hit;
+}
+
+function tableAiSelectionCount(selection){
+    if(!selection) return 0;
+    return (selection.r1 - selection.r0 + 1) * (selection.c1 - selection.c0 + 1);
+}
+
+function tableAiSelectionRows(selection){
+    const rows = [];
+    for(let row = selection.r0; row <= selection.r1; row += 1) rows.push(row + 1);
+    return rows;
+}
+
+function tableAiSelectionCellOf(view, selection){
+    let hit = null;
+    (view.cells || []).forEach(entry => {
+        if(entry.row < selection.r0 || entry.row > selection.r1) return;
+        if(entry.col < selection.c0 || entry.col > selection.c1) return;
+        if(!hit || (entry.row === selection.r0 && entry.col === selection.c0)) hit = entry;
+    });
+    return hit;
+}
+
+function tableAiApplySelection(node, selection){
+    const model = novaTableModel();
+    const state = ensureTableState(node);
+    if(!model || !state) return null;
+    const next = model.normalizeSelection(state, selection);
+    if(next) state.selection = next; else delete state.selection;
+    tableAiPaintSelection(node);
+    return next;
+}
+
+function tableAiPaintSelection(node){
+    const view = tableAiViews.get(node);
+    if(!view) return;
+    const state = node.table || null;
+    const selection = state && state.selection ? state.selection : null;
+    (view.cells || []).forEach(entry => {
+        const on = Boolean(selection)
+            && entry.row >= selection.r0 && entry.row <= selection.r1
+            && entry.col >= selection.c0 && entry.col <= selection.c1;
+        entry.cell.classList.toggle('is-selected', on);
+    });
+    /* 表头对应列给一档更轻的底做呼应，长表里一眼能看出选的是哪几列。 */
+    (view.heads || []).forEach(entry => {
+        const on = Boolean(selection) && entry.col >= selection.c0 && entry.col <= selection.c1;
+        entry.cell.classList.toggle('is-selected-column', on);
+    });
+    tableAiSyncToolbar(node);
+}
+
+function tableAiClearSelection(node){
+    const state = ensureTableState(node);
+    if(!state) return;
+    const had = Boolean(state.selection);
+    tableAiApplySelection(node, null);
+    if(had) scheduleSave();
+}
+
+function tableAiBuildToolbar(node, view){
+    const el = tableAiEl('div', 'table-ai-toolbar');
+    const title = tableAiEl('span', 'table-ai-toolbar-title', '');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'table-ai-toolbar-input';
+    input.placeholder = '一句话说明怎么改';
+    input.oninput = () => tableAiSyncToolbar(node);
+    input.onkeydown = event => {
+        event.stopPropagation();
+        if(event.key === 'Enter'){ event.preventDefault(); tableAiOpenPreview(node); }
+        else if(event.key === 'Escape'){ event.preventDefault(); tableAiClearSelection(node); }
+    };
+    const run = tableAiEl('button', 'table-ai-primary', '生成预览');
+    run.type = 'button';
+    run.disabled = true;
+    run.onclick = event => { if(event && event.stopPropagation) event.stopPropagation(); tableAiOpenPreview(node); };
+    const cancel = tableAiEl('button', 'table-ai-ghost', '取消');
+    cancel.type = 'button';
+    cancel.onclick = event => { if(event && event.stopPropagation) event.stopPropagation(); tableAiClearSelection(node); };
+    const hint = tableAiEl('span', 'table-ai-hint', '');
+    [title, input, run, cancel, hint].forEach(part => el.appendChild(part));
+    view.toolbar = {el, title, input, run, cancel, hint};
+    return el;
+}
+
+function tableAiSyncToolbar(node){
+    const view = tableAiViews.get(node);
+    if(!view || !view.toolbar) return;
+    const parts = view.toolbar;
+    const state = node.table || null;
+    const selection = state && state.selection ? state.selection : null;
+    if(!selection){ parts.el.classList.remove('is-open'); return; }
+    const channel = tableAiChannel();
+    const batchBusy = view.batchBusy === undefined ? tableAiBatchBusy(node) : Boolean(view.batchBusy);
+    const previewBusy = tableAiPreviewRuns.has(node);
+    const typed = String(parts.input.value || '').trim();
+    parts.title.textContent = tableAiSelectionCount(selection) + ' 格 · AI 批量改';
+    let hint = '';
+    if(batchBusy) hint = TABLE_AI_BUSY_TITLE;
+    else if(!channel) hint = TABLE_AI_NO_CHANNEL;
+    else if(previewBusy) hint = '正在生成预览…';
+    parts.hint.textContent = hint;
+    parts.hint.style.display = hint ? 'inline' : 'none';
+    parts.input.title = typed;
+    parts.input.disabled = batchBusy || previewBusy;
+    parts.run.disabled = batchBusy || previewBusy || !channel || !typed;
+    parts.run.title = batchBusy ? TABLE_AI_BUSY_TITLE
+        : (!channel ? TABLE_AI_NO_CHANNEL
+            : (previewBusy ? '正在生成预览…' : (typed ? '按这句要求生成改动预览' : '先写一句改写要求')));
+    parts.el.title = hint;
+    parts.el.classList.add('is-open');
+    tableAiPlaceToolbar(node, selection);
+}
+
+function tableAiPlaceToolbar(node, selection){
+    const view = tableAiViews.get(node);
+    if(!view || !view.toolbar) return;
+    const el = view.toolbar.el;
+    const hit = tableAiSelectionCellOf(view, selection);
+    if(!hit || !hit.cell) return;
+    const cellBox = tableAiBox(hit.cell);
+    const rootBox = tableAiBox(view.root);
+    const gridBox = tableAiBox(view.grid);
+    const width = Number(el.offsetWidth) || 320;
+    const height = Number(el.offsetHeight) || 34;
+    /* 表头是 sticky 的：贴选区上方时不能盖住表头（否则列名全被挡掉），空间不够就翻到下方。 */
+    const headPad = Number(view.headPad) || 38;
+    const minTop = gridBox.top - rootBox.top + headPad + 4;
+    const maxTop = Math.max(minTop, gridBox.bottom - rootBox.top - height - 4);
+    let top = cellBox.top - rootBox.top - height - 6;
+    if(top < minTop) top = cellBox.bottom - rootBox.top + 6;
+    top = Math.min(maxTop, Math.max(minTop, top));
+    const minLeft = gridBox.left - rootBox.left + 4;
+    const maxLeft = Math.max(minLeft, gridBox.right - rootBox.left - width - 4);
+    const left = Math.min(maxLeft, Math.max(minLeft, cellBox.left - rootBox.left));
+    el.style.left = Math.round(left) + 'px';
+    el.style.top = Math.round(top) + 'px';
+    el.style.maxWidth = Math.max(160, Math.round(gridBox.width - 8)) + 'px';
+}
+
+function tableAiAutoScroll(view, event){
+    const grid = view && view.grid;
+    if(!grid || !event || typeof event.clientY !== 'number') return;
+    const box = tableAiBox(grid);
+    if(!box.height) return;
+    const top = Number(grid.scrollTop) || 0;
+    if(event.clientY < box.top + TABLE_AI_DRAG_EDGE) grid.scrollTop = Math.max(0, top - 20);
+    else if(event.clientY > box.bottom - TABLE_AI_DRAG_EDGE) grid.scrollTop = top + 20;
+}
+
+function tableAiPointerDown(node, event){
+    if(!event) return;
+    if(event.button !== undefined && event.button !== null && Number(event.button) !== 0) return;
+    if(tableAiEditableTarget(event.target)) return;
+    const target = event.target;
+    if(target && typeof target.closest === 'function'
+        && target.closest('.table-cell-editor, .table-cell-mention-picker, .table-cell-mention-trigger, .table-cell-more-wrap, .table-cell-add')) return;
+    const address = tableAiCellAddress(target);
+    if(!address) return;
+    if(typeof event.preventDefault === 'function') event.preventDefault();
+    const state = ensureTableState(node);
+    const current = state && state.selection ? state.selection : null;
+    let anchor = address;
+    if(event.shiftKey && current){
+        anchor = node._tableAiAnchor || {row: current.r0, col: current.c0};
+    }
+    node._tableAiAnchor = anchor;
+    node._tableAiDrag = {anchor, active: true};
+    tableAiApplySelection(node, {r0: anchor.row, c0: anchor.col, r1: address.row, c1: address.col});
+}
+
+function tableAiPointerMove(node, event){
+    const drag = node._tableAiDrag;
+    if(!drag || !drag.active) return;
+    /* 鼠标在窗口外松开时收不到 mouseup：下一次移动（buttons=0）就当落定，别继续扩选。 */
+    if(event && event.buttons === 0){ tableAiPointerUp(node, event); return; }
+    const view = tableAiViews.get(node);
+    if(view) tableAiAutoScroll(view, event);
+    const address = tableAiCellAddress(event && event.target);
+    if(!address) return;
+    tableAiApplySelection(node, {r0: drag.anchor.row, c0: drag.anchor.col, r1: address.row, c1: address.col});
+}
+
+function tableAiPointerUp(node, event){
+    const drag = node._tableAiDrag;
+    if(!drag) return;
+    node._tableAiDrag = null;
+    const address = tableAiCellAddress(event && event.target);
+    if(address) tableAiApplySelection(node, {r0: drag.anchor.row, c0: drag.anchor.col, r1: address.row, c1: address.col});
+    const state = ensureTableState(node);
+    if(state && state.selection) scheduleSave();
+}
+
+function tableAiBuildNotice(node, view){
+    const el = tableAiEl('div', 'table-ai-notice');
+    const text = tableAiEl('span', 'table-ai-notice-text', '');
+    const undo = tableAiEl('button', 'table-ai-notice-undo', '撤销');
+    undo.type = 'button';
+    undo.onclick = event => { if(event && event.stopPropagation) event.stopPropagation(); tableAiUndoNode(node); };
+    el.appendChild(text);
+    el.appendChild(undo);
+    view.notice = {el, text, undo, timer: 0};
+    return el;
+}
+
+function tableAiShowNotice(node, text){
+    const view = tableAiViews.get(node);
+    if(!view || !view.notice) return;
+    const notice = view.notice;
+    notice.text.textContent = text;
+    notice.undo.style.display = tableAiUndoStack.has(node) ? '' : 'none';
+    notice.el.classList.add('is-open');
+    if(notice.timer) clearTimeout(notice.timer);
+    notice.timer = setTimeout(() => {
+        notice.timer = 0;
+        notice.el.classList.remove('is-open');
+    }, TABLE_AI_NOTICE_MS);
+    if(notice.timer && typeof notice.timer.unref === 'function') notice.timer.unref();
+}
+
+function tableAiShowError(node, message, title){
+    const text = String(message || '').slice(0, 400) || '未知错误';
+    if(typeof showErrorModal === 'function'){ showErrorModal(text, title || 'AI 失败'); return; }
+    notifyCanvas(text);
+}
+
+/* 选区原文：二维数组 + 偏移 + 选中的列名（行列号在提示词里是整表真实序号）。
+   媒体格不参与改写：提示词里留空，应用时也不许把媒体地址覆盖成文字。 */
+function tableAiSelectionPatch(model, state, selection){
+    const values = [];
+    const skipped = [];
+    for(let row = selection.r0; row <= selection.r1; row += 1){
+        const line = [];
+        for(let col = selection.c0; col <= selection.c1; col += 1){
+            const raw = state.rows[row] ? state.rows[row][col] : '';
+            if(model.isMediaCell(raw)){ skipped.push({row:row + 1, col:col + 1}); line.push(''); }
+            else line.push(model.cellText(raw));
+        }
+        values.push(line);
+    }
+    return {
+        values,
+        rowOffset: selection.r0,
+        colOffset: selection.c0,
+        columnNames: state.columns.slice(selection.c0, selection.c1 + 1),
+        skipped
+    };
+}
+
+function tableAiValuesRepairPrompt(prompt, bad, withCols){
+    return '你上一次的输出无法解析成要求的 JSON。请只返回一个合法 JSON 对象，不要解释、不要 Markdown。\n'
+        + '格式：{"values":[{"row":1' + (withCols ? ',"col":1' : '') + ',"value":"改写后的单元格文本"}]}\n\n'
+        + '原始要求：\n' + String(prompt || '').slice(0, 12000)
+        + '\n\n上一次输出：\n' + String(bad || '').slice(0, 4000);
+}
+
+function tableAiCloseOverlay(node){
+    const preview = tableAiPreviews.get(node);
+    if(preview){ tableAiRemoveElement(preview.overlay); tableAiPreviews.delete(node); }
+    const panel = tableAiColumnPanels.get(node);
+    if(panel){ tableAiRemoveElement(panel.overlay); tableAiColumnPanels.delete(node); }
+}
+
+function tableAiSyncPreviewFoot(node){
+    const entry = tableAiPreviews.get(node);
+    if(!entry) return;
+    const total = entry.preview.changes.length;
+    const picked = entry.preview.changes.filter(change => change.included).length;
+    entry.count.textContent = '共 ' + total + ' 处变更' + (picked < total ? '（已选 ' + picked + ' 处）' : '');
+    entry.apply.disabled = picked === 0;
+}
+
+function tableAiOpenPreviewModal(node, preview){
+    tableAiCloseOverlay(node);
+    const overlay = tableAiEl('div', 'table-ai-overlay');
+    const panel = tableAiEl('div', 'table-ai-panel');
+    overlay.appendChild(panel);
+
+    const head = tableAiEl('div', 'table-ai-panel-head');
+    head.appendChild(tableAiEl('span', 'table-ai-panel-title', 'AI 批量改 · ' + preview.changes.length + ' 处'));
+    const close = tableAiEl('button', 'table-ai-close', '✕');
+    close.type = 'button';
+    head.appendChild(close);
+    panel.appendChild(head);
+
+    if(preview.note && preview.note.length) panel.appendChild(tableAiEl('p', 'table-ai-note', preview.note.join('；')));
+
+    const diff = tableAiEl('div', 'table-ai-diff');
+    const headRow = tableAiEl('div', 'table-ai-diff-head');
+    headRow.appendChild(tableAiEl('span', 'table-ai-diff-check', ''));
+    headRow.appendChild(tableAiEl('span', 'table-ai-diff-where', '位置'));
+    headRow.appendChild(tableAiEl('span', 'table-ai-diff-head-cell', '原文'));
+    headRow.appendChild(tableAiEl('span', 'table-ai-diff-head-cell', '改动后'));
+    diff.appendChild(headRow);
+
+    preview.changes.forEach(change => {
+        const row = tableAiEl('div', 'table-ai-diff-row');
+        row.dataset.row = String(change.row);
+        row.dataset.col = String(change.col);
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.className = 'table-ai-diff-check';
+        check.checked = Boolean(change.included);
+        check.onchange = () => {
+            change.included = Boolean(check.checked);
+            row.classList.toggle('is-off', !change.included);
+            tableAiSyncPreviewFoot(node);
+        };
+        const where = tableAiEl('span', 'table-ai-diff-where', '第 ' + change.row + ' 行 · ' + (change.columnName || ''));
+        const before = tableAiEl('div', 'table-ai-diff-before', change.before || '（空）');
+        before.title = change.before || '';
+        const after = tableAiEl('div', 'table-ai-diff-after', change.after || '（空）');
+        after.title = change.after || '';
+        row.appendChild(check);
+        row.appendChild(where);
+        row.appendChild(before);
+        row.appendChild(after);
+        diff.appendChild(row);
+    });
+    panel.appendChild(diff);
+
+    const foot = tableAiEl('div', 'table-ai-panel-foot');
+    const count = tableAiEl('span', 'table-ai-diff-count', '');
+    foot.appendChild(count);
+    const apply = tableAiEl('button', 'table-ai-primary', '应用');
+    apply.type = 'button';
+    const cancel = tableAiEl('button', 'table-ai-ghost', '取消');
+    cancel.type = 'button';
+    foot.appendChild(apply);
+    foot.appendChild(cancel);
+    panel.appendChild(foot);
+
+    close.onclick = () => tableAiCloseOverlay(node);
+    cancel.onclick = () => tableAiCloseOverlay(node);
+    overlay.onclick = event => { if(event && event.target === overlay) tableAiCloseOverlay(node); };
+    apply.onclick = () => {
+        const picked = preview.changes.filter(change => change.included);
+        if(!picked.length) return;
+        tableAiCloseOverlay(node);
+        tableAiApplyChanges(node, picked);
+    };
+
+    tableAiPreviews.set(node, {overlay, preview, count, apply});
+    const host = document.body || document.documentElement;
+    if(host) host.appendChild(overlay);
+    tableAiSyncPreviewFoot(node);
+}
+
+async function tableAiOpenPreview(node){
+    const model = novaTableModel();
+    if(!model) return false;
+    if(tableAiPreviewRuns.has(node)) return false;
+    const view = tableAiViews.get(node);
+    const state = ensureTableState(node);
+    if(!view || !view.toolbar || !state) return false;
+    if(tableAiBatchBusy(node)){ tableAiShowError(node, TABLE_AI_BUSY_TITLE, 'AI 批量改'); return false; }
+    const channel = tableAiChannel();
+    if(!channel){ tableAiShowError(node, TABLE_AI_NO_CHANNEL, 'AI 批量改'); return false; }
+    const selection = state.selection;
+    if(!selection) return false;
+    const instruction = String(view.toolbar.input.value || '').trim();
+    if(!instruction) return false;
+    const patch = tableAiSelectionPatch(model, state, selection);
+    tableAiPreviewRuns.add(node);
+    const runLabel = view.toolbar.run.textContent;
+    view.toolbar.run.textContent = '生成中…';
+    tableAiSyncToolbar(node);
+    try {
+        const prompt = model.batchRewritePrompt(instruction, patch);
+        let text = '';
+        let parsed = null;
+        try {
+            text = await channel(node, prompt, {maxTokens: model.AI_COLUMN_MAX_TOKENS});
+            parsed = model.parseAiValues(text, tableAiSelectionRows(selection));
+            if(!parsed.parsed || !parsed.applied.length){
+                text = await channel(node, tableAiValuesRepairPrompt(prompt, text, true), {maxTokens: model.AI_COLUMN_MAX_TOKENS});
+                parsed = model.parseAiValues(text, tableAiSelectionRows(selection));
+            }
+        } catch(error){
+            throw new Error(String((error && error.message) || error || '生成预览失败'));
+        }
+        if(!parsed || !parsed.parsed) throw new Error('模型返回的内容不是可解析的 JSON');
+        const fresh = ensureTableState(node);
+        if(!fresh || !fresh.selection) throw new Error('表格已变化，请重新选择区域再试');
+        const cells = [];
+        const ignored = [];
+        parsed.applied.forEach(item => {
+            const row = Number(item.row);
+            const col = item.col === undefined || item.col === null
+                ? (selection.c0 === selection.c1 ? selection.c0 + 1 : 0)
+                : Number(item.col);
+            if(!col || row - 1 < selection.r0 || row - 1 > selection.r1
+                || col - 1 < selection.c0 || col - 1 > selection.c1){ ignored.push(item); return; }
+            if(!fresh.rows[row - 1] || model.isMediaCell(fresh.rows[row - 1][col - 1])){ ignored.push(item); return; }
+            cells.push({row, column:col, value:item.value});
+        });
+        if(!cells.length) throw new Error(ignored.length ? '模型返回的格子都不在选区里' : '模型没有返回可用的改写结果');
+        const after = model.applyOperation(fresh, 'set_cells', {cells});
+        const changes = model.diffTables(fresh, after).map(change => ({...change, included:true}));
+        if(!changes.length) throw new Error('模型返回的内容和原文相同，没有可应用的改动');
+        const note = [];
+        if(ignored.length) note.push('有 ' + ignored.length + ' 处返回不在选区或落在媒体格，已忽略');
+        if(parsed.missing.length) note.push('有 ' + parsed.missing.length + ' 行没有返回改写结果');
+        if(parsed.invalid.length) note.push('有 ' + parsed.invalid.length + ' 项返回不合法');
+        tableAiOpenPreviewModal(node, {selection, changes, note});
+        return true;
+    } catch(error){
+        tableAiShowError(node, (error && error.message) || '生成预览失败', 'AI 批量改');
+        return false;
+    } finally {
+        tableAiPreviewRuns.delete(node);
+        view.toolbar.run.textContent = runLabel || '生成预览';
+        tableAiSyncToolbar(node);
+    }
+}
+
+function tableAiApplyChanges(node, changes){
+    const model = novaTableModel();
+    const state = ensureTableState(node);
+    if(!model || !state || !changes || !changes.length) return false;
+    const cells = changes.map(change => ({row:change.row, column:change.col, value:change.after}));
+    const snapshot = model.tableSnapshot(state);
+    let next = null;
+    try {
+        next = model.applyOperation(state, 'set_cells', {cells});
+    } catch(error){
+        tableAiShowError(node, (error && error.message) || '应用改动失败', 'AI 批量改');
+        return false;
+    }
+    tableAiUndoStack.set(node, {snapshot, at: tableAiNow()});
+    node.table = next;
+    scheduleSave();
+    repaintTable(node);
+    tableAiShowNotice(node, '已应用 ' + cells.length + ' 处改动');
+    return true;
+}
+
+function tableAiUndoNode(node){
+    const model = novaTableModel();
+    const entry = tableAiUndoStack.get(node);
+    if(!model || !entry) return false;
+    tableAiUndoStack.delete(node);
+    node.table = model.cloneTable(entry.snapshot.table);
+    scheduleSave();
+    repaintTable(node);
+    tableAiShowNotice(node, '已撤销 AI 改动');
+    return true;
+}
+
+function tableAiUndoLast(){
+    let latest = null;
+    tableAiUndoStack.forEach((entry, item) => {
+        if(!latest || Number(entry.at) >= Number(latest.entry.at)) latest = {node:item, entry};
+    });
+    if(!latest) return false;
+    return tableAiUndoNode(latest.node);
+}
+
+function tableAiHasUndo(){ return tableAiUndoStack.size > 0; }
+
+function tableAiColumnState(node){ return tableAiColumnStates.get(node) || null; }
+
+function tableAiColumnIsRunning(node){ return Boolean(node) && tableAiColumnRuns.has(node); }
+
+function tableAiStopColumn(node){
+    const runState = tableAiColumnStates.get(node);
+    if(!runState || !runState.running) return false;
+    runState.stopped = true;
+    tableAiPaintColumnPanel(node);
+    return true;
+}
+
+function tableAiSetInstruction(node, column, instruction){
+    const model = novaTableModel();
+    const state = ensureTableState(node);
+    if(!model || !state) return false;
+    if(column < 0 || column >= state.columns.length) return false;
+    const text = String(instruction || '').trim().slice(0, model.AI_INSTRUCTION_MAX_CHARS);
+    const next = state.aiColumns.slice();
+    next[column] = text ? {instruction:text, updatedAt:tableAiNow()} : null;
+    state.aiColumns = model.normalizeAiColumns(next, state.columns.length);
+    scheduleSave();
+    repaintTable(node);
+    return true;
+}
+
+function tableAiMarkFailedRow(runState, row, reason){
+    if(!runState || !Array.isArray(runState.failed)) return;
+    const hit = runState.failed.filter(item => item.row === row)[0];
+    if(hit){ hit.reason = reason; return; }
+    runState.failed.push({row, reason});
+}
+
+function tableAiClearFailedRow(runState, row){
+    if(!runState || !Array.isArray(runState.failed)) return;
+    runState.failed = runState.failed.filter(item => item.row !== row);
+}
+
+function openTableAiColumnPanel(node, column){
+    const model = novaTableModel();
+    const state = ensureTableState(node);
+    if(!model || !state) return null;
+    if(node.llmGeneratedOutput) return null;
+    if(column < 0 || column >= state.columns.length) return null;
+    tableAiCloseOverlay(node);
+    const overlay = tableAiEl('div', 'table-ai-overlay');
+    const panel = tableAiEl('div', 'table-ai-panel');
+    overlay.appendChild(panel);
+
+    const head = tableAiEl('div', 'table-ai-panel-head');
+    head.appendChild(tableAiEl('span', 'table-ai-panel-title', '智能列 · ' + (state.columns[column] || '未命名列')));
+    const close = tableAiEl('button', 'table-ai-close', '✕');
+    close.type = 'button';
+    head.appendChild(close);
+    panel.appendChild(head);
+
+    const hint = tableAiEl('p', 'table-ai-note', '');
+    panel.appendChild(hint);
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'table-ai-instruction';
+    textarea.placeholder = '这一列怎么生成？例如：按场景描述写一句英文 SD 提示词，不超过 30 词';
+    const meta = state.aiColumns[column] || null;
+    textarea.value = meta ? meta.instruction : '';
+    panel.appendChild(textarea);
+
+    const status = tableAiEl('div', 'table-ai-col-status', '');
+    panel.appendChild(status);
+    const fails = tableAiEl('div', 'table-ai-col-fails', '');
+    panel.appendChild(fails);
+
+    const foot = tableAiEl('div', 'table-ai-panel-foot');
+    const run = tableAiEl('button', 'table-ai-primary', '按此列生成');
+    run.type = 'button';
+    const stop = tableAiEl('button', 'table-ai-ghost', '停止');
+    stop.type = 'button';
+    const clear = tableAiEl('button', 'table-ai-ghost', '清除指令');
+    clear.type = 'button';
+    foot.appendChild(run);
+    foot.appendChild(stop);
+    foot.appendChild(clear);
+    panel.appendChild(foot);
+
+    close.onclick = () => tableAiCloseOverlay(node);
+    overlay.onclick = event => { if(event && event.target === overlay) tableAiCloseOverlay(node); };
+    textarea.onkeydown = event => event.stopPropagation();
+    run.onclick = () => {
+        const instruction = String(textarea.value || '').trim();
+        if(!instruction){ textarea.focus(); return; }
+        tableAiSetInstruction(node, column, instruction);
+        tableAiRunColumn(node, column);
+    };
+    stop.onclick = () => tableAiStopColumn(node);
+    clear.onclick = () => {
+        tableAiSetInstruction(node, column, '');
+        textarea.value = '';
+        tableAiPaintColumnPanel(node);
+    };
+
+    tableAiColumnPanels.set(node, {overlay, column, textarea, status, fails, hint, run, stop, clear});
+    const host = document.body || document.documentElement;
+    if(host) host.appendChild(overlay);
+    tableAiPaintColumnPanel(node);
+    return overlay;
+}
+
+function tableAiPaintColumnPanel(node){
+    const entry = tableAiColumnPanels.get(node);
+    if(!entry) return;
+    const state = ensureTableState(node);
+    if(!state || entry.column >= state.columns.length){ tableAiCloseOverlay(node); return; }
+    const runState = tableAiColumnStates.get(node) || null;
+    const running = tableAiColumnIsRunning(node);
+    const batchBusy = tableAiBatchBusy(node);
+    const channel = tableAiChannel();
+    const meta = state.aiColumns[entry.column] || null;
+    const instruction = meta ? meta.instruction : '';
+    let hint = '';
+    if(batchBusy) hint = TABLE_AI_BUSY_TITLE;
+    else if(!channel) hint = TABLE_AI_NO_CHANNEL;
+    else if(running) hint = '正在按指令生成这一列；可随时点「停止」，已生成的格子会保留。';
+    else if(!instruction) hint = '先写这一列的生成指令，再点「按此列生成」。';
+    entry.hint.textContent = hint;
+    entry.hint.style.display = hint ? '' : 'none';
+
+    let status = '';
+    if(runState && runState.column === entry.column && runState.total){
+        const failed = Array.isArray(runState.failed) ? runState.failed.length : 0;
+        const headText = runState.running ? '正在生成：' : (runState.stopped ? '已停止：' : '');
+        status = headText + '已生成 ' + runState.done + '/' + runState.total + ' 行'
+            + (failed ? '，失败 ' + failed + ' 行' : '');
+    } else if(runState && runState.error){
+        status = runState.error;
+    }
+    entry.status.textContent = status;
+    entry.status.classList.toggle('is-error', Boolean(runState && runState.error && !(runState.done > 0)));
+
+    entry.fails.textContent = '';
+    const failedRows = runState && runState.column === entry.column && Array.isArray(runState.failed) ? runState.failed : [];
+    failedRows.forEach(item => {
+        const row = tableAiEl('div', 'table-ai-col-fail');
+        row.appendChild(tableAiEl('span', 'table-ai-col-fail-text', '第 ' + item.row + ' 行失败：' + (item.reason || '未知原因')));
+        const retry = tableAiEl('button', 'table-ai-retry', '重试该行');
+        retry.type = 'button';
+        retry.onclick = () => tableAiRunColumn(node, entry.column, {rows:[item.row], keepFailed:true});
+        row.appendChild(retry);
+        entry.fails.appendChild(row);
+    });
+
+    entry.run.disabled = running || batchBusy || !channel;
+    entry.run.title = batchBusy ? TABLE_AI_BUSY_TITLE
+        : (!channel ? TABLE_AI_NO_CHANNEL : (running ? '这一列正在生成' : '按这一列的指令生成整列'));
+    entry.stop.disabled = !running;
+    entry.clear.disabled = running || !instruction;
+}
+
+async function tableAiRunColumn(node, column, options){
+    const opts = options || {};
+    const model = novaTableModel();
+    if(!model) return false;
+    /* 同一时刻只允许一列在跑（跨表也算）：两列同时写会让「停止 / 进度」对不上。 */
+    if(tableAiColumnRuns.size){
+        if(!tableAiColumnIsRunning(node)) tableAiShowError(node, '另一列的 AI 生成还在进行，等它结束再试', 'AI 列');
+        return false;
+    }
+    if(tableAiBatchBusy(node)){ tableAiShowError(node, TABLE_AI_BUSY_TITLE, 'AI 列'); return false; }
+    const channel = tableAiChannel();
+    if(!channel){ tableAiShowError(node, TABLE_AI_NO_CHANNEL, 'AI 列'); return false; }
+    let state = ensureTableState(node);
+    if(!state) return false;
+    if(column < 0 || column >= state.columns.length) return false;
+    const meta = state.aiColumns[column] || null;
+    const instruction = meta ? meta.instruction : '';
+    const planOptions = Array.isArray(opts.rows) && opts.rows.length ? {rows: opts.rows} : {};
+    const jobs = model.planAiColumn(state, column, planOptions);
+    const total = jobs.reduce((sum, batch) => sum + batch.rows.length, 0);
+    if(!total){
+        tableAiColumnStates.set(node, {column, running:false, stopped:false, done:0, total:0, failed:[], error:'没有可生成的行（整行都是空的行会跳过）'});
+        tableAiPaintColumnPanel(node);
+        return false;
+    }
+    const previous = tableAiColumnStates.get(node) || null;
+    const kept = opts.keepFailed && previous && Array.isArray(previous.failed) ? previous.failed.slice() : [];
+    const runState = {column, running:true, stopped:false, done:0, total, failed:kept, error:''};
+    tableAiColumnStates.set(node, runState);
+    tableAiColumnRuns.add(node);
+    tableAiPaintColumnPanel(node);
+    try {
+        for(let index = 0; index < jobs.length; index += 1){
+            if(runState.stopped) break;
+            if((nodes || []).indexOf(node) < 0) break;
+            const batch = jobs[index];
+            state = ensureTableState(node);
+            if(!state) break;
+            const cells = batch.rows.map(rowNumber => {
+                const line = state.rows[rowNumber - 1] || [];
+                return {row:rowNumber, values:state.columns.map((_, col) => model.cellText(line[col]))};
+            });
+            const prompt = model.aiColumnPrompt(instruction, cells, state.columns, {columnIndex:column});
+            let parsed = null;
+            try {
+                let text = await channel(node, prompt, {maxTokens:model.AI_COLUMN_MAX_TOKENS});
+                parsed = model.parseAiValues(text, batch.rows);
+                /* 只有「整批解析不出可用结果」才值得再要一次；缺行属于逐行失败，
+                   留给「重试该行」，不能让一次补发把进度和失败标记抹掉。 */
+                if(!parsed.parsed || !parsed.applied.length){
+                    text = await channel(node, tableAiValuesRepairPrompt(prompt, text, false), {maxTokens:model.AI_COLUMN_MAX_TOKENS});
+                    parsed = model.parseAiValues(text, batch.rows);
+                }
+            } catch(error){
+                runState.error = String((error && error.message) || error || '生成失败');
+                parsed = null;
+            }
+            const writes = (parsed ? parsed.applied : [])
+                .filter(item => item.col === undefined || item.col === null)
+                .map(item => ({row:item.row, column:column + 1, value:item.value}));
+            if(writes.length){
+                try {
+                    const fresh = ensureTableState(node);
+                    node.table = model.applyOperation(fresh, 'set_cells', {cells:writes});
+                    writes.forEach(item => {
+                        runState.done += 1;
+                        tableAiClearFailedRow(runState, item.row);
+                    });
+                } catch(error){
+                    runState.error = String((error && error.message) || error || '写入失败');
+                    writes.forEach(item => tableAiMarkFailedRow(runState, item.row, runState.error));
+                }
+            }
+            batch.rows
+                .filter(rowNumber => !writes.some(item => item.row === rowNumber))
+                .forEach(rowNumber => tableAiMarkFailedRow(runState, rowNumber, runState.error || '这一行没有返回结果'));
+            scheduleSave();
+            repaintTable(node);
+            tableAiPaintColumnPanel(node);
+        }
+    } finally {
+        runState.running = false;
+        tableAiColumnRuns.delete(node);
+        tableAiPaintColumnPanel(node);
+        if(!runState.done && runState.error) tableAiShowError(node, runState.error, 'AI 列生成失败');
+        scheduleSave();
+    }
+    return runState.done > 0;
+}
+
+/* 撤销快照只活到「用户点了别处」：否则在别的节点上按 Cmd+Z 也会被这张表吃掉。 */
+function tableAiDropUndo(node){
+    if(!tableAiUndoStack.delete(node)) return;
+    const view = tableAiViews.get(node);
+    if(view && view.notice) view.notice.undo.style.display = 'none';
+}
+
+function tableAiGlobalMouseDown(event){
+    /* 预览 / AI 列弹层开着时不按「点表格外」处理：那是弹层自己的点击，不该把选区丢给下一轮。 */
+    if(tableAiPreviews.size || tableAiColumnPanels.size) return;
+    const inside = tableAiNodeForTarget(event && event.target);
+    (nodes || []).forEach(item => {
+        if(!item) return;
+        if(item !== inside) tableAiDropUndo(item);
+        if(item === inside) return;
+        if(!item.table || !item.table.selection) return;
+        tableAiApplySelection(item, null);
+        scheduleSave();
+    });
+}
+
+function tableAiGlobalMouseMove(event){
+    (nodes || []).forEach(item => { if(item && item._tableAiDrag) tableAiPointerMove(item, event); });
+}
+
+function tableAiGlobalMouseUp(event){
+    (nodes || []).forEach(item => { if(item && item._tableAiDrag) tableAiPointerUp(item, event); });
+}
+
+function tableAiGlobalKeydown(event){
+    if(!event) return;
+    const key = String(event.key || '');
+    const editable = tableAiEditableTarget(event.target);
+    if(key === 'Escape' && !editable){
+        const opened = Array.from(tableAiPreviews.keys()).concat(Array.from(tableAiColumnPanels.keys()));
+        if(opened.length){
+            opened.forEach(item => tableAiCloseOverlay(item));
+            return;
+        }
+    }
+    if(key === 'Escape' && !editable){
+        let cleared = false;
+        (nodes || []).forEach(item => {
+            if(!item || !item.table || !item.table.selection) return;
+            tableAiApplySelection(item, null);
+            cleared = true;
+        });
+        if(cleared){ scheduleSave(); return; }
+    }
+    if((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey
+        && key.toLowerCase() === 'z' && !editable && tableAiHasUndo()){
+        if(typeof event.preventDefault === 'function') event.preventDefault();
+        if(typeof event.stopPropagation === 'function') event.stopPropagation();
+        if(typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+        tableAiUndoLast();
+    }
+}
+
+(function bindTableAiGlobals(){
+    if(typeof document === 'undefined' || !document || typeof document.addEventListener !== 'function') return;
+    document.addEventListener('mousedown', tableAiGlobalMouseDown, true);
+    document.addEventListener('mousemove', tableAiGlobalMouseMove, true);
+    document.addEventListener('mouseup', tableAiGlobalMouseUp, true);
+    document.addEventListener('keydown', tableAiGlobalKeydown, true);
+})();
+
+
 function renderTableBody(node){
     const model = novaTableModel();
     if(!model){
@@ -1871,6 +2742,13 @@ function renderTableBody(node){
     table.className = 'table-node-table';
     grid.appendChild(table);
 
+    const aiView = {root, grid, cells: [], batchBusy: undefined, toolbar: null, notice: null};
+    tableAiViews.set(node, aiView);
+    root.appendChild(tableAiBuildToolbar(node, aiView));
+    root.appendChild(tableAiBuildNotice(node, aiView));
+    root.addEventListener('mousedown', event => tableAiPointerDown(node, event), true);
+    grid.addEventListener('scroll', () => tableAiSyncToolbar(node), {passive:true});
+
     function tableButton(label, title, className){
         const button = document.createElement('button');
         button.type = 'button';
@@ -1899,6 +2777,13 @@ function renderTableBody(node){
     function paint(){
         const state = ensureTableState(node);
         if(!state) return;
+        /* 每次重绘都重算一遍批量运行态（runTableBatch 的开跑/收尾都会 repaintTable），
+           选区拖动只走轻量标记，不重算这一份，免得拖一下扫一张表。 */
+        node._tableAiDrag = null;
+        const aiBusy = tableAiBatchBusy(node);
+        const aiChannel = tableAiChannel();
+        const aiRun = tableAiColumnStates.get(node) || null;
+        if(aiView){ aiView.cells = []; aiView.heads = []; aiView.batchBusy = aiBusy; }
         /* 字号一律不缩放，只让图片随列宽变化。
            表格区不再设高度上限：行数全部自然显示，节点多高就显示多少，
            由「填满节点可用高度」来决定，而不是硬顶一个固定行数。 */
@@ -2009,11 +2894,29 @@ function renderTableBody(node){
             cell.title = name;
             if(textColumns[index]) cell.classList.add('is-text-column');
             if(editingHere) cell.classList.add('is-editing');
+            if(aiView) aiView.heads.push({col: index, cell});
             const label = document.createElement('span');
             label.className = 'table-head-label';
             label.textContent = name;
             cell.appendChild(label);
             cell.appendChild(tableHeadDeleteButton('删除这一列', () => deleteTableColumn(node, index)));
+            /* LLM 出表生成的临时表不给 AI 列入口：那张表是模型的产物，别把用户的出表流程搅乱。 */
+            if(!llmTable){
+                const aiMeta = state.aiColumns[index] || null;
+                const aiButton = tableButton('AI', '', 'table-ai-col-btn');
+                if(aiMeta){
+                    aiButton.classList.add('is-configured');
+                    aiButton.title = '智能列：' + aiMeta.instruction;
+                } else {
+                    aiButton.title = '设为智能列（按这一列的指令批量生成）';
+                }
+                if(aiBusy){ aiButton.disabled = true; aiButton.title = TABLE_AI_BUSY_TITLE; }
+                else if(!aiChannel){ aiButton.disabled = true; aiButton.title = TABLE_AI_NO_CHANNEL; }
+                aiButton.onclick = event => { event.stopPropagation(); openTableAiColumnPanel(node, index); };
+                aiButton.ondblclick = event => event.stopPropagation();
+                cell.appendChild(aiButton);
+                cell.classList.add('has-ai');
+            }
             cell.ondblclick = event => { event.stopPropagation(); beginTableEdit(node, {kind:'column', column:index}); };
             if(editingHere){
                 const input = document.createElement('input');
@@ -2045,6 +2948,7 @@ function renderTableBody(node){
 
         thead.appendChild(headRow);
         table.appendChild(thead);
+        if(aiView) aiView.headPad = Number(thead.offsetHeight) || 38;
 
         // ── 表体 ──
         const tbody = document.createElement('tbody');
@@ -2136,7 +3040,12 @@ function renderTableBody(node){
             state.columns.forEach((name, index) => {
                 const cell = document.createElement('td');
                 cell.className = 'table-cell';
+                cell.dataset.row = String(rowIndex);
+                cell.dataset.col = String(index);
                 if(textColumns[index]) cell.classList.add('is-text-column');
+                if(aiView) aiView.cells.push({row: rowIndex, col: index, cell});
+                if(aiRun && aiRun.column === index && Array.isArray(aiRun.failed)
+                    && aiRun.failed.some(item => item.row === rowIndex + 1)) cell.classList.add('table-ai-failed');
                 const raw = row[index];
                 const media = model.isMediaCell(raw) ? raw : null;
                 const value = model.cellText(raw);
@@ -2204,6 +3113,7 @@ function renderTableBody(node){
         refreshIcons();
 
         node._tableSignature = tableNodeSignature(node);
+        tableAiPaintSelection(node);
         if(typeof requestAnimationFrame === 'function') requestAnimationFrame(() => syncTableNodeWidth(node));
         else syncTableNodeWidth(node);
     }

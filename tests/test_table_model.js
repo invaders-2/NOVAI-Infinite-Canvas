@@ -80,7 +80,7 @@ eq(M.describeOperation('delete_row').risk, 'medium', 'delete_row risk');
 eq(M.describeOperation('delete_row').confirmation, 'on-risk', 'delete_row confirmation');
 eq(M.describeOperation('delete_column').confirmation, 'on-risk', 'delete_column confirmation');
 eq(M.describeOperation('nope'), null, '未知操作描述');
-eq(M.OPERATION_IDS.length, 6, '操作数 6');
+eq(M.OPERATION_IDS.length, 7, '操作数 7');
 ok(!M.requiresConfirmation('delete_row',{}), 'on-risk 非风险不确认');
 ok(M.requiresConfirmation('delete_row',{risky:true}), 'on-risk 风险时确认');
 

@@ -16,6 +16,7 @@
 }
 
 .table-node {
+    position: relative;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -1158,4 +1159,410 @@ input.table-batch-input { width: 48px; }
     line-height: 1.4;
     word-break: break-word;
 }
+
+/* ═══ 智能（选区 / AI 批量改 / AI 列）═══════════════════════════════
+   全部沿用上面的设计令牌；不新增描边（层级靠软底 + 柔和投影 + 字重）。 */
+
+/* 选区：半透明软底 + 字重提一级（不描边、不加线，项目硬规则）。
+   选择器带上 tr：行勾选的 `tr.is-selected td` 是 0,2,3，光写 td.is-selected 会被它盖掉。 */
+.table-node-table tbody tr td.is-selected {
+    background: color-mix(in srgb, var(--accent) 24%, transparent);
+    color: var(--text);
+    font-weight: 500;
+}
+
+/* 表头对应列的一档轻底，和选区呼应（比格子的 24% 淡得多） */
+.table-head-cell.is-selected-column {
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface-2));
+    color: var(--text-2);
+}
+
+/* AI 列某一行上次失败：淡红底 + 危险色文字，面板里同时给出「重试该行」 */
+.table-node-table tbody tr td.table-ai-failed {
+    background: color-mix(in srgb, var(--danger) 16%, transparent);
+    color: var(--danger-text);
+}
+
+/* ── 表头 AI 列按钮：无指令淡灰「AI」，有指令高亮 ── */
+.table-head-cell.has-ai .table-head-label { padding-right: 40px; }
+
+.table-ai-col-btn {
+    position: absolute;
+    top: 50%;
+    right: 22px;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 16px;
+    padding: 0;
+    border: 0;
+    border-radius: 5px;
+    background: var(--soft);
+    color: var(--text-3);
+    font-family: inherit;
+    font-size: 8px;
+    font-weight: 800;
+    line-height: 16px;
+    letter-spacing: .2px;
+    opacity: .55;
+    cursor: pointer;
+    transition: opacity .15s ease, background .15s ease, color .15s ease;
+}
+
+.table-ai-col-btn:hover { opacity: 1; background: var(--nav-hover-bg); color: var(--text); }
+.table-ai-col-btn.is-configured {
+    opacity: 1;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+}
+.table-ai-col-btn[disabled] { opacity: .3; cursor: not-allowed; }
+
+/* ── 选区工具条 ── */
+.table-ai-toolbar {
+    position: absolute;
+    z-index: 24;
+    display: none;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    /* 绝对定位的 shrink-to-fit / max-content 不认输入框里的文字宽度，会窄到把按钮挤下去；
+       给一个确定性宽度，窄节点再由 max-width 收窄并折行。 */
+    width: 440px;
+    max-width: calc(100% - 8px);
+    padding: 6px;
+    box-sizing: border-box;
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--panel) 96%, transparent);
+    box-shadow: var(--shadow-lg), 0 6px 18px var(--shadow-color-lg);
+    backdrop-filter: blur(44px) saturate(190%);
+    -webkit-backdrop-filter: blur(44px) saturate(190%);
+}
+
+.table-ai-toolbar.is-open { display: flex; }
+
+.table-ai-toolbar-title {
+    flex: 0 0 auto;
+    color: var(--text-2);
+    font-size: 10px;
+    font-weight: 700;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.table-ai-toolbar-input {
+    flex: 1 1 200px;
+    min-width: 160px;
+    max-width: 320px;
+    height: 24px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: var(--soft);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 10.5px;
+    text-overflow: ellipsis;
+    outline: none;
+}
+
+.table-ai-toolbar-input:focus {
+    background: var(--surface);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 16%, transparent);
+}
+
+.table-ai-toolbar-input[disabled] { opacity: .5; cursor: not-allowed; }
+
+.table-ai-hint {
+    flex: 1 1 100%;
+    color: var(--text-2);
+    font-size: 9.5px;
+    line-height: 1.35;
+}
+
+/* ── 通用按钮（工具条 / 弹层共用）── */
+.table-ai-primary {
+    flex: 0 0 auto;
+    height: 24px;
+    padding: 0 11px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent);
+    color: var(--accent-text);
+    font-family: inherit;
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .16s var(--fluid-ease), opacity .16s var(--fluid-ease);
+}
+
+.table-ai-primary:hover { background: var(--accent-hover); }
+.table-ai-primary[disabled] { opacity: .38; cursor: not-allowed; }
+
+.table-ai-ghost {
+    flex: 0 0 auto;
+    height: 24px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--soft);
+    color: var(--text-2);
+    font-family: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .16s var(--fluid-ease), color .16s var(--fluid-ease), opacity .16s var(--fluid-ease);
+}
+
+.table-ai-ghost:hover { background: var(--nav-hover-bg); color: var(--text); }
+.table-ai-ghost[disabled] { opacity: .38; cursor: not-allowed; }
+
+/* ── 应用成功 / 撤销提示条（5 秒内可点撤销）── */
+.table-ai-notice {
+    position: absolute;
+    left: 50%;
+    bottom: 10px;
+    transform: translateX(-50%);
+    z-index: 25;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    max-width: calc(100% - 16px);
+    padding: 5px 6px 5px 12px;
+    box-sizing: border-box;
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--panel) 96%, transparent);
+    box-shadow: var(--shadow-md), 0 6px 18px var(--shadow-color-lg);
+    backdrop-filter: blur(44px) saturate(190%);
+    -webkit-backdrop-filter: blur(44px) saturate(190%);
+}
+
+.table-ai-notice.is-open { display: inline-flex; }
+
+.table-ai-notice-text {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-2);
+    font-size: 10.5px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.table-ai-notice-undo {
+    flex: 0 0 auto;
+    height: 22px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent);
+    color: var(--accent-text);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.table-ai-notice-undo:hover { background: var(--accent-hover); }
+
+/* ── 预览 / AI 列弹层 ── */
+.table-ai-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 260;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--scrim);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.table-ai-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: min(720px, 100%);
+    max-height: min(78vh, 640px);
+    padding: 14px;
+    box-sizing: border-box;
+    overflow: hidden;
+    border-radius: var(--radius-xl);
+    background: color-mix(in srgb, var(--panel) 96%, transparent);
+    box-shadow: var(--shadow-xl);
+    backdrop-filter: blur(44px) saturate(190%);
+    -webkit-backdrop-filter: blur(44px) saturate(190%);
+    color: var(--text);
+    font-family: var(--font-sans);
+}
+
+.table-ai-panel-head { display: flex; align-items: center; gap: 8px; }
+
+.table-ai-panel-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.table-ai-close {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--soft);
+    color: var(--text-3);
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.table-ai-close:hover { background: var(--nav-hover-bg); color: var(--text); }
+
+.table-ai-note { margin: 0; color: var(--text-2); font-size: 10.5px; line-height: 1.5; }
+
+.table-ai-panel-foot { display: flex; align-items: center; gap: 8px; }
+
+/* ── 逐格差异：左右并排「原文 / 改动后」── */
+.table-ai-diff {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.table-ai-diff-head,
+.table-ai-diff-row {
+    display: grid;
+    grid-template-columns: 18px 104px minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+}
+
+.table-ai-diff-head { padding: 0 6px; color: var(--text-3); font-size: 9.5px; font-weight: 700; }
+
+.table-ai-diff-head-cell { color: var(--text-3); font-size: 9.5px; font-weight: 700; }
+
+.table-ai-diff-row { padding: 6px; border-radius: var(--radius-md); background: var(--surface-2); }
+.table-ai-diff-row.is-off { opacity: .45; }
+
+.table-ai-diff-check { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+
+.table-ai-diff-where {
+    overflow: hidden;
+    color: var(--text-3);
+    font-size: 9.5px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.table-ai-diff-before,
+.table-ai-diff-after {
+    min-width: 0;
+    max-height: 66px;
+    overflow: auto;
+    padding: 4px 7px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 10.5px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.table-ai-diff-after { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); color: var(--text); }
+
+.table-ai-diff-count {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--text-2);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── AI 列弹层 ── */
+.table-ai-instruction {
+    width: 100%;
+    min-height: 84px;
+    max-height: 160px;
+    padding: 8px 10px;
+    box-sizing: border-box;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 11px;
+    line-height: 1.55;
+    outline: none;
+    resize: vertical;
+}
+
+.table-ai-instruction:focus {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--strong) 16%, transparent);
+}
+
+.table-ai-col-status {
+    min-height: 14px;
+    color: var(--text-2);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+}
+
+.table-ai-col-status.is-error { color: var(--danger-text); }
+
+.table-ai-col-fails {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 140px;
+    overflow: auto;
+}
+
+.table-ai-col-fail {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--danger-bg);
+}
+
+.table-ai-col-fail-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--danger-text);
+    font-size: 10px;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.table-ai-retry {
+    flex: 0 0 auto;
+    height: 22px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface);
+    color: var(--danger-text);
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.table-ai-retry:hover { background: var(--danger-bg); }
 

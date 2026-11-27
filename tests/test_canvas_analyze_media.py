@@ -8,10 +8,14 @@ import asyncio
 import base64
 import json
 import os
+
+import httpx
 import shutil
 import sys
 import tempfile
 from pathlib import Path
+
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -96,13 +100,15 @@ _EXPECTED_FOUR_SECTIONS = (
 
 
 def _fake_caption_recorder(calls, reply=_REPLY, model="vision-mock"):
-    async def _fake(abs_path, prompt, provider_id, model_arg, ms_model="", max_tokens=0):
+    async def _fake(abs_path, prompt, provider_id, model_arg, ms_model="", max_tokens=0,
+                    timeout_seconds=None):
         calls.append({
             "path": abs_path,
             "prompt": prompt,
             "provider": provider_id,
             "model": model_arg,
             "max_tokens": max_tokens,
+            "timeout_seconds": timeout_seconds,
             "exists_during_call": os.path.exists(abs_path),
             "size": os.path.getsize(abs_path) if os.path.exists(abs_path) else -1,
         })
@@ -111,7 +117,8 @@ def _fake_caption_recorder(calls, reply=_REPLY, model="vision-mock"):
 
 
 def _fake_images_caption_recorder(calls, reply=_VIDEO_REPLY, model="vision-mock"):
-    async def _fake(abs_paths, prompt, provider_id, model_arg, ms_model="", max_tokens=0):
+    async def _fake(abs_paths, prompt, provider_id, model_arg, ms_model="", max_tokens=0,
+                    timeout_seconds=None):
         paths = list(abs_paths)
         calls.append({
             "paths": paths,
@@ -119,6 +126,7 @@ def _fake_images_caption_recorder(calls, reply=_VIDEO_REPLY, model="vision-mock"
             "provider": provider_id,
             "model": model_arg,
             "max_tokens": max_tokens,
+            "timeout_seconds": timeout_seconds,
             "exists_during_call": [os.path.exists(path) for path in paths],
             "sizes": [os.path.getsize(path) if os.path.exists(path) else -1 for path in paths],
         })
@@ -210,7 +218,8 @@ def test_missing_image_is_400():
 
 
 def test_upstream_html_error_page_not_leaked(monkeypatch):
-    async def _boom(abs_path, prompt, provider_id, model, ms_model="", max_tokens=0):
+    async def _boom(abs_path, prompt, provider_id, model, ms_model="", max_tokens=0,
+                    timeout_seconds=None):
         raise main.HTTPException(
             status_code=502, detail="上游接口错误：<html><body>FORBIDDEN</body></html>")
 
@@ -220,11 +229,13 @@ def test_upstream_html_error_page_not_leaked(monkeypatch):
     assert resp.status_code == 502, resp.text
     detail = resp.json()["detail"]
     assert "<html" not in detail and "FORBIDDEN" not in detail
-    assert detail == "上游返回的是网关错误页，不是模型接口的正常响应：请稍后重试，或换一个视觉模型。"
+    assert detail == "上游网关报错 HTTP 502（不是模型接口的正常响应）：请稍后重试，或换一个视觉模型。"
+    assert "HTTP 502" in detail
 
 
 def test_upstream_rate_limit_becomes_chinese_502(monkeypatch):
-    async def _boom(abs_path, prompt, provider_id, model, ms_model="", max_tokens=0):
+    async def _boom(abs_path, prompt, provider_id, model, ms_model="", max_tokens=0,
+                    timeout_seconds=None):
         raise main.HTTPException(status_code=429, detail="429 rate limit exceeded")
 
     monkeypatch.setattr(main, "caption_image_with_provider", _boom)
@@ -235,7 +246,8 @@ def test_upstream_rate_limit_becomes_chinese_502(monkeypatch):
 
 
 def test_upstream_400_keeps_400_and_chinese_detail(monkeypatch):
-    async def _boom(abs_path, prompt, provider_id, model, ms_model="", max_tokens=0):
+    async def _boom(abs_path, prompt, provider_id, model, ms_model="", max_tokens=0,
+                    timeout_seconds=None):
         raise main.HTTPException(status_code=400, detail="未配置 test 的 API Key，请在 API 平台管理中填写。")
 
     monkeypatch.setattr(main, "caption_image_with_provider", _boom)
@@ -245,19 +257,22 @@ def test_upstream_400_keeps_400_and_chinese_detail(monkeypatch):
     assert resp.json()["detail"] == "未配置 test 的 API Key，请在 API 平台管理中填写。"
 
 
-def test_image_prompt_template_asks_for_json_only():
-    # 模板改成「只输出一个 JSON」：四段标记不再由模型吐，改由后端拼 text
-    assert main.canvas_analyze_prompt(False) == main.CANVAS_ANALYZE_PROMPT
-    assert "只输出一个 JSON 对象" in main.CANVAS_ANALYZE_PROMPT
-    for key in ('"prompt"', '"shots"', '"cnPos"', '"cnNeg"', '"enPos"', '"enNeg"',
-                '"no"', '"dur"', '"desc"', '"char"', '"charDesc"', '"shotSize"',
-                '"mood"', '"light"', '"audio"', '"line"', '"prompt"', '"motion"'):
-        assert key in main.CANVAS_ANALYZE_PROMPT, f"JSON 结构里应声明 {key}"
-    assert "这一张画面只给 1 行" in main.CANVAS_ANALYZE_PROMPT
-    assert "注意：这是视频的一帧" not in main.CANVAS_ANALYZE_PROMPT
-    assert "[中文正向]" not in main.CANVAS_ANALYZE_PROMPT
+def test_image_prompt_template_asks_for_prompt_json_only():
+    # 图片节点只要提示词：JSON 里只有 prompt 块，不再有 shots / 分镜表要求
+    prompt = main.CANVAS_ANALYZE_PROMPT
+    assert main.canvas_analyze_prompt(False) == prompt
+    assert "只输出一个 JSON 对象" in prompt
+    assert '{"prompt":{"cnPos":"","cnNeg":"","enPos":"","enNeg":""}}' in prompt
+    assert '"shots"' not in prompt and "shots" not in prompt, "图片模板不该再要求 shots"
+    for key in ('"cnPos"', '"cnNeg"', '"enPos"', '"enNeg"'):
+        assert key in prompt
+    # 四段的内容要求保留
+    assert "200–400 字" in prompt and "60–120 字" in prompt and "60–150 词" in prompt
+    assert "主体与外观细节" in prompt and "构图与镜头" in prompt
+    assert "注意：这是视频的一帧" not in prompt
+    assert "[中文正向]" not in prompt
     # 视频一帧的旧说明仍在（is_video_frame=true 时还会再追加一行）
-    assert "按静态画面反推，不要描述镜头运动" in main.CANVAS_ANALYZE_PROMPT
+    assert "按静态画面反推，不要描述镜头运动" in prompt
 
 
 def test_vision_model_heuristic_picks_first_matching_usable_provider(monkeypatch):
@@ -427,32 +442,32 @@ def test_multi_frame_uses_video_template_and_sends_all_frames(monkeypatch):
     assert created and all(not os.path.exists(path) for path in created), "finally 里要把每帧临时文件都删掉"
 
 
-def test_eight_frames_is_accepted_and_temp_files_all_removed(monkeypatch):
+def test_sixteen_frames_is_accepted_and_temp_files_all_removed(monkeypatch):
     calls = []
     monkeypatch.setattr(main, "caption_images_with_provider", _fake_images_caption_recorder(calls))
     created = _capture_temp_files(monkeypatch)
 
     resp = CLIENT.post("/api/canvas-analyze-media", json={
-        "images": [_PNG_DATA_URL] * 8, "provider": "test",
+        "images": [_PNG_DATA_URL] * 16, "provider": "test",
     })
 
     assert resp.status_code == 200, resp.text
-    assert len(calls[0]["paths"]) == 8
-    assert len(created) == 8
+    assert len(calls[0]["paths"]) == 16
+    assert len(created) == 16
     assert all(not os.path.exists(path) for path in created)
 
 
-def test_more_than_eight_frames_is_400(monkeypatch):
+def test_more_than_sixteen_frames_is_400(monkeypatch):
     calls = []
     monkeypatch.setattr(main, "caption_images_with_provider", _fake_images_caption_recorder(calls))
     created = _capture_temp_files(monkeypatch)
 
     resp = CLIENT.post("/api/canvas-analyze-media", json={
-        "images": [_PNG_DATA_URL] * 9, "provider": "test",
+        "images": [_PNG_DATA_URL] * 17, "provider": "test",
     })
 
     assert resp.status_code == 400, resp.text
-    assert "一次最多 8 帧" in resp.json()["detail"]
+    assert "一次最多 16 帧" in resp.json()["detail"]
     assert calls == []
     assert created == [], "超帧数要在落临时文件之前就拒绝"
 
@@ -571,8 +586,9 @@ def test_video_json_reply_becomes_four_sections_and_storyboard_table(monkeypatch
     assert rows[2][0] == "3" and rows[2][11] == "Slow pull out"
 
 
-def test_image_json_reply_has_single_storyboard_row(monkeypatch):
+def test_image_json_reply_keeps_four_sections_and_never_returns_table(monkeypatch):
     calls = []
+    # 就算模型无视模板仍吐了 shots，图片路径也不组表
     reply = _json_reply(shots=[_JSON_SHOTS[0]], prompt=_JSON_PROMPT)
     monkeypatch.setattr(main, "caption_image_with_provider",
                         _fake_caption_recorder(calls, reply=reply))
@@ -582,10 +598,7 @@ def test_image_json_reply_has_single_storyboard_row(monkeypatch):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["text"] == _EXPECTED_FOUR_SECTIONS
-    assert body["table"]["columns"] == _EXPECTED_COLUMNS
-    assert len(body["table"]["rows"]) == 1
-    assert body["table"]["rows"][0][0] == "1"
-    assert body["table"]["rows"][0][10] == "红裙女孩走向橱窗，中景"
+    assert body["table"] is None, "图片路径 table 恒为 null"
 
 
 def test_non_json_reply_falls_back_to_raw_text_with_null_table(monkeypatch):
@@ -786,7 +799,8 @@ def test_quota_error_detail_markers_become_chinese_sentence():
 
 
 def test_preconsume_quota_error_on_single_frame_is_chinese_502(monkeypatch):
-    async def _boom(abs_path, prompt, provider_id, model, ms_model="", max_tokens=0):
+    async def _boom(abs_path, prompt, provider_id, model, ms_model="", max_tokens=0,
+                    timeout_seconds=None):
         raise main.HTTPException(status_code=402, detail=(
             '上游接口错误：{"error":{"code":402,"message":"failed to pre-consume quota '
             '(current balance: $3.148456, required: $4.981162)"}}'))
@@ -804,7 +818,8 @@ def test_preconsume_quota_error_on_single_frame_is_chinese_502(monkeypatch):
 def test_preconsume_quota_error_on_multi_frame_is_chinese_502(monkeypatch):
     created = _capture_temp_files(monkeypatch)
 
-    async def _boom(abs_paths, prompt, provider_id, model, ms_model="", max_tokens=0):
+    async def _boom(abs_paths, prompt, provider_id, model, ms_model="", max_tokens=0,
+                    timeout_seconds=None):
         raise main.HTTPException(status_code=402, detail=(
             "upstream rejected: failed to pre-consume quota, current balance: $3.148456"))
 
@@ -816,3 +831,693 @@ def test_preconsume_quota_error_on_multi_frame_is_chinese_502(monkeypatch):
     assert resp.status_code == 502, resp.text
     assert resp.json()["detail"] == main.CANVAS_ANALYZE_QUOTA_DETAIL
     assert len(created) == 4 and all(not os.path.exists(path) for path in created), "额度失败也要删干净临时文件"
+
+
+# ── 只出分镜表（2026-11-25 第七轮）────────────────────────────────────────────
+
+
+def test_table_only_template_has_no_four_section_requirements():
+    prompt = main.CANVAS_ANALYZE_VIDEO_TABLE_ONLY_PROMPT
+    assert '"shots":[' in prompt, "只出表格模板必须要求输出 shots"
+    assert "3–20 行" in prompt and "中英混排可接受" in prompt
+    # 整条视频每个镜头都要覆盖（服务端抽帧后镜头数可能多于前端传的帧数）
+    assert "覆盖整条视频的每一个镜头" in prompt
+    assert "镜号从 \"1\" 连续递增" in prompt
+    assert "各镜时长相加要≈整段视频时长" in prompt
+    # 帧数与镜头数要相称，别把多个镜头合并成一行
+    assert "镜头数要与给出的帧数 / 画面变化程度相称" in prompt
+    assert "每一帧属于哪个镜头要交代清楚" in prompt
+    # 不再要 prompt 块 / 四段文本
+    assert "cnPos" not in prompt
+    assert '"prompt":{"cnPos"' not in prompt
+    assert "[中文正向]" not in prompt
+    assert "不要输出提示词四段" in prompt
+    # 不带 duration 时就是常量原文；带 duration 时前面仍加那句时长说明
+    assert main.canvas_analyze_video_prompt(0, 3, table_only=True) == prompt
+    with_duration = main.canvas_analyze_video_prompt(12.3, 3, table_only=True)
+    assert with_duration.startswith("这段视频整段约 12.3 秒，共给出 3 帧，按时间顺序排列。")
+    assert with_duration.endswith(prompt)
+
+
+def test_table_only_video_returns_empty_text_and_storyboard_table(monkeypatch):
+    calls = []
+    monkeypatch.setattr(main, "caption_images_with_provider",
+                        _fake_images_caption_recorder(calls, reply=_JSON_REPLY))
+
+    resp = CLIENT.post("/api/canvas-analyze-media", json={
+        "images": [_PNG_DATA_URL] * 3, "kind": "video", "duration": 12.3,
+        "table_only": True, "provider": "test", "model": "",
+    })
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["text"] == "", "table_only 时不返回四段文本"
+    assert body["table"]["columns"] == _EXPECTED_COLUMNS
+    assert len(body["table"]["rows"]) == 3
+    assert body["table"]["rows"][0][0] == "1"
+    # 模型收到的是「只出表格」模板（带 duration 前缀句）
+    saved_prompt = calls[0]["prompt"]
+    assert saved_prompt == main.canvas_analyze_video_prompt(12.3, 3, table_only=True)
+    assert '"shots":[' in saved_prompt and "cnPos" not in saved_prompt
+    assert "[中文正向]" not in saved_prompt
+    assert calls[0]["max_tokens"] == main.CANVAS_ANALYZE_MAX_TOKENS
+
+
+def test_table_only_false_keeps_current_four_sections(monkeypatch):
+    monkeypatch.setattr(main, "caption_images_with_provider",
+                        _fake_images_caption_recorder([], reply=_JSON_REPLY))
+
+    resp = CLIENT.post("/api/canvas-analyze-media", json={
+        "images": [_PNG_DATA_URL] * 3, "provider": "test",
+    })
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["text"] == _EXPECTED_FOUR_SECTIONS, "缺省 table_only=false 行为不变"
+    assert len(body["table"]["rows"]) == 3
+
+
+def test_table_only_non_json_reply_falls_back_to_raw_text(monkeypatch):
+    monkeypatch.setattr(main, "caption_images_with_provider",
+                        _fake_images_caption_recorder([], reply=_REPLY))
+
+    resp = CLIENT.post("/api/canvas-analyze-media", json={
+        "images": [_PNG_DATA_URL] * 3, "kind": "video", "table_only": True, "provider": "test",
+    })
+
+    assert resp.status_code == 200, f"{resp.text}（table_only 解析失败也要 200，不抛 502）"
+    body = resp.json()
+    assert body["text"] == _REPLY.strip()
+    assert body["table"] is None
+
+
+def test_table_only_on_image_path_is_ignored(monkeypatch):
+    calls = []
+    monkeypatch.setattr(main, "caption_image_with_provider",
+                        _fake_caption_recorder(calls, reply=_json_reply(shots=[_JSON_SHOTS[0]])))
+
+    resp = CLIENT.post("/api/canvas-analyze-media", json={
+        "image": _PNG_DATA_URL, "table_only": True, "provider": "test",
+    })
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # 图片路径忽略 table_only：仍用图片模板、仍返回四段文本、table 恒为 null
+    assert calls[0]["prompt"] == main.CANVAS_ANALYZE_PROMPT
+    assert body["text"] == _EXPECTED_FOUR_SECTIONS
+    assert body["table"] is None
+
+
+# ── 整条视频服务端抽帧（2026-11-25 第八轮）──────────────────────────────────
+
+
+def _fake_ffmpeg_runner(records, scene_count=3, even_count=8, scene_times=None):
+    """桩掉真实 ffmpeg：记录命令、造假帧文件，并用 showinfo 格式的 stderr 给出场景帧时间。"""
+    def _run(args, timeout=180):
+        records.append(list(args))
+        vf = args[args.index("-vf") + 1]
+        pattern = args[-1]
+        if "select=" in vf:
+            count, prefix = scene_count, "scene"
+            times = (scene_times if scene_times is not None
+                     else [round(0.5 + index, 3) for index in range(count)])
+        else:
+            count = min(int(even_count), int(args[args.index("-frames:v") + 1]))
+            prefix = "even"
+            times = []
+        for index in range(count):
+            path = pattern % (index + 1)
+            with open(path, "wb") as f:
+                f.write(prefix.encode("ascii") + b"-frame-%02d" % (index + 1))
+        stderr = "\n".join(
+            f"[Parsed_showinfo_1 @ 0x0] n:{index} pts_time:{times[index]}"
+            for index in range(min(len(times), count)))
+        return True, stderr
+    return _run
+
+
+def test_scene_threshold_is_015_and_min_frames_guarantee():
+    assert main.CANVAS_ANALYZE_SCENE_THRESHOLD == 0.15, "缓变镜头 0.3 会把多个镜头并掉（实测 4 帧）"
+    assert main.CANVAS_ANALYZE_MIN_FRAMES == 8
+    vf = main.canvas_analyze_scene_filter()
+    assert "gt(scene,0.15)" in vf and "showinfo" in vf
+
+
+def test_video_extraction_uses_scene_filter_and_returns_frames_in_time_order(monkeypatch):
+    records = []
+    monkeypatch.setattr(main, "ffmpeg_binary", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(main, "probe_video_file_duration_seconds", lambda path: 12.5)
+    monkeypatch.setattr(main, "canvas_analyze_run_ffmpeg",
+                        _fake_ffmpeg_runner(records, scene_count=10))
+    dirs = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def _record_mkdtemp(*args, **kwargs):
+        path = real_mkdtemp(*args, **kwargs)
+        dirs.append(path)
+        return path
+
+    monkeypatch.setattr(tempfile, "mkdtemp", _record_mkdtemp)
+
+    urls, duration = main.canvas_analyze_video_frames("/tmp/not-really-a-video.mp4")
+
+    assert duration == 12.5
+    assert len(urls) == 10, "关键帧 >= 8 时不再等距补齐"
+    assert len(records) == 1
+    first = records[0]
+    vf = first[first.index("-vf") + 1]
+    assert "select=" in vf and "scene" in vf and "0.15" in vf, "要用 0.15 的场景切换检测"
+    assert "showinfo" in vf, "要拿到 scene 帧的 pts_time 才能和等距帧按时间合并"
+    assert "896" in vf and "force_original_aspect_ratio=decrease" in vf, "视频抽帧长边降到 896"
+    assert first[first.index("-q:v") + 1] == "4", "JPEG 质量用 -q:v 4"
+    assert first[first.index("-frames:v") + 1] == "12", "视频抽帧最多 12 帧"
+    assert main.CANVAS_ANALYZE_VIDEO_MAX_FRAMES == 12
+    assert first[-1].endswith("scene_%04d.jpg")
+    decoded = [base64.b64decode(url.split(",", 1)[1]) for url in urls]
+    assert decoded == [b"scene-frame-%02d" % index for index in range(1, 11)], "按时间顺序"
+    assert dirs and all(not os.path.exists(path) for path in dirs), "抽帧临时目录必须删"
+
+
+def test_scene_frames_less_than_eight_merges_even_frames_in_time_order(monkeypatch):
+    records = []
+    monkeypatch.setattr(main, "ffmpeg_binary", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(main, "probe_video_file_duration_seconds", lambda path: 8.0)
+    monkeypatch.setattr(main, "canvas_analyze_run_ffmpeg",
+                        _fake_ffmpeg_runner(records, scene_count=4, even_count=8,
+                                            scene_times=[0.5, 1.5, 2.5, 3.5]))
+    dirs = []
+    real_mkdtemp = tempfile.mkdtemp
+
+    def _record_mkdtemp(*args, **kwargs):
+        path = real_mkdtemp(*args, **kwargs)
+        dirs.append(path)
+        return path
+
+    monkeypatch.setattr(tempfile, "mkdtemp", _record_mkdtemp)
+
+    urls, duration = main.canvas_analyze_video_frames("/tmp/not-really-a-video.mp4")
+
+    assert duration == 8.0
+    assert len(urls) == 12, "4 张关键帧不足 8 张 -> 再等距抽 8 帧并合并"
+    assert len(records) == 2
+    even = records[1]
+    vf = even[even.index("-vf") + 1]
+    assert vf.startswith("fps=1.000000"), "8 帧 / 8 秒 = 每秒 1 帧"
+    assert even[even.index("-frames:v") + 1] == "8"
+    assert even[-1].endswith("even_%04d.jpg")
+    decoded = [base64.b64decode(url.split(",", 1)[1]) for url in urls]
+    # 等距帧时间 0,1,2…7；场景帧 0.5,1.5,2.5,3.5 -> 按时间交错
+    assert decoded == [
+        b"even-frame-01", b"scene-frame-01", b"even-frame-02", b"scene-frame-02",
+        b"even-frame-03", b"scene-frame-03", b"even-frame-04", b"scene-frame-04",
+        b"even-frame-05", b"even-frame-06", b"even-frame-07", b"even-frame-08",
+    ]
+    assert dirs and all(not os.path.exists(path) for path in dirs), "补齐路径也要删临时文件"
+
+
+def test_merged_frames_never_exceed_twelve(monkeypatch):
+    records = []
+    monkeypatch.setattr(main, "ffmpeg_binary", lambda: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(main, "probe_video_file_duration_seconds", lambda path: 8.0)
+    monkeypatch.setattr(main, "canvas_analyze_run_ffmpeg",
+                        _fake_ffmpeg_runner(records, scene_count=7, even_count=8,
+                                            scene_times=[0.2 + index for index in range(7)]))
+
+    urls, duration = main.canvas_analyze_video_frames("/tmp/not-really-a-video.mp4")
+
+    assert duration == 8.0
+    assert len(urls) == 12, "7 张关键帧 + 补齐 5 张 = 12 帧（视频上限 12）"
+    even = records[1]
+    assert even[even.index("-frames:v") + 1] == "5", "补齐帧数 = min(8, 12 - 已有帧数)"
+    decoded = [base64.b64decode(url.split(",", 1)[1]) for url in urls]
+    assert decoded[0] == b"even-frame-01" and decoded[1] == b"scene-frame-01"
+    assert len(decoded) == 12
+
+
+def test_video_url_route_uses_server_frames_ignores_images_and_cleans_video_temp(monkeypatch, tmp_path):
+    video_file = tmp_path / "clip.mp4"
+    video_file.write_bytes(b"fake-video-bytes")
+    calls = []
+    monkeypatch.setattr(main, "caption_images_with_provider",
+                        _fake_images_caption_recorder(calls, reply=_JSON_REPLY))
+
+    async def _source(url):
+        return str(video_file), str(video_file)
+
+    monkeypatch.setattr(main, "canvas_analyze_video_source", _source)
+    frames = ["data:image/jpeg;base64," + base64.b64encode(b"server-frame-%d" % i).decode("ascii")
+              for i in range(3)]
+    monkeypatch.setattr(main, "canvas_analyze_video_frames", lambda path: (frames, 8.0))
+
+    resp = CLIENT.post("/api/canvas-analyze-media", json={
+        "video_url": "/assets/input/clip.mp4",
+        "images": [_PNG_DATA_URL],           # 有 video_url 时应当被忽略
+        "table_only": True,
+        "provider": "test",
+    })
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["text"] == ""
+    assert len(body["table"]["rows"]) == 3
+    assert len(calls[0]["paths"]) == 3, "用服务端抽的 3 帧，不用 images"
+    assert calls[0]["prompt"].startswith("这段视频整段约 8 秒，共给出 3 帧，按时间顺序排列。"), \
+        "没传 duration 时用 ffprobe 探到的时长"
+    assert calls[0]["prompt"] == main.canvas_analyze_video_prompt(8.0, 3, table_only=True)
+    assert calls[0]["timeout_seconds"] == main.CANVAS_ANALYZE_SLOW_SECONDS, "视频第一次请求带 100s 超时"
+    assert not video_file.exists(), "视频临时文件必须在请求结束后删掉"
+
+
+def test_video_url_unresolvable_falls_back_to_images(monkeypatch):
+    calls = []
+    monkeypatch.setattr(main, "caption_image_with_provider", _fake_caption_recorder(calls))
+
+    async def _should_not_extract(path):
+        raise AssertionError("video_url 解析不了时不该抽帧")
+
+    monkeypatch.setattr(main, "canvas_analyze_video_frames", _should_not_extract)
+
+    resp = CLIENT.post("/api/canvas-analyze-media", json={
+        "video_url": "/assets/does-not-exist.mp4",
+        "image": _PNG_DATA_URL,
+        "provider": "test",
+    })
+
+    assert resp.status_code == 200, resp.text
+    assert len(calls) == 1
+    assert calls[0]["prompt"] == main.CANVAS_ANALYZE_PROMPT
+
+
+# ── 帧体积预算 / 网关失败重试（2026-11-25 第十一轮）──────────────────────────
+
+
+class _StubHTTPResponse:
+    def __init__(self, status_code, body="", payload=None):
+        self.status_code = status_code
+        self.text = body
+        self._payload = payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            request = httpx.Request("POST", "http://stub.local/v1/chat/completions")
+            raise httpx.HTTPStatusError(f"HTTP {self.status_code}", request=request, response=self)
+
+    def json(self):
+        return self._payload
+
+
+def _install_chat_sequence(monkeypatch, responses):
+    requests, sleeps = [], []
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            requests.append(json)
+            return responses.pop(0)
+
+    async def _sleep(seconds):
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(main.httpx, "AsyncClient", _FakeClient)
+    monkeypatch.setattr(main.asyncio, "sleep", _sleep)
+    monkeypatch.setattr(main, "resolve_chat_provider",
+                        lambda *args, **kwargs: ("http://stub.local/v1", {}, "gpt-4o"))
+    monkeypatch.setattr(main, "get_api_provider", lambda *args, **kwargs: {})
+    monkeypatch.setattr(main, "image_path_to_data_url",
+                        lambda path, max_size=1024: "data:image/png;base64,AA==")
+    return requests, sleeps
+
+
+def test_budget_keep_indices_drops_alternating_and_keeps_first_last():
+    keep = main.canvas_analyze_budget_keep_indices([100] * 16, 450)
+    assert keep[0] == 0 and keep[-1] == 15, "必须保留首帧与末帧"
+    assert keep == sorted(keep)
+    assert len(keep) < 16
+
+
+def test_frame_budget_downgrades_then_drops_frames_and_logs(monkeypatch, capsys, tmp_path):
+    paths = []
+    for index in range(16):
+        path = tmp_path / f"scene_{index + 1:04d}.jpg"
+        path.write_bytes(b"x" * 10)
+        paths.append(str(path))
+    monkeypatch.setattr(main, "CANVAS_ANALYZE_MAX_TOTAL_B64", 4 * 1024 * 1024)
+    monkeypatch.setattr(
+        main, "canvas_analyze_b64_size",
+        lambda path: 300 * 1024 if os.path.basename(path).startswith("frame_") else 600 * 1024)
+
+    def _reencode(path, out_path, max_edge, quality):
+        with open(out_path, "wb") as f:
+            f.write(b"y")
+        return out_path
+
+    monkeypatch.setattr(main, "canvas_analyze_reencode_jpeg", _reencode)
+
+    result = main.canvas_analyze_apply_frame_budget(paths, str(tmp_path))
+
+    out = capsys.readouterr().out
+    assert "帧体积预算：帧数=9" in out
+    assert "原始总字节=9830400" in out
+    assert "最终总字节=2764800" in out
+    assert "降档次数=2" in out
+    assert len(result) == 9, "16 帧 4.8MB -> 重编后仍超 -> 隔帧丢到 9 帧"
+    assert result[0].endswith("frame_0001.jpg") and result[-1].endswith("frame_0016.jpg")
+    assert result[1].endswith("frame_0003.jpg")
+
+
+def test_gateway_failure_retries_once_then_succeeds(monkeypatch, capsys):
+    responses = [
+        _StubHTTPResponse(502, body="<html><body>Bad Gateway</body></html>"),
+        _StubHTTPResponse(200, payload={"choices": [{"message": {"content": "OK"}}]}),
+    ]
+    requests, sleeps = _install_chat_sequence(monkeypatch, responses)
+
+    text, model = asyncio.run(main.caption_images_with_provider(["/tmp/x.png"], "反推", "", ""))
+
+    assert text == "OK" and model == "gpt-4o"
+    assert len(requests) == 2, "网关类失败要重试一次"
+    assert sleeps == [1.5]
+    out = capsys.readouterr().out
+    assert "[canvas-analyze-media] 上游 HTTP 502" in out
+    assert "Bad Gateway" in out, "上游 body 前段要留在日志里"
+
+
+def test_gateway_failure_retries_only_once_and_reports_status(monkeypatch, capsys):
+    responses = [
+        _StubHTTPResponse(504, body="<html>gateway timeout</html>"),
+        _StubHTTPResponse(504, body="<html>gateway timeout</html>"),
+    ]
+    requests, sleeps = _install_chat_sequence(monkeypatch, responses)
+
+    with pytest.raises(main.HTTPException) as caught:
+        asyncio.run(main.caption_images_with_provider(["/tmp/x.png"], "反推", "", ""))
+
+    assert len(requests) == 2, "只重试一次"
+    assert sleeps == [1.5]
+    assert caught.value.status_code == 504
+    detail = main.canvas_analyze_error_detail(caught.value)
+    assert detail == "上游网关报错 HTTP 504（不是模型接口的正常响应）：请稍后重试，或换一个视觉模型。"
+    assert "<html" not in detail and "gateway timeout" not in detail.lower()
+
+
+def test_non_gateway_error_is_not_retried(monkeypatch):
+    responses = [_StubHTTPResponse(400, body='{"error":"bad request"}')]
+    requests, sleeps = _install_chat_sequence(monkeypatch, responses)
+
+    with pytest.raises(main.HTTPException):
+        asyncio.run(main.caption_images_with_provider(["/tmp/x.png"], "反推", "", ""))
+
+    assert len(requests) == 1
+    assert sleeps == []
+
+
+def test_non_html_502_detail_keeps_status_code():
+    exc = main.HTTPException(status_code=502, detail="上游接口错误：HTTP 502：upstream overloaded")
+    detail = main.canvas_analyze_error_detail(exc)
+    assert "HTTP 502" in detail
+
+
+def test_empty_upstream_reply_is_logged_shape(monkeypatch, capsys):
+    responses = [_StubHTTPResponse(200, payload={"choices": []})]
+    _install_chat_sequence(monkeypatch, responses)
+
+    text, _model = asyncio.run(main.caption_images_with_provider(["/tmp/x.png"], "反推", "", ""))
+
+    assert text == "接口返回了空回复。"
+    out = capsys.readouterr().out
+    assert "[canvas-analyze-media] 上游返回空内容" in out
+    assert '"choices": []' in out
+
+
+# ── 12 帧上限 / 慢请求降级 8 帧 640（2026-11-25 第十二轮）───────────────────
+
+
+def test_video_frame_cap_and_slow_constants():
+    assert main.CANVAS_ANALYZE_VIDEO_MAX_FRAMES == 12
+    assert main.CANVAS_ANALYZE_SCENE_MAX_FRAMES == 12
+    assert main.CANVAS_ANALYZE_MIN_FRAMES == 8
+    assert main.CANVAS_ANALYZE_SLOW_SECONDS == 100
+    assert main.CANVAS_ANALYZE_FALLBACK_FRAMES == 8
+    assert main.CANVAS_ANALYZE_FALLBACK_MAX_EDGE == 640
+
+
+def test_pick_even_paths_keeps_first_and_last():
+    paths = [f"/tmp/frame-{index}.jpg" for index in range(12)]
+    picked = main.canvas_analyze_pick_even_paths(paths, 8)
+    assert len(picked) == 8
+    assert picked[0] == paths[0] and picked[-1] == paths[-1]
+    assert picked == [paths[index] for index in sorted({round(i * 11 / 7) for i in range(8)})]
+
+
+def test_fallback_builder_resizes_to_eight_frames_at_640(tmp_path):
+    sources = []
+    for index in range(12):
+        path = tmp_path / f"src_{index:02d}.jpg"
+        Image.new("RGB", (896, 500), (index * 20 % 255, 80, 160)).save(path, format="JPEG", quality=90)
+        sources.append(str(path))
+
+    temps, total = main.canvas_analyze_build_fallback_frames(sources)
+    try:
+        assert len(temps) == 8
+        assert total > 0
+        for path in temps:
+            with Image.open(path) as img:
+                assert max(img.size) <= 640
+    finally:
+        for path in temps:
+            os.remove(path)
+
+
+def test_fallback_builder_cleans_temp_files_on_failure(monkeypatch, tmp_path):
+    source = tmp_path / "src.jpg"
+    Image.new("RGB", (100, 100), (10, 20, 30)).save(source, format="JPEG")
+
+    def _boom(*args, **kwargs):
+        raise OSError("reencode failed")
+
+    monkeypatch.setattr(main, "canvas_analyze_reencode_jpeg", _boom)
+    before = set(Path(tempfile.gettempdir()).glob("canvas_analyze_small_*"))
+
+    with pytest.raises(OSError):
+        main.canvas_analyze_build_fallback_frames([str(source)])
+
+    after = set(Path(tempfile.gettempdir()).glob("canvas_analyze_small_*"))
+    assert after == before, "降级重编失败也要删掉已写的临时文件"
+
+
+def _patch_video_caption(monkeypatch, fake):
+    monkeypatch.setattr(main, "caption_images_with_provider", fake)
+
+
+def test_slow_video_request_degrades_to_eight_640(monkeypatch, capsys):
+    monkeypatch.setattr(main, "CANVAS_ANALYZE_SLOW_SECONDS", 0.0)
+    calls = []
+
+    async def _fake(paths, prompt, provider_id, model, ms_model="", max_tokens=0, timeout_seconds=None):
+        calls.append({"paths": list(paths), "timeout": timeout_seconds})
+        if len(calls) == 1:
+            await asyncio.sleep(0.01)
+            return "第一次太慢的文本", "model-a"
+        return "降级成功", "model-b"
+
+    fallback = [f"/tmp/canvas-fallback-{index}.jpg" for index in range(8)]
+    monkeypatch.setattr(main, "canvas_analyze_build_fallback_frames",
+                        lambda paths, **kwargs: (fallback, 123456))
+    _patch_video_caption(monkeypatch, _fake)
+
+    text, used_model = asyncio.run(main.canvas_analyze_caption_video_with_fallback(
+        ["/tmp/full-1.jpg"], "反推", "", ""))
+
+    assert text == "降级成功" and used_model == "model-b"
+    assert len(calls) == 2, "慢请求只降级重试一次"
+    assert calls[0]["paths"] == ["/tmp/full-1.jpg"]
+    assert calls[1]["paths"] == fallback, "降级请求要用 8 张 640 帧"
+    assert calls[0]["timeout"] == 0.0 and calls[1]["timeout"] == 0.0
+    out = capsys.readouterr().out
+    assert "第一次耗时=" in out and "进入降级=True" in out
+    assert "降级帧数=8" in out and "降级总字节=123456" in out and "最终耗时=" in out
+
+
+def test_empty_reply_triggers_degrade(monkeypatch):
+    calls = []
+
+    async def _fake(paths, prompt, provider_id, model, ms_model="", max_tokens=0, timeout_seconds=None):
+        calls.append(list(paths))
+        if len(calls) == 1:
+            return "接口返回了空回复。", "model-a"
+        return "降级后的文本", "model-b"
+
+    monkeypatch.setattr(main, "canvas_analyze_build_fallback_frames",
+                        lambda paths, **kwargs: ([f"/tmp/small-{index}.jpg" for index in range(8)], 100))
+    _patch_video_caption(monkeypatch, _fake)
+
+    text, used_model = asyncio.run(main.canvas_analyze_caption_video_with_fallback(
+        ["/tmp/full.jpg"], "反推", "", ""))
+
+    assert text == "降级后的文本" and used_model == "model-b"
+    assert len(calls) == 2
+
+
+def test_gateway_error_triggers_degrade_then_success(monkeypatch):
+    calls = []
+
+    async def _fake(paths, prompt, provider_id, model, ms_model="", max_tokens=0, timeout_seconds=None):
+        calls.append(list(paths))
+        if len(calls) == 1:
+            raise main.HTTPException(502, "上游接口错误：HTTP 502：<html>bad gateway</html>")
+        return "网关重试成功", "model-b"
+
+    monkeypatch.setattr(main, "canvas_analyze_build_fallback_frames",
+                        lambda paths, **kwargs: ([f"/tmp/small-{index}.jpg" for index in range(8)], 100))
+    _patch_video_caption(monkeypatch, _fake)
+
+    text, _model = asyncio.run(main.canvas_analyze_caption_video_with_fallback(
+        ["/tmp/full.jpg"], "反推", "", ""))
+
+    assert text == "网关重试成功"
+    assert len(calls) == 2, "502/HTML 要降级重试一次"
+
+
+def test_both_attempts_fail_raises_more_informative_error(monkeypatch):
+    calls = []
+
+    async def _fake(paths, prompt, provider_id, model, ms_model="", max_tokens=0, timeout_seconds=None):
+        calls.append(list(paths))
+        if len(calls) == 1:
+            raise main.HTTPException(502, "上游接口错误：HTTP 502：<html>gateway</html>")
+        raise main.HTTPException(400, "第二次的详细错误：请求里图片太多，网关拒绝处理。" + "请减少帧数后再试。" * 5)
+
+    monkeypatch.setattr(main, "canvas_analyze_build_fallback_frames",
+                        lambda paths, **kwargs: ([f"/tmp/small-{index}.jpg" for index in range(8)], 100))
+    _patch_video_caption(monkeypatch, _fake)
+
+    with pytest.raises(main.HTTPException) as caught:
+        asyncio.run(main.canvas_analyze_caption_video_with_fallback(["/tmp/full.jpg"], "反推", "", ""))
+
+    assert len(calls) == 2
+    assert caught.value.status_code == 400, "两次都失败要选信息量更大的第二次"
+    assert "第二次的详细错误" in str(caught.value.detail)
+
+
+def test_more_informative_error_prefers_longer_detail():
+    first = main.HTTPException(502, "短错误")
+    second = main.HTTPException(400, "更长的错误详情" * 5)
+    assert main.canvas_analyze_more_informative_error(first, second) is second
+    assert main.canvas_analyze_more_informative_error(second, first) is second
+    assert main.canvas_analyze_more_informative_error(None, first) is first
+
+
+# —— 分镜模板（「更多 › 解析设置」）：template 给了就按模板列出表，带起止时间与首帧截图 ——
+
+_TEMPLATE_REPLY = json.dumps({"shots": [
+    {"no": "1", "start": 0, "end": 1.5, "dur": "", "desc": "红色画面", "shotSize": "全景",
+     "camera": "正面", "move": "固定", "prompt": "red", "motion": "static"},
+    {"no": "2", "start": 1.5, "end": 3, "dur": "1.5s", "desc": "蓝色画面", "shotSize": "特写",
+     "camera": "俯拍", "move": "缓推", "prompt": "blue", "motion": "push in"},
+]}, ensure_ascii=False)
+
+
+def _make_two_color_video(path):
+    ffmpeg = main.ffmpeg_binary()
+    if not ffmpeg:
+        pytest.skip("没有 ffmpeg")
+    import subprocess
+    subprocess.run([
+        ffmpeg, "-hide_banner", "-v", "error", "-y",
+        "-f", "lavfi", "-i", "color=c=red:s=320x180:d=1.5:r=10",
+        "-f", "lavfi", "-i", "color=c=blue:s=320x180:d=1.5:r=10",
+        "-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]", "-map", "[v]",
+        "-pix_fmt", "yuv420p", str(path),
+    ], check=True)
+
+
+def test_template_prompt_lists_template_keys_and_frame_times():
+    prompt = main.canvas_analyze_template_prompt("storyboard", 3.0, 2, [0.0, 1.5])
+    assert prompt.startswith("这段视频整段约 3 秒，共给出 2 帧，按时间顺序排列。")
+    assert "各帧在原视频里的时间点（秒）依次是：0、1.5。" in prompt
+    for key in ("\"start\"", "\"end\"", "\"camera\"", "\"move\"", "\"motion\""):
+        assert key in prompt
+    # 首帧 / 起止由后端填，不让模型写
+    assert "\"first\"" not in prompt and "\"range\"" not in prompt
+    lite = main.canvas_analyze_template_prompt("lite", 0, 2)
+    assert "\"camera\"" not in lite and "\"move\"" in lite
+    assert main.canvas_analyze_template_name("ECOM") == "ecom"
+    assert main.canvas_analyze_template_name("nope") == ""
+
+
+def test_shot_times_fill_gaps_from_duration_and_clamp():
+    times = main.canvas_analyze_shot_times([
+        {"start": 0, "end": 2},
+        {"dur": "3s"},            # 没给起止：接上一镜，按时长累加
+        {"start": "6", "end": 99},  # 超出整段时长：夹到 7
+    ], duration=7)
+    assert times == [(0.0, 2.0), (2.0, 5.0), (6.0, 7.0)]
+
+
+def test_template_table_columns_range_and_duration():
+    table = main.canvas_analyze_template_table(json.loads(_TEMPLATE_REPLY), "storyboard", 3.0)
+    assert table["columns"][:4] == ["镜号", "首帧", "起止", "时长"]
+    assert "机位" in table["columns"] and "运镜" in table["columns"]
+    first, second = table["rows"]
+    assert first[2] == "0.0–1.5s" and first[3] == "1.5s", "时长缺了按起止算"
+    assert second[table["columns"].index("机位")] == "俯拍"
+    assert second[table["columns"].index("运镜")] == "缓推"
+    assert table["starts"] == [0.0, 1.5]
+
+
+def test_template_video_url_returns_first_frames_from_real_video(monkeypatch, tmp_path):
+    video = tmp_path / "two.mp4"
+    _make_two_color_video(video)
+    calls = []
+    monkeypatch.setattr(main, "caption_images_with_provider",
+                        _fake_images_caption_recorder(calls, reply=_TEMPLATE_REPLY))
+
+    async def _source(url):
+        return str(video), ""
+
+    monkeypatch.setattr(main, "canvas_analyze_video_source", _source)
+    resp = CLIENT.post("/api/canvas-analyze-media", json={
+        "video_url": "/assets/input/two.mp4", "kind": "video", "table_only": True,
+        "template": "storyboard", "provider": "test",
+    })
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["template"] == "storyboard"
+    assert body["text"] == ""
+    table = body["table"]
+    assert "starts" not in table, "内部用的开始时间不往外吐"
+    at = table["columns"].index("首帧")
+    urls = [row[at] for row in table["rows"]]
+    assert all(url.startswith("/output/storyboard_frames/") for url in urls), urls
+    colors = []
+    for url in urls:
+        path = main.output_file_from_url(url)
+        assert path and os.path.getsize(path) > 0
+        with Image.open(path) as img:
+            r, g, b = img.convert("RGB").getpixel((10, 10))
+        colors.append("red" if r > b else "blue")
+    assert colors == ["red", "blue"], "每镜首帧要按开始时间截"
+    assert "时间点（秒）依次是" in calls[0]["prompt"]
+
+
+def test_template_with_frontend_frames_has_empty_first_frames(monkeypatch):
+    calls = []
+    monkeypatch.setattr(main, "caption_images_with_provider",
+                        _fake_images_caption_recorder(calls, reply=_TEMPLATE_REPLY))
+    resp = CLIENT.post("/api/canvas-analyze-media", json={
+        "images": [_PNG_DATA_URL] * 2, "kind": "video", "duration": 3,
+        "template": "lite", "provider": "test",
+    })
+    assert resp.status_code == 200, resp.text
+    table = resp.json()["table"]
+    assert table["columns"] == ["镜号", "首帧", "起止", "画面描述", "景别", "运镜", "分镜提示词"]
+    assert [row[1] for row in table["rows"]] == ["", ""], "没有视频文件就不截首帧"
+    assert resp.json()["text"] == "", "给了模板就按只出表格走"

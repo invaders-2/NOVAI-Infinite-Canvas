@@ -6,16 +6,49 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
-import { CHANNEL_MODES, CHANNEL_MODE_LABEL, channelItemsForRow, csvFromTable, inputCellHeight, isMediaRef, mediaRefsIn, ROLE_META, ROLE_ORDER, rolesOf, rowHeight, tableChannels, tableFromCsv, tableInputWarnings, tableOf, TABLE_CELL_PREVIEW_W, TABLE_INPUT_COL_W, TABLE_INPUT_MAX_SHOWN, TABLE_INPUT_PREVIEW_W, TABLE_LIMITS, withRole, withTable, guessRole, type ChannelMode, type ColRole, type TableData } from "../table";
+import { CHANNEL_MODES, CHANNEL_MODE_LABEL, channelItemsForRow, clampSelection, csvFromTable, inputCellHeight, isMediaRef, mediaRefsIn, normalizeAiColumns, ROLE_META, ROLE_ORDER, rolesOf, rowHeight, tableChannels, tableFromCsv, tableInputWarnings, tableOf, TABLE_CELL_PREVIEW_W, TABLE_INPUT_COL_W, TABLE_INPUT_MAX_SHOWN, TABLE_INPUT_PREVIEW_W, TABLE_LIMITS, withRole, withTable, guessRole, activeViewOf, viewsOf, withViews, visibleCols, viewRows, FILTER_OPS, TABLE_VIEW_LIMIT, type ChannelMode, type ColRole, type TableData, type TableSelection, type TableView, type TableViewDef, type FilterOp } from "../table";
+import { openAiColumnPanel, TABLE_AI_BUSY_TITLE, TableAiToolbar, installTableAiGlobals, useAiColumnRun, useTableBatchBusy } from "./TableAi";
+import { tableLlmConfig } from "../tableLlm";
 import { storyboardPipeline } from "../tableFlow";
 import { reviewTable } from "../tableReview";
+import { genOf } from "../model";
 import { plainPrompt } from "../mentions";
-import { MEDIA_UPLOAD_LIMIT } from "../actions";
+import { MEDIA_UPLOAD_LIMIT, MULTIPART_UPLOAD_MIN, tooLargeText, uploadFailureText } from "../actions";
 import type { CanvasStore } from "../store";
 import { openModal, openPop } from "./overlay";
 import { useCtl, useS } from "./ctx";
 import { Icon } from "./Icon";
 import { PreviewImg } from "./thumb";
+import { colTypeOf, COL_TYPE_LABEL } from "../table";
+import { CardWall, DetailDrawer, makeViewCtl, sourceVideoOf, ViewMenuButton, ViewTabs, ViewTools } from "./TableViews";
+
+/** 解析中的进度：转圈 + 已用秒数（视频解析一般 1–3 分钟，给个盼头，不靠长时间挂着的 toast） */
+/** 解析开始时间（按表节点记）：标题里的计时和节点里的四步进度用同一个起点，切视图 / 重渲不归零 */
+const parseStarted = new Map<string, number>();
+function useParseSeconds(id: string): number {
+  if (!parseStarted.has(id)) parseStarted.set(id, Date.now());
+  const t0 = parseStarted.get(id)!;
+  const [sec, setSec] = useState(() => Math.floor((Date.now() - t0) / 1000));
+  useEffect(() => { const tick = setInterval(() => setSec(Math.floor((Date.now() - t0) / 1000)), 500); return () => clearInterval(tick); }, [t0]);
+  return sec;
+}
+function ParseStatus({ id }: { id: string }) {
+  const sec = useParseSeconds(id);
+  return <span className="st tnum" data-parse-status style={{ color: "var(--fg2)", fontSize: 11 }}>解析中 · {sec}s<span style={{ color: "var(--fg3)", marginLeft: 4 }}>约 1–3 分钟</span></span>;
+}
+/**
+ * 解析中（原型 v3）：四步进度条（抽帧 → 切镜 → 识别镜头 → 写表）+ 两张骨架卡片。
+ * 后端是一次请求，前两步按经验时长推进，「识别镜头」一直亮到结果回来；不给假百分比，当前步只做呼吸。
+ */
+const PARSE_STEPS = ["抽帧", "切镜", "识别镜头", "写表"];
+function ParseProgress({ id }: { id: string }) {
+  const sec = useParseSeconds(id);
+  const cur = sec < 2 ? 0 : sec < 5 ? 1 : 2;
+  return <div className="tparse" data-parse-progress>
+    <div className="tp-steps">{PARSE_STEPS.map((s, i) => <div key={s} className={"tp-step" + (i < cur ? " done" : i === cur ? " cur" : "")}><span>{s}</span><span className="tp-bar"><i /></span></div>)}</div>
+    <div className="tcards tp-skel" aria-hidden>{[0, 1].map((i) => <div className="tcard" key={i}><div className="tc-cover tp-shim" /><div className="tc-body"><span className="tp-fill" style={{ width: "80%" }} /><span className="tp-fill" style={{ width: "46%" }} /></div></div>)}</div>
+  </div>;
+}
 
 export function TableNodeBody({ node, sel, full = false }: { node: CanvasNode; sel: boolean; full?: boolean }) {
   const ctl = useCtl(); const store = ctl.store;
@@ -33,12 +66,78 @@ export function TableNodeBody({ node, sel, full = false }: { node: CanvasNode; s
     const auto = (x.inputModesAuto || []).filter((k) => k !== id);
     return { ...x, inputModes: { ...(x.inputModes || {}), [id]: next }, inputModesAuto: auto };
   }, true);
+  // ── 智能（AI 列 / 选区批量改）：选区是界面态，不写文档；aiColumns / aiModel / aiSystem 写文档 ──
+  const [cellSel, setCellSel] = useState<TableSelection | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const aiRun = useAiColumnRun(node.id);
+  const batchBusy = useTableBatchBusy(store, node.id);
+  useEffect(() => { installTableAiGlobals(store); }, [store]);
+  // 删列 / 增删行之后把选区夹回表内；夹不出来就清掉
+  useEffect(() => { setCellSel((cur) => (cur ? clampSelection(cur, t.rows.length, t.columns.length) : null)); }, [t.rows.length, t.columns.length]);
+  // 点表格外 / Esc 清空选区；点弹层与提示条是它们自己的事，不丢选区
+  useEffect(() => {
+    if (!cellSel) return;
+    const typing = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      const tag = String((el && el.tagName) || "").toUpperCase();
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || Boolean(el && el.isContentEditable);
+    };
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Element | null;
+      if (rootRef.current && target && rootRef.current.contains(target)) return;
+      if (target && typeof target.closest === "function" && target.closest("#modal, #pop, #toasts")) return;
+      setCellSel(null);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key !== "Escape" || typing(e.target)) return; setCellSel(null); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey, true); };
+  }, [cellSel]);
+  /** 按下数据格 = 开始拖选矩形（Shift 从原选区左上角扩选）。不 preventDefault，双击进编辑照旧 */
+  const cellDown = (e: React.PointerEvent, r: number, c: number) => {
+    if (e.button !== 0) return;
+    if (editCell === key(r, c)) return;
+    e.stopPropagation();
+    const anchor = e.shiftKey && cellSel ? { r: cellSel.r0, c: cellSel.c0 } : { r, c };
+    setCellSel(clampSelection({ r0: anchor.r, c0: anchor.c, r1: r, c1: c }, t.rows.length, t.columns.length));
+    // 拖选用 document 级监听（不抢指针捕获：否则双击进编辑会被截断）
+    const move = (ev: PointerEvent) => {
+      const grid = gridRef.current;
+      if (grid) {
+        const gb = grid.getBoundingClientRect();
+        if (ev.clientY < gb.top + 24) grid.scrollTop = Math.max(0, grid.scrollTop - 20);
+        else if (ev.clientY > gb.bottom - 24) grid.scrollTop = grid.scrollTop + 20;
+      }
+      const hit = (document.elementFromPoint(ev.clientX, ev.clientY) as Element | null);
+      const td = hit && typeof hit.closest === "function" ? hit.closest("[data-r][data-c]") as HTMLElement | null : null;
+      if (!td) return;
+      const nr = Number(td.dataset.r), nc = Number(td.dataset.c);
+      if (!Number.isInteger(nr) || !Number.isInteger(nc)) return;
+      setCellSel(clampSelection({ r0: anchor.r, c0: anchor.c, r1: nr, c1: nc }, t.rows.length, t.columns.length));
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move, true);
+      document.removeEventListener("pointerup", up, true);
+    };
+    document.addEventListener("pointermove", move, true);
+    document.addEventListener("pointerup", up, true);
+  };
+  const inSel = (r: number, c: number) => Boolean(cellSel) && r >= cellSel!.r0 && r <= cellSel!.r1 && c >= cellSel!.c0 && c <= cellSel!.c1;
+  const failRow = (r: number, c: number) => Boolean(aiRun) && aiRun!.column === c && aiRun!.failed.some((item) => item.row === r + 1);
   const key = (r: number | "h", c: number) => `${node.id}:${r}:${c}`;
   const startEdit = (k: string) => { store.snapshot(); store.setUI({ editCell: k, sel: new Set([node.id]) }); };
   const stopEdit = () => store.setUI({ editCell: null });
   const addRow = (at = t.rows.length) => { if (t.rows.length >= TABLE_LIMITS.rows) return store.toast("表格最多允许 5000 行。"); save((x) => ({ ...x, rows: [...x.rows.slice(0, at), x.columns.map(() => ""), ...x.rows.slice(at)] }), true); };
-  const addCol = () => { if (t.columns.length >= TABLE_LIMITS.cols) return store.toast("表格最多允许 200 列。"); save((x) => ({ ...x, columns: [...x.columns, "字段 " + (x.columns.length + 1)], rows: x.rows.map((r) => [...r, ""]), ...(x.roles ? { roles: [...x.roles, ""] } : {}) }), true); };
-  const delCol = (i: number) => { if (t.columns.length <= 1) return store.toast("至少保留一列"); save((x) => ({ ...x, columns: x.columns.filter((_, j) => j !== i), rows: x.rows.map((r) => r.filter((_, j) => j !== i)), ...(x.roles ? { roles: x.roles.filter((_, j) => j !== i) } : {}) }), true); };
+  const addCol = () => { if (t.columns.length >= TABLE_LIMITS.cols) return store.toast("表格最多允许 200 列。"); save((x) => ({ ...x, columns: [...x.columns, "字段 " + (x.columns.length + 1)], rows: x.rows.map((r) => [...r, ""]), ...(x.roles ? { roles: [...x.roles, ""] } : {}), ...(x.types ? { types: [...x.types, ""] } : {}) }), true); };
+  const delCol = (i: number) => {
+    if (t.columns.length <= 1) return store.toast("至少保留一列");
+    save((x) => {
+      const nextColumns = x.columns.filter((_, j) => j !== i);
+      const aiNext = normalizeAiColumns(x.aiColumns, x.columns.length).filter((_, j) => j !== i);
+      return { ...x, columns: nextColumns, rows: x.rows.map((r) => r.filter((_, j) => j !== i)), ...(x.roles ? { roles: x.roles.filter((_, j) => j !== i) } : {}), ...(x.types ? { types: x.types.filter((_, j) => j !== i) } : {}), ...(aiNext.some(Boolean) ? { aiColumns: normalizeAiColumns(aiNext, nextColumns.length) } : { aiColumns: undefined }) };
+    }, true);
+  };
   const delRow = (i: number) => save((x) => ({ ...x, rows: x.rows.filter((_, j) => j !== i) }), true);
   // 复制为 CSV：只导数据列，「输入 N」通道列由画布连线推导，不属于表格数据
   const copyCsv = () => { void navigator.clipboard?.writeText(csvFromTable(tableOf(store.node(node.id) || node)))?.then(() => store.toast("已复制 CSV"), () => store.toast("剪贴板不可用，请用「全屏编辑」后手动复制")); };
@@ -80,28 +179,59 @@ export function TableNodeBody({ node, sel, full = false }: { node: CanvasNode; s
   const roles = rolesOf(t);
   const setCell = (r: number, c: number, v: string, history = false) => save((x) => ({ ...x, rows: x.rows.map((rr, i) => (i === r ? rr.map((y, j) => (j === c ? (isMediaRef(v) ? v : v.slice(0, TABLE_LIMITS.cell)) : y)) : rr)) }), history);
   const hasFirst = roles.some((r) => r.role === "first");
+  // 视频「解析」正在给这张表出分镜：纯界面态（同文本节点的 ui.parsing），标题旁显示转圈和已用时间
+  const parsing = useS((s) => s.ui.parsing.has(node.id));
+  // 解析结果落表的那一下：卡片 / 行从下方 8px 依次淡入、首帧由模糊变清晰（原型 v3），2.4s 后撤掉动效类
+  const wasParsing = useRef(parsing); const [reveal, setReveal] = useState(false);
+  useEffect(() => {
+    if (wasParsing.current && !parsing) { parseStarted.delete(node.id); setReveal(true); const t = setTimeout(() => setReveal(false), 2400); wasParsing.current = parsing; return () => clearTimeout(t); }
+    wasParsing.current = parsing; return undefined;
+  }, [parsing, node.id]);
+  // ── 视图：当前视图决定显示哪些列、哪些行、怎么排序分组；编辑始终写回原始行号 ──
+  const views = viewsOf(t); const view = activeViewOf(t);
+  const cols = visibleCols(t, view);
+  const groups = viewRows(t, view);
+  const shown = groups.reduce((n, g) => n + g.rows.length, 0);
+  const viewCtl = makeViewCtl(store, node.id, t);
+  // 镜头详情抽屉（只在全屏里）：记原始行号；筛选 / 排序后的顺序用来上下切
+  const [detail, setDetail] = useState<number | null>(null);
+  const order = groups.flatMap((g) => g.rows);
+  useEffect(() => { if (detail !== null && detail >= t.rows.length) setDetail(null); }, [detail, t.rows.length]);
   return (
     <>
-      {full ? null : <div className="nhead"><Icon name="grid" size="xs" /><span className="t">{t.title}</span><span className="tnum" style={{ color: "var(--fg3)", fontSize: 11 }}>{t.rows.length} × {t.columns.length}{channels.length ? ` · ${channels.length} 个输入` : ""}</span></div>}
-      <div className={full ? "td-table" : "nbody"} style={full ? undefined : { height: node.h }}>
+      {full ? null : <div className="nhead"><span className="nhead-in">{parsing ? <i className="runsig" role="status" aria-label="解析中" /> : <Icon name="grid" size="xs" />}<span className="t">{t.title}</span>{parsing ? <ParseStatus id={node.id} /> : <span className="tnum" style={{ color: "var(--fg3)", fontSize: 11 }}>{t.rows.length} × {t.columns.length}{channels.length ? ` · ${channels.length} 个输入` : ""}</span>}<ViewMenuButton ctl={viewCtl} /></span></div>}
+      <div className={full ? "td-table" : "nbody"} style={full ? undefined : { height: node.h }} ref={rootRef}>
         <div className="tnode">
-          <div className="tgrid" onWheel={(e) => { if (sel || editCell) e.stopPropagation(); }}>
-            <table style={{ width: channels.length * TABLE_INPUT_COL_W + t.columns.length * 132 + 30 }}>
-              <colgroup>{channels.map((ch) => <col key={ch.id} style={{ width: TABLE_INPUT_COL_W }} />)}{t.columns.map((_, i) => <col key={i} style={{ width: 132 }} />)}<col style={{ width: 30 }} /></colgroup>
+          {full ? <div className="tv-bar"><ViewTabs ctl={viewCtl} /><ViewTools ctl={viewCtl} shown={shown} total={t.rows.length} hint={view.type === "card" ? "点卡片看详情" : "点行尾 ⤢ 看详情 · ↑↓ 切换镜头"} /></div> : null}
+          {parsing && !full ? <ParseProgress id={node.id} /> : null}
+          {parsing && !full ? null : view.type === "card" ? <CardWall reveal={reveal} t={t} roles={roles} cols={cols} groups={groups} groupCol={view.group} sel={sel} full={full} active={detail} onRow={setDetail} onOpenFull={() => window.dispatchEvent(new CustomEvent("cn:tabledoc", { detail: node.id }))} /> : null}
+          <div className={"tgrid" + (reveal ? " reveal" : "")} ref={gridRef} hidden={view.type === "card" || (parsing && !full)} onWheel={(e) => { if (sel || editCell) e.stopPropagation(); }}>
+            <table style={{ width: channels.length * TABLE_INPUT_COL_W + cols.length * 132 + 30 }}>
+              <colgroup>{channels.map((ch) => <col key={ch.id} style={{ width: TABLE_INPUT_COL_W }} />)}{cols.map((i) => <col key={i} style={{ width: 132 }} />)}<col style={{ width: 30 }} /></colgroup>
               <thead><tr>
                 {/* 表头两行：上行「输入 N」+ 数量，下行模式按钮（112px 也放得下「逐行 / 全部 / 沿用」） */}
                 {channels.map((ch, i) => <th className="tin" key={ch.id} title={`${ch.title}：${ch.items.length} 个素材`}><div className="h">
                   <div className="tin-top"><span className="tin-label">输入 {i + 1}</span><small className="tin-count">{ch.items.length}</small></div>
                   <button className="tmode" title={MODE_HINT[ch.mode]} data-channel={ch.id} data-mode={ch.mode} onPointerDown={(e) => { e.stopPropagation(); cycleMode(ch.id, ch.mode); }}>{CHANNEL_MODE_LABEL[ch.mode]}<Icon name="down" size="xs" /></button>
                 </div></th>)}
-                {t.columns.map((c, i) => <th key={i} title={c || "列名"}><div className="h">
+                {cols.map((i) => { const c = t.columns[i]; return <th key={i} title={c || "列名"} className={cellSel && i >= cellSel.c0 && i <= cellSel.c1 ? "is-sel-col" : undefined}><div className="h">
                   <Cell tag="input" cellKey={key("h", i)} value={c} editing={editCell === key("h", i)} onStart={() => startEdit(key("h", i))} onStop={stopEdit} onChange={(v) => save((x) => ({ ...x, columns: x.columns.map((y, j) => (j === i ? v.slice(0, 120) : y)) }))} />
                   {/* 列用途 / 删除放第二行：132px 列宽下标题才有整行宽度，不再只露出「画面提」 */}
                   <div className="hmeta">
                     <button className={"trole" + (roles[i].auto ? " auto" : "") + (ROLE_META[roles[i].role].media ? " media" : "")} data-role={roles[i].role} title={`列用途：${ROLE_META[roles[i].role].label}${roles[i].auto ? "（按列名自动识别）" : ""}。${ROLE_META[roles[i].role].hint}`} onPointerDown={(e) => { e.stopPropagation(); roleMenu(e.currentTarget, c, roles[i], (r) => save((x) => withRole(x, i, r), true)); }}>{ROLE_META[roles[i].role].label}</button>
+                    {(() => { const ty = colTypeOf(t, i); return ty === "single" || ty === "multi" || ty === "number" ? <span className="ttype" data-coltype={ty}>{COL_TYPE_LABEL[ty]}</span> : null; })()}
+                    {(() => {
+                      // 智能列入口：批量生成在跑 / 没配好模型时禁用并写明原因（不静默禁用）
+                      const aiMeta = normalizeAiColumns(t.aiColumns, t.columns.length)[i];
+                      const ready = tableLlmConfig(t, store.modelsOf("text"));
+                      const title = batchBusy ? TABLE_AI_BUSY_TITLE : !ready.ok ? ready.reason : aiMeta ? "智能列：" + aiMeta.instruction : "设为智能列（按这一列的指令批量生成）";
+                      return <button type="button" className={"tai-col" + (aiMeta ? " on" : "")} data-ai-col={i} disabled={batchBusy || !ready.ok} title={title}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); openAiColumnPanel(store, node.id, i); }}>AI</button>;
+                    })()}
                     <button className="xcol" title="删除列" onPointerDown={(e) => { e.stopPropagation(); delCol(i); }}><Icon name="x" size="xs" /></button>
                   </div>
-                </div></th>)}
+                </div></th>; })}
                 <th className="tact" />
               </tr></thead>
               <tbody>
@@ -111,26 +241,37 @@ export function TableNodeBody({ node, sel, full = false }: { node: CanvasNode; s
                     <button className="te-add" onPointerDown={(e) => { e.stopPropagation(); addRow(); }}><Icon name="plus" size="xs" />添加一行</button>
                   </td>
                 </tr> : null}
-                {t.rows.map((row, r) => {
+                {t.rows.length > 0 && shown === 0 ? <tr className="tempty"><td colSpan={channels.length + cols.length + 1}><span className="te-hint"><Icon name="search" size="s" />没有符合筛选条件的行</span></td></tr> : null}
+                {groups.map((g) => [
+                  g.key !== null ? <tr className="tgroup" key={"g:" + g.key}><td colSpan={channels.length + cols.length + 1}><span className="tg-k">{view.group}</span><span className="tg-v">{g.key || "（空）"}</span><em className="tnum">{g.rows.length}</em></td></tr> : null,
+                  ...g.rows.map((r) => { const row = t.rows[r];
                   // 该行每条通道取到的素材；这一行最多有几张决定行高（有几张显示几张，超过 9 张才折叠）
                   const rowItems = channels.map((ch) => channelItemsForRow(ch, r));
                   const mostItems = rowItems.reduce((n, items) => Math.max(n, items.length), 0);
-                  return <tr key={r} style={{ height: Math.max(rowHeight(row, channels.length > 0), inputCellHeight(mostItems)) }}>
+                  return <tr key={r} style={{ height: Math.max(rowHeight(row, channels.length > 0), inputCellHeight(mostItems)), ["--i" as string]: r }}>
                     {channels.map((ch, ci) => {
                       const items = rowItems[ci]; const shown = items.slice(0, TABLE_INPUT_MAX_SHOWN); const more = items.length - shown.length;
                       return <td className="tin" key={ch.id}><div className="mcell">
                         {shown.length ? <>{shown.map((m, i) => <MediaThumb key={m.nodeId + ":" + i} src={m.src} url={m.url} kind={m.kind} title={m.title} width={TABLE_INPUT_PREVIEW_W} />)}{more > 0 ? <em>+{more}</em> : null}</> : <em>—</em>}
                       </div></td>;
                     })}
-                    {row.map((v, c) => ROLE_META[roles[c].role].media && editCell !== key(r, c) && (!v.trim() || isMediaRef(v))
-                      ? <td key={c} className="tmc"><MediaCell store={store} cellId={`${node.id}:${r}:${c}`} value={v} multi={roles[c].role === "ref"} label={ROLE_META[roles[c].role].label} onEdit={() => startEdit(key(r, c))} onSet={(nv) => setCell(r, c, nv, true)} /></td>
-                      : <td key={c}>{/* 只读态把 @{节点id} 显示成 @标题；编辑态留着原始记号，写回文档的仍是 @{id} */}<Cell tag="textarea" cellKey={key(r, c)} value={editCell === key(r, c) ? v : plainPrompt(v, doc)} editing={editCell === key(r, c)} onStart={() => startEdit(key(r, c))} onStop={stopEdit} onChange={(nv) => setCell(r, c, nv)} maxH={full ? CELL_MAX.full : CELL_MAX.node} /></td>)}
-                    <td className="tact"><button title="删除这一行" onPointerDown={(e) => { e.stopPropagation(); delRow(r); }}><Icon name="trash" size="xs" /></button></td>
+                    {cols.map((c) => { const v = row[c] ?? "";
+                      // 数据格：拖选矩形 / Shift 扩选靠 data-r + data-c；图片格也参与选区，但不参与改写
+                      const asMedia = ROLE_META[roles[c].role].media && editCell !== key(r, c) && (!v.trim() || isMediaRef(v));
+                      const cls = [asMedia ? "tmc" : "", inSel(r, c) ? "is-sel" : "", failRow(r, c) ? "is-ai-fail" : ""].filter(Boolean).join(" ");
+                      return <td key={c} className={cls || undefined} data-r={r} data-c={c} onPointerDown={(e) => cellDown(e, r, c)}>
+                        {asMedia
+                          ? <MediaCell store={store} cellId={`${node.id}:${r}:${c}`} value={v} multi={roles[c].role === "ref"} label={ROLE_META[roles[c].role].label} onEdit={() => startEdit(key(r, c))} onSet={(nv) => setCell(r, c, nv, true)} />
+                          : <Cell tag="textarea" cellKey={key(r, c)} value={editCell === key(r, c) ? v : plainPrompt(v, doc)} editing={editCell === key(r, c)} onStart={() => startEdit(key(r, c))} onStop={stopEdit} onChange={(nv) => setCell(r, c, nv)} maxH={full ? CELL_MAX.full : CELL_MAX.node} />}
+                      </td>;
+                    })}
+                    <td className="tact">{full ? <button title="看详情" data-act="open-row" onPointerDown={(e) => { e.stopPropagation(); setDetail(r); }}><Icon name="expand" size="xs" /></button> : null}<button title="删除这一行" onPointerDown={(e) => { e.stopPropagation(); delRow(r); }}><Icon name="trash" size="xs" /></button></td>
                   </tr>;
-                })}
+                })])}
               </tbody>
             </table>
           </div>
+          {cellSel ? <TableAiToolbar store={store} nodeId={node.id} table={t} sel={cellSel} rootRef={rootRef} gridRef={gridRef} busy={batchBusy} onClear={() => setCellSel(null)} /> : null}
           {warns.length ? <div className="trefwarn" data-warn="table-input">
             {warns.map((w) => <div className="tw" key={w}><Icon name="alert" size="xs" /><span>{w}</span></div>)}
           </div> : null}
@@ -144,12 +285,13 @@ export function TableNodeBody({ node, sel, full = false }: { node: CanvasNode; s
             </> : null}
             {/* 动作按卡片规范放右侧：「+行/+列」留在左侧作工具，分镜出片 / 审查靠右 */}
             <span className="sp" />
-            <span className="meta">双击单元格编辑</span>
+            {full ? null : <span className="meta">{view.type === "card" ? "双击卡片全屏查看" : "双击单元格编辑"}</span>}
             <button title={hasFirst ? "接出「首帧图」和「分镜视频」两个节点：先逐行出首帧并填回表格，再逐行出视频" : "补上首帧 / 尾帧两列，并接出「首帧图」和「分镜视频」两个节点"} data-act="storyboard-flow" onPointerDown={(e) => { e.stopPropagation(); storyboardPipeline(store, node.id); }}><Icon name="video" size="xs" />分镜出片</button>
             <button data-act="table-review" title="审查这张表：通道 / 模式 / 行数 / 输入编号 / 空行 / 下游模型参考图上限 / 批量失败行（只读检查，不发请求）" onPointerDown={(e) => e.stopPropagation()} onClick={openReview}><Icon name="fit" size="xs" />审查</button>
           </div>
         </div>
       </div>
+      {full && detail !== null ? <DetailDrawer ctl={ctl} nodeId={node.id} row={detail} order={order} onMove={setDetail} onClose={() => setDetail(null)} /> : null}
       {full ? null : <div className="rz" data-rz title="拖动调整大小" />}
     </>
   );
@@ -159,6 +301,7 @@ export function TableDocLayer() {
   const ctl = useCtl(); const store = ctl.store;
   const [id, setId] = useState<string | null>(null); const [closing, setClosing] = useState(false);
   useEffect(() => { const on = (e: Event) => { setClosing(false); setId(String((e as CustomEvent).detail || "") || null); }; addEventListener("cn:tabledoc", on); return () => removeEventListener("cn:tabledoc", on); }, []);
+  useEffect(() => { const on = () => { setId(null); store.setUI({ editCell: null }); }; addEventListener("cn:tabledoc-close", on); return () => removeEventListener("cn:tabledoc-close", on); }, [store]);
   const close = () => { if (closing) return; setClosing(true); setTimeout(() => { setId(null); setClosing(false); store.setUI({ editCell: null }); }, 140); };
   useEffect(() => {
     if (!id) return;
@@ -167,10 +310,13 @@ export function TableDocLayer() {
   });
   const n = useS((s) => id ? s.doc.nodes.find((x) => x.id === id) : undefined);
   if (!n || n.kind !== "table") return null;
-  const title = tableOf(n).title;
-  return <div className="textdoc" data-tabledoc style={closing ? { animation: "fadeOut 140ms var(--e-exit) forwards" } : undefined} onPointerDown={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) close(); }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+  const td = tableOf(n); const title = td.title;
+  const src = sourceVideoOf(store, n.id);
+  const meta = [`${td.rows.length} ${td.columns.includes("首帧") ? "个镜头" : "行"}`, src ? `来自 ${genOf(src).title || "视频"}` : ""].filter(Boolean).join(" · ");
+  return <div className="textdoc wide" data-tabledoc style={closing ? { animation: "fadeOut 140ms var(--e-exit) forwards" } : undefined} onPointerDown={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) close(); }} onWheel={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
     <div className="td-panel" role="dialog" aria-label={title + " · 全屏编辑"} onPointerDown={(e) => e.stopPropagation()}>
-      <div className="td-top"><button className="td-back" aria-label="返回" data-tip="返回画布" onClick={close}><Icon name="left" /></button><span className="td-title">{title}</span></div>
+      <div className="td-top"><button className="td-back" aria-label="返回" data-tip="返回画布" onClick={close}><Icon name="left" /></button><span className="td-title"><b>{title}</b><span className="tnum">{meta}</span></span><span className="sp" />
+        <button className="btn" data-act="storyboard-flow-top" onClick={() => { close(); storyboardPipeline(store, n.id); }}><Icon name="video" size="xs" />分镜出片</button></div>
       <TableNodeBody node={n} sel full />
     </div>
   </div>;
@@ -297,7 +443,16 @@ function MediaCell({ store, cellId, value, multi, label, onEdit, onSet }: { stor
     const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith("image/")).slice(0, multi ? 8 : 1);
     if (!files.length) { store.toast(`${label}列只放图片`); return; }
     const urls: string[] = [];
-    for (const f of files) { if (f.size > MEDIA_UPLOAD_LIMIT) { store.toast(`${f.name} 超过 200MB，未添加`); continue; } const d = await readFile(f); if (d) urls.push(await store.backend.importAsset(store.state.canvasId, d, f.name)); }
+    for (const f of files) {
+      if (f.size > MEDIA_UPLOAD_LIMIT) { store.toast(tooLargeText(f), 7000); continue; }
+      try {
+        // >8MB 走 multipart 原始字节：整段 base64 会让几十 MB 的图片全进内存
+        if (f.size > MULTIPART_UPLOAD_MIN && typeof store.backend.importAssetFile === "function") { urls.push(await store.backend.importAssetFile!(store.state.canvasId, f, f.name)); continue; }
+        const d = await readFile(f); if (d) urls.push(await store.backend.importAsset(store.state.canvasId, d, f.name));
+      } catch (error) {
+        store.toast(uploadFailureText(f, error), 9000);
+      }
+    }
     if (urls.length) onSet((multi ? [...refs, ...urls].slice(0, 8) : urls.slice(0, 1)).join("\n"));
   };
   if (refs.length && refs.every((u) => lost.has(u))) return <div className="mcell" data-mcell={cellId} title={value}
