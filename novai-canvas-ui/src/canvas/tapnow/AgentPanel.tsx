@@ -7,7 +7,7 @@ import { isAssetRef } from "../canvasAssetRefs";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CanvasNode } from "../react-canvas/reactCanvasStore";
-import { addFiles, title } from "../canvas-next/actions";
+import { addFiles, copiedNodeIds, title } from "../canvas-next/actions";
 import { clampThinkLevel, genOf, isGenKind, srcOf, thinkLevelsFor, TYPE_ICON, type GenKind, type ModelSpec } from "../canvas-next/model";
 import { useCtl, useS, type Ctl } from "../canvas-next/ui/ctx";
 import { ComboMenu, prefersReduced } from "../canvas-next/ui/combo";
@@ -154,6 +154,7 @@ import { inspectSkillRepository, installSkillPreview } from "../canvas-next/agen
 import { SkillInstallCard } from "../canvas-next/agent/SkillInstallCard";
 import { ChipLabel, MentionInput, mentionTokenOf, parseMentionTokens, plainMentionText, removeMentionTokens, type MentionChip, type MentionInputHandle, type MentionKind } from "../canvas-next/agent/MentionInput";
 import { ChipPreviewHost, hoverChip, leaveChip } from "../canvas-next/agent/ChipPreview";
+import { buildClipText, buildMessageClipHtml, writeClipboard, type MsgClipRef } from "../canvas-next/agent/messageClipboard";
 import { CaptureButton, FolderButton } from "./DesktopInputControls";
 import "./agent-webimg.css";
 import { Bubble, BubbleContent } from "@/components/hexta/bubble";
@@ -246,6 +247,54 @@ function inferCtxFromText(store: CanvasStore, text: string): NonNullable<AgentMs
   if (inferredCtxCache.size > 400) inferredCtxCache.clear();
   inferredCtxCache.set(key, out);
   return out;
+}
+
+/** 分组 / 堆叠的引用标签：title(n) 对 group 只会退回 kind（三个堆叠全叫 group），
+      这里用 data.gen.title（堆叠名）+ 成员数，引用清单 / 胶囊才分得清是哪一个。 */
+function refLabel(n: CanvasNode): string {
+  if (n.kind !== "group") return title(n);
+  const row = n as unknown as { text?: string; children?: unknown[]; data?: { stack?: unknown; gen?: { title?: unknown } } };
+  const name = String(row.data?.gen?.title || row.text || "").trim() || (row.data?.stack ? "堆叠" : "分组");
+  const count = Array.isArray(row.children) ? row.children.length : 0;
+  return count ? `${name}（${count} 个成员）` : name;
+}
+
+/** 复制消息时一并带上的画布节点：只留还在画布上的，kind / 标题按当前节点重算（组 / 堆叠和气泡一致） */
+function clipRefsOf(store: CanvasStore, ids: Array<string | undefined>): MsgClipRef[] {
+  const out: MsgClipRef[] = []; const seen = new Set<string>();
+  for (const id of ids) {
+    if (!id || seen.has(id)) continue;
+    const n = store.node(id); if (!n) continue;
+    seen.add(id);
+    out.push({ id: n.id, kind: n.kind, title: refLabel(n) });
+  }
+  return out;
+}
+
+/** 消息里带的技能名：正文里的 @skill{名} 记号（按出现顺序去重）+ 老消息只有 skill 字段的情况 */
+function clipSkillsOf(rich: string, fallback?: string): string[] {
+  const names = parseMentionTokens(rich).filter((t) => t.kind === "skill").map((t) => t.id);
+  const extra = String(fallback || "").trim();
+  if (extra) names.push(extra);
+  return [...new Set(names.map((n) => String(n).trim()).filter(Boolean))];
+}
+
+/** 写「消息 + 它带的节点 / 技能」这份剪贴板：节点和技能都没有时保持旧行为（只写纯文本，外部应用读到的完全一样）。
+ *  返回 html 载荷是否真的写进去了——桌面壳 / 权限不支持时退回纯文本，toast 就不能说「带上了 N 个节点」。 */
+async function writeMessageClip(plain: string, refs: MsgClipRef[], rich: string, skills: string[]): Promise<boolean> {
+  const names = [...new Set((skills || []).map((s) => String(s || "").trim()).filter(Boolean))];
+  if (!refs.length && !names.length) { await navigator.clipboard.writeText(plain); return false; }
+  const clip = { v: 1 as const, text: buildClipText(rich, refs, names), refs, ...(names.length ? { skills: names } : {}) };
+  return writeClipboard(plain, buildMessageClipHtml(plain, clip));
+}
+
+/** 复制成功的文案：带什么说什么（节点 / 技能各自出现，都没有就是「已复制」） */
+function copiedToast(withHtml: boolean, refs: number, skills: string[]): string {
+  if (!withHtml) return "已复制";
+  const parts: string[] = [];
+  if (refs > 0) parts.push(refs + " 个节点");
+  if (skills.length) parts.push(skills.length + " 个技能");
+  return parts.length ? "已复制消息和 " + parts.join("、") : "已复制";
 }
 
 export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
@@ -446,15 +495,6 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
     const pinned = pinnedIds.map((id) => store.node(id)).filter((n): n is CanvasNode => !!n);
     const sel = selectedIds.filter((id) => !a.muted.has(id) && !pinnedIds.includes(id)).map((id) => store.node(id)).filter((n): n is CanvasNode => !!n);
     return [...pinned.map((n) => ({ n, pinned: true })), ...sel.map((n) => ({ n, pinned: false }))];
-  };
-  /** 分组 / 堆叠的引用标签：title(n) 对 group 只会退回 kind（三个堆叠全叫 group），
-      这里用 data.gen.title（堆叠名）+ 成员数，引用清单 / 胶囊才分得清是哪一个。 */
-  const refLabel = (n: CanvasNode): string => {
-    if (n.kind !== "group") return title(n);
-    const row = n as unknown as { text?: string; children?: unknown[]; data?: { stack?: unknown; gen?: { title?: unknown } } };
-    const name = String(row.data?.gen?.title || row.text || "").trim() || (row.data?.stack ? "堆叠" : "分组");
-    const count = Array.isArray(row.children) ? row.children.length : 0;
-    return count ? `${name}（${count} 个成员）` : name;
   };
   useEffect(() => { [...a.muted].forEach((id) => { if (!ui.sel.has(id)) a.muted.delete(id); }); }, [ui.sel, a]);
   // 画布上点选加入上下文
@@ -1320,6 +1360,43 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
       for (const id of made) { const chip = resolveChip("node", id); if (chip) edRef.current?.insertMention(chip); }
     }).catch(() => store.toast("粘贴图片失败"));
   };
+  /** 粘回来的消息带着画布节点 / 技能（剪贴板 html 载荷）：节点并进本轮引用，技能设成本轮技能。
+   *  输入框里的记号已由 MentionInput 先落成胶囊（所以这里再改 a.skill 不会误删 token），不动素材 / 应用引用（a.refs）。 */
+  const pasteMessageRefs = (refs: MsgClipRef[], skills: string[]) => {
+    let have = 0;
+    for (const r of refs) {
+      if (r.kind === "skill") continue; // 技能不是画布节点，不查 store.node
+      const n = store.node(r.id); if (!n) continue;
+      if (!a.pinned.includes(n.id)) a.pinned.push(n.id);
+      a.muted.delete(n.id);
+      have += 1;
+    }
+    // 多个技能时正文里每个都保留胶囊，生效取最后一个（和 / 面板 pickSkill 的语义一致）
+    const name = (skills || []).map((s) => String(s || "").trim()).filter(Boolean).pop() || "";
+    if (name) a.skill = name;
+    a.emit();
+    const parts: string[] = [];
+    if (have) parts.push("已带上 " + have + " 个画布节点");
+    if (name) parts.push("技能「" + name + "」");
+    store.toast(parts.length ? parts.join("、") : "这条消息里的节点已经不在画布上了");
+  };
+  /** 在画布上 ⌘C 复制的节点粘进输入框：按内存里的复制记录还原成引用胶囊（跨窗口没有记录时只提示，不插文字） */
+  const pasteCanvasNodes = (_marker: string) => {
+    const ids = copiedNodeIds(store);
+    if (!ids.length) { store.toast("剪贴板里是画布节点，但当前窗口没有复制记录；请回到画布重新复制后再粘贴", 6000); return; }
+    let added = 0;
+    for (const id of ids) {
+      if (!a.pinned.includes(id)) a.pinned.push(id);
+      a.muted.delete(id);
+      const chip = resolveChip("node", id);
+      if (chip) { edRef.current?.insertMention(chip); added += 1; }
+    }
+    a.emit();
+    if (!added) return;
+    // 每个胶囊插完光标都停在自己后面：这里只聚焦，不再把光标送回全文末尾
+    edRef.current?.focus({ caret: "keep" });
+    store.toast("已引用 " + added + " 个节点到本次对话");
+  };
   /** 技能落点：/ 面板与 + →「我的技能」共用——写进 a.skill 并在输入区插一个技能胶囊（选没选中要看得见） */
   const pickSkill = (name: string) => { a.skill = name; a.emit(); edRef.current?.insertMention({ kind: "skill", id: name, title: name, icon: "sparkle", badge: "技能" }); };
   /** 安装 .zip 技能包：在对话里记一条「安装技能包：xx.zip」，助手回一条结果；装好一个就直接放进输入框当本轮技能。
@@ -1570,6 +1647,7 @@ export function AgentPanel({ draft }: { draft?: AgentDraft | null }) {
           placeholder={a.busy ? (full ? "助手执行中 · 按 Enter 加入队列" : "Enter 加入队列") : voicePhase === "recording" ? "正在聆听…" : voicePhase === "transcribing" ? "正在转写…" : (full ? "描述创意或需求，/ 使用技能，@ 引用参考或使用应用" : "随心输入")}
           onChange={onDraftInput} onEnter={() => { if (a.busy) enqueueDraft(); else void send(); }} onTrigger={onMentionTrigger} onTriggerGone={onTriggerGone}
           resolve={resolveChip} onRemove={dropMention} onPasteFiles={pasteImages}
+          onPasteRefs={pasteMessageRefs} onPasteCanvasNodes={pasteCanvasNodes}
           onChipHover={(chip, rect) => { if (chip && rect) hoverChip(chip, rect); else leaveChip(); }}
           onFocus={() => setSugFocus(true)} onBlur={() => setSugFocus(false)} /></InputGroup>
         <div className="foot ap2-foot" data-voice={voicePhase}>
@@ -1762,7 +1840,14 @@ function settleGenText(text: string, executed: boolean): string {
 
 function Msg({ m, i, isNew, a, ctl, models, onRetry, onBranch, onQ, onSkillInstallConfirm, onSkillInstallCancel, onQa, onApprovePlan, onRegenerate }: { m: AgentMsg; i: number; isNew: boolean; a: AgentState; ctl: Ctl; models: ModelSpec[]; onRetry: () => void; onBranch: () => void; onQ: (q: string) => void; onSkillInstallConfirm: () => void; onSkillInstallCancel: () => void; onQa: (card: QaCard, skip: boolean) => void; onApprovePlan: (steps: AgentTaskPlan["steps"]) => void; onRegenerate: (items: AgentRegenerateItem[]) => void }) {
   const nw = isNew ? " new" : "";
-  const copy = async () => { try { await navigator.clipboard.writeText(copyableText(m.text || "")); ctl.store.toast("已复制"); } catch { ctl.store.toast("剪贴板不可用"); } };
+  /** 复制助手消息：正文原样，这条消息给出的结果节点（results / 审查卡 items）一起进剪贴板载荷（助手消息没有本轮技能） */
+  const copy = async () => {
+    const refs = clipRefsOf(ctl.store, [...(m.results || []), ...(m.reviews || []).flatMap((r) => (r.items || []).map((it) => it.node_id))]);
+    try {
+      const withHtml = await writeMessageClip(copyableText(m.text || ""), refs, m.text || "", []);
+      ctl.store.toast(copiedToast(withHtml, refs.length, []));
+    } catch { ctl.store.toast("剪贴板不可用"); }
+  };
   if (m.role === "u") {
     // 发送时已经带 ctx；历史消息（后端只存文本）按 @标题 反查当前画布，补出上下文。
     // @ 的节点 / 素材在正文里内联成缩略图胶囊（点一下定位到画布），技能是行内技能胶囊（有封面显示封面）；
@@ -1771,7 +1856,15 @@ function Msg({ m, i, isNew, a, ctl, models, onRetry, onBranch, onQ, onSkillInsta
     // 老数据里技能只写在「本轮按技能「X」来做。」这句里：剥掉文字的同时把它还原成技能胶囊
     const legacySkill = m.skill || (String(m.text || "").match(LEGACY_SKILL_RE)?.[1] ?? undefined);
     const ctx = m.ctx?.length ? m.ctx : inferCtxFromText(ctl.store, shown);
-    const copyUser = async () => { try { await navigator.clipboard.writeText(copyableText(shown)); ctl.store.toast("已复制"); } catch { ctl.store.toast("剪贴板不可用"); } };
+    const copyUser = async () => {
+      const refs = clipRefsOf(ctl.store, ctx.map((c) => c.id));
+      // rich 用展示文本（保留行内 @skill{名}）：plain 仍是「（技能：名）」的外对语义
+      const skills = clipSkillsOf(shown, legacySkill);
+      try {
+        const withHtml = await writeMessageClip(copyableText(shown), refs, shown, skills);
+        ctl.store.toast(copiedToast(withHtml, refs.length, skills));
+      } catch { ctl.store.toast("剪贴板不可用"); }
+    };
     return <div className={"msg u" + nw} data-i={i} data-msg-id={m.id}>
       <Bubble className="ap2-bub-u" variant="secondary"><BubbleContent className="ap2-bub-body"><MessageText text={shown} ctx={ctx} ctl={ctl} skill={legacySkill} own={!!m.ctx?.length} skills={a.skills} /></BubbleContent></Bubble><MessageTime at={m.at} /><div className="mact"><button title="复制" onClick={copyUser}><Icon name="copy" size="xs" /></button></div></div>;
   }

@@ -23,6 +23,13 @@ const HAND_DRAWN = {
     rundown: '<path d="M5 4l10 8-10 8zM19 5v14"/>',
     runup: '<path d="M19 4L9 12l10 8zM5 5v14"/>',
     code: '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
+    // 分镜表视图工具行 / 镜头详情（路径取自 lucide：list-filter 左对齐版、funnel、rows-2、arrow-up-down、map-pin、refresh-cw）
+    fields: '<path d="M3 6h18"/><path d="M3 12h12"/><path d="M3 18h7"/>',
+    filter: '<path d="M22 3H2l8 9.46V19l4 2v-8.54z"/>',
+    rows: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18"/>',
+    sort: '<path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/>',
+    pin: '<path d="M20 10c0 4.99-5.54 10.19-7.4 11.8a1 1 0 0 1-1.2 0C9.54 20.19 4 14.99 4 10a8 8 0 0 1 16 0"/><circle cx="12" cy="10" r="3"/>',
+    refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
 } as const;
 
 type HandName = keyof typeof HAND_DRAWN;

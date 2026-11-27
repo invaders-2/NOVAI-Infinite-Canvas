@@ -288,14 +288,42 @@ async function restore(id, quiet) {
         toast('恢复失败', { danger: true, icon: 'alert' });
     }
 }
+// 彻底删除会连带清掉媒体/预览/历史/素材库条目，后端返回统计，拼一句给用户看
+function formatBytes(n) {
+    const v = Number(n) || 0;
+    if (v < 1024) return v + ' B';
+    if (v < 1024 * 1024) return (v / 1024).toFixed(1) + ' KB';
+    if (v < 1024 * 1024 * 1024) return (v / 1024 / 1024).toFixed(1) + ' MB';
+    return (v / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+}
+function purgeToastText(list) {
+    const stats = (list || []).filter(Boolean);
+    if (!stats.length) return '';
+    const sum = { files: 0, previews: 0, history: 0, library: 0, bytes: 0 };
+    for (const s of stats) {
+        sum.files += (s.removed_files || []).length;
+        sum.previews += Number(s.removed_previews || 0);
+        sum.history += Number(s.removed_history || 0);
+        sum.library += Number(s.removed_library || 0) + Number(s.removed_assets_registry || 0);
+        sum.bytes += Number(s.removed_bytes || 0);
+    }
+    if (!sum.files && !sum.previews && !sum.history && !sum.library) return '';
+    const parts = [];
+    if (sum.files) parts.push(`${sum.files} 张图片/视频`);
+    if (sum.previews) parts.push(`${sum.previews} 个预览缓存`);
+    if (sum.history) parts.push(`${sum.history} 条生成历史`);
+    if (sum.library) parts.push(`${sum.library} 条素材库条目`);
+    return `已清理 ${parts.join('、')}，释放 ${formatBytes(sum.bytes)}`;
+}
 function askPurge(c) {
     confirm.value = {
         title: '彻底删除后无法恢复，确定删除？',
-        desc: '「' + (c.title || '未命名') + '」将被永久删除。',
+        desc: '「' + (c.title || '未命名') + '」会被永久删除：它生成的图片/视频、预览缓存、生成历史，以及素材库里只被这些画布用过的条目都会一起清掉。仍被其他画布引用的图片/视频会保留。',
         ok: '彻底删除',
         run: async () => {
-            await getJSON(`/api/canvases/${encodeURIComponent(c.id)}/purge`, { method: 'DELETE' });
+            const d = await getJSON(`/api/canvases/${encodeURIComponent(c.id)}/purge`, { method: 'DELETE' });
             trash.value = trash.value.filter(x => x.id !== c.id);
+            toast(purgeToastText([d]) || '已彻底删除', { icon: 'trash' });
         },
     };
 }
@@ -303,13 +331,17 @@ function askClear() {
     const n = trash.value.length; if (!n) return;
     confirm.value = {
         title: '清空回收站后无法恢复，确定清空？',
-        desc: '共 ' + n + ' 个画布将被永久删除。',
+        desc: '共 ' + n + ' 个画布会被永久删除：它们生成的图片/视频、预览缓存、生成历史，以及素材库里只被这些画布用过的条目都会一起清掉。仍被其他画布引用的图片/视频会保留。',
         ok: '清空',
+        fail: '清空回收站失败',
         run: async () => {
-            const ids = trash.value.map(c => c.id);
-            const rs = await Promise.all(ids.map(id => fetch(`/api/canvases/${encodeURIComponent(id)}/purge`, { method: 'DELETE' })));
-            if (rs.some(r => !r.ok)) { await loadTrash(); throw new Error('purge failed'); }
+            // 批量接口：后端整批只扫一次引用集，避免并发删同一张图导致统计不准
+            const d = await getJSON('/api/canvases/trash/clear', { method: 'POST' });
+            const failed = Array.isArray(d.failed) ? d.failed.length : 0;
             trash.value = [];
+            if (failed) await loadTrash();
+            toast(purgeToastText([d]) || `已清空 ${Number(d.cleared) || n} 个画布`, { icon: 'trash' });
+            if (failed) toast(`有 ${failed} 个画布没清干净，已留在回收站，请重试`, { danger: true, icon: 'alert' });
         },
     };
 }

@@ -4963,6 +4963,11 @@ class OnlineImageRequest(BaseModel):
     frame_duration_ms: int = 0
     # SVG 输出的文本模型（上游 svg.model 必填，按该文本模型 token 计费）；'' = 能力表默认 gpt-5.4-mini
     svg_model: str = ""
+    # 2026-11-25 新增的逐模型参数：只有能力表声明了对应字段的模型才下发，其它模型一律忽略
+    # （skill/length 仅 kling-v4-long-image；series_images 仅 kling-v4-image 系列模式，2–4 张）
+    skill: str = ""
+    length: str = ""
+    series_images: int = 0
     reference_images: List[AIReference] = []
     # 任务归属的画布节点：前端离开画布再回来靠它接上任务（不传 = 老调用方，行为不变）
     canvas_id: str = ""
@@ -5364,24 +5369,42 @@ def _credits_image_params(payload) -> dict:
         count = int(getattr(payload, "n", 1) or 1)
     except (TypeError, ValueError):
         count = 1
+    # 系列模式（kling-v4-image）一次请求出 2–4 张：预扣按系列张数算，不然只扣 1 张的钱
+    try:
+        series = int(getattr(payload, "series_images", 0) or 0)
+    except (TypeError, ValueError):
+        series = 0
+    count = max(count, series)
     return {"width": width, "height": height, "quality": str(getattr(payload, "quality", "") or ""),
             "size": size, "rows": max(1, count), "prompt": str(getattr(payload, "prompt", "") or "")}
 
 
-def _credits_video_params(payload) -> dict:
+def _credits_video_params(payload, provider=None) -> dict:
     size = str(getattr(payload, "size", "") or "")
     width, height = parse_size_pair(size)
     resolution = str(getattr(payload, "resolution", "") or "")
-    if not height and resolution:
-        match = re.search(r"(\d{3,4})", resolution)
-        if match:
-            height = int(match.group(1))
     try:
         duration = float(getattr(payload, "duration", 0) or 0)
     except (TypeError, ValueError):
         duration = 0.0
-    return {"width": width, "height": height, "duration": duration, "resolution": resolution,
-            "size": size, "rows": 1}
+    # Seedance 草稿两段式：草稿按 480p、成片按 1080p/4k 预扣，别用成片价扣草稿；
+    # 成片有原始参考视频时走 -input 档，并把草稿阶段的输出时长沿用过来。
+    draft_params = apimart_video_draft_billing_params(payload, provider)
+    if draft_params:
+        resolution = str(draft_params.get("resolution") or resolution)
+        duration = float(draft_params.get("duration") or duration or 0)
+        size = ""
+        width = height = 0
+    if not height and resolution:
+        match = re.search(r"(\d{3,4})", resolution)
+        if match:
+            height = int(match.group(1))
+    params = {"width": width, "height": height, "duration": duration, "resolution": resolution,
+              "size": size, "rows": 1}
+    if draft_params:
+        params.update({key: value for key, value in draft_params.items()
+                       if key not in ("resolution", "duration")})
+    return params
 
 
 def _credits_audio_params(payload) -> dict:
@@ -5636,6 +5659,19 @@ class CanvasVideoRequest(BaseModel):
     aspect_ratio: str = "16:9"
     resolution: str = ""
     size: str = ""
+    # Seedance 2.5 草稿两段式：draft=true 出 480p 草稿；draft_task_id 用草稿出 1080p/4k 成片（互斥）
+    draft: bool = False
+    draft_task_id: str = ""
+    # Midjourney 图生视频（只对视频模型 midjourney-video 生效；其它模型一个都不会发给上游）：
+    # 首帧走 images[0]，尾帧走 end_image 或 images 里 role=last_frame 的那张；
+    # mj_task_id + mj_index 复用 MJ 出图任务的 4 张候选（与首帧图互斥）。
+    motion: str = ""
+    video_type: str = ""
+    mj_batch: int = 0
+    end_image: Optional[AIReference] = None
+    mj_task_id: str = ""
+    mj_index: int = -1
+    animate_mode: str = ""
     # 生成方式（前端 VMODES 的接口值，如 start_end_to_video）；留空=按输入自动推断（老行为）
     mode: str = ""
     images: List[AIReference] = []
@@ -5651,6 +5687,8 @@ class CanvasVideoRequest(BaseModel):
     camerafixed: bool = False
     return_last_frame: bool = False
     generate_audio: bool = False
+    # 内容审核开关（magi-2 文档 L40741–L40746）：默认关；只有显式开启且模型能力表声明才会发 nsfw_check:true
+    nsfw_check: bool = False
     multimodal: bool = False
     trusted_asset: bool = False
     # 任务归属的画布节点（同 OnlineImageRequest）：离开画布回来按 node_id 续跑
@@ -5821,6 +5859,11 @@ class CanvasAnalyzeMediaRequest(BaseModel):
     images: Optional[List[str]] = None  # 视频多帧：按时间顺序，最多 4 张；空则退回单张 image
     kind: Optional[str] = ""            # "image" / "video"；空时按 images 帧数推断（>=2 视为 video）
     duration: Optional[float] = 0.0     # 整段视频时长（秒），只用于模板里描述「整段约 N 秒」
+    video_url: Optional[str] = ""    # 整条视频地址（/assets、/output、http(s) 或 data URL）：能读就服务端自己抽帧
+    table_only: bool = False         # 视频只出分镜表：用「只出表格」模板，text 返回空串
+    # 分镜模板（「更多 › 解析设置」）：storyboard / ecom / lite；空 = 老的 12 列（兼容旧前端）。
+    # 给了模板就按只出表格走，并额外返回每镜起止时间与首帧截图
+    template: str = ""
     is_video_frame: bool = False     # true = 视频的一帧，提示词里说明按静态画面反推
     provider: str = ""               # 空 = 自动挑一个看得懂图的对话模型
     model: str = ""
@@ -6853,17 +6896,42 @@ def _canvas_file_records():
 
 def cleanup_expired_canvas_trash():
     cutoff = now_ms() - CANVAS_TRASH_RETENTION_MS
+    expired = []
     with CANVAS_LOCK:
         for filename, record in _canvas_file_records():
             deleted_at = int(record.get("deleted_at") or 0)
-            if not deleted_at or deleted_at >= cutoff:
-                continue
-            try:
-                os.remove(os.path.join(CANVAS_DIR, filename))
-                _invalidate_canvas_record(filename)
-            except OSError:
-                continue
-            _remove_canvas_versions(record.get("id") or filename[:-len(".json")])
+            if deleted_at and deleted_at < cutoff:
+                expired.append((filename, record.get("id") or filename[:-len(".json")]))
+    if not expired:
+        return
+    # 过期批次就是一整批全清：不再保护其他回收站画布的引用，保留画布的引用集只算一次。
+    skip_ids = set()
+    for filename, expired_id in expired:
+        skip_ids.add(str(expired_id))
+        skip_ids.add(filename[:-len(".json")])
+    referenced, unreadable = _media_reference_set(skip_ids, protect_trash_refs=False)
+    # 锁外逐张处理：媒体清理要扫描全部画布 json、读写历史和素材库，放在锁里会卡住画布保存；
+    # 单张失败只打印一行，不能拖垮这一批（剩下的下次请求再清）。
+    removed_paths = set()
+    for filename, expired_id in expired:
+        try:
+            path = os.path.join(CANVAS_DIR, filename)
+            with open(path, "r", encoding="utf-8") as f:
+                canvas = json.load(f)
+            media = _purge_canvas_media(canvas, protect_trash_refs=False, alive_refs=referenced,
+                                        alive_refs_unreadable=unreadable, defer_cleanup=True)
+            os.remove(path)
+            _invalidate_canvas_record(filename)
+            _remove_canvas_versions(expired_id)
+        except Exception as exc:
+            print(f"[Canvas] 回收站过期清理失败 {filename}: {exc}")
+            continue
+        removed_paths |= media.pop("_removed_paths", set()) or set()
+    # 整批只 parse / 写一次 history.json（74 张逐张写实测要十几秒）
+    try:
+        _prune_removed_media(removed_paths)
+    except Exception as exc:
+        print(f"[Canvas] 回收站过期清理收尾失败: {exc}")
 
 def iter_canvas_records(include_deleted=False, owner_id=None):
     cleanup_expired_canvas_trash()
@@ -13944,6 +14012,74 @@ def apimart_image_source() -> str:
     value = str(os.getenv(APIMART_IMAGE_SOURCE_ENV) or "").strip().lower()
     return "apimart" if value in {"apimart", "official", "upload"} else "temp"
 
+APIMART_UPLOAD_RETENTION_ENV = "APIMART_UPLOAD_RETENTION_DAYS"
+APIMART_UPLOAD_RETENTION_DEFAULT = 3
+APIMART_UPLOAD_RETENTION_ALLOWED = (3, 7, 15, 30)
+
+
+def apimart_upload_retention_days() -> int:
+    """上传保留期固定 3 天（免费额度内），APIMART_UPLOAD_RETENTION_DAYS 可覆盖为 7/15/30。
+    文档 L80789 起：不传 retention_days 跟随控制台默认档，默认是 7/15/30 时每次上传都按字节计费。"""
+    raw = str(os.getenv(APIMART_UPLOAD_RETENTION_ENV) or "").strip()
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        days = 0
+    return days if days in APIMART_UPLOAD_RETENTION_ALLOWED else APIMART_UPLOAD_RETENTION_DEFAULT
+
+
+def apimart_upload_url(base_url: str, path: str) -> str:
+    """上传地址统一带 ?retention_days=3（只认 URL query，form 字段无效）。"""
+    return f"{str(base_url or '').rstrip('/')}{path}?retention_days={apimart_upload_retention_days()}"
+
+
+def apimart_upload_response_meta(payload) -> Dict[str, Any]:
+    """保留上传响应里的保留期字段（bytes / retention_days / expires_at），不参与业务判断。"""
+    node = payload if isinstance(payload, dict) else {}
+    data = node.get("data") if isinstance(node.get("data"), dict) else {}
+    meta: Dict[str, Any] = {}
+    for key in ("bytes", "retention_days", "expires_at"):
+        for source in (node, data):
+            value = source.get(key)
+            if value is None:
+                continue
+            try:
+                meta[key] = int(float(value))
+            except (TypeError, ValueError):
+                continue
+            break
+    return meta
+
+
+_APIMART_UPLOAD_LAST_META: Dict[str, Any] = {}
+
+
+def apimart_upload_last_meta() -> Dict[str, Any]:
+    """最近一次成功上传响应里的 bytes / retention_days / expires_at（缓存条目之外再留一份）。"""
+    return dict(_APIMART_UPLOAD_LAST_META)
+
+
+def apimart_upload_remember_meta(payload) -> Dict[str, Any]:
+    meta = apimart_upload_response_meta(payload)
+    if meta:
+        _APIMART_UPLOAD_LAST_META.clear()
+        _APIMART_UPLOAD_LAST_META.update(meta)
+    return meta
+
+
+def apimart_upload_cache_ttl(payload, fallback_seconds: int) -> int:
+    """缓存 TTL：优先用响应 expires_at（真实过期时间），没有就按 retention_days，最多 2 天。"""
+    meta = apimart_upload_response_meta(payload)
+    expires_at = meta.get("expires_at")
+    if expires_at:
+        remaining = int(float(expires_at) - apimart_cache_now())
+        if remaining > 0:
+            return min(remaining, APIMART_NATIVE_UPLOAD_CACHE_MAX_TTL)
+    days = int(meta.get("retention_days") or 0)
+    if days > 0:
+        return min(days * 24 * 60 * 60, APIMART_NATIVE_UPLOAD_CACHE_MAX_TTL)
+    return int(fallback_seconds)
+
 def apimart_temp_host_url_ttl(service) -> int:
     return int(APIMART_TEMP_HOST_URL_TTL.get(str(service or "").strip().lower(), 150 * 60))
 
@@ -13970,7 +14106,7 @@ def apimart_upload_cache_get(key) -> str:
     _APIMART_UPLOAD_CACHE[key] = entry
     return str(entry.get("url") or "")
 
-def apimart_upload_cache_put(key, url, ttl_seconds=None, source="") -> None:
+def apimart_upload_cache_put(key, url, ttl_seconds=None, source="", meta=None) -> None:
     if not key or not url:
         return
     expires_at = None if ttl_seconds is None else apimart_cache_now() + float(ttl_seconds)
@@ -13979,6 +14115,7 @@ def apimart_upload_cache_put(key, url, ttl_seconds=None, source="") -> None:
         "url": str(url),
         "expires_at": expires_at,
         "source": str(source or ""),
+        "meta": dict(meta or {}),
     }
     while len(_APIMART_UPLOAD_CACHE) > APIMART_UPLOAD_CACHE_MAX:
         _APIMART_UPLOAD_CACHE.pop(next(iter(_APIMART_UPLOAD_CACHE)))
@@ -14113,7 +14250,7 @@ async def upload_image_for_apimart(client, provider, ref_url: str, prefer_temp_h
     if ref_url.startswith("http://") or ref_url.startswith("https://") or ref_url.startswith("asset://"):
         return ref_url
     base_url = video_api_root(provider)
-    upload_url = f"{base_url}/v1/uploads/images"
+    upload_url = apimart_upload_url(base_url, "/v1/uploads/images")
     # data URL: 默认先临时图床（落盘 → 上传 → 删除），图床失败再上传到 APIMart
     if ref_url.startswith("data:"):
         temp_host_error = ""
@@ -14147,6 +14284,7 @@ async def upload_image_for_apimart(client, provider, ref_url: str, prefer_temp_h
                 rj = resp.json()
                 url = extract_apimart_asset_url(rj)
                 if valid_apimart_video_image_input(url):
+                    apimart_upload_remember_meta(rj)
                     print(f"APIMart 上传成功（apimart-upload）：data URL → {url}")
                     return url
                 print(f"APIMart 上传 data URL 返回中未找到可用 asset/url: {str(rj)[:300]}")
@@ -14204,7 +14342,10 @@ async def upload_image_for_apimart(client, provider, ref_url: str, prefer_temp_h
                 rj = resp.json()
                 url = extract_apimart_asset_url(rj)
                 if valid_apimart_video_image_input(url):
-                    apimart_upload_cache_put(cache_key, url, APIMART_UPLOAD_ASSET_TTL_SECONDS, "apimart-upload")
+                    meta = apimart_upload_remember_meta(rj)
+                    apimart_upload_cache_put(cache_key, url,
+                                             apimart_upload_cache_ttl(rj, APIMART_UPLOAD_ASSET_TTL_SECONDS),
+                                             "apimart-upload", meta)
                     print(f"APIMart 上传成功（apimart-upload）：{ref_url} → {url}")
                     return url
                 print(f"APIMart 文件上传返回中未找到可用 asset/url: {str(rj)[:300]}")
@@ -14276,6 +14417,21 @@ VIDEO_CLOUD_COMPRESS_MAX_EDGE = int(os.getenv("VIDEO_CLOUD_COMPRESS_MAX_EDGE", "
 VIDEO_CLOUD_COMPRESS_CRF = int(os.getenv("VIDEO_CLOUD_COMPRESS_CRF", "26"))
 VIDEO_CLOUD_COMPRESS_PRESET = (os.getenv("VIDEO_CLOUD_COMPRESS_PRESET") or "veryfast").strip() or "veryfast"
 VIDEO_CLOUD_COMPRESS_TIMEOUT = int(os.getenv("VIDEO_CLOUD_COMPRESS_TIMEOUT", "600"))
+# APIMart 网关（nginx client_max_body_size 1m）按整个 multipart 请求体算，
+# 扣掉 boundary 和表头余量后，文件本身按 ≤ 1,000,000 字节收敛。
+APIMART_UPLOAD_BODY_LIMIT_BYTES = int(os.getenv("APIMART_UPLOAD_BODY_LIMIT_BYTES", "1000000"))
+# 第一档沿用 VIDEO_CLOUD_COMPRESS_MAX_EDGE / CRF；仍超上传预算时按下面几档继续收敛。
+VIDEO_CLOUD_COMPRESS_FALLBACK_TIERS = ((960, 30), (720, 32), (480, 34))
+# 1MB 上传上限装不下 60 秒以上的视频，长视频只跑首档，避免多遍重编码白烧 CPU。
+VIDEO_CLOUD_COMPRESS_LONG_DURATION_SECONDS = 60
+APIMART_UPLOAD_1MB_VIDEO_MAX_SECONDS = 30
+# 音频按「预算 × 8 / 时长」算目标码率（留 10% 余量），最小 32kbps、128kbps 封顶；
+# 低于 96kbps 降单声道，1MB 在 32kbps 下约能容纳 4 分 10 秒。
+AUDIO_CLOUD_COMPRESS_MIN_KBPS = 32
+AUDIO_CLOUD_COMPRESS_MAX_KBPS = 128
+AUDIO_CLOUD_COMPRESS_MONO_BELOW_KBPS = 96
+AUDIO_CLOUD_COMPRESS_BUDGET_USE = 0.9
+AUDIO_CLOUD_COMPRESS_TIMEOUT = int(os.getenv("AUDIO_CLOUD_COMPRESS_TIMEOUT", "300"))
 
 def probe_video_dimensions(path: str) -> Tuple[int, int]:
     """取视频宽高：优先 ffprobe，没装 ffprobe 时用 opencv；都失败返回 (0, 0)。"""
@@ -14326,18 +14482,72 @@ def video_has_audio_stream(ffprobe: Optional[str], path: str) -> Optional[bool]:
     except Exception:
         return None
 
-def compression_scale_filter(width: int, height: int) -> str:
-    """长边缩到 1280，短边按比例取偶数；只有一边超限时不放大另一边。"""
+def compression_scale_filter(width: int, height: int, max_edge: Optional[int] = None) -> str:
+    """长边缩到 max_edge（默认 1280），短边按比例取偶数；只有一边超限时不放大另一边。"""
+    edge = VIDEO_CLOUD_COMPRESS_MAX_EDGE if max_edge is None else int(max_edge)
     if width >= height:
-        return f"scale='min({VIDEO_CLOUD_COMPRESS_MAX_EDGE},iw)':-2"
-    return f"scale=-2:'min({VIDEO_CLOUD_COMPRESS_MAX_EDGE},ih)'"
+        return f"scale='min({edge},iw)':-2"
+    return f"scale=-2:'min({edge},ih)'"
+
+def compression_output_dimensions(width: int, height: int, max_edge: int) -> Tuple[int, int]:
+    """按 compression_scale_filter 的规则算压缩后的宽高（-2 保证短边是偶数）。"""
+    long_edge = max(width, height)
+    if long_edge <= 0 or max_edge <= 0 or long_edge <= max_edge:
+        return width, height
+    if width >= height:
+        return max_edge, max(2, int(round(height * max_edge / width / 2.0)) * 2)
+    return max(2, int(round(width * max_edge / height / 2.0)) * 2), max_edge
+
+def remove_file_quietly(path) -> None:
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+def compress_video_tier(ffmpeg: str, path: str, width: int, height: int, max_edge: int,
+                        crf: int, audio_args: List[str], timeout: int) -> Tuple[str, int, str]:
+    """按一档参数压一次，返回 (临时文件路径, 字节数, 失败原因)；失败原因非空表示这一档不可用。"""
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.splitext(os.path.basename(path))[0])[:40] or "video"
+    try:
+        fd, temp_path = tempfile.mkstemp(prefix=f"apimart_video_{stem}_", suffix=".mp4")
+        os.close(fd)
+    except OSError as exc:
+        return "", 0, f"创建临时文件失败：{exc}"
+    cmd = [
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        "-i", path,
+        "-vf", compression_scale_filter(width, height, max_edge),
+        "-c:v", "libx264", "-crf", str(crf),
+        "-preset", VIDEO_CLOUD_COMPRESS_PRESET,
+        "-pix_fmt", "yuv420p",
+    ] + list(audio_args) + ["-movflags", "+faststart", temp_path]
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout)
+    except Exception as exc:
+        remove_file_quietly(temp_path)
+        return "", 0, f"ffmpeg 执行异常：{exc}"
+    try:
+        new_size = os.path.getsize(temp_path)
+    except OSError:
+        new_size = 0
+    if proc.returncode != 0 or new_size <= 0:
+        remove_file_quietly(temp_path)
+        stderr = (proc.stderr or "").strip()[:300]
+        return "", 0, f"ffmpeg 压缩失败：{stderr or '没有生成输出文件'}"
+    return temp_path, new_size, ""
 
 def compress_video_for_cloud_upload(path: str) -> Dict[str, Any]:
-    """视频传图床前按需压缩：>24MB 或长边 >1280 → H.264 MP4（长边 1280 / CRF 26 / veryfast）。
-    返回 {"path": 压缩产物路径或 "", "reason": 备注, "size", "width", "height", "duration"}；
-    压缩产物由调用方删除。没装 ffmpeg、探测不到、压缩失败或压完更大时一律用原文件。"""
+    """视频上传前按需压缩：>24MB / 长边 >1280 / 超过 APIMart 上传预算时，按档位逐级压到预算内。
+    返回 {"path","reason","size","width","height","duration","output_size","output_width",
+    "output_height","tier","over_budget","duration_capped"}；压缩临时文件由调用方删除。
+    没装 ffmpeg、探测不到、压缩失败或压完更大时一律用原文件。"""
     info: Dict[str, Any] = {
         "path": "", "reason": "", "size": 0, "width": 0, "height": 0,
+        "output_size": 0, "output_width": 0, "output_height": 0,
+        "tier": (0, 0), "over_budget": False, "duration_capped": False,
         "duration": probe_video_file_duration_seconds(path),
     }
     try:
@@ -14348,7 +14558,10 @@ def compress_video_for_cloud_upload(path: str) -> Dict[str, Any]:
     width, height = probe_video_dimensions(path)
     info["width"], info["height"] = width, height
     long_edge = max(width, height)
-    if info["size"] <= VIDEO_CLOUD_COMPRESS_THRESHOLD_BYTES and long_edge <= VIDEO_CLOUD_COMPRESS_MAX_EDGE:
+    budget = APIMART_UPLOAD_BODY_LIMIT_BYTES
+    if (info["size"] <= VIDEO_CLOUD_COMPRESS_THRESHOLD_BYTES
+            and long_edge <= VIDEO_CLOUD_COMPRESS_MAX_EDGE
+            and info["size"] <= budget):
         info["reason"] = "未超过压缩触发条件"
         return info
     ffmpeg = ffmpeg_binary()
@@ -14357,61 +14570,141 @@ def compress_video_for_cloud_upload(path: str) -> Dict[str, Any]:
         print(f"参考视频压缩跳过：未找到 ffmpeg，跳过压缩（原 {info['size']} 字节）")
         return info
     duration_text = f"{info['duration']:.1f}s" if info["duration"] else "时长未知"
-    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.splitext(os.path.basename(path))[0])[:40] or "video"
-    try:
-        fd, temp_path = tempfile.mkstemp(prefix=f"apimart_video_{stem}_", suffix=".mp4")
-        os.close(fd)
-    except OSError as exc:
-        info["reason"] = f"创建临时文件失败：{exc}"
-        print(f"参考视频压缩失败，回退原文件：{info['reason']}")
-        return info
     audio_args = ["-c:a", "aac", "-b:a", "128k"]
     if video_has_audio_stream(ffprobe_binary(), path) is False:
         audio_args = ["-an"]
+    tiers = [(VIDEO_CLOUD_COMPRESS_MAX_EDGE, VIDEO_CLOUD_COMPRESS_CRF)]
+    tiers += [tier for tier in VIDEO_CLOUD_COMPRESS_FALLBACK_TIERS if tier[0] < VIDEO_CLOUD_COMPRESS_MAX_EDGE]
+    duration_seconds = float(info["duration"] or 0)
+    duration_capped = duration_seconds >= VIDEO_CLOUD_COMPRESS_LONG_DURATION_SECONDS
+    if duration_capped:
+        tiers = tiers[:1]
+        print(f"参考视频时长 {duration_seconds:.0f}s ≥ {VIDEO_CLOUD_COMPRESS_LONG_DURATION_SECONDS}s，"
+              f"只跑首档压缩（1MB 上限装不下长视频，避免多遍重编码）")
+    best_path, best_size, best_tier = "", 0, (0, 0)
+    for max_edge, crf in tiers:
+        temp_path, new_size, error = compress_video_tier(
+            ffmpeg, path, width, height, max_edge, crf, audio_args, VIDEO_CLOUD_COMPRESS_TIMEOUT)
+        if error:
+            remove_file_quietly(best_path)
+            info["reason"] = error
+            print(f"参考视频压缩失败，回退原文件：{error}")
+            return info
+        if new_size >= info["size"]:
+            remove_file_quietly(temp_path)
+            if not best_path:
+                info["reason"] = f"压缩后更大（{new_size} >= {info['size']} 字节），回退原文件"
+                print(f"参考视频压缩未采用：{info['reason']}")
+                return info
+            break
+        remove_file_quietly(best_path)
+        best_path, best_size, best_tier = temp_path, new_size, (max_edge, crf)
+        print(f"参考视频压缩：原 {info['size']} 字节 {width}x{height} {duration_text} → 压缩后 {new_size} 字节"
+              f"（长边 {max_edge} / CRF {crf}，{new_size * 100 // info['size']}%）")
+        if new_size <= budget:
+            break
+        print(f"压缩后 {new_size} 字节仍超 APIMart 上传预算 {budget} 字节，继续压缩下一档")
+    if not best_path:
+        info["reason"] = "所有压缩档位都不可用，回退原文件"
+        print(f"参考视频压缩未采用：{info['reason']}")
+        return info
+    out_width, out_height = compression_output_dimensions(width, height, best_tier[0])
+    info.update(path=best_path, output_size=best_size, output_width=out_width,
+                output_height=out_height, tier=best_tier, over_budget=best_size > budget,
+                duration_capped=duration_capped)
+    if best_size > budget:
+        info["reason"] = f"压到最小档仍超 APIMart 上传预算 {budget} 字节"
+        print(f"参考视频压缩：{info['reason']}（{best_size} 字节 / {out_width}x{out_height}）")
+    else:
+        info["reason"] = "压缩成功"
+    return info
+
+def audio_budget_capacity_text(budget: int, kbps: int) -> str:
+    """按码率算预算能容纳的时长（1,000,000 字节 / 32kbps ≈ 4 分 10 秒）。"""
+    if budget <= 0 or kbps <= 0:
+        return ""
+    seconds = int(int(budget) * 8 // (int(kbps) * 1000))
+    minutes, rest = divmod(max(0, seconds), 60)
+    return f"{minutes} 分 {rest} 秒" if minutes else f"{rest} 秒"
+
+def compress_audio_for_upload(path: str, budget: Optional[int] = None) -> Dict[str, Any]:
+    """本地参考音频上传前按预算压缩：≤ 预算直接返回原文件，不调 ffmpeg。
+    超预算时按「预算 × 8 / 时长」算目标码率一次压到预算内（10% 余量，32~128kbps，<96kbps 单声道）。
+    返回 {"path","reason","size","duration","output_size","target_kbps","channels","budget",
+    "over_budget"}；压缩临时文件由调用方删除。没装 ffmpeg、探测不到时长、压缩失败或压完更大时用原文件。"""
+    limit = APIMART_UPLOAD_BODY_LIMIT_BYTES if budget is None else int(budget)
+    info: Dict[str, Any] = {
+        "path": "", "reason": "", "size": 0, "duration": 0.0,
+        "output_size": 0, "target_kbps": 0, "channels": 0, "budget": limit,
+        "over_budget": False,
+    }
+    try:
+        info["size"] = os.path.getsize(path)
+    except OSError as exc:
+        info["reason"] = f"读取原音频失败：{exc}"
+        return info
+    if info["size"] <= limit:
+        info["reason"] = "未超过压缩触发条件"
+        return info
+    ffmpeg = ffmpeg_binary()
+    if not ffmpeg:
+        info["reason"] = "未找到 ffmpeg，跳过压缩"
+        print(f"参考音频压缩跳过：未找到 ffmpeg（原 {info['size']} 字节）")
+        return info
+    info["duration"] = float(probe_video_file_duration_seconds(path) or 0)
+    if info["duration"] <= 0:
+        info["reason"] = "探测不到音频时长，跳过压缩"
+        print(f"参考音频压缩跳过：探测不到时长（原 {info['size']} 字节）")
+        return info
+    target_kbps = int((limit * 8 / info["duration"]) / 1000 * AUDIO_CLOUD_COMPRESS_BUDGET_USE)
+    target_kbps = max(AUDIO_CLOUD_COMPRESS_MIN_KBPS,
+                      min(AUDIO_CLOUD_COMPRESS_MAX_KBPS, target_kbps))
+    channels = 1 if target_kbps < AUDIO_CLOUD_COMPRESS_MONO_BELOW_KBPS else 2
+    try:
+        fd, temp_path = tempfile.mkstemp(prefix="apimart_audio_", suffix=".mp3")
+        os.close(fd)
+    except OSError as exc:
+        info["reason"] = f"创建临时文件失败：{exc}"
+        print(f"参考音频压缩失败，回退原文件：{info['reason']}")
+        return info
     cmd = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-        "-i", path,
-        "-vf", compression_scale_filter(width, height),
-        "-c:v", "libx264", "-crf", str(VIDEO_CLOUD_COMPRESS_CRF),
-        "-preset", VIDEO_CLOUD_COMPRESS_PRESET,
-        "-pix_fmt", "yuv420p",
-    ] + audio_args + ["-movflags", "+faststart", temp_path]
+        "-i", path, "-vn",
+        "-c:a", "libmp3lame", "-b:a", f"{target_kbps}k",
+        "-ac", str(channels), temp_path,
+    ]
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=VIDEO_CLOUD_COMPRESS_TIMEOUT)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=AUDIO_CLOUD_COMPRESS_TIMEOUT)
     except Exception as exc:
-        try:
-            os.remove(temp_path)
-        except OSError:
-            pass
+        remove_file_quietly(temp_path)
         info["reason"] = f"ffmpeg 执行异常：{exc}"
-        print(f"参考视频压缩失败，回退原文件：{info['reason']}")
+        print(f"参考音频压缩失败，回退原文件：{info['reason']}")
         return info
     try:
         new_size = os.path.getsize(temp_path)
     except OSError:
         new_size = 0
     if proc.returncode != 0 or new_size <= 0:
-        try:
-            os.remove(temp_path)
-        except OSError:
-            pass
+        remove_file_quietly(temp_path)
         stderr = (proc.stderr or "").strip()[:300]
         info["reason"] = f"ffmpeg 压缩失败：{stderr or '没有生成输出文件'}"
-        print(f"参考视频压缩失败，回退原文件：{info['reason']}")
+        print(f"参考音频压缩失败，回退原文件：{info['reason']}")
         return info
     if new_size >= info["size"]:
-        try:
-            os.remove(temp_path)
-        except OSError:
-            pass
+        remove_file_quietly(temp_path)
         info["reason"] = f"压缩后更大（{new_size} >= {info['size']} 字节），回退原文件"
-        print(f"参考视频压缩未采用：{info['reason']}")
+        print(f"参考音频压缩未采用：{info['reason']}")
         return info
-    info["path"] = temp_path
-    info["reason"] = "压缩成功"
-    print(f"参考视频压缩：原 {info['size']} 字节 {width}x{height} {duration_text} → 压缩后 {new_size} 字节"
-          f"（{new_size * 100 // info['size']}%）")
+    info.update(path=temp_path, output_size=new_size, target_kbps=target_kbps,
+                channels=channels, over_budget=new_size > limit)
+    channel_text = "单声道" if channels == 1 else "立体声"
+    if info["over_budget"]:
+        info["reason"] = f"压到最小档仍超 APIMart 上传预算 {limit} 字节"
+        print(f"参考音频压缩：{info['reason']}（{new_size} 字节 / {target_kbps}kbps / {channel_text}）")
+    else:
+        info["reason"] = "压缩成功"
+        print(f"参考音频压缩：原 {info['size']} 字节 {info['duration']:.1f}s → 压缩后 {new_size} 字节"
+              f"（{target_kbps}kbps / {channel_text}）")
     return info
 
 async def apimart_cloud_media_fallback(ref_url: str, reason: str, path_override: str = "") -> str:
@@ -14442,12 +14735,18 @@ async def apimart_cloud_media_fallback(ref_url: str, reason: str, path_override:
     return (f"ERR:APIMart 上传入口不可用（{reason}），云上传未返回可用的公网链接。"
             "请检查网络后重试，或配置 PUBLIC_BASE_URL/PUBLIC_MEDIA_BASE_URL。")
 
-async def apimart_video_cloud_media_fallback(ref_url: str, reason: str) -> str:
-    """参考视频上传图床前的可选压缩：大视频先转 H.264 临时文件，上传完（成功失败都）删除。
+async def apimart_video_cloud_media_fallback(ref_url: str, reason: str, path_override: str = "",
+                                             compress: bool = True) -> str:
+    """参考视频上传临时图床。path_override 非空时直接上传该文件（压缩产物，调用方负责删除）；
+    compress=False 表示调用方已经压过一次，没给文件就直接传原文件，不重复压缩。
     原文件超过图床大小限制时不做压缩，保持原有「超过大小限制」报错。"""
+    if path_override:
+        return await apimart_cloud_media_fallback(ref_url, reason, path_override)
     try:
         path = local_media_path_for_cloud_upload(ref_url)
     except HTTPException:
+        return await apimart_cloud_media_fallback(ref_url, reason)
+    if not compress:
         return await apimart_cloud_media_fallback(ref_url, reason)
     try:
         compressed = await asyncio.to_thread(compress_video_for_cloud_upload, path)
@@ -14458,28 +14757,35 @@ async def apimart_video_cloud_media_fallback(ref_url: str, reason: str) -> str:
     try:
         return await apimart_cloud_media_fallback(ref_url, reason, temp_path)
     finally:
-        if temp_path:
-            try:
-                os.remove(temp_path)
-            except OSError:
-                pass
+        remove_file_quietly(temp_path)
 
 def apimart_native_video_upload_enabled() -> bool:
     """APIMart 自己的上传端点默认作为兜底开启；显式设 APIMART_TRY_VIDEO_UPLOAD=0/false/off 才关掉。"""
     flag = str(os.getenv("APIMART_TRY_VIDEO_UPLOAD") or "").strip().lower()
     return flag not in {"0", "false", "no", "off"}
 
+APIMART_NATIVE_VIDEO_UPLOAD_PATHS = ("/v1/uploads/videos", "/v1/uploads/files", "/v1/uploads/images")
+APIMART_NATIVE_UPLOAD_DEFAULT_TTL = 6 * 60 * 60
+APIMART_NATIVE_UPLOAD_CACHE_MAX_TTL = 2 * 24 * 60 * 60
 
-async def apimart_native_video_upload(client, provider, path: str) -> Tuple[str, str]:
-    """把本地参考视频传进 APIMart 自己的上传端点，返回 (可用链接, 最后一次失败原因)。
-    实测 /v1/uploads/videos 收视频并回 {url, bytes, content_type, expires_at}；
-    链接为空表示这层兜底不可用，调用方继续报原来的错误。"""
+def apimart_upload_reason_text(value, limit: int = 300) -> str:
+    """去掉网关返回的 HTML 标签，只留可读文本；413 的 nginx 原文不塞进弹窗。"""
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    return re.sub(r"\s+", " ", text).strip()[:limit]
+
+def apimart_native_upload_cache_ttl(payload) -> int:
+    """按响应 expires_at / retention_days 缓存，最多 2 天；链接失效就当未命中重新上传。"""
+    return apimart_upload_cache_ttl(payload, APIMART_NATIVE_UPLOAD_DEFAULT_TTL)
+
+async def apimart_native_video_upload(client, provider, path: str) -> Tuple[str, str, int, Dict[str, Any]]:
+    """把本地参考视频传进 APIMart 自己的上传端点，返回 (可用链接, 最后一次失败原因, 缓存 TTL)。
+    413 是网关体积上限（三个 /v1/uploads/* 路径同一限制），带结论直接返回，不再换路径重试；
+    429 用账号额度文案；200 但响应里没有可用 URL 时继续试下一个路径。"""
     base_url = video_api_root(provider)
     filename, content, content_type = apimart_upload_raw_file_payload(path)
-    upload_paths = ("/v1/uploads/videos", "/v1/uploads/files", "/v1/uploads/images")
     last_error = ""
-    for upload_path in upload_paths:
-        upload_url = f"{base_url}{upload_path}"
+    for upload_path in APIMART_NATIVE_VIDEO_UPLOAD_PATHS:
+        upload_url = apimart_upload_url(base_url, upload_path)
         try:
             files = {"file": (filename, content, content_type)}
             resp = await client.post(upload_url, headers=api_headers(json_body=False, provider=provider), files=files, timeout=180)
@@ -14487,24 +14793,89 @@ async def apimart_native_video_upload(client, provider, path: str) -> Tuple[str,
                 rj = resp.json()
                 url = extract_apimart_asset_url(rj)
                 if valid_apimart_video_image_input(url):
+                    meta = apimart_upload_remember_meta(rj)
                     print(f"参考视频已上传 APIMart（{upload_path}）：{url}")
-                    return url, ""
+                    return url, "", apimart_native_upload_cache_ttl(rj), meta
                 last_error = f"{upload_path} 响应里没有可用 URL"
                 print(f"APIMart 视频上传返回中未找到可用 asset/url ({upload_path}): {str(rj)[:300]}")
                 continue
+            if resp.status_code == 413:
+                last_error = (f"{upload_path} 返回 413：上传入口单次请求上限约 1MB"
+                              f"（{APIMART_UPLOAD_BODY_LIMIT_BYTES} 字节），本次文件 {len(content)} 字节超限")
+                print(f"APIMart 视频上传 413（{upload_path}）：文件 {len(content)} 字节超过上传上限，不再换路径重试")
+                return "", last_error, 0, {}
+            if apimart_upload_quota_exhausted(resp):
+                last_error = f"{upload_path} 返回 {resp.status_code}：{apimart_upload_quota_reason(resp)}"
+                print(f"APIMart 视频上传额度用尽（{upload_path}），不再换路径重试")
+                return "", last_error, 0, {}
             last_error = f"{upload_path} 返回 {resp.status_code}: {resp.text[:200]}"
             print(f"APIMart 视频上传失败 {last_error}")
         except Exception as e:
             last_error = f"{upload_path} 异常：{e}"
             print(f"APIMart 视频上传异常: {last_error}")
-    return "", last_error or "上传端点返回 404"
+    return "", last_error or "上传端点返回 404", 0, {}
+
+def apimart_video_upload_failure_message(cloud_result: str, native_error: str, compressed: Dict[str, Any]) -> str:
+    """最终失败文案：先给 1MB 上传上限的结论，再附临时图床与原生上传原因、三条出路。"""
+    cloud_detail = str(cloud_result or "").strip()
+    if cloud_detail.startswith("ERR:"):
+        cloud_detail = cloud_detail[4:]
+    cloud_detail = apimart_upload_reason_text(cloud_detail)
+    native_detail = apimart_upload_reason_text(native_error)
+    if compressed.get("over_budget"):
+        head = (f"APIMart 上传入口单次请求上限约 1MB（{APIMART_UPLOAD_BODY_LIMIT_BYTES} 字节），"
+                f"已压到最小档（{int(compressed.get('output_size') or 0)} 字节 / "
+                f"{int(compressed.get('output_width') or 0)}x{int(compressed.get('output_height') or 0)}）仍超限")
+        if compressed.get("duration_capped"):
+            head += (f"；视频 {float(compressed.get('duration') or 0):.0f} 秒，"
+                     f"1MB 上限最多容纳约 {APIMART_UPLOAD_1MB_VIDEO_MAX_SECONDS} 秒")
+    else:
+        head = f"APIMart 上传入口单次请求上限约 1MB（{APIMART_UPLOAD_BODY_LIMIT_BYTES} 字节）"
+    if native_detail:
+        head += f"；原生上传：{native_detail}"
+    parts = [head]
+    if cloud_detail:
+        parts.append(f"临时图床也不可用：{cloud_detail}")
+    advice = ("可缩短视频时长、降低分辨率，或在 API/.env 配置 PUBLIC_BASE_URL "
+              "把本地素材暴露成公网地址")
+    return "ERR:参考视频上传失败：" + "；".join(parts) + f"。{advice}。"
+
+def apimart_audio_upload_failure_message(cloud_result: str, native_error: str, compressed: Dict[str, Any]) -> str:
+    """最终失败文案：1MB 上传上限结论 + 时长容量提示 + 原生/图床原因 + 三条出路。"""
+    cloud_detail = str(cloud_result or "").strip()
+    if cloud_detail.startswith("ERR:"):
+        cloud_detail = cloud_detail[4:]
+    cloud_detail = apimart_upload_reason_text(cloud_detail)
+    native_detail = apimart_upload_reason_text(native_error)
+    limit = int(compressed.get("budget") or APIMART_UPLOAD_BODY_LIMIT_BYTES)
+    if compressed.get("over_budget"):
+        duration = float(compressed.get("duration") or 0)
+        kbps = int(compressed.get("target_kbps") or 0)
+        channel_text = "单声道" if int(compressed.get("channels") or 0) == 1 else "立体声"
+        head = (f"APIMart 上传入口单次请求上限约 1MB（{limit} 字节），"
+                f"音频 {duration:.0f} 秒已压到最小档（{int(compressed.get('output_size') or 0)} 字节 / "
+                f"{kbps}kbps {channel_text}）仍超限")
+        capacity = audio_budget_capacity_text(limit, kbps)
+        if capacity:
+            head += f"；1MB 上限最多容纳约 {capacity}"
+    else:
+        head = f"APIMart 上传入口单次请求上限约 1MB（{limit} 字节）"
+    if native_detail:
+        head += f"；原生上传：{native_detail}"
+    parts = [head]
+    if cloud_detail:
+        parts.append(f"临时图床也不可用：{cloud_detail}")
+    advice = ("可缩短音频时长、降低码率，或在 API/.env 配置 PUBLIC_BASE_URL "
+              "把本地素材暴露成公网地址")
+    return "ERR:参考音频上传失败：" + "；".join(parts) + f"。{advice}。"
 
 async def upload_video_for_apimart(client, provider, ref_url: str) -> str:
     """尽力把本地参考视频转换为 APIMart 可接受的 http/https 或 asset:// URL。
 
     顺序：已有公网地址 → PUBLIC_BASE_URL → 免费临时图床（不花 APIMart 额度）→ APIMart 原生上传。
     临时图床近两年关停/改版很频繁（uguu 502、Litterbox 500、temp.sh 改成 HTML 查看页，
-    2026-11-13 三种同时挂），所以最后必须用 APIMart 自己的上传端点兜底，
+    2026-11-13 三种同时挂），所以最后必须用 APIMart 自己的上传端点兜底；
+    压缩只做一次，压缩产物同时给图床和原生上传用，成功失败都删临时文件。
     APIMART_TRY_VIDEO_UPLOAD=0/false/off 可以关掉这层兜底。"""
     ref_url = str(ref_url or "").strip()
     if not ref_url:
@@ -14522,21 +14893,38 @@ async def upload_video_for_apimart(client, provider, ref_url: str) -> str:
     ct = content_type_for_path(path)
     if not ct.startswith("video/"):
         return "ERR:参考视频不是可识别的视频文件"
-    cloud_result = await apimart_video_cloud_media_fallback(ref_url, "临时图床均不可用")
-    if not str(cloud_result).startswith("ERR:"):
-        return cloud_result
-    if not apimart_native_video_upload_enabled():
-        return cloud_result
-    native_url, native_error = await apimart_native_video_upload(client, provider, path)
-    if native_url:
-        return native_url
-    # 保持「ERR:APIMart 上传入口不可用…」这条老文案开头（前端和测试都按它识别），原生上传的失败原因追加在后
-    return f"{cloud_result}（APIMart 原生上传：{native_error}）"
+    cache_key = apimart_upload_cache_key(path)
+    cached = apimart_upload_cache_get(cache_key)
+    if cached:
+        print(f"参考视频缓存命中（跳过上传）：{ref_url} → {cached}")
+        return cached
+    try:
+        compressed = await asyncio.to_thread(compress_video_for_cloud_upload, path)
+    except Exception as exc:
+        print(f"参考视频压缩异常，回退原文件：{exc}")
+        compressed = {"path": ""}
+    compressed_path = str(compressed.get("path") or "")
+    upload_path = compressed_path or path
+    try:
+        cloud_result = await apimart_video_cloud_media_fallback(
+            ref_url, "临时图床均不可用", compressed_path, compress=False)
+        if not str(cloud_result).startswith("ERR:"):
+            return cloud_result
+        if not apimart_native_video_upload_enabled():
+            return cloud_result
+        native_url, native_error, native_ttl, native_meta = await apimart_native_video_upload(client, provider, upload_path)
+        if native_url:
+            apimart_upload_cache_put(cache_key, native_url, native_ttl, "apimart-native", native_meta)
+            return native_url
+        return apimart_video_upload_failure_message(cloud_result, native_error, compressed)
+    finally:
+        remove_file_quietly(compressed_path)
 
 async def upload_audio_for_apimart(client, provider, ref_url: str) -> str:
     """把本地参考音频转换为 APIMart 可接受的 http/https 或 asset:// URL。
-    优先用公网地址（PUBLIC_BASE_URL），否则尝试上传到 APIMart 文件端点；
-    端点不可用时回退云端网盘（temp.sh）换链接。返回值以 "ERR:" 开头表示失败原因。"""
+    优先用公网地址（PUBLIC_BASE_URL）；本地 / data URL 先按 1MiB 上传预算压缩，
+    再走 APIMart /v1/uploads/audios（/files 实测 404、/images 不收音频，不再白试），
+    失败回退临时图床。返回值以 "ERR:" 开头表示失败原因。"""
     ref_url = str(ref_url or "").strip()
     if not ref_url:
         return "ERR:空地址"
@@ -14546,47 +14934,90 @@ async def upload_audio_for_apimart(client, provider, ref_url: str) -> str:
     if public_url:
         return public_url
     base_url = video_api_root(provider)
-    upload_paths = ("/v1/uploads/audios", "/v1/uploads/files", "/v1/uploads/images")
-    last_error = ""
-    if ref_url.startswith("data:"):
-        if ";base64," not in ref_url:
-            return "ERR:不支持的 data URL（缺少 base64 段）"
-        header, encoded = ref_url.split(";base64,", 1)
-        mime = header.split(":", 1)[1].split(";", 1)[0] if ":" in header else "audio/mpeg"
+    upload_path = "/v1/uploads/audios"
+    temp_files: List[str] = []
+    cache_key = ""
+    try:
+        if ref_url.startswith("data:"):
+            if ";base64," not in ref_url:
+                return "ERR:不支持的 data URL（缺少 base64 段）"
+            header, encoded = ref_url.split(";base64,", 1)
+            mime = header.split(":", 1)[1].split(";", 1)[0] if ":" in header else "audio/mpeg"
+            try:
+                raw = base64.b64decode(encoded)
+            except Exception as exc:
+                return f"ERR:音频 data URL 解码失败：{exc}"
+            ext = mimetypes.guess_extension(mime) or ".mp3"
+            try:
+                fd, source_path = tempfile.mkstemp(prefix="apimart_audio_src_", suffix=ext)
+                with os.fdopen(fd, "wb") as fh:
+                    fh.write(raw)
+            except OSError as exc:
+                return f"ERR:音频 data URL 落盘失败：{exc}"
+            temp_files.append(source_path)
+        elif ref_url.startswith("/output/") or ref_url.startswith("/assets/"):
+            source_path = output_file_from_url(ref_url)
+            if not source_path:
+                return "ERR:本地音频不存在或已被删除"
+            ct = content_type_for_path(source_path)
+            if not ct.startswith("audio/"):
+                return "ERR:参考音频不是可识别的音频文件"
+            cache_key = apimart_upload_cache_key(source_path)
+            cached = apimart_upload_cache_get(cache_key)
+            if cached:
+                print(f"参考音频缓存命中（跳过上传）：{ref_url} → {cached}")
+                return cached
+        else:
+            return f"ERR:{apimart_video_reference_error(ref_url)}"
         try:
-            raw = base64.b64decode(encoded)
+            compressed = await asyncio.to_thread(compress_audio_for_upload, source_path)
         except Exception as exc:
-            return f"ERR:音频 data URL 解码失败：{exc}"
-        ext = mimetypes.guess_extension(mime) or ".mp3"
-        filename, content, content_type = (f"canvas_audio{ext}", raw, mime or "audio/mpeg")
-    elif ref_url.startswith("/output/") or ref_url.startswith("/assets/"):
-        path = output_file_from_url(ref_url)
-        if not path:
-            return "ERR:本地音频不存在或已被删除"
-        ct = content_type_for_path(path)
-        if not ct.startswith("audio/"):
-            return "ERR:参考音频不是可识别的音频文件"
-        filename, content, content_type = apimart_upload_raw_file_payload(path)
-    else:
-        return f"ERR:{apimart_video_reference_error(ref_url)}"
-    for upload_path in upload_paths:
-        upload_url = f"{base_url}{upload_path}"
+            print(f"参考音频压缩异常，回退原文件：{exc}")
+            compressed = {"path": ""}
+        upload_file = str(compressed.get("path") or source_path)
+        if upload_file != source_path:
+            temp_files.append(upload_file)
+        last_error = ""
         try:
-            files = {"file": (filename, content, content_type)}
-            resp = await client.post(upload_url, headers=api_headers(json_body=False, provider=provider), files=files, timeout=180)
+            filename, content, content_type = apimart_upload_raw_file_payload(upload_file)
+            resp = await client.post(
+                apimart_upload_url(base_url, upload_path),
+                headers=api_headers(json_body=False, provider=provider),
+                files={"file": (filename, content, content_type)}, timeout=180)
             if resp.status_code in (200, 201):
                 rj = resp.json()
                 url = extract_apimart_asset_url(rj)
                 if valid_apimart_video_image_input(url):
+                    meta = apimart_upload_remember_meta(rj)
+                    if cache_key:
+                        apimart_upload_cache_put(cache_key, url,
+                                                 apimart_native_upload_cache_ttl(rj), "apimart-audio", meta)
+                    print(f"参考音频已上传 APIMart（{upload_path}）：{url}")
                     return url
-                last_error = "上传响应未包含可用 URL"
-                continue
-            last_error = f"{upload_path} 返回 {resp.status_code}: {resp.text[:200]}"
+                last_error = f"{upload_path} 响应里没有可用 URL"
+                print(f"APIMart 音频上传返回中未找到可用 asset/url：{str(rj)[:300]}")
+            elif resp.status_code == 413:
+                last_error = (f"{upload_path} 返回 413：上传入口单次请求上限约 1MB"
+                              f"（{APIMART_UPLOAD_BODY_LIMIT_BYTES} 字节），本次文件 {len(content)} 字节超限")
+                print(f"APIMart 音频上传 413（{upload_path}）：文件 {len(content)} 字节超过上传上限，"
+                      f"不再尝试其它上传路径")
+            elif apimart_upload_quota_exhausted(resp):
+                last_error = f"{upload_path} 返回 {resp.status_code}：{apimart_upload_quota_reason(resp)}"
+                print(f"APIMart 音频上传额度用尽（{upload_path}），不再尝试其它上传路径")
+            else:
+                last_error = f"{upload_path} 返回 {resp.status_code}: {resp.text[:200]}"
+                print(f"APIMart 音频上传失败 {last_error}")
         except Exception as exc:
             last_error = f"{upload_path} 异常：{exc}"
-    if ref_url.startswith(("/output/", "/assets/")):
-        return await apimart_cloud_media_fallback(ref_url, last_error or "上传端点返回 404")
-    return f"ERR:APIMart 未提供可用的音频文件上传入口（{last_error}）。请使用公网 http/https / asset:// 音频地址。"
+            print(f"APIMart 音频上传异常: {last_error}")
+        cloud_result = await apimart_cloud_media_fallback(
+            ref_url, last_error or "上传端点返回 404", upload_file)
+        if not str(cloud_result).startswith("ERR:"):
+            return cloud_result
+        return apimart_audio_upload_failure_message(cloud_result, last_error, compressed)
+    finally:
+        for temp_file in temp_files:
+            remove_file_quietly(temp_file)
 
 async def upload_media_for_apimart(client, provider, ref_url: str, kind: str) -> str:
     """按 kind 分派到对应的 APIMart 上传器，拿回上游可用的 http/https/asset:// URL。"""
@@ -15566,6 +15997,38 @@ def normalize_gpt_image_2_size(size):
         height = int((height * grow + 15) // 16) * 16
     return f"{width}x{height}"
 
+# MAI 图像（mai-image-2.7 / -flash）的精确像素口径与 GPT-Image 不同：不看长边 3840，
+# 而是「两边 ≥768、总像素 ≤4194304、各自向下取 32 的倍数」（文档 L11378-11382，例：1000x1000 → 992x992）。
+MAI_IMAGE_MIN_SIDE = 768
+MAI_IMAGE_MAX_PIXELS = 4194304
+MAI_IMAGE_SIZE_STEP = 32
+
+def normalize_mai_image_size(size, min_side=None, max_pixels=None, step=None):
+    """把精确像素收进 MAI 文档口径；非宽高输入原样返回（比例仍走 size + resolution）。"""
+    min_side = int(min_side or MAI_IMAGE_MIN_SIDE)
+    max_pixels = int(max_pixels or MAI_IMAGE_MAX_PIXELS)
+    step = int(step or MAI_IMAGE_SIZE_STEP)
+    width, height = parse_size_pair(size)
+    if not width or not height:
+        return str(size or "").strip()
+    scale = min(1.0, (max_pixels / max(1, width * height)) ** 0.5)
+    width = max(min_side, int((width * scale) // step) * step)
+    height = max(min_side, int((height * scale) // step) * step)
+    if width * height > max_pixels:
+        # 抬到 min_side 之后可能又超总像素上限：按上限等比收一次，仍以 min_side 兜底
+        scale = (max_pixels / max(1, width * height)) ** 0.5
+        width = max(min_side, int((width * scale) // step) * step)
+        height = max(min_side, int((height * scale) // step) * step)
+    return f"{width}x{height}"
+
+def apimart_exact_size_value(size, caps):
+    """精确像素机型最终下发的尺寸：有 min_side/size_step 的（MAI）按 MAI 口径，其余原样。"""
+    caps = caps if isinstance(caps, dict) else {}
+    if caps.get("min_side") or caps.get("size_step"):
+        return normalize_mai_image_size(size, caps.get("min_side"), caps.get("max_pixels"),
+                                        caps.get("size_step"))
+    return str(size or "").strip()
+
 def gpt_image_2_size_error_message(size):
     width, height = parse_size_pair(size)
     display_size = size or "未指定"
@@ -15813,7 +16276,7 @@ def apimart_size_notice(requested_ratio, final_ratio, requested_resolution, fina
 
 APIMART_SPECIAL_RESOLUTION_PIXELS = {
     "0.5K": 262144, "768SQ": 589824, "1K": 1048576, "1.5K": 2097152,
-    "2K": 4194304, "3K": 9437184, "4K": 16777216,
+    "2K": 4194304, "3K": 9437184, "4K": 16777216, "8K": 67108864,
 }
 
 def apimart_image_resolution_from_size_for_model(size, model, caps=None):
@@ -15835,9 +16298,11 @@ def apimart_image_resolution_for_model(model="", resolution="1K", caps=None):
     if caps and caps.get("fixed_resolution"):
         return str(caps["fixed_resolution"])
     text = str(resolution or "1K").strip().upper()
-    if text not in {"0.5K", "768SQ", "1K", "1.5K", "2K", "3K", "4K"}:
+    # 8K 是 2026-11-25 新增档（kling-v4-image）：白名单和排序表都要认，否则会被当成未知档降回 1K/2K
+    if text not in {"0.5K", "768SQ", "1K", "1.5K", "2K", "3K", "4K", "8K"}:
         text = "1K"
     if not caps:
+        # 没有能力表的模型不给 8K（旧白名单只到 4K）：宁可降档也别把未知档直接发给上游
         return text if text in {"0.5K", "1K", "2K", "4K"} else "1K"
     return apimart_clamp_image_resolution(text, caps.get("resolutions"))
 
@@ -15864,6 +16329,35 @@ APIMART_SVG_DEFAULT_MODEL = "gpt-5.4-mini"
 # （gpt-5.4-mini 不支持 minimal/max；gpt-6.1-sol 不支持 minimal/none）；不传或 null = 用作者模型默认。
 # 只在这里留档：生成侧目前只下发 svg.model，不下发 reasoning。
 APIMART_SVG_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+# Midjourney 图生视频（文档 2026-11-25 L19884–L20060 端点页 / L20400–L20520 参数与计费表）：
+#   * 只有图生视频（固定 FAST、约 5 秒、无文生视频），输入 image_urls 或 task_id+index 二选一；
+#   * motion low|high（默认 high，不影响计费）、batch_size 1|2|4（默认 1，按 N 倍计费）、
+#     video_type 480p/720p × 基础/首尾帧 4 个值、end_url 设了自动升级 start_end_*；
+#   * 计费 id：midjourney@video（480p）/ midjourney@video-720p（720p），费用 = 单价 × batch_size。
+# 同一份常量两处下发：图片模型 midjourney 的 mj.video（编辑器在 MJ 出图面板里也能看到视频能力），
+# 以及虚拟视频模型 midjourney-video 的 mj_video（视频节点按模型名选）。
+APIMART_MJ_VIDEO_CAPS = {
+    "endpoint": "/v1/midjourney/generations/video",
+    "upstream_model": "midjourney",
+    "input_sources": ("image_urls", "task_id"),
+    "requires_first_frame": True,
+    "supports_end_frame": True,
+    "duration_seconds": 5,
+    "duration_fixed": True,
+    "motions": ("low", "high"), "motion_default": "high",
+    "video_types": ("vid_1.1_i2v_480", "vid_1.1_i2v_720",
+                    "vid_1.1_i2v_start_end_480", "vid_1.1_i2v_start_end_720"),
+    "video_type_default": "vid_1.1_i2v_480",
+    "base_by_tier": {"480p": "vid_1.1_i2v_480", "720p": "vid_1.1_i2v_720"},
+    "start_end_by_tier": {"480p": "vid_1.1_i2v_start_end_480", "720p": "vid_1.1_i2v_start_end_720"},
+    "start_end_video_types": ("vid_1.1_i2v_start_end_480", "vid_1.1_i2v_start_end_720"),
+    "animate_modes": ("manual", "auto"),
+    "batch": (1, 2, 4), "batch_default": 1,
+    "index_min": 0, "index_max": 3,
+    "billing": ("midjourney@video", "midjourney@video-720p"),
+    "billing_by_tier": {"480p": "midjourney@video", "720p": "midjourney@video-720p"},
+}
 APIMART_IMAGE_MODEL_CAPS = {
     # GPT-Image-2 家族共用上游文档的像素上限（长边 3840 / 总像素约 829 万 / 最低 655360）：
     # 精确像素请求（exact_size）也按它收敛，否则 4K 16:9 的 4096x2304 会被上游直接 400 拒掉。
@@ -15962,10 +16456,7 @@ APIMART_IMAGE_MODEL_CAPS = {
         "ratios": ("auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"),
         "resolutions": ("1K",), "n_max": 1, "mask_url": True, "base64_refs": True, "official_fallback": True,
     },
-    "nano-banana-lite": {
-        "ratios": ("auto", "1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "5:4", "4:5", "21:9", "1:4", "4:1", "1:8", "8:1"),
-        "resolutions": ("1K",), "n_max": 1, "mask_url": True, "base64_refs": True, "official_fallback": True,
-    },
+
     "gemini-nano-banana-2-1-ext": {
         "ratios": ("auto", "1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9", "1:4", "4:1", "1:8", "8:1"),
         "resolutions": ("1K", "2K", "4K"), "n_max": 1, "mask_url": False, "base64_refs": True, "official_fallback": True,
@@ -15980,6 +16471,41 @@ APIMART_IMAGE_MODEL_CAPS = {
     },
     "mai-image-2-6": {
         "ratios": (), "resolutions": ("1K", "2K"), "n_max": 1, "mask_url": True, "base64_refs": True, "official_fallback": False,
+    },
+    # ── 2026-11-25 文档新增页 ─────────────────────────────────────────────────
+    # Kling V4 Image（L10193 起）：size = auto + 8 个比例（像素尺寸直接 400），resolution 2K(默认)/4K/8K，
+    # n 1–9（系列模式必须省略 n 或给 1，靠 max_images 2–4 定张数），参考图 ≤10 张且只收公网 URL
+    # （本地图先走上传接口，所以 base64_refs=False），mask_url / width / height / watermark:true 一律 400。
+    "kling-v4-image": {
+        "ratios": ("auto", "16:9", "9:16", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9"),
+        "resolutions": ("2K", "4K", "8K"), "n_max": 9,
+        "mask_url": False, "base64_refs": False, "ref_max": 10,
+        "series": {"min": 2, "max": 4}, "official_fallback": False,
+    },
+    # Kling V4 Long Image（L10508 起）：长图 / 详情页 / 网页设计，每请求固定 1 张。
+    # skill 必填（ecommerce|webpage）；length 只在 ecommerce（short|medium|long，默认 medium，
+    # webpage 传 length 或 ecommerce 传 image_with_roles 都 400）；resolution 只有 1K(默认)/2K（4K 不支持）；
+    # size / aspect_ratio / width / height / mask_url / sequential_image_generation* 传了就 400（含 null/空串）
+    # → send_size=False，请求体里根本不带 size。参考图：ecommerce 用 image_urls 1–3 张，webpage 用
+    # image_with_roles(style|subject 各 ≤1)；两者都只收公网 URL。watermark:true 也 400。
+    "kling-v4-long-image": {
+        "ratios": (), "resolutions": ("1K", "2K"), "n_max": 1, "send_size": False,
+        "mask_url": False, "base64_refs": False, "ref_max": 3,
+        "skill": ("ecommerce", "webpage"), "length": ("short", "medium", "long"),
+        "official_fallback": False,
+    },
+    # MAI Image 2.7 / 2.7-flash（L11145 起，同一页声明两版能力与参数完全一致 → 一条家族条目，
+    # 最长 key 命中让 -flash 复用同一条）：size 收「任意整数比例 1:4–4:1」或像素宽高，不收 auto；
+    # resolution 只有 1K(默认)/2K，且只在 size 是比例时生效；width/height 成对时优先级最高。
+    # 像素约束与 GPT-Image 的 3840 长边规则不同：两边 ≥768、总像素 ≤4194304、各自向下取 32 的倍数
+    # （1000x1000 → 992x992），所以用 min_side/size_step 这套独立口径，不复用 max_long_edge。
+    # n 固定 1；参考图 ≤5（URL 或 data:image data URI，图生图时 size/resolution/width/height 全失效）；
+    # background 只有 auto|opaque（transparent 传了 400）；quality/style/output_format/mask_url 上游忽略。
+    "mai-image-2-7": {
+        "ratios": (), "resolutions": ("1K", "2K"), "n_max": 1,
+        "mask_url": False, "base64_refs": True, "ref_max": 5,
+        "background": ("auto", "opaque"), "exact_size": True, "exact_size_pair": True,
+        "min_side": 768, "max_pixels": 4194304, "size_step": 32, "official_fallback": False,
     },
     "qwen-image-2-0": {
         "ratios": ("1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"), "resolutions": ("1K", "2K"), "n_max": 6,
@@ -16110,18 +16636,17 @@ APIMART_IMAGE_MODEL_CAPS = {
         # 速度三档全部声明（fast 放第一 = 面板默认高亮；relax 慢但便宜、turbo 极速档，pricing 已有 turbo）
         "mj": {"versions": ["8.2", "8.1", "7", "6.1", "5.2", "5.1"],
                "speeds": ["fast", "turbo", "relax"], "hd": ["8.2", "8.1"],
-               "video": {
-                   "endpoint": "/v1/midjourney/generations/video",
-                   "motions": ("low", "high"), "motion_default": "high",
-                   "batch": (1, 2, 4), "batch_default": 1,
-                   "video_types": ("vid_1.1_i2v_480", "vid_1.1_i2v_720",
-                                   "vid_1.1_i2v_start_end_480", "vid_1.1_i2v_start_end_720"),
-                   "video_type_default": "vid_1.1_i2v_480",
-                   "animate_modes": ("manual", "auto"),
-                   "billing": ("midjourney@video", "midjourney@video-720p"),
-               }},
+               "video": APIMART_MJ_VIDEO_CAPS},
     },
 }
+
+# 别名 → 同一条规格（引用而不是复制，避免两份漂移）：
+#   * nano-banana-2 / -2-ext 是 gemini-3.1-flash-image-preview 的兼容别名（文档 L3337 / L4029）；
+#   * nano-banana-2-lite / -2-lite-ext 是 gemini-3.1-flash-lite-image 的别名（L4029）。
+# 旧 key "nano-banana-lite" 不是任何上游 id 的子串（真别名是 nano-banana-2-lite），永远命不中，
+# 2026-11-26 删掉；最长 key 命中保证 -2-lite 先于 -2、-2 先于 nano-banana。
+APIMART_IMAGE_MODEL_CAPS["nano-banana-2"] = APIMART_IMAGE_MODEL_CAPS["gemini-3-1-flash-image-preview"]
+APIMART_IMAGE_MODEL_CAPS["nano-banana-2-lite"] = APIMART_IMAGE_MODEL_CAPS["gemini-3-1-flash-lite-image"]
 
 def apimart_image_caps_key(model=""):
     return re.sub(r"[^a-z0-9]+", "-", str(model or "").strip().lower()).strip("-")
@@ -16308,7 +16833,8 @@ def apimart_image_request_identity(model=""):
         return request_model, "sunburst" if "sunburst" in name else "flare"
     return request_model, ""
 
-APIMART_IMAGE_RESOLUTION_RANK = {"0.5K": 0.5, "768SQ": 0.768, "1K": 1.0, "1.5K": 1.5, "2K": 2.0, "3K": 3.0, "4K": 4.0}
+APIMART_IMAGE_RESOLUTION_RANK = {"0.5K": 0.5, "768SQ": 0.768, "1K": 1.0, "1.5K": 1.5, "2K": 2.0,
+                                  "3K": 3.0, "4K": 4.0, "8K": 8.0}
 
 def apimart_clamp_image_resolution(value, allowed):
     levels = [str(item).strip().upper() for item in (allowed or ()) if str(item).strip()]
@@ -18616,11 +19142,11 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {**{"videos": local_urls, "task_id": task_id, "raw": result}, **build_canvas_meta(local_urls, payload, "video")}
 
-async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format="", frame_count=0, frame_duration_ms=0, svg_model="", midjourney_speed="", midjourney_stylize=0):
+async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format="", frame_count=0, frame_duration_ms=0, svg_model="", midjourney_speed="", midjourney_stylize=0, skill="", length="", series_images=0):
     async with provider_slot(get_api_provider(provider_id)):
-        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background, size_notice_out, n, midjourney_version, midjourney_hd, thinking_mode, output_format, frame_count, frame_duration_ms, svg_model, midjourney_speed, midjourney_stylize)
+        return await _generate_ai_image_unlimited(prompt, size, quality, model, reference_images, provider_id, background, size_notice_out, n, midjourney_version, midjourney_hd, thinking_mode, output_format, frame_count, frame_duration_ms, svg_model, midjourney_speed, midjourney_stylize, skill, length, series_images)
 
-async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format="", frame_count=0, frame_duration_ms=0, svg_model="", midjourney_speed="", midjourney_stylize=0):
+async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_images=None, provider_id="comfly", background="auto", size_notice_out=None, n=1, midjourney_version="", midjourney_hd=False, thinking_mode=None, output_format="", frame_count=0, frame_duration_ms=0, svg_model="", midjourney_speed="", midjourney_stylize=0, skill="", length="", series_images=0):
     provider = get_api_provider(provider_id)
     if reference_images:
         # 私网素材（对方电脑 / 旧克隆漏网的局域网地址）先落本机，绝不把 http://192.168.x.x 发给上游
@@ -18795,7 +19321,7 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
                     gif_size_notice = (f"GIF 每帧尺寸 {requested_frame_size} → {apimart_size}"
                                        "（整版需 ≤3840/829 万像素）")
             elif apimart_caps.get("exact_size") and exact_width and exact_height:
-                apimart_size = f"{exact_width}x{exact_height}"
+                apimart_size = apimart_exact_size_value(size, apimart_caps)
             else:
                 apimart_size = apimart_clamp_ratio(apimart_size, apimart_caps.get("ratios"))
             resolution = apimart_image_resolution_for_model(model, resolution, caps=apimart_caps)
@@ -18814,11 +19340,56 @@ async def _generate_ai_image_unlimited(prompt, size, quality, model, reference_i
             body = {"model": request_model, "prompt": prompt}
             if request_version:
                 body["version"] = request_version
-            body[apimart_caps.get("size_field") or "size"] = apimart_size
-            if apimart_caps.get("send_resolution", True) and not gif_selected:
+            # 精确像素按 width/height 成对下发（mai）：单独给一个上游当非法参数；成对时 size/resolution 让位
+            exact_pair = parse_size_pair(apimart_size) if apimart_caps.get("exact_size_pair") else (0, 0)
+            if exact_pair[0] and exact_pair[1]:
+                body["width"], body["height"] = exact_pair
+            elif apimart_caps.get("send_size", True):
+                # kling-v4-long-image 不收 size/aspect_ratio（传了连 null 都 400）→ send_size=False
+                body[apimart_caps.get("size_field") or "size"] = apimart_size
+            if apimart_caps.get("send_resolution", True) and not gif_selected and not exact_pair[0]:
                 body["resolution"] = resolution
-            if apimart_caps.get("send_n", True):
+            # 系列模式（kling-v4-image）：sequential_image_generation=auto + max_images 2–4，
+            # 此时上游要求 n 省略或为 1（n>1 直接 400），张数由 max_images 决定
+            apimart_series = apimart_caps.get("series") or {}
+            try:
+                series_images_value = int(series_images or 0)
+            except (TypeError, ValueError):
+                series_images_value = 0
+            series_mode = bool(apimart_series.get("max")
+                               and apimart_series.get("min", 2) <= series_images_value <= int(apimart_series["max"]))
+            if series_mode:
+                body["sequential_image_generation"] = "auto"
+                body["sequential_image_generation_options"] = {"max_images": series_images_value}
+            elif apimart_caps.get("send_n", True):
                 body["n"] = max(1, min(int(n or 1), int(apimart_caps.get("n_max") or 1)))
+            # skill / length（kling-v4-long-image）：skill 必填，空值按 ecommerce；
+            # length 只在 ecommerce 下发（webpage 传了 400），空值按文档默认 medium
+            apimart_skills = [str(item).strip().lower() for item in (apimart_caps.get("skill") or ())
+                              if str(item).strip()]
+            if apimart_skills:
+                apimart_skill = str(skill or "").strip().lower()
+                body["skill"] = apimart_skill if apimart_skill in apimart_skills else apimart_skills[0]
+                apimart_lengths = [str(item).strip().lower() for item in (apimart_caps.get("length") or ())
+                                   if str(item).strip()]
+                if apimart_lengths and body["skill"] == "ecommerce":
+                    apimart_length = str(length or "").strip().lower()
+                    body["length"] = apimart_length if apimart_length in apimart_lengths else "medium"
+                # webpage 模式的参考图必须走 image_with_roles(style|subject)，而通用链路只会发 image_urls；
+                # 发错字段既可能 400 也可能被忽略却照常按参考图计费 → 这里明确拒绝，不静默发错
+                if body["skill"] == "webpage" and image_refs:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{model} 的 webpage 模式参考图必须走 image_with_roles（style / subject 各 ≤1），"
+                               "编辑器暂未提供该入口：请改用 ecommerce 模式，或去掉参考图后重试。",
+                    )
+            # background 枚举（mai：只有 auto|opaque，transparent 传了 400）→ 白名单外的值退回 auto
+            apimart_backgrounds = [str(item).strip().lower() for item in (apimart_caps.get("background") or ())
+                                   if str(item).strip()]
+            if apimart_backgrounds and not native_background:
+                apimart_background = str(background or "auto").strip().lower()
+                body["background"] = (apimart_background if apimart_background in apimart_backgrounds
+                                      else "auto")
             body.update(apimart_output_format_fields(
                 model, apimart_caps, output_format, n, bool(image_refs or mask_refs)))
             # 透明背景必须 png：原生透明下覆盖用户选的输出格式
@@ -19545,12 +20116,45 @@ async def upload_image(files: List[UploadFile] = File(...)):
 
 UPLOAD_IMAGE_HARD_MAX_BYTES = 200 * 1024 * 1024
 UPLOAD_OTHER_MAX_BYTES = 50 * 1024 * 1024
+# 视频 / 音频单文件上限：画布端界面承诺的是 200MB（novai-canvas-ui 的 MEDIA_UPLOAD_LIMIT），
+# 后端只给 50MB 就会出现「拖进画布毫无反应」（前端只能拿到静默的 413）。
+UPLOAD_MEDIA_MAX_BYTES = 200 * 1024 * 1024
 # 超过这个体积的图片先压小再存：画布无损改图会把整张合成图传上来，直接卡 50MB 用户只会看到「图片出不来」
 UPLOAD_IMAGE_COMPRESS_TARGET_BYTES = 50 * 1024 * 1024
 UPLOAD_IMAGE_SHRINK_SIDES = (8192, 6144, 4096, 2048)
+# base64/JSON 上传（/api/ai/upload-base64）的上限：JSON 会把体积再撑大约 1/3，不给畸大请求开口子；
+# 画布拖入的大文件走 multipart 的 /api/ai/upload，不受这里限制。
+UPLOAD_BASE64_MAX_BYTES = 50 * 1024 * 1024
+UPLOAD_KIND_LABEL = {"image": "图片", "video": "视频", "audio": "音频", "file": "文件"}
 
 def upload_size_mb(size_bytes) -> str:
     return f"{float(size_bytes) / 1024.0 / 1024.0:.1f}MB"
+
+def upload_limit_for_kind(kind: str) -> int:
+    """按上传类型给单文件上限（纯函数，测试不必造 200MB 对象，直接 monkeypatch 常量即可）。
+
+    图片 / 视频 / 音频对齐画布端承诺的 200MB；其它（文档等）保持 50MB。
+    读模块级常量而不是默认参数，测试 patch 后立即生效。
+    """
+    if kind == "image":
+        return UPLOAD_IMAGE_HARD_MAX_BYTES
+    if kind in ("video", "audio"):
+        return UPLOAD_MEDIA_MAX_BYTES
+    return UPLOAD_OTHER_MAX_BYTES
+
+def upload_over_limit_detail(display_name: str, size_bytes: int, kind: str) -> str:
+    """413 文案口径：文件名 + 实际大小 + 上限 + 怎么处理（前端会把 detail 原样 toast 出来）。"""
+    label = UPLOAD_KIND_LABEL.get(kind, "文件")
+    limit = upload_size_mb(upload_limit_for_kind(kind))
+    if kind == "image":
+        advice = "请先缩小原图（建议长边不超过 6144 像素，或另存为 JPEG）后重试。"
+    elif kind == "video":
+        advice = "请先压缩 / 裁短 / 转码（例如剪短时长、降到 1080p 或更低码率，或转成 mp4）后重试。"
+    elif kind == "audio":
+        advice = "请先压缩 / 裁短 / 转码（例如降低码率、剪短时长或转成 mp3）后重试。"
+    else:
+        advice = "请先压缩 / 拆分后再上传。"
+    return (f"{display_name} 有 {upload_size_mb(size_bytes)}，超过{label}单文件 {limit} 上限，无法上传。" + advice)
 
 def encode_upload_image_bytes(img, image_format: str) -> bytes:
     """JPEG 没有透明通道，压平到白底再编码（和参考图转 JPEG 的处理一致），避免透明区域变黑。"""
@@ -19650,20 +20254,15 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
             if not ext:
                 ext = ".bin"
         display_name = file.filename or "文件"
-        if kind == "image":
-            if len(content) > UPLOAD_IMAGE_HARD_MAX_BYTES:
-                raise HTTPException(status_code=413, detail=(
-                    f"{display_name} 有 {upload_size_mb(len(content))}，超过图片单文件 "
-                    f"{upload_size_mb(UPLOAD_IMAGE_HARD_MAX_BYTES)} 上限，无法上传。"
-                    "请先缩小原图（建议长边不超过 6144 像素，或另存为 JPEG）后重试。"))
-            if len(content) > UPLOAD_IMAGE_COMPRESS_TARGET_BYTES:
-                original_bytes = len(content)
-                content, ext, info = compress_oversized_image(content, ext, UPLOAD_IMAGE_COMPRESS_TARGET_BYTES)
-                print(f"上传图片 {display_name} 超过 {upload_size_mb(UPLOAD_IMAGE_COMPRESS_TARGET_BYTES)}，已压缩："
-                      f"{upload_size_mb(original_bytes)} → {upload_size_mb(len(content))}，"
-                      f"{info['from_size'][0]}x{info['from_size'][1]} → {info['to_size'][0]}x{info['to_size'][1]}，{info['format']}")
-        elif len(content) > UPLOAD_OTHER_MAX_BYTES:
-            raise HTTPException(status_code=413, detail=f"{display_name} 超过 50MB，无法上传")
+        # 上限按类型分档：图片 / 视频 / 音频 200MB（画布端承诺），其它（文档等）50MB；超限文案带实际大小与改法
+        if len(content) > upload_limit_for_kind(kind):
+            raise HTTPException(status_code=413, detail=upload_over_limit_detail(display_name, len(content), kind))
+        if kind == "image" and len(content) > UPLOAD_IMAGE_COMPRESS_TARGET_BYTES:
+            original_bytes = len(content)
+            content, ext, info = compress_oversized_image(content, ext, UPLOAD_IMAGE_COMPRESS_TARGET_BYTES)
+            print(f"上传图片 {display_name} 超过 {upload_size_mb(UPLOAD_IMAGE_COMPRESS_TARGET_BYTES)}，已压缩："
+                  f"{upload_size_mb(original_bytes)} → {upload_size_mb(len(content))}，"
+                  f"{info['from_size'][0]}x{info['from_size'][1]} → {info['to_size'][0]}x{info['to_size'][1]}，{info['format']}")
         filename = f"ai_ref_{uuid.uuid4().hex[:12]}{ext}"
         # 内容哈希去重：同一张图重复上传只保留一份物理文件（命中优先硬链，否则复用已有 URL）
         url = store_uploaded_bytes(content, filename, "input", file.filename or filename)
@@ -19772,6 +20371,9 @@ BACKUP_MEDIA_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".mov", "
 # 数据目录里不进备份的：机器相关（LAN 口令）、可再生（预览缓存、任务记录）、备份自身、更新回滚包
 BACKUP_DATA_SKIP_DIRS = {"backups", "media_previews", "tasks", "update_backups", "canvas_versions"}
 BACKUP_DATA_SKIP_FILES = {"security.json"}
+# 顶层目录名以这些前缀开头的整份跳过：用户数据里留着 data/canvases.bak-<时间戳> 这类旧备份目录，
+# 它们既不该再被打进备份，也不该算进备份体积。
+BACKUP_DATA_SKIP_DIR_PREFIXES = ("canvases.bak",)
 # 含 Key 的文件：不勾「包含 API Key」时整份跳过
 BACKUP_KEY_FILES = {"api_providers.json"}
 BACKUP_ASSET_REF_RE = re.compile(r"/(assets|output)/([^\"'\s)?#<>]+)")
@@ -19817,6 +20419,39 @@ def _backup_safe_rel(rel: str) -> str:
     return "/".join(parts)
 
 
+def _backup_should_skip_dir(name: str, skip_dirs) -> bool:
+    if not name:
+        return False
+    return name in skip_dirs or name.startswith(BACKUP_DATA_SKIP_DIR_PREFIXES)
+
+
+def _backup_canvas_json_in_trash(path: str) -> bool:
+    """画布 json 是否已软删（进回收站）。读不出来按「不在回收站」处理：备份宁可多带，不能漏。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return False
+    return bool(isinstance(data, dict) and data.get("deleted_at"))
+
+
+def _backup_trashed_canvas_files() -> List[Tuple[str, str]]:
+    """回收站里的画布 json（zip 内路径照旧）：只用来算「回收站独占素材」，本身不进备份。"""
+    out = []
+    try:
+        names = os.listdir(CANVAS_DIR)
+    except OSError:
+        return out
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(CANVAS_DIR, name)
+        if not os.path.isfile(path) or not _backup_canvas_json_in_trash(path):
+            continue
+        out.append((path, "data/canvases/" + name))
+    return out
+
+
 def _backup_data_files(include_keys: bool, include_versions: bool) -> List[Tuple[str, str]]:
     """(绝对路径, zip 内路径) —— 数据目录里要备份的文件。"""
     out = []
@@ -19826,17 +20461,20 @@ def _backup_data_files(include_keys: bool, include_versions: bool) -> List[Tuple
     for dirpath, dirs, files in os.walk(DATA_DIR):
         rel_dir = os.path.relpath(dirpath, DATA_DIR).replace("\\", "/")
         top = rel_dir.split("/")[0] if rel_dir != "." else ""
-        if top in skip_dirs:
+        if _backup_should_skip_dir(top, skip_dirs):
             dirs[:] = []
             continue
         if rel_dir == ".":
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            dirs[:] = [d for d in dirs if not _backup_should_skip_dir(d, skip_dirs)]
         for name in files:
             if name.startswith(".") or name.endswith((".tmp", ".lock")):
                 continue
             if rel_dir == "." and name in BACKUP_DATA_SKIP_FILES:
                 continue
             if rel_dir == "." and name in BACKUP_KEY_FILES and not include_keys:
+                continue
+            # 回收站画布连同它的引用都不进备份（用户口径：备份不带回收站）
+            if rel_dir == "canvases" and _backup_canvas_json_in_trash(os.path.join(dirpath, name)):
                 continue
             rel = name if rel_dir == "." else f"{rel_dir}/{name}"
             out.append((os.path.join(dirpath, name), "data/" + rel))
@@ -19874,7 +20512,23 @@ def _backup_referenced_assets(data_files: List[Tuple[str, str]]) -> Dict[str, st
     return found
 
 
-def _backup_all_assets() -> Dict[str, str]:
+def _backup_trash_only_assets(data_files: List[Tuple[str, str]]) -> Dict[str, str]:
+    """只被回收站画布引用、正常画布/素材库/历史都没引用的素材 → {zip 路径: 绝对路径}。
+
+    A = 正常数据的引用集合，B = 再加上回收站画布 json 的引用；B 独有就是回收站独占。
+    只多扫一遍 canvases 目录，不把整个数据目录 walk 两遍。
+    """
+    trashed = _backup_trashed_canvas_files()
+    if not trashed:
+        return {}
+    trash_refs = _backup_referenced_assets(trashed)
+    if not trash_refs:
+        return {}
+    live_refs = _backup_referenced_assets(data_files)
+    return {key: path for key, path in trash_refs.items() if key not in live_refs}
+
+
+def _backup_all_assets(data_files: Optional[List[Tuple[str, str]]] = None) -> Dict[str, str]:
     found: Dict[str, str] = {}
     for kind, roots in _backup_asset_roots().items():
         for root in roots:
@@ -19891,15 +20545,23 @@ def _backup_all_assets() -> Dict[str, str]:
                         continue
                     rel = name if rel_dir == "." else f"{rel_dir}/{name}"
                     found.setdefault(f"{kind}/{rel}", os.path.join(dirpath, name))
+    # 「全部素材」也剔除回收站独占的文件，否则清空回收站后备份里还留着它们的图片
+    live_data_files = data_files if data_files is not None else _backup_data_files(False, False)
+    for key in _backup_trash_only_assets(live_data_files):
+        found.pop(key, None)
     return found
 
 
 def _backup_canvas_count() -> int:
+    """只数没进回收站的画布：回收站画布的 json 和独占素材已经不进备份了。"""
     n = 0
     try:
         for name in os.listdir(CANVAS_DIR):
-            if name.endswith(".json"):
-                n += 1
+            if not name.endswith(".json"):
+                continue
+            if _backup_canvas_json_in_trash(os.path.join(CANVAS_DIR, name)):
+                continue
+            n += 1
     except Exception:
         pass
     return n
@@ -19977,7 +20639,7 @@ def _backup_build(opts: Dict[str, Any], kind="manual") -> Dict[str, Any]:
     _backup_set(percent=2, message="正在整理要备份的文件")
     data_files = _backup_data_files(include_keys, include_versions)
     if asset_mode == "all":
-        assets = _backup_all_assets()
+        assets = _backup_all_assets(data_files)
     elif asset_mode == "referenced":
         assets = _backup_referenced_assets(data_files)
     else:
@@ -20051,6 +20713,13 @@ def backup_summary():
                 all_bytes += b
                 all_count += c
     models_bytes, _ = _backup_dir_size(_MODELS_DIR) if os.path.isdir(_MODELS_DIR) else (0, 0)
+    # 「全部素材」模式会剔除回收站独占的文件，这里的体积估算跟着扣掉，别让用户看到虚高
+    trash_only_bytes = 0
+    for path in _backup_trash_only_assets(data_files).values():
+        try:
+            trash_only_bytes += os.path.getsize(path)
+        except OSError:
+            pass
     data_bytes = sum(os.path.getsize(p) for p, _ in data_files if os.path.isfile(p))
     versions_bytes, _ = _backup_dir_size(CANVAS_VERSIONS_DIR) if os.path.isdir(CANVAS_VERSIONS_DIR) else (0, 0)
     has_keys = os.path.isfile(API_PROVIDERS_FILE) or os.path.isfile(API_ENV_FILE)
@@ -20059,7 +20728,7 @@ def backup_summary():
         "data_bytes": data_bytes,
         "referenced_assets": len(referenced),
         "referenced_bytes": ref_bytes,
-        "all_assets_bytes": max(0, all_bytes - models_bytes),
+        "all_assets_bytes": max(0, all_bytes - models_bytes - trash_only_bytes),
         "versions_bytes": versions_bytes,
         "has_keys": has_keys,
         "backup_dir": BACKUP_DIR,
@@ -23092,8 +23761,13 @@ async def upload_ai_base64(payload: Base64UploadRequest):
         raise HTTPException(status_code=400, detail="数据无法解码")
     if not content:
         raise HTTPException(status_code=400, detail="内容为空")
-    if len(content) > 50 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="超过 50MB")
+    # base64/JSON 只服务不便用 multipart 的客户端（PS UXP 面板等）：不给畸大 JSON 开口子，仍是 50MB。
+    # 画布拖入的大文件走 /api/ai/upload 的 multipart，不受这里限制。
+    if len(content) > UPLOAD_BASE64_MAX_BYTES:
+        raise HTTPException(status_code=413, detail=(
+            f"{payload.name or '文件'} 有 {upload_size_mb(len(content))}，超过 base64 上传单文件 "
+            f"{upload_size_mb(UPLOAD_BASE64_MAX_BYTES)} 上限（JSON 会把体积再撑大约 1/3）。"
+            "请改用 multipart 的 /api/ai/upload 上传，或先压缩 / 裁短 / 转码到上限以内。"))
     kind, ext = _local_upload_kind_ext(payload.name or "", ct or "image/png")
     if kind is None:
         raise HTTPException(status_code=415, detail=(
@@ -24317,7 +24991,8 @@ async def ai_config(request: Request):
 MODEL_CAPS_CACHE_TTL = 120.0
 _MODEL_CAPS_CACHE: Dict[Any, Any] = {}
 
-MODEL_CAPS_TIER_RANK = {"0.5K": 0.5, "768SQ": 0.768, "1K": 1.0, "1.5K": 1.5, "2K": 2.0, "3K": 3.0, "4K": 4.0}
+MODEL_CAPS_TIER_RANK = {"0.5K": 0.5, "768SQ": 0.768, "1K": 1.0, "1.5K": 1.5, "2K": 2.0,
+                          "3K": 3.0, "4K": 4.0, "8K": 8.0}
 MODEL_CAPS_VIDEO_RES_RANK = {"480p": 480, "512p": 512, "640p": 640, "720p": 720, "768p": 768, "780p": 780,
                              "1080p": 1080, "1440p": 1440, "2160p": 2160}
 
@@ -24458,11 +25133,57 @@ def video_mode_required_inputs(mode):
     }.get(mode, (0, False, ""))
 
 
+def _caps_mj_video_payload(value):
+    """Midjourney 视频能力位（图片 mj.video 与视频 mj_video 共用同一形状）：只输出文档确证的键。"""
+    if not isinstance(value, dict) or not value:
+        return {}
+    out: Dict[str, Any] = {}
+    for key in ("motions", "video_types", "start_end_video_types", "animate_modes", "billing",
+                "input_sources"):
+        items = _caps_list(value.get(key))
+        if items:
+            out[key] = items
+    for key in ("endpoint", "upstream_model", "motion_default", "video_type_default"):
+        text = str(value.get(key) or "").strip()
+        if text:
+            out[key] = text
+    for key in ("base_by_tier", "start_end_by_tier", "billing_by_tier"):
+        source = value.get(key)
+        if not isinstance(source, dict):
+            continue
+        bucket = {}
+        for tier, target in source.items():
+            tier_text = str(tier or "").strip()
+            target_text = str(target or "").strip()
+            if tier_text and target_text:
+                bucket[tier_text] = target_text
+        if bucket:
+            out[key] = bucket
+    for key in ("batch",):
+        numbers = _caps_int_list(value.get(key))
+        if numbers:
+            out[key] = numbers
+    for key in ("batch_default", "index_min", "index_max", "duration_seconds"):
+        try:
+            number = int(value.get(key))
+        except (TypeError, ValueError):
+            continue
+        if number >= 0:
+            out[key] = number
+    for key in ("requires_first_frame", "supports_end_frame", "duration_fixed"):
+        if key in value:
+            out[key] = bool(value.get(key))
+    return out
+
+
 def _caps_payload(ratios=None, resolutions=None, n_max=None, durations=None, modes=None, qualities=None,
                   max_long_edge=None, max_pixels=None, min_pixels=None, thinking_mode=False,
                    ref_max=None, video_ref_max=None, audio_ref_max=None, output_formats=None,
-                   sizes=None, batch=None, mj=None, prompt_only=False, gif_frames=None,
-                   native_background=False, audio=False):
+                   sizes=None, batch=None, mj=None, mj_video=None, prompt_only=False, gif_frames=None,
+                   native_background=False, audio=False, series=None, skill=None, length=None,
+                   background=None, send_size=None, exact_size_pair=False, min_side=None, size_step=None,
+                   draft=False, draft_resolution=None, draft_final_resolutions=None, draft_expires_days=None,
+                   audio_default_on=False, ratio_follows_first_frame=False, nsfw_check=False):
     """caps 条目：n_max / modes 用「字段缺失 = 后端不掌握」的表达，不再下发 null/空占位。
     max_long_edge / max_pixels / min_pixels 只给「精确像素生成」的模型（目前是 GPT-Image 家族）：
     前端据此在组装请求时就把尺寸钳进上游上限。"""
@@ -24525,8 +25246,73 @@ def _caps_payload(ratios=None, resolutions=None, n_max=None, durations=None, mod
             "speeds": _caps_list(mj.get("speeds")),
             "hd": _caps_list(mj.get("hd")),
         }
+        mj_video_payload = _caps_mj_video_payload(mj.get("video"))
+        if mj_video_payload:
+            # 以前这里只传 versions/speeds/hd，mj.video 被整段丢掉 → 编辑器根本看不到 MJ 视频能力
+            payload["mj"]["video"] = mj_video_payload
+    if isinstance(mj_video, dict) and mj_video:
+        normalized_video = _caps_mj_video_payload(mj_video)
+        if normalized_video:
+            payload["mj_video"] = normalized_video
     if prompt_only:
         payload["prompt_only"] = True
+    # 2026-11-25 新增的逐模型能力位（只在该模型上声明）：
+    #   series         系列模式张数区间（kling-v4-image 2–4，走 sequential_image_generation）
+    #   skill/length   长图模型的二级参数（kling-v4-long-image 必填 skill）
+    #   background     上游接受的 background 枚举（mai 只有 auto|opaque，没有 transparent）
+    #   send_size      显式 false = 请求体不带 size（kling-v4-long-image 传了就 400）
+    #   exact_size_pair 精确像素按 width/height 成对下发（mai），不是 size="WxH"
+    #   min_side/size_step 精确像素约束（mai 每边 ≥768、向下取 32 的倍数）
+    if isinstance(series, dict) and series:
+        bucket = {}
+        for key in ("min", "max"):
+            try:
+                number = int(series.get(key))
+            except (TypeError, ValueError):
+                continue
+            if number > 0:
+                bucket[key] = number
+        if bucket:
+            payload["series"] = bucket
+    for key, value in (("skill", skill), ("length", length), ("background", background)):
+        if value is not None:
+            payload[key] = _caps_list(value)
+    for key, value in (("min_side", min_side), ("size_step", size_step)):
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            payload[key] = number
+    if send_size is False:
+        payload["send_size"] = False
+    if exact_size_pair:
+        payload["exact_size_pair"] = True
+    # 草稿模式（seedance-2.5）：draft=true 出 480p 草稿 → draft_task_id 出成片，草稿 3 天过期。
+    # draft_resolution 是草稿固定档；draft_final_resolutions 是成片可选档（互斥，别混用 resolutions）。
+    if draft:
+        payload["draft"] = True
+    draft_resolution = str(draft_resolution or "").strip()
+    if draft_resolution:
+        payload["draft_resolution"] = draft_resolution
+    if draft_final_resolutions is not None:
+        payload["draft_final_resolutions"] = _caps_list(draft_final_resolutions)
+    try:
+        expires_days = int(draft_expires_days)
+    except (TypeError, ValueError):
+        expires_days = 0
+    if expires_days > 0:
+        payload["draft_expires_days"] = expires_days
+    # 视频链路的布尔能力位（字段缺失 = 后端不掌握；只有能力表确证为真的模型才下发）：
+    #   audio_default_on          声音默认开、关要显式发 false（编辑器据此把音频开关默认打开）
+    #   ratio_follows_first_frame 首帧方式整段不发比例、跟随首帧（编辑器据此收起比例选择）
+    if audio_default_on:
+        payload["audio_default_on"] = True
+    if ratio_follows_first_frame:
+        payload["ratio_follows_first_frame"] = True
+    if nsfw_check:
+        # 布尔能力标记：上游收 nsfw_check（内容审核开关，默认关；只有文档确证、请求体能拼的模型才声明）
+        payload["nsfw_check"] = True
     return payload
 
 
@@ -24618,6 +25404,15 @@ def model_caps_for(provider, model, kind):
         return None
     is_agnes = "apihub.agnes-ai.com" in base_url or lower.startswith(("agnes-image-", "agnes-video-"))
     is_apimart = pid == MEMBER_PROVIDER_ID or protocol == "apimart" or "apib.ai" in base_url
+    if kind == "chat":
+        # 只有内置 chat 清单（仅定价接口/定价页证据的 7 个）下发极小 caps：它们没有参数文档，
+        # 用空档位让「全部可用模型」能列出，绝不编造比例/分辨率/时长。
+        chat_ids = set()
+        for names in (APIMART_BUILTIN_MODEL_IDS.get("chat") or {}).values():
+            chat_ids.update(str(name).strip().lower() for name in names)
+        if is_apimart and lower in chat_ids:
+            return _caps_payload([], [], n_max=1)
+        return None
     if kind == "image":
         # 图片的 n_max = 单次请求最多几张：
         #   apimart 用能力表；agnes / gemini / volcengine / jimeng 的请求组装代码都不发 n
@@ -24650,7 +25445,15 @@ def model_caps_for(provider, model, kind):
                                     gif_frames=table.get("gif_frames"),
                                     sizes=table.get("sizes"),
                                     batch=table.get("batch"),
-                                    mj=table.get("mj"))
+                                    mj=table.get("mj"),
+                                    series=table.get("series"),
+                                    skill=table.get("skill"),
+                                    length=table.get("length"),
+                                    background=table.get("background"),
+                                    send_size=table.get("send_size"),
+                                    exact_size_pair=bool(table.get("exact_size_pair")),
+                                    min_side=table.get("min_side"),
+                                    size_step=table.get("size_step"))
             # exact_size 等内部字段不参与 _caps_payload 的常规拼装，但覆盖里显式给了就下发给编辑器
             if "exact_size" in override:
                 payload["exact_size"] = bool(override.get("exact_size"))
@@ -24697,7 +25500,16 @@ def model_caps_for(provider, model, kind):
                                     ref_max=table.get("ref_max"),
                                     video_ref_max=table.get("video_ref_max"),
                                     audio_ref_max=table.get("audio_ref_max"),
-                                    audio=bool(apimart_video_audio_field(table)))
+                                    audio=bool(apimart_video_audio_field(table)),
+                                    audio_default_on=bool(table.get("audio_default_on")),
+                                    ratio_follows_first_frame=bool(table.get("ratio_follows_first_frame")),
+                                    nsfw_check=bool(table.get("nsfw_check")),
+                                    draft=bool(table.get("draft")),
+                                    draft_resolution=table.get("draft_resolution"),
+                                    draft_final_resolutions=table.get("draft_final_resolutions"),
+                                    draft_expires_days=table.get("draft_expires_days"),
+                                    batch=table.get("batch"),
+                                    mj_video=table.get("mj_video"))
             # 更新包覆盖优先：modes/durations/ratios/resolutions/n_max 直接替换内置推导值
             payload["durations"] = _caps_int_list(override.get("durations")) if "durations" in override else payload.get("durations", [])
             if "modes" in override:
@@ -24734,12 +25546,14 @@ def direct_image_request_batches(provider, model, n):
     例：请求 4 张，模型 n_max=1 → [1, 1, 1, 1]（执行端请求 4 次）；
         n_max=2 → [2, 2]；n_max=6 → [4]。
     没有声明 n_max 的模型保持旧行为（单次最多 8 张，逐张请求）。"""
-    try:
-        total = max(1, min(8, int(n or 1)))
-    except (TypeError, ValueError):
-        total = 1
     caps = model_caps_for(provider, model, "image") or {}
     n_max = int(caps.get("n_max") or 0)
+    # 上限按模型声明来：kling-v4-image 单次能出 1–9 张，旧写死的 8 会把它吞成 8 张
+    ceiling = max(8, n_max) if n_max > 1 else 8
+    try:
+        total = max(1, min(ceiling, int(n or 1)))
+    except (TypeError, ValueError):
+        total = 1
     batch = max(1, min(total, n_max)) if n_max > 1 else 1
     batches = []
     left = total
@@ -24785,7 +25599,7 @@ def direct_image_size_caps(provider, model, size):
     if table.get("exact_size"):
         # 精确像素模型也要收进上游文档的像素上限（GPT-Image 家族：长边 3840 / 总像素约 829 万）：
         # 4K 16:9 的 4096x2304 超限，原样发出去必然被 400 拒，这里等比缩到上限内并说明原因。
-        fixed = normalize_gpt_image_2_size(size) if is_gpt_image_2_model(model) else str(size or "").strip()
+        fixed = normalize_gpt_image_2_size(size) if is_gpt_image_2_model(model) else apimart_exact_size_value(size, table)
         if fixed and fixed != str(size or "").strip():
             return fixed, f"尺寸 {str(size or '').strip() or '未填'} → {fixed}（超过该模型的像素上限，已等比缩小）"
         return size, ""
@@ -24828,10 +25642,24 @@ def direct_image_size_caps(provider, model, size):
 # 没把握的（比如 nano-banana-lite、无版本号的 grok-imagine）宁可不收，也不把能力表 key 当模型名发给上游。
 # ---------------------------------------------------------------------------
 APIMART_BUILTIN_MODEL_IDS = {
+    # chat 侧：只有「定价页 + GET /api/pricing/model 200」证据的 7 个 2026-11-25 新增模型
+    # （文档 196 页 0 命中，参数未知 → caps 只有空档位）。claude-fable-5.2 命名与 opus/sonnet 体系不同，
+    # 但定价接口确实返回该 id（2026-11-25 上一轮实测；乱写 id 返回 404），所以按「在售」收录，
+    # 真正能否调通仍未知（U19/U20）。
+    "chat": {
+        "gemini-4-carbon": ("gemini-4-carbon",),
+        "gemini-4-hydrogen": ("gemini-4-hydrogen",),
+        "gemini-4-neon": ("gemini-4-neon",),
+        "gpt-6-2-astra": ("gpt-6.2-astra",),
+        "gpt-6-2-sol": ("gpt-6.2-sol",),
+        "claude-fable-5-2": ("claude-fable-5.2",),
+        "qwen4-max": ("qwen4-max",),
+    },
     "image": {
         "gpt-image-1": ("gpt-image-1",),
         "gpt-image-2": ("gpt-image-2",),
-        "gpt-image-2-5": ("gpt-image-2.5", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst"),
+        # 上游 image 组只有 -ext / -flare / -sunburst，没有裸 gpt-image-2.5（2026-11-26 实测 /v1/models）
+        "gpt-image-2-5": ("gpt-image-2.5-flare", "gpt-image-2.5-sunburst"),
         "gpt-image-2-5-ext": ("gpt-image-2.5-ext",),
         "gpt-image-2-6-ext": ("gpt-image-2.6-ext",),
         "gpt-image-2-6-flare": ("gpt-image-2.6-flare",),
@@ -24847,6 +25675,9 @@ APIMART_BUILTIN_MODEL_IDS = {
         "gemini-nano-banana-2-1-ext": ("gemini-nano-banana-2.1-ext",),
         "imagen-4-0-apimart": ("imagen-4.0-apimart",),
         "mai-image-2-6": ("mai-image-2.6",),
+        "kling-v4-image": ("kling-v4-image",),
+        "kling-v4-long-image": ("kling-v4-long-image",),
+        "mai-image-2-7": ("mai-image-2.7", "mai-image-2.7-flash"),
         "qwen-image-2-0": ("qwen-image-2.0",),
         "qwen-image-3-0": ("qwen-image-3.0",),
         "seedream-4-0": ("seedream-4.0",),
@@ -24872,9 +25703,11 @@ APIMART_BUILTIN_MODEL_IDS = {
         "midjourney": ("midjourney",),
     },
     "video": {
+        # 虚拟视频模型：上游没有这个 model id（提交走 MJ video 端点、不带 model），
+        # include_builtin=1 时下发给编辑器，用户不必手工把它写进平台视频清单。
+        "midjourney-video": ("midjourney-video",),
         "muse-video-ext": ("muse-video-ext",),
         "seedance-2-0": ("seedance-2.0",),
-        "seedance-1-5-pro": ("seedance-1-5-pro",),
         "seedance-1-0-pro": ("seedance-1-0-pro-quality", "seedance-1-0-pro-fast"),
         "seedance-2-5": ("seedance-2.5",),
         "seedance-2-5-flash": ("seedance-2-5-flash",),
@@ -24913,11 +25746,16 @@ APIMART_BUILTIN_MODEL_IDS = {
         "gemini-omni-1-2-flash-ext": ("gemini-omni-1.2-flash-ext",),
         "gemini-omni-flash-preview": ("gemini-omni-flash-preview",),
         "apimart-zoe": ("apimart-zoe",),
+        "magi-2": ("magi-2",),
         "veo3-1": ("veo3.1-fast", "veo3.1-quality"),
         "veo3-1-lite": ("veo3.1-lite",),
         "omni-flash-ext": ("Omni-Flash-Ext",),
     },
 }
+
+
+def _model_caps_chat_key(model):
+    return str(model or "").strip().lower()
 
 
 def _model_caps_builtin_items(provider, seen, registered):
@@ -24930,11 +25768,13 @@ def _model_caps_builtin_items(provider, seen, registered):
     if not pid:
         return []
     out = []
-    for kind in ("image", "video"):
+    for kind in ("chat", "image", "video"):
         table = APIMART_IMAGE_MODEL_CAPS if kind == "image" else APIMART_VIDEO_MODEL_CAPS
         normalize = apimart_image_caps_key if kind == "image" else apimart_video_normalized_name
+        if kind == "chat":
+            normalize = _model_caps_chat_key
         for caps_key, models in (APIMART_BUILTIN_MODEL_IDS.get(kind) or {}).items():
-            if caps_key not in table:
+            if kind != "chat" and caps_key not in table:
                 continue
             for model in models:
                 key = (pid, model.lower(), kind)
@@ -24960,7 +25800,9 @@ def _model_caps_items(admin=True, include_builtin=False):
             continue
         if not admin and pid != MEMBER_PROVIDER_ID:
             continue
-        registered = {"image": set(), "video": set()}
+        registered = {"chat": set(), "image": set(), "video": set()}
+        for model in _caps_list(provider.get("chat_models") or []):
+            registered["chat"].add(str(model).strip().lower())
         for kind, field in (("image", "image_models"), ("video", "video_models")):
             normalize = apimart_image_caps_key if kind == "image" else apimart_video_normalized_name
             models = _caps_list(provider.get(field) or [])
@@ -25116,6 +25958,8 @@ def _caps_tier_from_size(size):
         raw = str(size or "").strip().upper()
         return raw if raw in MODEL_CAPS_TIER_RANK else ""
     long_edge = max(width, height)
+    if long_edge >= 7000:
+        return "8K"
     if long_edge >= 3600:
         return "4K"
     if long_edge >= 1800:
@@ -25133,7 +25977,8 @@ def _caps_size_for_tier(ratio, tier, current_size=""):
     width, height = parse_size_pair(current_size)
     if not width or not height:
         return current_size
-    long_side = {"0.5K": 512, "1K": 1024, "2K": 2048, "3K": 3072, "4K": 4096}.get(str(tier or "").upper())
+    long_side = {"0.5K": 512, "1K": 1024, "2K": 2048, "3K": 3072, "4K": 4096,
+                 "8K": 8192}.get(str(tier or "").upper())
     if not long_side:
         return current_size
     factor = long_side / max(width, height)
@@ -25961,14 +26806,43 @@ async def probe_volcengine_auto_detect(client, base_url: str, api_key: str):
         "raw": {"task_probe": task_probe, "openai_compat_probe": compat_probe.get("raw")},
     }
 
+# 语义覆盖表（2026-11-27）：上游 category 是元数据，不等于「能不能当对话模型用」。
+# 只在本层改正分类/隐藏，绝不改上游返回。键 = 小写模型 ID：
+#   * gpt-4o-transcribe / gpt-4o-mini-transcribe：上游归 chat，实际走 /v1/audio/transcriptions
+#     → 强制 audio，否则编辑器把转写模型塞进对话下拉，选中必失败（与 gpt-audio-mini 同类坑）；
+#   * omni-moderation-latest：上游归 chat，实际走 /v1/moderations → 不进任何桶（hidden），
+#     产品没有审核节点，宁可不展示。
+APIMART_MODEL_SEMANTIC_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    "gpt-4o-transcribe": {"category": "audio"},
+    "gpt-4o-mini-transcribe": {"category": "audio"},
+    "omni-moderation-latest": {"hidden": True},
+}
+
+
 def classify_upstream_model(mid):
+    """没有上游 category 时的名称回退：video → image → audio → chat（顺序不能反）。
+
+    audio 分支 2026-11-26 补：上游 /v1/models?expand=category 把 gpt-audio-mini / gpt-4o-mini-tts /
+    whisper-1 / flowmusic / suno 都归 audio；旧逻辑一律回落 chat，音频模型会被塞进对话列表。
+    种子系（seedance）也补进 video：旧关键词只有 doubao-seedance，裸 seedance-2.0 会被猜成 chat。
+    """
     lc = str(mid or "").lower()
-    video_keys = ["veo", "sora", "wan2", "wanx", "doubao-seedance", "doubao-1", "kling", "hailuo", "video", "t2v-", "i2v-", "s2v"]
+    # image / video 同族（minimax-h3-image vs MiniMax-H3、pixverse-image vs pixverse-v6、
+    # grok-imagine-image-* vs grok-imagine-*-video）：带 -image 的先归 image，否则会被家族视频关键词抢走；
+    # 但识别成「图生视频」的不算（kling-*-image-to-video 这类仍按 video）
+    if "-image" in lc and not any(k in lc for k in ("to-video", "i2v", "t2v", "video")):
+        return "image"
+    video_keys = ["veo", "sora", "wan2", "wanx", "doubao-seedance", "seedance", "doubao-1", "kling",
+                  "hailuo", "video", "t2v-", "i2v-", "s2v", "pixverse", "viduq3", "viduq4", "vidu-q4",
+                  "skyreels", "happyhorse", "minimax-h3", "gemini-omni", "apimart-zoe", "omni-flash"]
     if any(k in lc for k in video_keys):
         return "video"
-    image_keys = ["banana", "image", "dalle", "dall-e", "imagen", "flux", "stable", "sdxl", "midjourney", "nano-banana", "ideogram", "fal-ai", "z-image", "qwen-image", "klein", "seedream", "doubao-seedream", "text-to-image", "image-to-image"]
+    image_keys = ["banana", "image", "dalle", "dall-e", "imagen", "flux", "stable", "sdxl", "midjourney", "nano-banana", "ideogram", "fal-ai", "z-image", "qwen-image", "klein", "seedream", "doubao-seedream", "text-to-image", "image-to-image", "grok-imagine", "imagine"]
     if any(k in lc for k in image_keys):
         return "image"
+    audio_keys = ["suno", "music", "flowmusic", "lyria", "tts", "speech", "whisper", "audio", "voice"]
+    if any(k in lc for k in audio_keys):
+        return "audio"
     return "chat"
 
 APIMART_MODEL_CATEGORIES = ("chat", "image", "video", "audio", "unknown")
@@ -25982,6 +26856,7 @@ def parse_upstream_models(raw, protocol="openai"):
     grouped = {"image": [], "chat": [], "video": [], "audio": []}
     ids = []
     meta_counts = {"guessed_unknown": 0}
+    hidden_ids = []
     for it in items:
         category = ""
         if isinstance(it, str):
@@ -25996,10 +26871,20 @@ def parse_upstream_models(raw, protocol="openai"):
         mid = str(mid)
         if protocol == "gemini" and mid.startswith("models/"):
             mid = mid[len("models/"):]
+        # 语义覆盖表优先于上游分类：上游把转写/审核模型归 chat，直接照抄会做出「能选但必失败」的下拉项
+        override = APIMART_MODEL_SEMANTIC_OVERRIDES.get(mid.strip().lower()) or {}
+        if override.get("hidden"):
+            hidden_ids.append(mid)
+            continue
+        forced_category = str(override.get("category") or "")
+        if forced_category not in grouped:
+            forced_category = ""
         # 带 expand=category 时以上游分类为准（audio 也收，画布音频节点用）；
         # unknown 只是「平台暂未收录分类元数据」，模型本身可用，按名称猜测归类；
         # 没有 category 的旧格式同样走启发式
-        if category in grouped:
+        if forced_category:
+            grouped[forced_category].append(mid)
+        elif category in grouped:
             grouped[category].append(mid)
         else:
             if category == "unknown":
@@ -26009,7 +26894,7 @@ def parse_upstream_models(raw, protocol="openai"):
     for key in grouped:
         grouped[key] = sorted(set(grouped[key]))
     ids = sorted(set(ids))
-    meta = {"guessed_unknown": meta_counts["guessed_unknown"]}
+    meta = {"guessed_unknown": meta_counts["guessed_unknown"], "hidden": sorted(set(hidden_ids))}
     return grouped, ids, meta
 
 def upstream_models_skipped_note(meta):
@@ -26622,6 +27507,17 @@ async def build_online_image_result(payload: OnlineImageRequest):
     count = request_batches[0] if request_batches else 1
     model_caps = model_caps_for(provider, model, "image") or {}
     native_n_max = int(model_caps.get("n_max") or 1)
+    # 系列模式（kling-v4-image）：一次请求产出 2–4 张且不能带 n>1，所以固定单批、n=1，
+    # 张数由 sequential_image_generation_options.max_images 决定
+    series_caps = model_caps.get("series") or {}
+    try:
+        series_images = int(getattr(payload, "series_images", 0) or 0)
+    except (TypeError, ValueError):
+        series_images = 0
+    if series_caps.get("max") and int(series_caps.get("min") or 2) <= series_images <= int(series_caps["max"]):
+        request_batches = [1]
+        count = 1
+        requested_n = series_images
     # 「原图比例」：size 是 auto/空、或请求显式带原图比例时，按源图（参考图/原图）真实比例算尺寸；
     # 没有源图才退回方图，并把原因写进 size_notice 让前端能提示
     effective_size = str(payload.size or "").strip()
@@ -26648,7 +27544,9 @@ async def build_online_image_result(payload: OnlineImageRequest):
             payload.midjourney_version, payload.midjourney_hd,
             getattr(payload, "thinking_mode", None), output_format,
             payload.frame_count, payload.frame_duration_ms, payload.svg_model,
-            getattr(payload, "midjourney_speed", ""), getattr(payload, "midjourney_stylize", 0))
+            getattr(payload, "midjourney_speed", ""), getattr(payload, "midjourney_stylize", 0),
+            getattr(payload, "skill", ""), getattr(payload, "length", ""),
+            getattr(payload, "series_images", 0))
         try:
             image_items = extract_images(raw_item) if isinstance(raw_item, dict) else [image_data]
         except HTTPException:
@@ -28243,7 +29141,34 @@ def apimart_is_kling_model(model: str) -> bool:
     name = str(model or "").strip().lower().replace("_", "-").replace(".", "-")
     return "kling" in name
 
+# Seedance 草稿模式（文档 L46524–L46602）：草稿固定 480p、成片只收 1080p/4k、草稿 3 天过期。
+APIMART_DRAFT_RESOLUTION = "480p"
+APIMART_DRAFT_FINAL_RESOLUTIONS = ("1080p", "4k")
+APIMART_DRAFT_EXPIRES_DAYS = 3
+APIMART_DRAFT_MAX_SECONDS = 30
+# 成片不得重发的继承字段（文档明说「同值也 400」）；本地按这个表拦，别让上游 400 白扣。
+APIMART_DRAFT_INHERITED_FIELDS = (
+    "prompt", "image_urls", "image_with_roles", "video_urls", "audio_urls", "duration", "size",
+    "aspect_ratio", "seed", "generate_audio", "audio", "omni_reference_task_type",
+    "generation_type", "camerafixed", "web_search", "tools",
+)
+
 APIMART_VIDEO_MODEL_CAPS = {
+    # Midjourney 图生视频（文档 2026-11-25 L19884–L20060 / L20400–L20520）：
+    # 这是「虚拟视频模型」不是上游模型 id —— 上游端点固定 POST /v1/midjourney/generations/video，
+    # 请求体不带 model；模型名只用于编辑器识别能力与计费选择。只有图生视频、固定 FAST、约 5 秒，
+    # 文生视频不支持；比例/时长/声音/水印/seed 都不下发，所以 ratios 为空、resolution_key 为 None。
+    "midjourney-video": {
+        "mj_video": APIMART_MJ_VIDEO_CAPS,
+        "modes": ("image_to_video",),
+        "durations": (5,),
+        "ratios": (), "ratio_key": None,
+        "resolutions": ("480p", "720p"), "resolution_key": None,
+        "batch": (1, 2, 4),
+        "ref_max": 1,
+        "generate_audio": False, "watermark": False, "seed": False,
+        "image_with_roles": False, "video_urls": False, "audio_urls": False,
+    },
     # muse-video-ext（REPORT A.3，文档确证）：约 10 秒 / 720p / 带声音 / ≤9 张参考图 / 支持 Idempotency-Key。
     # 文档没写画幅枚举 -> 不下发比例字段；时长按「约 10 秒」收敛到固定 10；参考图上限与通用 image_urls[:9] 一致。
     "muse-video-ext": {
@@ -28280,10 +29205,15 @@ APIMART_VIDEO_MODEL_CAPS = {
         "image_with_roles": True, "video_urls": False, "audio_urls": False,
     },
     "seedance-2-5": {
-        # 官方文档（2026-11-18 复核）：分辨率 480p/720p/1080p/**4k**（2k/2160p 不支持）；
-        # 比例含 adaptive；时长 4–30 或 -1（自动/自选）；参考上限 图30 / 视频10 / 音频10；
-        # 另有草稿模式（draft:true 出 480p 草稿 → draft_task_id 出 1080p/4k 成片，草稿 3 天过期，
-        # 继承字段重发即 400），项目未提供草稿入口，只在 REPORT 与更新包里留档。
+        # 官方文档（2026-11-25 复核）：分辨率 480p/720p/1080p/**4k**（2k/2160p 不支持）；
+        # 比例含 adaptive；时长 4–30 或 -1（自动/自选）。
+        # 参考上限：文档 L46346 / L46822–L46824 声明 图 30 / 视频 10 / 音频 10；2026-11-27 起通用上传
+        # 分支按本表声明值下发（caps_ref_max / video_ref_max / audio_ref_max），所以这里按文档写 30 / 10 / 10。
+        # 未知：上游是否真照收超限请求未经付费实测（U23），被拒再回退。
+        # 草稿模式（L46524–L46602）：draft:true → 固定 480p 草稿；draft_task_id → 1080p/4k 成片，
+        # 3 天过期；成片不得重发 prompt/image_urls/image_with_roles/video_urls/audio_urls/duration/
+        # size/aspect_ratio/seed/generate_audio/audio/omni_reference_task_type/generation_type/
+        # camerafixed/web_search/tools（同值也 400）。seedance-2-5-flash 不支持草稿（L45662）。
         "durations": (-1,) + tuple(range(4, 31)), "ratio_key": "size",
         "ratios": ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"),
         "resolution_key": "resolution", "resolutions": ("480p", "720p", "1080p", "4k"),
@@ -28291,6 +29221,9 @@ APIMART_VIDEO_MODEL_CAPS = {
         "watermark": True, "seed": True,
         "image_with_roles": True, "video_urls": True, "audio_urls": True,
         "ref_max": 30, "video_ref_max": 10, "audio_ref_max": 10,
+        "draft": True, "draft_resolution": APIMART_DRAFT_RESOLUTION,
+        "draft_final_resolutions": APIMART_DRAFT_FINAL_RESOLUTIONS,
+        "draft_expires_days": APIMART_DRAFT_EXPIRES_DAYS,
     },
     # Seedance 2.5 Flash（文档 2026-11-18 新增页）：只有 480p/720p（1080p/2k/4k 直接 400），
     # 时长 4–30 或 -1，比例 6 个 + adaptive（首尾帧/编辑/延长必须 adaptive），
@@ -28554,9 +29487,10 @@ APIMART_VIDEO_MODEL_CAPS = {
     },
     # ── 2026-11-13 文档新增：统一入口 /v1/videos/generations + omni_reference_task_type ──────────
     # apimart-zoe：480p/720p/1080p/2k/4k（普通生成默认 720p，草稿只认 480p），比例含 adaptive，
-    # 时长 4–30 或 -1（模型自选），自带音轨、seed 可传；参考上限「图 30 / 视频 10 / 音频 10」，
-    # 但本机通用分支只上传前 9 张图、3 段视频、3 段音频（见下方 image_limit / video_payload[:3]），
-    # 所以参考上限按实际下发能力写（9 / 3 / 3），别让编辑器允许拖进来的数量被静默截断。
+    # 时长 4–30 或 -1（模型自选），自带音轨、seed 可传。
+    # 参考上限文档 2026-11-25 声明图 30 / 视频 10 / 音频 10（L36104 / L36118 / L36126）；
+    # 2026-11-27 起通用上传分支按本表声明值下发（caps_ref_max 等），所以这里按文档写 30 / 10 / 10，
+    # /api/model-caps 同步下发同一组数字。未知：上游是否真照收超限请求未经付费实测（U23）。
     # 编辑/参考走 omni_reference_task_type（auto 省略、reference/edit/extend），zoe 不支持 extend。
     "apimart-zoe": {
         "durations": (-1,) + tuple(range(4, 31)), "ratio_key": "aspect_ratio",
@@ -28566,13 +29500,34 @@ APIMART_VIDEO_MODEL_CAPS = {
         "generate_audio": True, "audio_field": "generate_audio", "audio_default_on": True,
         "watermark": False, "seed": True,
         "image_with_roles": True, "video_urls": True, "audio_urls": True,
-        "omni_task_type": True, "ref_max": 9, "video_ref_max": 3, "audio_ref_max": 3,
+        "omni_task_type": True, "ref_max": 30, "video_ref_max": 10, "audio_ref_max": 10,
         "modes": ("text_to_video", "image_to_video", "start_end_to_video", "reference_to_video",
                   "video_edit", "reference_video_to_video"),
     },
+    # magi-2（Sand AI，文档 2026-11-26 新增页 L40642–L40910）：固定 1080p；时长 4–30 整秒（默认 5），
+    # seconds 是 duration 的别名；比例 6 个 + auto（图生视频不含 21:9，省略/auto = 跟随首帧 →
+    # ratio_follows_first_frame，首帧方式整段不发 aspect_ratio）；generate_audio 默认 true（audio 是别名，
+    # 同时发必须相等）；seed 支持、watermark 不支持；nsfw_check 默认 false（true 才用 omni-moderation 审
+    # prompt 与输入图，显式开才发）。
+    # omni_reference_task_type 只有 auto|reference，edit/extend 直接 400（L40891）→ modes 不收
+    # video_edit / video_extend，另给 reject_edit_modes 让提交分支本地先拦，别把注定 400 的请求发上游。
+    # 参考上限：文档写 图 10（L40786/40798）/ 视频 5（L40802）/ 音频 5（L40806）；2026-11-27 起通用提交
+    # 分支按本表声明值下发（caps_ref_max / video_ref_max / audio_ref_max），所以这里按文档写 10 / 5 / 5。
+    # 未知：上游是否真照收超限请求未经付费实测（U23）。
+    "magi-2": {
+        "durations": tuple(range(4, 31)), "ratio_key": "aspect_ratio",
+        "ratios": ("16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto"),
+        "resolution_key": "resolution", "resolutions": ("1080p",),
+        "generate_audio": True, "audio_field": "generate_audio", "audio_default_on": True,
+        "watermark": False, "seed": True, "nsfw_check": True,
+        "image_with_roles": True, "video_urls": True, "audio_urls": True,
+        "omni_task_type": True, "ratio_follows_first_frame": True, "reject_edit_modes": True,
+        "ref_max": 10, "video_ref_max": 5, "audio_ref_max": 5,
+        "modes": ("text_to_video", "image_to_video", "start_end_to_video", "reference_to_video"),
+    },
     # kling-v4：3–30 秒；720p / 1080p（V4 用 resolution，**不再有 mode**）；比例 16:9/9:16/1:1/21:9
     # （参考生视频才认 auto）；首帧方式不接受 aspect_ratio（跟随首帧，见 ratio_follows_first_frame）；
-    # 文档参考上限 图 10 / 视频 5（合计 30 秒）/ 音频 3（每段 5–30 秒），实际下发按通用分支的 9 / 3 / 3；
+    # 文档参考上限 图 10 / 视频 5（合计 30 秒）/ 音频 3（每段 5–30 秒），实际下发按本表声明（9 / 3 / 3）；
     # 参考音只有 v4 收，flash 不收。
     "kling-v4": {
         "duration": (3, 30), "ratio_key": "aspect_ratio",
@@ -28791,6 +29746,404 @@ def apimart_video_body_params(model, duration, ratio, resolution):
         "resolution_key": caps.get("resolution_key"),
         "resolution_value": apimart_video_resolution_value(model, resolution, caps),
     }
+
+def apimart_video_draft_supported(caps) -> bool:
+    """能力表是否声明支持草稿（seedance-2.5 有，seedance-2-5-flash 明确不支持）。"""
+    return bool(isinstance(caps, dict) and caps.get("draft"))
+
+
+def apimart_video_draft_body(payload, model, caps):
+    """Seedance 草稿两段式的本地校验 + 成片请求体。
+
+    返回 None：不是草稿请求（draft=false 且 draft_task_id 为空），走正常组装；
+    返回 dict：成片请求，只含 model / draft_task_id / resolution / output_format(可选) /
+    return_last_frame / watermark —— 继承字段一个都不发（文档：同值也 400）。
+    模型不支持、两参数互斥、分辨率不合规一律本地 400，不把错误请求交给上游。
+    """
+    draft = bool(getattr(payload, "draft", False))
+    draft_task_id = str(getattr(payload, "draft_task_id", "") or "").strip()
+    if not draft and not draft_task_id:
+        return None
+    if not apimart_video_draft_supported(caps):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{model} 不支持草稿模式（draft / draft_task_id 只对 seedance-2.5 开放，"
+                   "seedance-2.5-flash 明确不支持）。",
+        )
+    if draft and draft_task_id:
+        raise HTTPException(status_code=400, detail="draft 与 draft_task_id 互斥：草稿请求不要带 draft_task_id，成片请求不要带 draft。")
+    if draft:
+        requested = str(getattr(payload, "resolution", "") or "").strip().lower()
+        if requested and requested != APIMART_DRAFT_RESOLUTION:
+            raise HTTPException(
+                status_code=400,
+                detail=f"草稿分辨率固定为 {APIMART_DRAFT_RESOLUTION}（当前 {requested}）："
+                       "草稿阶段传其它档位上游直接 400，请去掉 resolution 或用 "
+                       f"{APIMART_DRAFT_RESOLUTION}。",
+            )
+        return None
+    resolution = str(getattr(payload, "resolution", "") or "").strip().lower() or "1080p"
+    if resolution not in APIMART_DRAFT_FINAL_RESOLUTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"成片分辨率只支持 {' / '.join(APIMART_DRAFT_FINAL_RESOLUTIONS)}（当前 {resolution}）；"
+                   "省略按 1080p。",
+        )
+    body = {"model": model, "draft_task_id": draft_task_id, "resolution": resolution}
+    if bool(getattr(payload, "return_last_frame", False)):
+        body["return_last_frame"] = True
+    if bool(getattr(payload, "watermark", False)):
+        body["watermark"] = True
+    return body
+
+
+# 草稿上下文：成片计费要知道草稿阶段有没有原始参考视频、输出了多少秒。
+# 只在本进程内按上游 draft task id 记 3 天（与草稿过期时间一致）；查不到就按无参考视频、
+# 正常时长估，不能凭猜把参考视频输入档算成已发生。
+APIMART_DRAFT_CONTEXT: Dict[str, Dict[str, Any]] = {}
+APIMART_DRAFT_CONTEXT_MAX = 500
+
+
+def apimart_draft_context_record(task_id: str, payload, duration: float) -> None:
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return
+    videos = []
+    for item in (getattr(payload, "videos", None) or []):
+        url = str(item.get("url") if isinstance(item, dict) else item or "").strip()
+        if url:
+            videos.append(url)
+    APIMART_DRAFT_CONTEXT.pop(task_id, None)
+    APIMART_DRAFT_CONTEXT[task_id] = {
+        "created_at": time.time(),
+        "duration": max(0.0, float(duration or 0)),
+        "has_video": bool(videos),
+        "video_count": len(videos),
+        "prompt": str(getattr(payload, "prompt", "") or "")[:200],
+    }
+    while len(APIMART_DRAFT_CONTEXT) > APIMART_DRAFT_CONTEXT_MAX:
+        APIMART_DRAFT_CONTEXT.pop(next(iter(APIMART_DRAFT_CONTEXT)))
+
+
+def apimart_draft_context_get(task_id: str) -> Dict[str, Any]:
+    entry = APIMART_DRAFT_CONTEXT.get(str(task_id or "").strip())
+    if not entry:
+        return {}
+    if time.time() - float(entry.get("created_at") or 0) > APIMART_DRAFT_EXPIRES_DAYS * 24 * 60 * 60:
+        APIMART_DRAFT_CONTEXT.pop(str(task_id or "").strip(), None)
+        return {}
+    return dict(entry)
+
+
+def apimart_video_draft_effective_duration(payload, context=None) -> float:
+    """草稿/成片的计费时长：-1 按 30 秒上限预扣（文档口径），成片沿用草稿的时长。"""
+    try:
+        duration = float(getattr(payload, "duration", 0) or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if duration > 0:
+        return duration
+    if context and float(context.get("duration") or 0) > 0:
+        return float(context.get("duration") or 0)
+    return float(APIMART_DRAFT_MAX_SECONDS)
+
+
+def apimart_video_draft_billing_params(payload, provider=None) -> Dict[str, Any]:
+    """草稿两段式的计费口径：草稿按 480p；成片按 1080p/4k，有原始参考视频时走 input 档。
+    provider 明确不是 APIMart 时返回空（draft 字段只对 seedance-2.5 有意义，别把别家价格算错）。"""
+    if provider is not None and not is_apimart_provider(provider):
+        return {}
+    draft = bool(getattr(payload, "draft", False))
+    draft_task_id = str(getattr(payload, "draft_task_id", "") or "").strip()
+    if not draft and not draft_task_id:
+        return {}
+    context = apimart_draft_context_get(draft_task_id) if draft_task_id else {}
+    if draft:
+        return {
+            "resolution": APIMART_DRAFT_RESOLUTION,
+            "duration": apimart_video_draft_effective_duration(payload),
+            "draft": True,
+        }
+    # 成片的 duration 从草稿继承（前端仍会带默认 5 秒，不能用它覆盖草稿记录的真实时长）
+    duration = float(context.get("duration") or 0) or apimart_video_draft_effective_duration(payload, context)
+    return {
+        "resolution": str(getattr(payload, "resolution", "") or "").strip().lower() or "1080p",
+        "duration": duration,
+        "draft_final": True,
+        "video_input": bool(context.get("has_video")),
+        "video_input_count": int(context.get("video_count") or 0),
+    }
+
+
+
+# --- Midjourney 图生视频（i2v）---
+# 端点 POST /v1/midjourney/generations/video，文档 2026-11-25 L19884–L20060 / L20400–L20520：
+#   只有图生视频、固定 FAST、约 5 秒、无文生视频；输入 image_urls 或 task_id+index 二选一；
+#   video_type 480p/720p × 基础/首尾帧；end_url 设了自动升级 start_end_*；batch_size 按 N 倍计费；
+#   轮询与其它 APIMart 视频任务同一条 GET /v1/tasks/{id}（wait_for_video_task 已按 provider 协议处理）。
+# 虚拟模型名 midjourney-video 只用于编辑器识别与计费选择，请求体不带 model。
+
+def apimart_mj_video_caps(model):
+    """该模型名是否命中 Midjourney 视频能力；命中返回 mj_video 能力位，否则空 dict。"""
+    table = apimart_video_model_caps(model)
+    value = (table or {}).get("mj_video") if isinstance(table, dict) else None
+    return dict(value) if isinstance(value, dict) and value else {}
+
+
+def apimart_mj_video_plan(payload):
+    """Midjourney 视频的本地校验 + 请求计划；不是该模型返回 None，参数不合法抛本地 400。"""
+    caps = apimart_mj_video_caps(getattr(payload, "model", ""))
+    if not caps:
+        return None
+    mode = _agent_video_mode(getattr(payload, "mode", ""))
+    if mode and mode != "image_to_video":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Midjourney 视频只支持图生视频（image_to_video），当前生成方式：{mode}；"
+                   "文档明确不支持文生视频。",
+        )
+    refs = [ref for ref in (getattr(payload, "images", None) or [])
+            if str(getattr(ref, "url", "") or "").strip()]
+    tail_refs = [ref for ref in refs
+                 if str(getattr(ref, "role", "") or "").strip().lower() == "last_frame"]
+    explicit_end = getattr(payload, "end_image", None)
+    if explicit_end is not None and not str(getattr(explicit_end, "url", "") or "").strip():
+        explicit_end = None
+    if len(tail_refs) > 1:
+        raise HTTPException(status_code=400, detail="Midjourney 视频只支持 1 张尾帧图（role=last_frame 的图片超出 1 张）。")
+    if explicit_end is not None and tail_refs:
+        raise HTTPException(status_code=400, detail="尾帧图重复：end_image 与 role=last_frame 的图片只能给一种。")
+    end_ref = explicit_end or (tail_refs[0] if tail_refs else None)
+    head_refs = [ref for ref in refs if ref not in tail_refs]
+    if len(head_refs) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Midjourney 视频只收 1 张首帧图（当前 {len(head_refs)} 张）："
+                   "首尾帧请把尾帧放到 end_image，其余参考图去掉。",
+        )
+    first_ref = head_refs[0] if head_refs else None
+    task_id = str(getattr(payload, "mj_task_id", "") or "").strip()
+    if task_id and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,240}", task_id):
+        raise HTTPException(status_code=400, detail=f"mj_task_id 不合法：{task_id[:80]}")
+    if first_ref is None and not task_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Midjourney 视频需要 1 张首帧图（images[0]），或复用的 MJ 出图任务 mj_task_id；"
+                   "文档不支持文生视频。",
+        )
+    if first_ref is not None and task_id:
+        raise HTTPException(status_code=400, detail="首帧图与 mj_task_id 互斥：image_urls 版给图片，复用版给 mj_task_id + mj_index。")
+    if not str(getattr(payload, "prompt", "") or "").strip() and not task_id:
+        raise HTTPException(status_code=400, detail="Midjourney 视频需要提示词；prompt 为空时必须用 mj_task_id 复用 MJ 出图任务。")
+    raw_index = getattr(payload, "mj_index", -1)
+    if raw_index is None:
+        raw_index = -1
+    try:
+        index = int(raw_index)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"mj_index 应为 0–3 的整数，当前：{raw_index}")
+    index_given = index >= 0
+    if index_given and (index < int(caps.get("index_min") or 0) or index > int(caps.get("index_max") or 3)):
+        raise HTTPException(status_code=400, detail=f"mj_index 只支持 0–3（当前 {index}）：对应 MJ 出图任务的 4 张候选。")
+    if index_given and not task_id:
+        raise HTTPException(status_code=400, detail="mj_index 只在用 mj_task_id 复用 MJ 出图任务时可用。")
+    animate_mode = str(getattr(payload, "animate_mode", "") or "").strip().lower() or "manual"
+    if animate_mode not in caps.get("animate_modes", ("manual", "auto")):
+        raise HTTPException(status_code=400, detail=f"animate_mode 只支持 manual / auto（当前 {animate_mode}）。")
+    if animate_mode == "auto" and not (task_id and index_given):
+        raise HTTPException(status_code=400, detail="animate_mode=auto 需要 mj_task_id + mj_index(0–3)，缺一不可。")
+    motion = str(getattr(payload, "motion", "") or "").strip().lower() or str(caps.get("motion_default") or "high")
+    if motion not in caps.get("motions", ("low", "high")):
+        raise HTTPException(status_code=400, detail=f"motion 只支持 low / high（当前 {motion}）。")
+    try:
+        batch = int(getattr(payload, "mj_batch", 0) or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"mj_batch 只支持 1 / 2 / 4，当前：{getattr(payload, 'mj_batch', '')}")
+    if batch == 0:
+        batch = int(caps.get("batch_default") or 1)
+    if batch not in caps.get("batch", (1, 2, 4)):
+        raise HTTPException(status_code=400, detail=f"mj_batch 只支持 1 / 2 / 4（当前 {batch}）；费用 = 单价 × batch。")
+    video_type = str(getattr(payload, "video_type", "") or "").strip()
+    if video_type:
+        if video_type not in caps.get("video_types", ()):
+            raise HTTPException(
+                status_code=400,
+                detail=f"video_type 只支持 {' / '.join(caps.get('video_types', ()))}（当前 {video_type}）。",
+            )
+        tier = "720p" if video_type.endswith("_720") else "480p"
+    else:
+        requested = str(getattr(payload, "resolution", "") or "").strip().lower()
+        if requested not in ("", "auto", "480p", "720p", "480", "720"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Midjourney 视频只有 480p / 720p 两档（当前 {requested}）："
+                       "档位由 video_type 决定，别传 1080p/4k。",
+            )
+        tier = "720p" if requested in ("720p", "720") else "480p"
+    base_by_tier = caps.get("base_by_tier") or {}
+    start_end_by_tier = caps.get("start_end_by_tier") or {}
+    if not video_type:
+        video_type = str(base_by_tier.get(tier) or caps.get("video_type_default") or "")
+    if end_ref is not None:
+        # 文档：end_url 设了 video_type 自动升级成 start_end_*（档位不变）
+        video_type = str(start_end_by_tier.get(tier) or video_type)
+    return {
+        "caps": caps,
+        "first_frame": first_ref,
+        "end_frame": end_ref,
+        "task_id": task_id,
+        "index": index if index_given else (0 if task_id else -1),
+        "animate_mode": animate_mode,
+        "motion": motion,
+        "batch": batch,
+        "tier": tier,
+        "video_type": video_type,
+        "duration_seconds": int(caps.get("duration_seconds") or 5),
+        "billing": str((caps.get("billing_by_tier") or {}).get(tier) or ""),
+    }
+
+
+def apimart_mj_video_price_quote(billing_id, params):
+    """按 midjourney@video / @video-720p 的 per_call 档报价；价目缺键直接失败，绝不按 0 计。"""
+    from server.credits import pricing as _credits_pricing
+    try:
+        quote = _credits_pricing.estimate("video", billing_id, params, provider="apimart")
+    except Exception as exc:  # noqa: BLE001 - 价目读不了也要给出可诊断的失败
+        raise HTTPException(status_code=500, detail=f"Midjourney 视频计费失败（{billing_id}）：{exc}") from exc
+    cost_usd = float(quote.get("cost_usd") or 0)
+    price = float(quote.get("price") or 0)
+    if quote.get("pricing_fallback") or cost_usd <= 0 or price <= 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"APIMart 价目缺少 {billing_id} 档位（480p / 720p 各一条，费用 = 单价 × batch_size）："
+                   "按 0 计费等于白送，先更新 server/credits/apimart_pricing.json 再重试。",
+        )
+    return quote
+
+
+def apimart_mj_video_charge(payload):
+    """预扣口径：tier 决定 billing id，batch_size 决定 rows；返回 (计费模型, params, quote)。"""
+    plan = apimart_mj_video_plan(payload)
+    if not plan:
+        raise HTTPException(status_code=400, detail="当前模型不是 Midjourney 视频模型。")
+    billing_id = str(plan.get("billing") or "").strip()
+    if not billing_id:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Midjourney 视频缺少 {plan.get('tier')} 档计费 id：能力表 billing_by_tier 不完整。",
+        )
+    params = {
+        "width": 0, "height": 0, "duration": float(plan.get("duration_seconds") or 5),
+        "resolution": str(plan.get("tier") or ""), "size": "",
+        "rows": int(plan.get("batch") or 1), "batch": int(plan.get("batch") or 1),
+        "requested_model": str(getattr(payload, "model", "") or ""),
+    }
+    return billing_id, params, apimart_mj_video_price_quote(billing_id, params)
+
+
+def apimart_mj_video_output_urls(raw):
+    """从任务结果里取全部视频（batch>1 时 video_urls 有 N 条）；不认识的形状交给 video_output_urls 兜底。"""
+    urls = []
+
+    def add(value):
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith(("http://", "https://", "/output/", "/assets/")) and text not in urls:
+                urls.append(text)
+        elif isinstance(value, list):
+            for item in value:
+                add(item)
+        elif isinstance(value, dict):
+            for key in ("url", "video_url", "videoUrl"):
+                if key in value:
+                    add(value.get(key))
+
+    def walk(node, depth=0):
+        if not isinstance(node, dict) or depth > 3:
+            return
+        if "video_urls" in node:
+            add(node.get("video_urls"))
+        for key in ("video_url", "videoUrl"):
+            if key in node:
+                add(node.get(key))
+        for key in ("data", "detail", "result", "task_result"):
+            child = node.get(key)
+            if isinstance(child, dict):
+                walk(child, depth + 1)
+            elif isinstance(child, list):
+                for item in child:
+                    if isinstance(item, dict):
+                        walk(item, depth + 1)
+
+    walk(raw)
+    return urls
+
+
+async def _apimart_mj_video_frame_url(client, provider, ref, label):
+    ref_url = str(getattr(ref, "url", "") or "").strip()
+    uploaded = await upload_video_image_for_apimart(client, provider, ref_url)
+    if not valid_apimart_video_image_input(uploaded):
+        reason = uploaded[4:] if isinstance(uploaded, str) and uploaded.startswith("ERR:") else "未知错误"
+        raise HTTPException(
+            status_code=400,
+            detail=f"Midjourney 视频{label}无法转换为 APIMart 可访问的地址：{invalid_video_image_preview(ref_url)}"
+                   f"\n原因：{reason}",
+        )
+    return uploaded
+
+
+async def generate_apimart_midjourney_video(payload, provider, caps=None):
+    """提交 Midjourney 图生视频任务并轮询到出片；本地校验全部在 apimart_mj_video_plan 里。"""
+    if not is_apimart_provider(provider):
+        raise HTTPException(
+            status_code=400,
+            detail="Midjourney 图生视频是 APIMart 渠道能力：请把视频模型切到 APIMart 平台的 midjourney-video。",
+        )
+    plan = apimart_mj_video_plan(payload)
+    if not plan:
+        raise HTTPException(status_code=400, detail="当前模型不是 Midjourney 视频模型。")
+    base_url = video_api_root(provider)
+    if not base_url:
+        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
+    api_key = provider_env_key_value(provider["id"])
+    if not api_key:
+        raise HTTPException(status_code=400, detail=f"未配置 {provider.get('name') or provider['id']} 的 API Key，请在 API 设置中填写。")
+    endpoint = str(plan["caps"].get("endpoint") or "/v1/midjourney/generations/video")
+    submit_url = f"{apimart_api_base(provider)}{endpoint}"
+    prompt_text = str(getattr(payload, "prompt", "") or "").strip()
+    body: Dict[str, Any] = {}
+    if prompt_text:
+        body["prompt"] = prompt_text
+    timeout = httpx.Timeout(connect=20.0, read=180.0, write=120.0, pool=20.0)
+    async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env(provider),
+                                 timeout=timeout) as client:
+        if plan["first_frame"] is not None:
+            body["image_urls"] = [await _apimart_mj_video_frame_url(
+                client, provider, plan["first_frame"], "首帧图")]
+        else:
+            body["task_id"] = plan["task_id"]
+            body["index"] = int(plan["index"])
+        if plan["end_frame"] is not None:
+            body["end_url"] = await _apimart_mj_video_frame_url(
+                client, provider, plan["end_frame"], "尾帧图")
+        body["video_type"] = plan["video_type"]
+        body["motion"] = plan["motion"]
+        body["batch_size"] = int(plan["batch"])
+        body["animate_mode"] = plan["animate_mode"]
+        raw, task_id = await apimart_midjourney_request(provider, endpoint, body)
+        result = raw
+        if task_id and not apimart_mj_video_output_urls(raw):
+            result = await wait_for_video_task(client, provider, task_id, submit_url)
+        urls = apimart_mj_video_output_urls(result) or video_output_urls(result)
+        if not urls:
+            raise HTTPException(status_code=502, detail=f"Midjourney 视频任务成功但没有返回视频：{str(result)[:500]}")
+        local_urls = [await save_remote_video_to_output(url) for url in urls]
+    plan_note = {"video_type": plan["video_type"], "tier": plan["tier"],
+                 "batch_size": int(plan["batch"]), "motion": plan["motion"],
+                 "animate_mode": plan["animate_mode"]}
+    return {**{"videos": local_urls, "task_id": task_id, "mj_video": plan_note, "raw": result},
+            **build_canvas_meta(local_urls, payload, "video")}
+
 
 def apimart_kling_video_params(model: str, resolution) -> dict:
     """APIMart Kling 分辨率字段取官方口径：v3 / o1 用 mode(std/pro/4k)，
@@ -29331,8 +30684,28 @@ async def canvas_video(payload: CanvasVideoRequest, async_mode: bool = Query(Fal
     ?async=1 时进入 Task Engine 队列，立即返回 {task_id, status: "queued"}。"""
     video_model = str(payload.model or "").strip() or "veo3-fast"
     # 先预扣再建任务：余额不足直接 402，不创建 task，不走异常删除路径。
-    charge = credits_charge_start("video", video_model, _credits_video_params(payload),
-                                 provider=payload.provider_id)
+    try:
+        charge_provider = get_api_provider(payload.provider_id)
+    except Exception:
+        charge_provider = None
+    charge_model, charge_params, charge_estimate = video_model, None, None
+    mj_video_caps = apimart_mj_video_caps(video_model)
+    if mj_video_caps:
+        # Midjourney 视频：虚拟模型名 → 480p/720p 两个 per_call 计费 id，费用 = 单价 × mj_batch；
+        # 参数不合法在这里就 400（不建任务、不预扣），价目缺键直接 500（绝不按 0 计）。
+        if charge_provider is not None and not is_apimart_provider(charge_provider):
+            raise HTTPException(
+                status_code=400,
+                detail="Midjourney 图生视频是 APIMart 渠道能力：请把视频模型切到 APIMart 平台的 midjourney-video。",
+            )
+        charge_model, charge_params, charge_estimate = apimart_mj_video_charge(payload)
+    else:
+        charge_params = _credits_video_params(payload, charge_provider)
+    # MJ 视频的计费 id 是 APIMart 价目里的 per_call 档（midjourney@video / @video-720p）：
+    # provider 固定记 apimart，结算时的保守估价才会命中同一档，不会按别家 id 落到 conservative 高价。
+    charge_provider_id = "apimart" if mj_video_caps else payload.provider_id
+    charge = credits_charge_start("video", charge_model, charge_params, provider=charge_provider_id,
+                                 estimate=charge_estimate)
     try:
         task = task_create(kind="video", payload=payload, runner_name="run_canvas_video_task",
                            provider_id=payload.provider_id, model_id=payload.model or "")
@@ -29520,6 +30893,10 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
             if source_ratio:
                 payload.aspect_ratio = source_ratio
                 print(f"[Video] {ratio_note}", flush=True)
+    # Midjourney 图生视频（虚拟视频模型 midjourney-video）：端点/参数/输入都与通用视频接口不同，
+    # 单独一条链路；本地校验在 apimart_mj_video_plan 里，必须先于通用 mode 输入校验（复用 task_id 时没有首帧图）。
+    if apimart_mj_video_caps(payload.model):
+        return await generate_apimart_midjourney_video(payload, provider)
     # 生成方式明确指定时，按这种方式走（校验输入 + 路由），不再靠输入自动推断；
     # 不传 mode 的调用保持原来的推断行为。
     explicit_mode = _agent_video_mode(getattr(payload, "mode", ""))
@@ -29609,12 +30986,31 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
         async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=provider_trust_env(provider), timeout=VIDEO_POLL_TIMEOUT) as client:
             # --- 构造图片载荷 ---
             if is_apimart:
+                # Seedance 草稿两段式：先本地校验（模型/互斥/分辨率），成片请求不上传任何媒体。
+                apimart_seedance_model = selected_model(payload.model, "doubao-seedance-2.0")
+                apimart_video_caps = apimart_video_model_caps(apimart_seedance_model)
+                # 参考上限按该模型能力表声明下发（zoe / seedance-2.5 文档 30/10/10、magi-2 10/5/5）；
+                # 能力表没声明时回落 9/3/3 的保守值。这只是「按文档放开」，上游是否照收未经付费实测（U23）。
+                caps_ref_max = int((apimart_video_caps or {}).get("ref_max") or 9)
+                caps_video_ref_max = int((apimart_video_caps or {}).get("video_ref_max") or 3)
+                caps_audio_ref_max = int((apimart_video_caps or {}).get("audio_ref_max") or 3)
+                # 文档明确 edit/extend 一律 400 的模型（magi-2，L40891）：本地先拦，别把注定失败的请求发上游
+                if explicit_mode in ("video_edit", "video_extend") and (apimart_video_caps or {}).get("reject_edit_modes"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{apimart_seedance_model} 不支持视频编辑或延长（上游对 "
+                               f"omni_reference_task_type=edit/extend 直接返回 400），请改用参考生视频或多图参考。",
+                    )
+                apimart_draft_body = apimart_video_draft_body(
+                    payload, apimart_seedance_model, apimart_video_caps)
+                if apimart_draft_body is not None:
+                    payload.images, payload.videos, payload.audios = [], [], []
                 # APIMart 只接受 http/https 或 asset:// URL，先上传本地图片取回网络 URL
                 image_with_roles = []
                 invalid_images = []  # 每项为 (原始 URL, 失败原因)
                 video_payload = []
                 invalid_videos = []
-                for ref_url in payload.videos[:3]:
+                for ref_url in payload.videos[:caps_video_ref_max]:
                     ref_url = ref_url.get("url") if isinstance(ref_url, dict) else ref_url
                     ref_url = str(ref_url or "").strip()
                     if not ref_url:
@@ -29635,7 +31031,7 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                 apimart_model = apimart_veo31_model(requested_model) if is_veo31 else ""
                 if apimart_model == "veo3.1-lite" and payload.images:
                     raise HTTPException(status_code=400, detail="veo3.1-lite 不支持图片输入，请改用 veo3.1-fast 或 veo3.1-quality。")
-                image_limit = 0 if apimart_model == "veo3.1-lite" else (3 if is_veo31 else 9)
+                image_limit = 0 if apimart_model == "veo3.1-lite" else (3 if is_veo31 else caps_ref_max)
                 veo31_body = None
                 if is_veo31:
                     veo31_body = {
@@ -29697,7 +31093,9 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                     sample = invalid_video_image_preview(first_url)
                     raise HTTPException(status_code=400, detail=f"输入图片无法转换为视频接口支持的格式：{sample}\n原因：{first_reason}\n本地图片会自动压缩后上传；仍失败请换一张更小的图。VEO3.1 需要图片是 APIMart 可访问的 http/https / asset:// / data URL。")
                 # --- APIMart 请求体 ---
-                if is_veo31:
+                if apimart_draft_body is not None:
+                    body = apimart_draft_body
+                elif is_veo31:
                     model = apimart_model
                     body = veo31_body
                     if image_payload and model != "veo3.1-lite":
@@ -29710,8 +31108,6 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                         elif len(video_images) >= 3 and model != "veo3.1-quality":
                             body["generation_type"] = "reference"
                 else:
-                    apimart_seedance_model = selected_model(payload.model, "doubao-seedance-2.0")
-                    apimart_video_caps = apimart_video_model_caps(apimart_seedance_model)
                     video_params = apimart_video_body_params(
                         apimart_seedance_model, payload.duration,
                         payload.aspect_ratio or payload.size, payload.resolution)
@@ -29742,7 +31138,7 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                     if image_with_roles:
                         body["image_with_roles"] = image_with_roles
                     elif image_payload:
-                        body["image_urls"] = image_payload[:9]
+                        body["image_urls"] = image_payload[:caps_ref_max]
                     if video_payload:
                         if int(payload.duration or 0) == -1:
                             body["duration"] = -1
@@ -29758,7 +31154,7 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                         body[video_params["ratio_key"]] = "adaptive"
                     audio_payload = []
                     invalid_audios = []
-                    for ref_url in (payload.audios or [])[:3]:
+                    for ref_url in (payload.audios or [])[:caps_audio_ref_max]:
                         ref_url = str(ref_url or "").strip()
                         if not ref_url:
                             continue
@@ -29799,6 +31195,13 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                         body.pop("watermark", None)
                     elif payload.watermark and (apimart_video_caps is None or apimart_video_caps.get("watermark")):
                         body["watermark"] = True
+                    # nsfw_check 只有用户显式开启、且模型能力表声明支持时才发（默认不发 = 不上审核、无审核成本）
+                    if payload.nsfw_check and (apimart_video_caps or {}).get("nsfw_check"):
+                        body["nsfw_check"] = True
+                    if bool(getattr(payload, "draft", False)):
+                        # 草稿：正常请求 + draft:true，resolution 强制 480p（省略也不能落 720p，上游 400）
+                        body["draft"] = True
+                        body["resolution"] = APIMART_DRAFT_RESOLUTION
             else:
                 # 非 APIMart：data URL 方式（OpenAI / ComflyAI 接口）
                 if is_volcengine and not volc_is_proxy:
@@ -30099,6 +31502,9 @@ async def _canvas_video_run_unlimited(payload: CanvasVideoRequest):
                     )
                 ) from last_json_error
             task_id = extract_task_id(raw) or raw.get("task_id") or raw.get("id")
+            if is_apimart and bool(getattr(payload, "draft", False)) and task_id:
+                apimart_draft_context_record(
+                    str(task_id), payload, apimart_video_draft_effective_duration(payload))
             result = raw
             if task_id and not video_output_urls(raw):
                 result = await wait_for_video_task(client, provider, task_id, submit_url)
@@ -30556,8 +31962,40 @@ async def canvas_llm_stream(payload: CanvasLLMRequest):
 # ── 画布图片 / 视频节点「解析」：把画面反推成四段可直接用的 AI 绘图提示词 ──
 CANVAS_ANALYZE_MAX_IMAGE_BYTES = 12 * 1024 * 1024
 CANVAS_ANALYZE_TOO_LARGE_DETAIL = "图片太大（超过 12MB）：请先压缩或换一张小一点的图再解析。"
-CANVAS_ANALYZE_MAX_FRAMES = 8
+CANVAS_ANALYZE_MAX_FRAMES = 16
 CANVAS_ANALYZE_MAX_TOTAL_BYTES = 20 * 1024 * 1024
+# 整条视频服务端抽帧：ffmpeg 场景切换优先；关键帧不足 8 张再等距补齐并合并（保持时间序）
+# 阈值依据：产品 / 种草这类缓变镜头，0.3 会把多个镜头并成一两个（实测 2160x3840 / 8.2s / 30fps：
+# 0.3 只出 4 帧、0.2 出 7 帧、0.15 出 8 帧），所以降到 0.15。
+CANVAS_ANALYZE_SCENE_THRESHOLD = 0.15
+CANVAS_ANALYZE_SCENE_MAX_FRAMES = 12
+CANVAS_ANALYZE_VIDEO_MAX_FRAMES = 12     # 16 帧对 30 秒片不划算，12 帧已能覆盖十几个镜头
+CANVAS_ANALYZE_EVEN_FALLBACK_FRAMES = 8
+CANVAS_ANALYZE_MIN_FRAMES = 8
+# 慢请求降级：视频这条路第一次最多等 100s，超时/空回复/网关错误就用 8 帧 + 长边 640 再请求一次
+CANVAS_ANALYZE_SLOW_SECONDS = 100
+CANVAS_ANALYZE_FALLBACK_FRAMES = 8
+CANVAS_ANALYZE_FALLBACK_MAX_EDGE = 640
+CANVAS_ANALYZE_FRAME_MAX_EDGE = 896          # 视频抽帧长边；图片单帧路径仍走自己的 1024，不受影响
+CANVAS_ANALYZE_FRAME_QUALITY = 4             # ffmpeg -q:v 4（比旧值 3 小一档，单帧更小）
+# 16 帧 base64 总量预算：太大时 APIMart 网关会直接回 HTML 错误页（502/413），压到 4.5MB 以下
+CANVAS_ANALYZE_MAX_TOTAL_B64 = int(4.5 * 1024 * 1024)
+CANVAS_ANALYZE_BUDGET_MAX_EDGE = 768         # 超预算第一档：重编到长边 768
+CANVAS_ANALYZE_BUDGET_JPEG_QUALITY = 85      # 对应重编的 JPEG 质量
+CANVAS_ANALYZE_MAX_VIDEO_BYTES = 200 * 1024 * 1024
+CANVAS_ANALYZE_VIDEO_TOO_LARGE_DETAIL = "视频太大（超过 200MB）：请换一段小一点的视频，或改用前端传帧再解析。"
+CANVAS_ANALYZE_VIDEO_FFMPEG_MISSING_DETAIL = (
+    "这台机器上没找到可用的 ffmpeg，没法给整条视频抽帧；请装好 ffmpeg 后重启 NOVAI，或改用前端传帧再解析。")
+CANVAS_ANALYZE_VIDEO_DURATION_FAILED_DETAIL = "读不出这段视频的时长，没法按整段抽帧；请改用前端传帧再解析。"
+CANVAS_ANALYZE_VIDEO_FRAME_FAILED_DETAIL = "视频抽帧失败：没取到可用的画面，请改用前端传帧再解析。"
+_CANVAS_ANALYZE_VIDEO_SUFFIXES = {
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/webm": ".webm",
+    "video/x-msvideo": ".avi",
+    "video/x-matroska": ".mkv",
+    "video/mpeg": ".mpg",
+}
 # 压住预扣费：不设输出上限时上游按最大输出预估，多帧解析会被算成远超余额的预扣费而直接拒绝。
 # 不能压太狠：真实链路里 2048 会把 JSON 截断（实测 508 字就断 -> 解析失败、table=null），
 # 8192 才够「3–8 行分镜 + 四段」完整输出（实测 6 帧 / 6 行分镜正常返回）。
@@ -30565,7 +32003,7 @@ CANVAS_ANALYZE_MAX_TOKENS = 8192
 CANVAS_ANALYZE_QUOTA_DETAIL = (
     "账号额度不足：这次解析按上限预估的预扣费超过了当前余额，请充值，"
     "或在素材库「反推设置」里换一个更便宜的视觉模型再试。")
-CANVAS_ANALYZE_TOO_MANY_FRAMES_DETAIL = "一次最多 8 帧：请减少帧数后再解析。"
+CANVAS_ANALYZE_TOO_MANY_FRAMES_DETAIL = "一次最多 16 帧：请减少帧数后再解析。"
 CANVAS_ANALYZE_TOTAL_TOO_LARGE_DETAIL = (
     "所有帧加起来太大（超过 20MB）：请减少帧数，或把画面压小一点再解析。")
 _CANVAS_ANALYZE_IMAGE_SUFFIXES = {
@@ -30685,6 +32123,305 @@ async def canvas_analyze_media_paths(frames):
         raise
     return paths, cleanup_paths
 
+def canvas_analyze_video_suffix(mime):
+    return _CANVAS_ANALYZE_VIDEO_SUFFIXES.get(str(mime or "").strip().lower(), ".mp4")
+
+def canvas_analyze_video_data_url_to_file(value):
+    """data URL 视频解码成临时文件（返回路径，调用方负责删）。"""
+    header, _, encoded = str(value or "").partition(",")
+    mime = header[len("data:"):].split(";", 1)[0] if header.startswith("data:") else ""
+    if ";base64" not in header or not encoded:
+        raise HTTPException(status_code=400, detail="视频格式无法识别：解析只接受 data:video/...;base64 形式的视频。")
+    if not mime.startswith("video/"):
+        raise HTTPException(status_code=400, detail=f"只支持视频：收到的是 {(mime or '未知类型')}。")
+    if len(encoded) * 3 // 4 > CANVAS_ANALYZE_MAX_VIDEO_BYTES:
+        raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_VIDEO_TOO_LARGE_DETAIL)
+    try:
+        raw = base64.b64decode(encoded)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="视频数据损坏，解不出来：请重新导出这段视频再解析。") from exc
+    if len(raw) > CANVAS_ANALYZE_MAX_VIDEO_BYTES:
+        raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_VIDEO_TOO_LARGE_DETAIL)
+    fd, path = tempfile.mkstemp(prefix="canvas_analyze_video_", suffix=canvas_analyze_video_suffix(mime))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+    except Exception:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise
+    return path
+
+async def canvas_analyze_video_download_to_file(url):
+    """http(s) 视频下载成临时文件（返回路径，调用方负责删）。"""
+    try:
+        fetched = await asyncio.to_thread(
+            fetch_remote_media_bytes, url, 120.0, CANVAS_ANALYZE_MAX_VIDEO_BYTES)
+    except HTTPException as exc:
+        if exc.status_code == 413:
+            raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_VIDEO_TOO_LARGE_DETAIL) from exc
+        print(f"[canvas-analyze-media] 下载视频失败 {url[:120]}: {exc.detail}")
+        raise HTTPException(status_code=400, detail="下载这段视频失败：请确认链接能直接打开（对方站点也可能限制了外部访问）。") from exc
+    except Exception as exc:
+        print(f"[canvas-analyze-media] 下载视频失败 {url[:120]}: {exc}")
+        raise HTTPException(status_code=400, detail="下载这段视频失败：请确认链接能直接打开（对方站点也可能限制了外部访问）。") from exc
+    if not fetched:
+        raise HTTPException(status_code=400, detail="下载这段视频失败：链接没有返回内容。")
+    raw, content_type = fetched
+    mime = str(content_type or "").split(";", 1)[0]
+    fd, path = tempfile.mkstemp(prefix="canvas_analyze_video_", suffix=canvas_analyze_video_suffix(mime))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+    except Exception:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise
+    return path
+
+async def canvas_analyze_video_source(video_url):
+    """video_url → 本地视频文件，返回 (路径, 待清理临时文件)。
+
+    解析不了（缺省 / 不认识的地址 / data URL 解不开 / 下载失败）统一返回 ("", "")，
+    让路由退回前端传来的 images——契约要求 video_url 解析失败时不能把整个请求打挂。
+    """
+    text = str(video_url or "").strip()
+    if not text:
+        return "", ""
+    try:
+        if text.startswith("data:"):
+            path = canvas_analyze_video_data_url_to_file(text)
+            return path, path
+        local = output_file_from_url(text)
+        if local:
+            return local, ""
+        if text.startswith(("http://", "https://")):
+            path = await canvas_analyze_video_download_to_file(text)
+            return path, path
+    except HTTPException as exc:
+        print(f"[canvas-analyze-media] video_url 解析失败，退回前端帧: {exc.detail}")
+        return "", ""
+    return "", ""
+
+def canvas_analyze_scale_filter(max_edge=None):
+    edge = int(max_edge or CANVAS_ANALYZE_FRAME_MAX_EDGE)
+    return f"scale='min({edge},iw)':'min({edge},ih)':force_original_aspect_ratio=decrease"
+
+def canvas_analyze_scene_filter(threshold=None, max_edge=None):
+    value = CANVAS_ANALYZE_SCENE_THRESHOLD if threshold is None else threshold
+    # showinfo 把每个入选帧的 pts_time 打到 stderr，合并等距帧时才有真实时间可排序
+    return f"select='gt(scene,{value})',showinfo," + canvas_analyze_scale_filter(max_edge)
+
+def canvas_analyze_even_filter(fps, max_edge=None):
+    return f"fps={fps:.6f}," + canvas_analyze_scale_filter(max_edge)
+
+def canvas_analyze_scene_command(ffmpeg, video_path, out_pattern, max_frames=None):
+    limit = int(max_frames or CANVAS_ANALYZE_SCENE_MAX_FRAMES)
+    return [
+        ffmpeg, "-hide_banner", "-nostats", "-v", "info", "-i", video_path,
+        "-vf", canvas_analyze_scene_filter(),
+        "-fps_mode", "vfr", "-frames:v", str(limit),
+        "-q:v", str(CANVAS_ANALYZE_FRAME_QUALITY), out_pattern,
+    ]
+
+def canvas_analyze_even_command(ffmpeg, video_path, out_pattern, duration, frames=None):
+    count = int(frames or CANVAS_ANALYZE_EVEN_FALLBACK_FRAMES)
+    fps = count / max(float(duration or 0), 0.001)
+    return [
+        ffmpeg, "-hide_banner", "-v", "error", "-i", video_path,
+        "-vf", canvas_analyze_even_filter(fps),
+        "-frames:v", str(count),
+        "-q:v", str(CANVAS_ANALYZE_FRAME_QUALITY), out_pattern,
+    ]
+
+def canvas_analyze_run_ffmpeg(args, timeout=180):
+    """跑一次 ffmpeg（抽帧用），返回 (是否成功, 完整 stderr)。"""
+    try:
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except Exception as exc:
+        return False, str(exc)
+    return proc.returncode == 0, (proc.stderr or "").strip()
+
+_CANVAS_ANALYZE_PTS_TIME_RE = re.compile(r"pts_time:\s*([0-9]+(?:\.[0-9]+)?)")
+
+def canvas_analyze_scene_frames_with_times(ffmpeg, video_path, out_dir):
+    """场景切换抽帧，返回 [(时间秒, 文件路径)]（文件按解码顺序命名）。"""
+    pattern = os.path.join(out_dir, "scene_%04d.jpg")
+    ok, err = canvas_analyze_run_ffmpeg(canvas_analyze_scene_command(ffmpeg, video_path, pattern))
+    if not ok:
+        print(f"[canvas-analyze-media] 场景抽帧失败：{err[-400:]}")
+    files = canvas_analyze_list_frame_files(out_dir)
+    times = [float(value) for value in _CANVAS_ANALYZE_PTS_TIME_RE.findall(err or "")]
+    if len(times) < len(files):
+        # showinfo 没解析全（版本差异）就按解码顺序补一个递增时间，至少保证同批内有序
+        times += [float(index) for index in range(len(times), len(files))]
+    return list(zip(times[:len(files)], files))
+
+def canvas_analyze_even_frames_with_times(ffmpeg, video_path, out_dir, duration, frames=None):
+    """等距抽帧，返回 [(时间秒, 文件路径)]；时间按 i * duration / 实际帧数 估。"""
+    pattern = os.path.join(out_dir, "even_%04d.jpg")
+    ok, err = canvas_analyze_run_ffmpeg(
+        canvas_analyze_even_command(ffmpeg, video_path, pattern, duration, frames))
+    if not ok:
+        print(f"[canvas-analyze-media] 等距抽帧失败：{err[-400:]}")
+    files = canvas_analyze_list_frame_files(out_dir)
+    step = max(float(duration or 0), 0.0) / max(len(files), 1)
+    return [(index * step, path) for index, path in enumerate(files)]
+
+def canvas_analyze_list_frame_files(folder):
+    return sorted(glob.glob(os.path.join(folder, "*.jpg")))
+
+def canvas_analyze_jpeg_data_url(path):
+    with open(path, "rb") as f:
+        raw = f.read()
+    return "data:image/jpeg;base64," + base64.b64encode(raw).decode("ascii")
+
+def canvas_analyze_b64_size(path):
+    """单帧转成 data URL 后 base64 段的大小（字节）。"""
+    with open(path, "rb") as f:
+        return len(base64.b64encode(f.read()))
+
+def canvas_analyze_reencode_jpeg(path, out_path, max_edge, quality):
+    """把已抽出的 JPEG 重编一档（长边 max_edge）；帧已解码过，不再走第二遍视频解码。"""
+    with Image.open(path) as img:
+        img.load()
+        img = img.convert("RGB")
+        img.thumbnail((max_edge, max_edge), Image.LANCZOS)
+        img.save(out_path, format="JPEG", quality=quality, optimize=True)
+    return out_path
+
+def canvas_analyze_budget_keep_indices(sizes, limit):
+    """超预算时隔帧丢弃：保留首帧与末帧，反复隔一个留一个，直到进预算（至少留 2 帧）。"""
+    keep = list(range(len(sizes)))
+    while len(keep) > 2 and sum(sizes[index] for index in keep) > limit:
+        keep = keep[::2]
+        if keep[-1] != len(sizes) - 1:
+            keep.append(len(sizes) - 1)
+        keep = sorted(set(keep))
+    return keep
+
+def canvas_analyze_apply_frame_budget(frame_paths, workdir):
+    """按 base64 体积预算压帧：先长边 768 / q85 重编一档，仍超再隔帧丢弃（保留首末帧）。
+
+    返回保留的帧路径列表；帧数 / 原始总字节 / 最终总字节 / 降档次数打进日志，方便排查网关 413。
+    降档次数：0 = 没超预算，1 = 重编了一档，2 = 重编后仍超、又隔帧丢了帧。
+    """
+    paths = list(frame_paths)
+    original_total = sum(canvas_analyze_b64_size(path) for path in paths)
+    final_total = original_total
+    downgrades = 0
+    if final_total > CANVAS_ANALYZE_MAX_TOTAL_B64:
+        budget_dir = os.path.join(workdir, "budget")
+        os.makedirs(budget_dir, exist_ok=True)
+        downgraded = []
+        for index, path in enumerate(paths):
+            out_path = os.path.join(budget_dir, f"frame_{index + 1:04d}.jpg")
+            try:
+                downgraded.append(canvas_analyze_reencode_jpeg(
+                    path, out_path, CANVAS_ANALYZE_BUDGET_MAX_EDGE,
+                    CANVAS_ANALYZE_BUDGET_JPEG_QUALITY))
+            except Exception as exc:
+                print(f"[canvas-analyze-media] 帧重编失败，保留原帧: {exc}")
+                downgraded.append(path)
+        paths = downgraded
+        downgrades = 1
+        final_total = sum(canvas_analyze_b64_size(path) for path in paths)
+    if final_total > CANVAS_ANALYZE_MAX_TOTAL_B64 and len(paths) > 2:
+        sizes = [canvas_analyze_b64_size(path) for path in paths]
+        keep = canvas_analyze_budget_keep_indices(sizes, CANVAS_ANALYZE_MAX_TOTAL_B64)
+        paths = [paths[index] for index in keep]
+        final_total = sum(sizes[index] for index in keep)
+        downgrades = 2
+    print(
+        f"[canvas-analyze-media] 帧体积预算：帧数={len(paths)} "
+        f"原始总字节={original_total}({original_total / 1024 / 1024:.2f}MB) "
+        f"最终总字节={final_total}({final_total / 1024 / 1024:.2f}MB) 降档次数={downgrades}",
+        flush=True,
+    )
+    return paths
+
+def canvas_analyze_pick_even_paths(frame_paths, count):
+    """从已抽好的帧里等距挑 count 张（含首帧与末帧）；不够就全给。"""
+    paths = list(frame_paths)
+    if len(paths) <= count:
+        return paths
+    if count <= 1:
+        return paths[:1]
+    indexes = sorted({int(round(index * (len(paths) - 1) / (count - 1))) for index in range(count)})
+    return [paths[index] for index in indexes]
+
+def canvas_analyze_build_fallback_frames(frame_paths, count=None, max_edge=None):
+    """慢请求降级用：复用已抽好的帧，等距挑 8 张重编到长边 640（不重新解视频）。
+
+    返回 (临时文件列表, 这些帧的 base64 总字节)；中途失败会先删掉已写的临时文件。
+    """
+    count = CANVAS_ANALYZE_FALLBACK_FRAMES if count is None else int(count)
+    max_edge = CANVAS_ANALYZE_FALLBACK_MAX_EDGE if max_edge is None else int(max_edge)
+    selected = canvas_analyze_pick_even_paths(list(frame_paths), count)
+    temps, total = [], 0
+    try:
+        for path in selected:
+            fd, out_path = tempfile.mkstemp(prefix="canvas_analyze_small_", suffix=".jpg")
+            os.close(fd)
+            temps.append(out_path)
+            canvas_analyze_reencode_jpeg(path, out_path, max_edge, CANVAS_ANALYZE_BUDGET_JPEG_QUALITY)
+            total += canvas_analyze_b64_size(out_path)
+    except Exception:
+        for temp_path in temps:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        raise
+    return temps, total
+
+def canvas_analyze_video_frames(video_path, with_times=False):
+    """整条视频服务端抽帧：场景切换抽关键帧（阈值 0.15、长边 896 / q4、最多 12 张）。
+
+    关键帧不足 8 张时再等距抽 8 帧，两批按真实时间合并（最多 12 帧），避免缓变镜头
+    被并成一两个、模型只给出很粗的分镜；合并后按 base64 总量预算再压一档（必要时隔帧丢帧），
+    避免 16 帧把请求体撑到网关直接回 HTML 错误页。返回 (JPEG data URL 列表, 视频时长秒数)；
+    抽不到抛 400 中文；抽出来的帧文件都在临时目录里，返回前一定删掉。
+    """
+    ffmpeg = ffmpeg_binary()
+    if not ffmpeg:
+        raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_VIDEO_FFMPEG_MISSING_DETAIL)
+    duration = probe_video_file_duration_seconds(video_path) or 0.0
+    workdir = tempfile.mkdtemp(prefix="canvas_analyze_video_")
+    try:
+        scene_dir = os.path.join(workdir, "scene")
+        os.makedirs(scene_dir, exist_ok=True)
+        frame_entries = canvas_analyze_scene_frames_with_times(ffmpeg, video_path, scene_dir)
+        if len(frame_entries) < CANVAS_ANALYZE_MIN_FRAMES:
+            needed = min(CANVAS_ANALYZE_EVEN_FALLBACK_FRAMES,
+                         max(0, CANVAS_ANALYZE_VIDEO_MAX_FRAMES - len(frame_entries)))
+            if duration > 0 and needed > 0:
+                even_dir = os.path.join(workdir, "even")
+                os.makedirs(even_dir, exist_ok=True)
+                frame_entries += canvas_analyze_even_frames_with_times(
+                    ffmpeg, video_path, even_dir, duration, needed)
+            elif not frame_entries:
+                raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_VIDEO_DURATION_FAILED_DETAIL)
+        if not frame_entries:
+            raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_VIDEO_FRAME_FAILED_DETAIL)
+        # 两批按时间排序后截到 16 帧：关键帧与等距帧交错也能保持整体时间递增
+        frame_entries.sort(key=lambda item: (item[0], item[1]))
+        frame_entries = frame_entries[:CANVAS_ANALYZE_VIDEO_MAX_FRAMES]
+        frame_paths = [path for _, path in frame_entries]
+        frame_paths = canvas_analyze_apply_frame_budget(frame_paths, workdir)
+        urls = [canvas_analyze_jpeg_data_url(path) for path in frame_paths]
+        if not with_times:
+            return urls, duration
+        # 预算只重编没丢帧时顺序一一对应；隔帧丢过就对不上了，时间点只是给模型的提示，宁可不给
+        times = [round(t, 2) for t, _ in frame_entries] if len(frame_paths) == len(frame_entries) else []
+        return urls, duration, times
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
 def canvas_analyze_vision_provider(provider_id=""):
     """没指定平台时挑一个「看得懂图」的对话模型。
 
@@ -30748,23 +32485,118 @@ def canvas_analyze_quota_error(detail):
     lower = str(detail or "").lower()
     return any(marker in lower for marker in _CANVAS_ANALYZE_QUOTA_MARKERS)
 
+def canvas_analyze_looks_like_gateway_html(body):
+    """上游返回的是网关 HTML 错误页（不是模型接口的 JSON）。"""
+    text = str(body or "")
+    lower = text.lower()
+    return looks_like_html_response(text) or "<html" in lower or "<!doctype" in lower
+
+def canvas_analyze_should_retry_gateway(status_code, body):
+    """网关类失败（502/503/504 或 HTML 错误页）值得用同一请求重试一次。"""
+    return int(status_code or 0) in (502, 503, 504) or canvas_analyze_looks_like_gateway_html(body)
+
 def canvas_analyze_error_detail(exc):
     """把 caption 抛上来的 HTTPException 收成一句中文：额度不足 / 上游 HTML 错误页 / 超长原文不往用户脸上糊。"""
     detail = str(getattr(exc, "detail", "") or "").strip()
+    status_code = int(getattr(exc, "status_code", 0) or 0)
     if canvas_analyze_quota_error(detail):
         return CANVAS_ANALYZE_QUOTA_DETAIL
+    # HTML 网关页要排在 friendly 前面：body 里带 502 时 friendly 会把它换成泛化文案，状态码就丢了
+    if canvas_analyze_looks_like_gateway_html(detail):
+        if status_code:
+            return f"上游网关报错 HTTP {status_code}（不是模型接口的正常响应）：请稍后重试，或换一个视觉模型。"
+        return "上游返回的是网关错误页，不是模型接口的正常响应：请稍后重试，或换一个视觉模型。"
     friendly = friendly_chat_error_detail(detail) if detail else ""
     if friendly:
+        # 网关类状态码别被泛化文案吞掉，前端要能看到原状态码
+        if status_code in (502, 503, 504) and f"HTTP {status_code}" not in friendly:
+            return f"{friendly}（HTTP {status_code}）"
         return friendly
     if not detail:
         return "视觉模型调用失败：请稍后重试，或在「API 设置」里换一个看得懂图的模型。"
-    # caption 会把上游响应拼在「上游接口错误：」后面，光看开头判不出 HTML，这里整段找一遍
-    lower_detail = detail.lower()
-    if looks_like_html_response(detail) or "<html" in lower_detail or "<!doctype" in lower_detail:
-        return "上游返回的是网关错误页，不是模型接口的正常响应：请稍后重试，或换一个视觉模型。"
     if len(detail) > 300:
+        if status_code:
+            return f"视觉模型返回的报错太长了（HTTP {status_code}），已省略：请稍后重试，或换一个视觉模型。"
         return "视觉模型返回的报错太长了，已省略：请稍后重试，或换一个视觉模型。"
     return detail
+
+def canvas_analyze_is_gateway_exception(exc):
+    """caption 抛上来的异常是不是网关类失败（502/503/504 或 HTML 错误页）。"""
+    status = int(getattr(exc, "status_code", 0) or 0)
+    detail = str(getattr(exc, "detail", "") or "")
+    return status in (502, 503, 504) or canvas_analyze_looks_like_gateway_html(detail)
+
+def canvas_analyze_mapped_error(exc):
+    """caption 异常 → 路由对外语义：400 保留，其它统一 502 + 中文 detail。"""
+    status = 400 if int(getattr(exc, "status_code", 0) or 0) == 400 else 502
+    return HTTPException(status_code=status, detail=canvas_analyze_error_detail(exc))
+
+def canvas_analyze_more_informative_error(first, second):
+    """两次都失败时挑信息量更大的那条（detail 更长；一样长取后一次）。"""
+    if first is None:
+        return second
+    if second is None:
+        return first
+    first_detail = str(getattr(first, "detail", "") or "")
+    second_detail = str(getattr(second, "detail", "") or "")
+    return second if len(second_detail) >= len(first_detail) else first
+
+async def canvas_analyze_caption_video_with_fallback(media_paths, prompt, provider_id, model):
+    """视频解析：第一次最多等 CANVAS_ANALYZE_SLOW_SECONDS（httpx 超时比网关早放弃）。
+
+    超时 / 空回复 / 网关错误（502/503/504/HTML）就用已抽好的帧重编 8 张 640 再请求一次；
+    成功正常返回，两次都失败抛信息量更大的那条。日志写清第一次耗时 / 是否降级 / 降级帧数与大小 / 最终耗时。
+    """
+    first_started = time.monotonic()
+    first_text, first_error, used_model = "", None, model
+    try:
+        first_text, used_model = await caption_images_with_provider(
+            media_paths, prompt, provider_id, model,
+            max_tokens=CANVAS_ANALYZE_MAX_TOKENS,
+            timeout_seconds=CANVAS_ANALYZE_SLOW_SECONDS)
+    except HTTPException as exc:
+        first_error = exc
+    first_elapsed = time.monotonic() - first_started
+    first_text = (first_text or "").strip()
+    slow = first_elapsed >= CANVAS_ANALYZE_SLOW_SECONDS
+    empty = first_error is None and (not first_text or first_text == "接口返回了空回复。")
+    gateway = first_error is not None and canvas_analyze_is_gateway_exception(first_error)
+    if not (slow or empty or gateway):
+        if first_error is not None:
+            raise first_error
+        print(f"[canvas-analyze-media] 视频解析耗时：第一次耗时={first_elapsed:.1f}s "
+              f"进入降级=False 最终耗时={first_elapsed:.1f}s", flush=True)
+        return first_text, used_model
+    fallback_paths, fallback_bytes = [], 0
+    second_text, second_error = "", None
+    try:
+        try:
+            fallback_paths, fallback_bytes = canvas_analyze_build_fallback_frames(media_paths)
+        except Exception as exc:
+            print(f"[canvas-analyze-media] 降级重编小图失败：{exc}", flush=True)
+            if first_error is not None:
+                raise first_error
+            raise HTTPException(status_code=502, detail="降级解析失败：重编小图出错，请稍后重试。") from exc
+        try:
+            second_text, used_model = await caption_images_with_provider(
+                fallback_paths, prompt, provider_id, model,
+                max_tokens=CANVAS_ANALYZE_MAX_TOKENS,
+                timeout_seconds=CANVAS_ANALYZE_SLOW_SECONDS)
+        except HTTPException as exc:
+            second_error = exc
+    finally:
+        for temp_path in fallback_paths:
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+    final_elapsed = time.monotonic() - first_started
+    print(f"[canvas-analyze-media] 视频解析降级：第一次耗时={first_elapsed:.1f}s 进入降级=True "
+          f"降级帧数={len(fallback_paths)} 降级总字节={fallback_bytes}({fallback_bytes / 1024 / 1024:.2f}MB) "
+          f"最终耗时={final_elapsed:.1f}s", flush=True)
+    if second_error is None:
+        return (second_text or "").strip(), used_model
+    raise canvas_analyze_more_informative_error(first_error, second_error)
 
 def canvas_analyze_frames(payload):
     """按接口契约把请求拆成 (帧列表, 是否视频)。
@@ -30789,54 +32621,104 @@ def canvas_analyze_frames(payload):
 
 @app.post("/api/canvas-analyze-media")
 async def canvas_analyze_media(payload: CanvasAnalyzeMediaRequest):
-    """画布图片 / 视频节点的「解析」：把画面反推成四段可直接用于 AI 绘图的提示词。
+    """画布图片 / 视频节点的「解析」：把画面反推成可直接用于 AI 绘图的提示词。
 
-    kind=video（或 images >= 2）走视频专用模板、把所有帧按顺序发给模型；
-    其余保持旧单帧行为（image / images[0]，is_video_frame 只追加那行说明）。
+    video_url 能读成本地视频时由后端给整条视频抽帧（场景切换，太少就等距兜底），忽略 images；
+    读不到就退回前端传来的 images 多帧；其余保持旧单帧行为（image / images[0]）。
     """
     provider_id = (payload.provider or "").strip()
     if provider_id:
         provider_id = member_provider(provider_id)
     provider_id, model = canvas_analyze_vision_provider(provider_id)
-    frames, is_video = canvas_analyze_frames(payload)
-    if len(frames) > CANVAS_ANALYZE_MAX_FRAMES:
-        raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_TOO_MANY_FRAMES_DETAIL)
-    prompt = (canvas_analyze_video_prompt(payload.duration, len(frames)) if is_video
-              else canvas_analyze_prompt(payload.is_video_frame))
-    media_paths, cleanup_paths = await canvas_analyze_media_paths(frames)
+    template = canvas_analyze_template_name(payload.template)
+    video_cleanup = ""
+    server_frames, video_duration, frame_times = [], 0.0, []
+    shot_video_path = ""   # 给了模板时留着视频，模型回来后按每镜开始时间截首帧
+    media_paths, cleanup_paths = [], []
     try:
+        if str(payload.video_url or "").strip():
+            video_path, video_cleanup = await canvas_analyze_video_source(payload.video_url)
+            if video_path:
+                # 抽帧是同步 ffmpeg，扔线程里跑，别堵事件循环
+                if template:
+                    server_frames, video_duration, frame_times = await asyncio.to_thread(
+                        canvas_analyze_video_frames, video_path, True)
+                    shot_video_path = video_path
+                else:
+                    server_frames, video_duration = await asyncio.to_thread(
+                        canvas_analyze_video_frames, video_path)
+                if video_cleanup and not shot_video_path:
+                    try:
+                        os.remove(video_cleanup)
+                    except OSError:
+                        pass
+                    video_cleanup = ""
+        if server_frames:
+            frames, is_video = list(server_frames), True
+        else:
+            frames, is_video = canvas_analyze_frames(payload)
+        if len(frames) > CANVAS_ANALYZE_MAX_FRAMES:
+            raise HTTPException(status_code=400, detail=CANVAS_ANALYZE_TOO_MANY_FRAMES_DETAIL)
+        template = template if is_video else ""
+        table_only = (bool(payload.table_only) or bool(template)) and is_video
+        duration = payload.duration
+        if not duration or float(duration or 0) <= 0:
+            duration = video_duration or 0.0
+        if template:
+            prompt = canvas_analyze_template_prompt(template, duration, len(frames), frame_times)
+        else:
+            prompt = (canvas_analyze_video_prompt(duration, len(frames), table_only=table_only) if is_video
+                      else canvas_analyze_prompt(payload.is_video_frame))
+        media_paths, cleanup_paths = await canvas_analyze_media_paths(frames)
         try:
             if is_video:
-                text, used_model = await caption_images_with_provider(
-                    media_paths, prompt, provider_id, model, max_tokens=CANVAS_ANALYZE_MAX_TOKENS)
+                # 视频这条路：慢 / 空回复 / 网关失败会自动降级成 8 帧 640 再试一次
+                text, used_model = await canvas_analyze_caption_video_with_fallback(
+                    media_paths, prompt, provider_id, model)
             else:
                 text, used_model = await caption_image_with_provider(
                     media_paths[0], prompt, provider_id, model, max_tokens=CANVAS_ANALYZE_MAX_TOKENS)
         except HTTPException as exc:
-            raise HTTPException(
-                status_code=400 if exc.status_code == 400 else 502,
-                detail=canvas_analyze_error_detail(exc),
-            ) from exc
+            raise canvas_analyze_mapped_error(exc) from exc
         except Exception as exc:
             print(f"[canvas-analyze-media] 解析失败: {exc}")
             raise HTTPException(status_code=502, detail="解析失败：调用视觉模型出错，请稍后重试或换一个模型。") from exc
+        text = (text or "").strip()
+        # caption_images_with_provider（含单图包装）会把空文本换成这句哨兵，这里当成「没内容」
+        if not text or text == "接口返回了空回复。":
+            raise HTTPException(status_code=502, detail="模型没有返回内容，换一个视觉模型再试")
+        # 模板现在要求模型只吐 JSON：四段 text 由后端拼，分镜表由后端组（模型自造列名不采信）
+        parsed = canvas_analyze_reply_json(text)
+        # 图片节点只要提示词：即使模型无视模板吐了 shots 也不组表，table 恒为 null
+        if template:
+            table = canvas_analyze_template_table(parsed, template, duration)
+            if table is not None:
+                starts = table.pop("starts", [])
+                if shot_video_path:
+                    # 每镜首帧：按开始时间各截一张存进输出目录，截不到的格子留空
+                    firsts = await asyncio.to_thread(
+                        canvas_analyze_shot_first_frames, shot_video_path, starts, duration)
+                    table["rows"] = canvas_analyze_fill_first_frames(table, firsts)
+        else:
+            table = canvas_analyze_table_from_reply(parsed) if is_video else None
     finally:
         for path in cleanup_paths:
             try:
                 os.remove(path)
             except OSError:
                 pass
-    text = (text or "").strip()
-    # caption_images_with_provider（含单图包装）会把空文本换成这句哨兵，这里当成「没内容」
-    if not text or text == "接口返回了空回复。":
-        raise HTTPException(status_code=502, detail="模型没有返回内容，换一个视觉模型再试")
-    # 模板现在要求模型只吐 JSON：四段 text 由后端拼，分镜表由后端组（模型自造列名不采信）
-    parsed = canvas_analyze_reply_json(text)
-    reply_text = canvas_analyze_text_from_reply(parsed, text)
-    if not reply_text or reply_text == "接口返回了空回复。":
+        if video_cleanup:
+            try:
+                os.remove(video_cleanup)
+            except OSError:
+                pass
+    # table_only：模型只出表，text 按契约返回空串（前端不再用它）；解析失败/非 JSON 仍退回原文兜底
+    reply_text = "" if (table_only and table is not None) else canvas_analyze_text_from_reply(parsed, text)
+    if not table_only and (not reply_text or reply_text == "接口返回了空回复。"):
         raise HTTPException(status_code=502, detail="模型没有返回内容，换一个视觉模型再试")
     return {"ok": True, "text": reply_text,
-            "table": canvas_analyze_table_from_reply(parsed),
+            "table": table,
+            "template": template,
             "model": used_model or model, "prompt": prompt}
 
 # --- 对话管理 ---
@@ -32330,18 +34212,17 @@ async def delete_memory(memory_id: str, canvas_id: str = ""):
 
 
 
-# 画布图片 / 视频节点「解析」的反推模板（产品侧原文，一字不改；改字先跟产品对齐）
-CANVAS_ANALYZE_PROMPT = """你是资深的 AI 绘图提示词工程师。请把给定画面「反推」成可直接用于 AI 绘图（Midjourney / Stable Diffusion / Seedream / 即梦等）的提示词，并同时给出这一张画面的分镜表。
+# 图片解析模板：只出 prompt 四段（图片节点不需要分镜表，少生成 shots 省输出 token）
+CANVAS_ANALYZE_PROMPT = """你是资深的 AI 绘图提示词工程师。请把给定画面「反推」成可直接用于 AI 绘图（Midjourney / Stable Diffusion / Seedream / 即梦等）的提示词。
 
 只输出一个 JSON 对象，不要 Markdown 代码块、不要任何前言、解释或总结。JSON 结构固定为：
-{"prompt":{"cnPos":"","cnNeg":"","enPos":"","enNeg":""},"shots":[{"no":"1","dur":"","desc":"","char":"","charDesc":"","shotSize":"","mood":"","light":"","audio":"","line":"","prompt":"","motion":""}]}
+{"prompt":{"cnPos":"","cnNeg":"","enPos":"","enNeg":""}}
 
 内容要求：
 - prompt.cnPos：一段连续的中文短语流（逗号分隔，不分点、不编号、不写成句子解释），依次覆盖：主体与外观细节 → 动作/姿态/表情 → 场景与环境 → 风格与流派 → 构图与镜头（视角、景别、焦段、机位）→ 光线与氛围 → 色彩与色调 → 材质与质感 → 画质与分辨率词 → 关键细节补充。200–400 字。
 - prompt.cnNeg：中文短语流，列出要避免的画面问题（低质量、模糊、噪点、过曝、过饱和、畸变、多余手指、错位肢体、水印、logo、文字、边框等），以及与该图风格相冲突的元素。60–120 字。
 - prompt.enPos：英文关键词流，逗号分隔，顺序与中文正向一一对应：subject, appearance details, action/pose/expression, scene, style, composition/camera (angle, shot size, focal length), lighting, color palette, materials/texture, quality/resolution tags, key details。60–150 词。
 - prompt.enNeg：英文负向词，逗号分隔，语义与中文负向对应。
-- shots：这一张画面只给 1 行。no 固定 "1"；dur、audio、line、motion 一律给空字符串 ""；desc（画面描述）、char（主体角色）、charDesc（角色描述）、shotSize（景别，如 特写 / 近景 / 中景 / 全景）、mood（情绪）、light（光影氛围）、prompt（可直接用于生成这一张图的提示词）尽量填。拿不到的信息给空字符串，不要编。
 
 硬性规则：
 - 只写画面里真实存在或可合理推断的元素；看不清的细节不要编造，不要出现「这张图」「画面中」「图中」这类叙述词。
@@ -32382,8 +34263,28 @@ CANVAS_ANALYZE_VIDEO_PROMPT = """你是资深的 AI 视频提示词工程师。�
 # 请求给了 duration > 0 时，在视频模板最前面追加这一句（{duration} / {n} 由 canvas_analyze_video_prompt 填）
 CANVAS_ANALYZE_VIDEO_DURATION_LINE = "这段视频整段约 {duration} 秒，共给出 {n} 帧，按时间顺序排列。"
 
-def canvas_analyze_video_prompt(duration=0, frame_count=1):
-    prompt = CANVAS_ANALYZE_VIDEO_PROMPT
+# 视频「只出分镜表」模板（table_only=true）：老板只要分镜表，少生成 prompt 段能省一大半输出 token，避免撞预扣费。
+# 内容要求（覆盖整条视频每个镜头、时长相加≈duration、通常 3–20 行、不编造、中英混排可接受）与 CANVAS_ANALYZE_VIDEO_PROMPT 保持一致，只删掉 prompt 段与四段相关要求。
+CANVAS_ANALYZE_VIDEO_TABLE_ONLY_PROMPT = """你是资深的 AI 视频分镜师。下面按时间顺序给出这段视频的若干帧，它们来自同一个镜头（或同一段里的几个镜头）。请把这段视频「反推」成分镜表。
+
+只输出一个 JSON 对象，不要 Markdown 代码块、不要任何前言、解释或总结，也不要输出正向 / 负向提示词文本。JSON 结构固定为：
+{"shots":[{"no":"1","dur":"","desc":"","char":"","charDesc":"","shotSize":"","mood":"","light":"","audio":"","line":"","prompt":"","motion":""}]}
+
+内容要求：
+- shots：按帧序把这段视频拆成分镜。dur 写这一镜时长（如 "4s"）；每行都要填 desc（画面描述）、char（主体角色）、charDesc（角色描述）、shotSize（景别）、mood（情绪）、light（光影氛围）、audio（音效）、line（对白）、prompt（分镜提示词，可直接用于生成这一镜的画面）、motion（视频运动提示词，这一镜的运镜，如 "Slow Dolly in + 顶部聚光跟随"，中英混排可接受）。拿不到的信息给空字符串，不要编。
+
+硬性规则：
+- 必须覆盖整条视频的每一个镜头：帧按时间顺序给出，一帧可能对应多个镜头、也可能几帧属于同一镜头，按画面变化判断；镜号从 "1" 连续递增，不要跳号、不要重号。
+- 各镜时长相加要≈整段视频时长；镜头数按实际画面变化决定，通常 3–20 行，不要为了凑数硬拆。
+- 镜头数要与给出的帧数 / 画面变化程度相称，不要为了省事把多个镜头合并成一行；每一帧属于哪个镜头要交代清楚。
+- 只写这些帧里真实出现或可合理推断的内容；帧与帧之间看不清的变化不要编造。
+- 不要出现「第一帧」「第二帧」「画面中」「图中」这类叙述词，直接给可用于生成的描述。
+- 不要输出提示词四段（中文正向 / 中文负向 / 英文正向 / 英文负向），也不要输出 prompt 块。
+- 只输出那一个 JSON 对象，字段名和结构与上面完全一致，不要增删字段。
+"""
+
+def canvas_analyze_video_prompt(duration=0, frame_count=1, table_only=False):
+    prompt = CANVAS_ANALYZE_VIDEO_TABLE_ONLY_PROMPT if table_only else CANVAS_ANALYZE_VIDEO_PROMPT
     try:
         seconds = float(duration or 0)
     except (TypeError, ValueError):
@@ -32471,10 +34372,205 @@ def canvas_analyze_table_from_reply(data):
         return None
     return {"columns": list(CANVAS_ANALYZE_TABLE_COLUMNS), "rows": rows}
 
-async def caption_images_with_provider(abs_paths, prompt, provider_id, model, ms_model="", max_tokens=0):
+# —— 分镜模板（「更多 › 解析设置」）——
+# 每项 (列名, JSON 键)。first / range 由后端填：首帧 = 按开始时间截图，起止 = 模型给的 start/end（缺了按时长累加）
+CANVAS_ANALYZE_TEMPLATES = {
+    "storyboard": [
+        ("镜号", "no"), ("首帧", "first"), ("起止", "range"), ("时长", "dur"),
+        ("画面描述", "desc"), ("角色", "char"), ("角色描述", "charDesc"), ("景别", "shotSize"),
+        ("机位", "camera"), ("运镜", "move"), ("情绪", "mood"), ("光影氛围", "light"),
+        ("音效", "audio"), ("对白", "line"), ("分镜提示词", "prompt"), ("视频运动提示词", "motion"),
+    ],
+    "ecom": [
+        ("镜号", "no"), ("首帧", "first"), ("起止", "range"), ("时长", "dur"),
+        ("画面描述", "desc"), ("景别", "shotSize"), ("机位", "camera"), ("运镜", "move"),
+        ("卖点", "sell"), ("字幕文案", "caption"), ("音乐", "music"),
+        ("分镜提示词", "prompt"), ("视频运动提示词", "motion"),
+    ],
+    "lite": [
+        ("镜号", "no"), ("首帧", "first"), ("起止", "range"), ("画面描述", "desc"),
+        ("景别", "shotSize"), ("运镜", "move"), ("分镜提示词", "prompt"),
+    ],
+}
+CANVAS_ANALYZE_SERVER_KEYS = ("first", "range")
+CANVAS_ANALYZE_KEY_HINTS = {
+    "dur": "这一镜时长，如 \"2.4s\"",
+    "desc": "画面描述",
+    "char": "主体角色",
+    "charDesc": "角色描述（外观、服装、道具）",
+    "shotSize": "景别（远景 / 全景 / 中景 / 近景 / 特写 / 大特写）",
+    "camera": "机位（正面 / 侧面 / 背面 / 俯拍 / 仰拍 / 过肩 / 主观 / 顶拍 等）",
+    "move": "运镜（固定 / 推 / 拉 / 摇 / 移 / 跟 / 升降 / 环绕 / 手持，可带速度，如「缓推」）",
+    "mood": "情绪",
+    "light": "光影氛围",
+    "audio": "音效",
+    "line": "对白（画面里有人说话才写）",
+    "sell": "卖点（这一镜在展示产品的哪个卖点）",
+    "caption": "字幕文案（画面上已有的字，或适合配的一句字幕）",
+    "music": "音乐（风格、节奏、是否卡点）",
+    "prompt": "分镜提示词（可直接用于生成这一镜画面）",
+    "motion": "视频运动提示词（这一镜的运镜与主体运动，如 \"Slow Dolly in + 顶部聚光跟随\"，中英混排可接受）",
+}
+
+def canvas_analyze_template_name(value):
+    name = str(value or "").strip().lower()
+    return name if name in CANVAS_ANALYZE_TEMPLATES else ""
+
+def canvas_analyze_template_prompt(template, duration=0, frame_count=1, frame_times=None):
+    """按模板字段拼「只出分镜表」提示词：多要每镜 start / end，首帧和起止列由后端自己填。"""
+    keys = [key for _, key in CANVAS_ANALYZE_TEMPLATES[template] if key not in CANVAS_ANALYZE_SERVER_KEYS]
+    shape = {"no": "1", "start": 0, "end": 0}
+    for key in keys:
+        if key != "no":
+            shape[key] = ""
+    hints = "\n".join(f"- {key}：{CANVAS_ANALYZE_KEY_HINTS[key]}" for key in keys if key in CANVAS_ANALYZE_KEY_HINTS)
+    lines = []
+    try:
+        seconds = float(duration or 0)
+    except (TypeError, ValueError):
+        seconds = 0.0
+    if seconds > 0:
+        lines.append(CANVAS_ANALYZE_VIDEO_DURATION_LINE.format(duration=f"{seconds:g}", n=max(1, int(frame_count or 1))))
+    times = [t for t in (frame_times or []) if isinstance(t, (int, float))]
+    if times and len(times) == int(frame_count or 0):
+        lines.append("各帧在原视频里的时间点（秒）依次是：" + "、".join(f"{t:g}" for t in times) + "。")
+    head = ("\n".join(lines) + "\n\n") if lines else ""
+    return head + f"""你是资深的 AI 视频分镜师。下面按时间顺序给出这段视频的若干帧。请把这段视频「反推」成分镜表。
+
+只输出一个 JSON 对象，不要 Markdown 代码块、不要任何前言、解释或总结。JSON 结构固定为：
+{json.dumps({"shots": [shape]}, ensure_ascii=False)}
+
+字段说明：
+- no：镜号，从 "1" 连续递增，不要跳号、不要重号。
+- start / end：这一镜在原视频里的开始 / 结束时间（秒，数字，保留一位小数）；第一镜从 0 开始，相邻镜头首尾相接，最后一镜的 end ≈ 整段时长。
+{hints}
+拿不到的信息给空字符串，不要编。
+
+硬性规则：
+- 必须覆盖整条视频的每一个镜头：按画面变化判断镜头边界，一帧可能对应多个镜头、也可能几帧属于同一镜头。
+- 镜头数按实际画面变化决定，通常 3–20 行，不要为了凑数硬拆，也不要把多个镜头合并成一行。
+- 只写这些帧里真实出现或可合理推断的内容；不要出现「第一帧」「画面中」「图中」这类叙述词。
+- 只输出那一个 JSON 对象，字段名和结构与上面完全一致，不要增删字段。
+"""
+
+def canvas_analyze_seconds(value):
+    """模型给的时间：数字或「2.4s」「约 3 秒」→ 秒数；读不出返回 None。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if value >= 0 else None
+    match = re.search(r"(\d+(?:\.\d+)?)", str(value or ""))
+    return float(match.group(1)) if match else None
+
+def canvas_analyze_shot_times(shots, duration=0):
+    """每镜 (开始, 结束)：优先用模型的 start/end，缺了按上一镜结束 + 时长累加；有整段时长就夹在里面。"""
+    try:
+        total = float(duration or 0)
+    except (TypeError, ValueError):
+        total = 0.0
+    out, cursor = [], 0.0
+    for shot in shots:
+        start = canvas_analyze_seconds(shot.get("start"))
+        end = canvas_analyze_seconds(shot.get("end"))
+        dur = canvas_analyze_seconds(shot.get("dur"))
+        if start is None:
+            start = cursor
+        if end is None or end <= start:
+            end = start + dur if dur else None
+        if total > 0:
+            start = min(start, total)
+            end = min(end, total) if end is not None else None
+        out.append((round(start, 1), round(end, 1) if end is not None else None))
+        cursor = end if end is not None else start
+    return out
+
+def canvas_analyze_template_table(data, template, duration=0):
+    """模型 JSON → 模板列的分镜表；附带 starts（每镜开始秒数，路由截首帧用，返回前弹掉）。"""
+    shots = data.get("shots") if isinstance(data, dict) else None
+    if not isinstance(shots, list):
+        return None
+    shots = [shot for shot in shots[:CANVAS_ANALYZE_TABLE_MAX_ROWS] if isinstance(shot, dict)]
+    if not shots:
+        return None
+    spec = CANVAS_ANALYZE_TEMPLATES[template]
+    times = canvas_analyze_shot_times(shots, duration)
+    rows = []
+    for index, (shot, (start, end)) in enumerate(zip(shots, times)):
+        row = []
+        for _, key in spec:
+            if key == "first":
+                row.append("")
+            elif key == "range":
+                row.append(f"{start:.1f}–{end:.1f}s" if end is not None else f"{start:.1f}s")
+            elif key == "no":
+                row.append(canvas_analyze_cell_text(shot.get("no")).strip() or str(index + 1))
+            elif key == "dur":
+                given = canvas_analyze_cell_text(shot.get("dur")).strip()
+                row.append(given or (f"{end - start:.1f}s" if end is not None else ""))
+            else:
+                row.append(canvas_analyze_cell_text(shot.get(key)))
+        rows.append(row)
+    return {"columns": [name for name, _ in spec], "rows": rows, "starts": [start for start, _ in times]}
+
+CANVAS_ANALYZE_SHOT_FRAME_DIR = "storyboard_frames"
+CANVAS_ANALYZE_SHOT_FRAME_EDGE = 640
+
+def canvas_analyze_shot_first_frames(video_path, starts, duration=0):
+    """按每镜开始时间各截一张（往后挪 0.1 秒避开转场黑帧），存到输出目录，返回 /output/… 地址；失败的给空串。"""
+    ffmpeg = ffmpeg_binary()
+    if not ffmpeg or not video_path or not starts:
+        return ["" for _ in starts or []]
+    folder = os.path.join(OUTPUT_DIR, CANVAS_ANALYZE_SHOT_FRAME_DIR)
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError as exc:
+        print(f"[canvas-analyze-media] 首帧目录建不了：{exc}", flush=True)
+        return ["" for _ in starts]
+    try:
+        total = float(duration or 0)
+    except (TypeError, ValueError):
+        total = 0.0
+    tag = uuid.uuid4().hex[:10]
+    urls = []
+    for index, start in enumerate(starts):
+        at = max(float(start or 0) + 0.1, 0.0)
+        if total > 0:
+            at = min(at, max(total - 0.1, 0.0))
+        name = f"{tag}_{index + 1:02d}.jpg"
+        out_path = os.path.join(folder, name)
+        ok, err = canvas_analyze_run_ffmpeg([
+            ffmpeg, "-hide_banner", "-v", "error", "-ss", f"{at:.3f}", "-i", video_path,
+            "-frames:v", "1", "-vf", canvas_analyze_scale_filter(CANVAS_ANALYZE_SHOT_FRAME_EDGE),
+            "-q:v", str(CANVAS_ANALYZE_FRAME_QUALITY), "-y", out_path,
+        ], timeout=30)
+        if ok and os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+            urls.append(f"/output/{CANVAS_ANALYZE_SHOT_FRAME_DIR}/{name}")
+        else:
+            if not ok:
+                print(f"[canvas-analyze-media] 第 {index + 1} 镜首帧截图失败：{err[-200:]}", flush=True)
+            urls.append("")
+    return urls
+
+def canvas_analyze_fill_first_frames(table, firsts):
+    """把首帧地址写进「首帧」列（没有这一列就原样返回）。"""
+    columns = table.get("columns") or []
+    if "首帧" not in columns:
+        return table.get("rows") or []
+    at = columns.index("首帧")
+    rows = []
+    for index, row in enumerate(table.get("rows") or []):
+        row = list(row)
+        if index < len(firsts) and firsts[index]:
+            row[at] = firsts[index]
+        rows.append(row)
+    return rows
+
+async def caption_images_with_provider(abs_paths, prompt, provider_id, model, ms_model="", max_tokens=0,
+                                      timeout_seconds=None):
     """一张或多张图交给视觉模型反推：多帧按传入顺序放进同一次请求。
 
     max_tokens > 0 时把输出上限带进请求；默认 0 = 不发，旧调用点行为完全不变。
+    timeout_seconds 只给视频解析这条慢链路用（让 httpx 比网关早一点超时，好走降级重试）。
     """
     paths = [str(path) for path in (abs_paths or []) if str(path or "").strip()]
     llm_provider = get_api_provider(provider_id) if provider_id not in ("modelscope",) else {}
@@ -32519,37 +34615,59 @@ async def caption_images_with_provider(abs_paths, prompt, provider_id, model, ms
                 for path in paths]
     messages = [{"role": "user", "content": content}]
     raw = None
-    try:
-        async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=AI_REQUEST_TIMEOUT) as client:
-            req_body = {"model": resolved_model, "messages": messages}
-            if max_tokens and int(max_tokens) > 0:
-                req_body["max_tokens"] = int(max_tokens)
-            if is_apimart:
-                req_body["stream"] = False
-            response = await client.post(
-                f"{chat_base}/chat/completions",
-                headers=chat_hdrs,
-                json=req_body,
-            )
-            response.raise_for_status()
-            raw = response.json()
-    except httpx.HTTPStatusError as exc:
-        body = exc.response.text or ""
-        friendly = friendly_chat_error_detail(body, resolved_model, llm_provider)
-        raise HTTPException(status_code=exc.response.status_code, detail=friendly or f"上游接口错误：{body}") from exc
-    except httpx.HTTPError as exc:
-        log_net_error(f"对话 网络/TLS错误 provider={llm_provider} model={resolved_model}", exc)
-        raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"解析上游响应失败：{exc}") from exc
+    request_timeout = timeout_seconds if timeout_seconds and float(timeout_seconds) > 0 else AI_REQUEST_TIMEOUT
+    for attempt in (1, 2):
+        try:
+            async with httpx.AsyncClient(http2=False, verify=_SSL_CONTEXT, trust_env=_TRUST_ENV, timeout=request_timeout) as client:
+                req_body = {"model": resolved_model, "messages": messages}
+                if max_tokens and int(max_tokens) > 0:
+                    req_body["max_tokens"] = int(max_tokens)
+                if is_apimart:
+                    req_body["stream"] = False
+                response = await client.post(
+                    f"{chat_base}/chat/completions",
+                    headers=chat_hdrs,
+                    json=req_body,
+                )
+                response.raise_for_status()
+                raw = response.json()
+            break
+        except httpx.HTTPStatusError as exc:
+            body = exc.response.text or ""
+            status = exc.response.status_code
+            # 把上游真实信息留下来（状态码 + body 前 300 字），别让排查只能靠猜
+            print(f"[canvas-analyze-media] 上游 HTTP {status}：{body[:300]}", flush=True)
+            if attempt == 1 and canvas_analyze_should_retry_gateway(status, body):
+                print(f"[canvas-analyze-media] 网关类失败（HTTP {status}），1.5 秒后重试一次", flush=True)
+                await asyncio.sleep(1.5)
+                continue
+            if canvas_analyze_looks_like_gateway_html(body):
+                detail = f"上游接口错误：HTTP {status}：{body}"
+            else:
+                friendly = friendly_chat_error_detail(body, resolved_model, llm_provider)
+                detail = friendly or f"上游接口错误：HTTP {status}：{body}"
+            raise HTTPException(status_code=status, detail=detail) from exc
+        except httpx.HTTPError as exc:
+            log_net_error(f"对话 网络/TLS错误 provider={llm_provider} model={resolved_model}", exc)
+            raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"解析上游响应失败：{exc}") from exc
+    if raw is None:
+        raise HTTPException(status_code=502, detail="上游接口错误：重试后仍未拿到响应")
     text = text_from_chat_response(raw).strip() if isinstance(raw, dict) else ""
+    if not text:
+        # 上游可能 200 但没给可用文本（网关超时/降级），把响应形状留一行日志，别只报「空回复」
+        preview = json.dumps(raw, ensure_ascii=False)[:300] if raw is not None else "null"
+        print(f"[canvas-analyze-media] 上游返回空内容：{preview}", flush=True)
     return text or "接口返回了空回复。", resolved_model
 
-async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_model="", max_tokens=0):
+async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_model="", max_tokens=0,
+                                  timeout_seconds=None):
     """单图调用（旧签名）：转调多图版，行为与之前完全一致。"""
-    return await caption_images_with_provider([abs_path], prompt, provider_id, model, ms_model, max_tokens)
+    return await caption_images_with_provider([abs_path], prompt, provider_id, model, ms_model, max_tokens,
+                                              timeout_seconds)
 
 
 def find_asset_item_in_library(lib, item_id, library_id=""):
@@ -32661,15 +34779,16 @@ def generated_media_path_from_url(url):
 
 
 def prune_history_for_media_paths(paths):
+    """删掉引用了这些媒体路径的生成历史条目，返回删掉的条目数。"""
     if not paths or not os.path.isfile(HISTORY_FILE):
-        return
+        return 0
     try:
         with open(HISTORY_FILE, "r", encoding="utf-8") as f:
             history = json.load(f)
     except Exception:
-        return
+        return 0
     if not isinstance(history, list):
-        return
+        return 0
 
     def references(record):
         for item_url in collect_local_media_urls(record):
@@ -32680,9 +34799,10 @@ def prune_history_for_media_paths(paths):
 
     kept = [item for item in history if not references(item)]
     if len(kept) == len(history):
-        return
+        return 0
     with HISTORY_LOCK:
         write_json_atomic(HISTORY_FILE, kept, ensure_ascii=False, indent=4)
+    return len(history) - len(kept)
 
 
 def _canvas_log_generated_refs(node):
@@ -32763,6 +34883,237 @@ def _canvas_referenced_media_paths(canvas):
         if resolved:
             paths.add(resolved)
     return paths
+
+
+def _purge_asset_registry_entries(removed_paths):
+    """摘掉资产注册表里指向已删文件的条目：文件都没了，留着只会让画布打开时指向空资产。"""
+    registry = load_assets_registry()
+    assets = registry.get("assets")
+    if not isinstance(assets, list) or not assets:
+        return 0
+    kept = []
+    for item in assets:
+        url = str(item.get("url") or "") if isinstance(item, dict) else ""
+        resolved = generated_media_path_from_url(url) if url else None
+        if resolved and resolved in removed_paths:
+            continue
+        kept.append(item)
+    removed = len(assets) - len(kept)
+    if removed:
+        registry["assets"] = kept
+        save_assets_registry(registry)
+    return removed
+
+
+def _purge_asset_library_entries(removed_paths):
+    """摘掉素材库里指向已删文件的条目。
+
+    用户自己上传的素材地址解析不到这些路径（不在生成媒体挂载点下），所以不会误删。
+    """
+    if not removed_paths or not os.path.isfile(ASSET_LIBRARY_PATH):
+        return 0
+    try:
+        lib = load_asset_library()
+    except Exception:
+        return 0
+    category_lists = []
+    seen_lists = set()
+    for library in lib.get("libraries") if isinstance(lib.get("libraries"), list) else []:
+        categories = library.get("categories") if isinstance(library, dict) else None
+        if isinstance(categories, list) and id(categories) not in seen_lists:
+            seen_lists.add(id(categories))
+            category_lists.append(categories)
+    # 顶层 categories 常与当前库是同一份列表，按对象身份去重，避免同一条被算两次
+    if isinstance(lib.get("categories"), list) and id(lib["categories"]) not in seen_lists:
+        category_lists.append(lib["categories"])
+    removed = 0
+    for categories in category_lists:
+        for category in categories:
+            items = category.get("items") if isinstance(category, dict) else None
+            if not isinstance(items, list) or not items:
+                continue
+            kept = []
+            for item in items:
+                url = str(item.get("url") or "") if isinstance(item, dict) else ""
+                resolved = generated_media_path_from_url(url) if url else None
+                if resolved and resolved in removed_paths:
+                    continue
+                kept.append(item)
+            if len(kept) != len(items):
+                removed += len(items) - len(kept)
+                category["items"] = kept
+    if removed:
+        save_asset_library(lib)
+    return removed
+
+
+def _media_reference_set(skip_ids, protect_trash_refs=True):
+    """扫一遍画布 json，返回 (其他画布引用的媒体路径集合, 是否有画布读不出来)。
+
+    批量清理时算一次给每张画布复用，避免逐张全量扫描。
+    """
+    referenced = set()
+    unreadable = False
+    if not os.path.isdir(CANVAS_DIR):
+        return referenced, unreadable
+    skip = set(skip_ids or ())
+    for filename in sorted(os.listdir(CANVAS_DIR)):
+        if not filename.endswith(".json"):
+            continue
+        file_path = os.path.join(CANVAS_DIR, filename)
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                other_canvas = json.load(f)
+        except Exception:
+            unreadable = True
+            continue
+        if not isinstance(other_canvas, dict):
+            continue
+        stem = filename[:-len(".json")]
+        other_id = str(other_canvas.get("id") or stem)
+        if other_id in skip or stem in skip:
+            continue
+        # 回收站画布只有「单张彻底删除」时才算保护（之后可能被恢复）；批量清空时整批都要删
+        if other_canvas.get("deleted_at") and not protect_trash_refs:
+            continue
+        referenced |= _canvas_referenced_media_paths(other_canvas)
+    return referenced, unreadable
+
+
+def _purge_asset_hash_entries(removed_paths):
+    """摘掉内容去重索引里指向已删文件的条目：留着会让同内容再次上传时复用失效 URL。"""
+    if not removed_paths or not os.path.isfile(ASSET_HASH_FILE):
+        return 0
+    with ASSET_HASH_LOCK:
+        index = _load_asset_hash_index()
+        removed = 0
+        for digest in list(index.keys()):
+            entry = index.get(digest)
+            resolved = None
+            if isinstance(entry, dict):
+                entry_path = str(entry.get("path") or "")
+                if entry_path:
+                    try:
+                        resolved = os.path.realpath(entry_path)
+                    except OSError:
+                        resolved = None
+                if not resolved:
+                    resolved = generated_media_path_from_url(str(entry.get("url") or ""))
+            if resolved and resolved in removed_paths:
+                index.pop(digest, None)
+                removed += 1
+        if removed:
+            _save_asset_hash_index(index)
+        return removed
+
+
+def _prune_removed_media(removed_paths, allow_asset_library_removal=True) -> dict:
+    """整批只 prune 一次：history / 资产注册表 / 素材库 / 内容去重索引一起收尾。
+
+    逐张调会把 history.json（真实数据 14MB）重复 parse+写 74 次，批量时合并成一次。
+    """
+    pruned = {
+        "removed_history": 0,
+        "removed_assets_registry": 0,
+        "removed_library": 0,
+        "removed_asset_hashes": 0,
+    }
+    if not removed_paths:
+        return pruned
+    pruned["removed_history"] = prune_history_for_media_paths(removed_paths) or 0
+    if allow_asset_library_removal:
+        pruned["removed_assets_registry"] = _purge_asset_registry_entries(removed_paths)
+        pruned["removed_library"] = _purge_asset_library_entries(removed_paths)
+    pruned["removed_asset_hashes"] = _purge_asset_hash_entries(removed_paths)
+    return pruned
+
+
+def _purge_canvas_media(canvas: dict, extra_urls=(), allow_asset_library_removal=True,
+                        protect_trash_refs=True, alive_refs=None, alive_refs_unreadable=False,
+                        defer_cleanup: bool = False) -> dict:
+    """彻底删除画布时清掉它独占的媒体，返回清理统计。
+
+    仍然被保留中的画布引用的路径一律不删；任一画布 json 读不出来时按「有引用」处理、整体跳过删除。
+    protect_trash_refs=True（单张彻底删除）：其他回收站画布的引用也算保护，它们之后可能被恢复。
+    protect_trash_refs=False（批量清空 / 过期清理）：整批都要删，不再保护回收站画布的引用。
+    alive_refs 是调用方预先算好的保护集（批量时只扫一遍画布目录）；配套 alive_refs_unreadable
+    表示那次扫描里有画布读不出来，此时按保守口径整体跳过删除。
+    defer_cleanup=True（批量）：只删文件/预览，history/注册表/素材库/哈希留给调用方整批 prune 一次，
+    删掉的路径放进返回值私有字段 "_removed_paths"（聚合后必须 pop 掉，不能泄进对外统计）。
+    """
+    stats = {
+        "removed_files": [],
+        "removed_bytes": 0,
+        "removed_previews": 0,
+        "removed_history": 0,
+        "removed_assets_registry": 0,
+        "removed_library": 0,
+        "removed_asset_hashes": 0,
+        "skipped_referenced": [],
+    }
+    if not isinstance(canvas, dict):
+        return stats
+    canvas_id = str(canvas.get("id") or "")
+    if alive_refs is not None:
+        referenced = set(alive_refs)
+        unreadable = bool(alive_refs_unreadable)
+    else:
+        referenced, unreadable = _media_reference_set({canvas_id} if canvas_id else set(), protect_trash_refs)
+    urls = list(collect_local_media_urls(canvas)) + list(extra_urls or ())
+    seen_urls = set()
+    removed_paths = set()
+    for item_url in urls:
+        url_key = str(item_url.get("url", "")) if isinstance(item_url, dict) else str(item_url)
+        if not url_key or url_key in seen_urls:
+            continue
+        seen_urls.add(url_key)
+        mount = _generated_media_mount_path(item_url)
+        if not mount:
+            continue
+        raw_path, mount_root = mount
+        try:
+            resolved = os.path.realpath(raw_path)
+        except OSError:
+            continue
+        if unreadable or resolved in referenced:
+            stats["skipped_referenced"].append(os.path.basename(raw_path))
+            continue
+        if resolved in removed_paths:
+            continue
+        # 删前再校验一次：仍然必须是挂载根内的普通文件
+        if not os.path.isfile(raw_path) or not is_within_dir(raw_path, mount_root):
+            continue
+        previews = []
+        try:
+            previews = list(media_preview_cache_paths(raw_path, 256))
+        except OSError:
+            pass
+        try:
+            size = os.path.getsize(raw_path)
+            os.remove(raw_path)
+        except OSError:
+            # 删不掉就记进 skipped（文件还在），不吞成「已删除」
+            stats["skipped_referenced"].append(os.path.basename(raw_path))
+            continue
+        removed_paths.add(resolved)
+        stats["removed_files"].append(os.path.basename(raw_path))
+        stats["removed_bytes"] += size
+        for preview in previews:
+            if not os.path.isfile(preview) or not is_within_dir(preview, MEDIA_PREVIEW_DIR):
+                continue
+            try:
+                preview_size = os.path.getsize(preview)
+                os.remove(preview)
+            except OSError:
+                continue
+            stats["removed_previews"] += 1
+            stats["removed_bytes"] += preview_size
+    if removed_paths:
+        if defer_cleanup:
+            stats["_removed_paths"] = removed_paths
+        else:
+            stats.update(_prune_removed_media(removed_paths, allow_asset_library_removal))
+    return stats
 
 
 async def delete_canvas_log(canvas_id, req):
@@ -32895,23 +35246,110 @@ async def restore_canvas(canvas_id: str, request: Request):
         save_canvas(canvas)
     return {"canvas": canvas}
 
-@app.delete("/api/canvases/{canvas_id}/purge")
-async def purge_canvas(canvas_id: str, request: Request):
-    canvas = load_canvas_any(canvas_id)
-    require_canvas_access(canvas, request, "manage")
-    path = canvas_path(canvas_id)
-    if os.path.exists(path):
-        os.remove(path)
-    # 线程文件按画布存：彻底删除画布时一起清掉（软删除/回收站不清，恢复后对话还在）
+def _remove_canvas_thread(canvas_id):
+    """线程文件按画布存：彻底删除画布时一起清掉（软删除/回收站不清，恢复后对话还在）。"""
     try:
         thread_path = _agent_thread_path(canvas_id)
         if os.path.exists(thread_path):
             os.remove(thread_path)
     except Exception as exc:
         print(f"[Agent] 清理画布线程失败 {canvas_id}: {exc}")
+
+
+@app.delete("/api/canvases/{canvas_id}/purge")
+async def purge_canvas(canvas_id: str, request: Request):
+    canvas = load_canvas_any(canvas_id)
+    require_canvas_access(canvas, request, "manage")
+    # 媒体清单只能从这份画布读出来：先清媒体，再删 json
+    # 单张彻底删除时别的回收站画布可能还会被恢复，它们的引用也要保护（默认 protect_trash_refs=True）
+    # 清媒体要扫画布目录 + 读写素材库，丢线程池跑，别堵事件循环
+    media = await asyncio.to_thread(_purge_canvas_media, canvas)
+    path = canvas_path(canvas_id)
+    if os.path.exists(path):
+        os.remove(path)
+    _remove_canvas_thread(canvas_id)
     _agent_v2_memory_forget_canvas(canvas_id)      # 档案 / 开关 / 候选 / 索引条目一起清
     _remove_canvas_versions(canvas_id)             # 历史版本快照跟着画布一起删（软删/回收站不清，恢复后版本还在）
-    return {"ok": True}
+    return {"ok": True, **media}
+
+
+def _clear_canvas_trash(request=None) -> dict:
+    """清空回收站：整批只算一次保留画布引用集，逐张清媒体 + 删 json / 线程 / 版本。
+
+    整批都是一次性删除，所以不再保护其他回收站画布的引用（protect_trash_refs=False）；
+    单张失败收集进 failed 继续下一张，不中断整批。
+    """
+    stats = {
+        "ok": True,
+        "cleared": 0,
+        "removed_files": [],
+        "removed_bytes": 0,
+        "removed_previews": 0,
+        "removed_history": 0,
+        "removed_assets_registry": 0,
+        "removed_library": 0,
+        "removed_asset_hashes": 0,
+        "skipped_referenced": [],
+        "failed": [],
+    }
+    targets = []
+    skip_ids = set()
+    if os.path.isdir(CANVAS_DIR):
+        for filename in sorted(os.listdir(CANVAS_DIR)):
+            if not filename.endswith(".json"):
+                continue
+            path = os.path.join(CANVAS_DIR, filename)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    canvas = json.load(f)
+            except Exception:
+                continue
+            if not isinstance(canvas, dict) or not canvas.get("deleted_at"):
+                continue
+            canvas_id = str(canvas.get("id") or filename[:-len(".json")])
+            if request is not None and auth_isolation(request):
+                try:
+                    require_canvas_access(canvas, request, "manage")
+                except HTTPException:
+                    continue    # 别人回收站里的画布不归这次清空管
+            targets.append((filename, canvas_id, canvas))
+            skip_ids.add(canvas_id)
+            skip_ids.add(filename[:-len(".json")])
+    if not targets:
+        return stats
+    referenced, unreadable = _media_reference_set(skip_ids, protect_trash_refs=False)
+    removed_paths = set()
+    for filename, canvas_id, canvas in targets:
+        try:
+            media = _purge_canvas_media(canvas, protect_trash_refs=False, alive_refs=referenced,
+                                        alive_refs_unreadable=unreadable, defer_cleanup=True)
+            os.remove(os.path.join(CANVAS_DIR, filename))
+            _invalidate_canvas_record(filename)
+            _remove_canvas_thread(canvas_id)
+            _agent_v2_memory_forget_canvas(canvas_id)
+            _remove_canvas_versions(canvas_id)
+        except Exception as exc:
+            stats["failed"].append({"id": canvas_id, "reason": f"{type(exc).__name__}: {exc}"})
+            continue
+        stats["cleared"] += 1
+        stats["removed_files"].extend(media.get("removed_files") or [])
+        stats["removed_bytes"] += int(media.get("removed_bytes") or 0)
+        stats["removed_previews"] += int(media.get("removed_previews") or 0)
+        stats["skipped_referenced"].extend(media.get("skipped_referenced") or [])
+        removed_paths |= media.pop("_removed_paths", set()) or set()
+    # 整批只 parse / 写一次 history.json，素材库 / 注册表 / 哈希也只收尾一次
+    try:
+        stats.update(_prune_removed_media(removed_paths))
+    except Exception as exc:
+        # 画布 json 已经删了，收尾失败只影响统计，不能让整批接口 500
+        print(f"[Canvas] 清空回收站收尾失败（画布已删除）: {exc}")
+    return stats
+
+
+@app.post("/api/canvases/trash/clear")
+async def clear_canvas_trash(request: Request):
+    # 整批清空要扫画布目录 + 删几十个文件 + 写一次 14MB 级 history，丢线程池跑，别堵事件循环
+    return await asyncio.to_thread(_clear_canvas_trash, request)
 
 # --- V2 Phase 2: 画布版本化 API ---
 
@@ -38517,6 +40955,17 @@ def _agent_beat_url(node):
     return str(out.get("url") or node.get("url") or "").strip()
 
 
+def _agent_beat_has_result(node):
+    """节点当前这一版有没有产出（图片 / 视频 / 音频看 url / 封帧，文本看 text）。
+
+    助手重跑一个已经有结果的节点时不能在原节点上追加版本：前端 autoSelfUrl 会把「当前这一版」
+    当第一参考喂回新一轮（提示词一改就触发），越改越偏。这里只做判断，具体由前端新建节点。"""
+    out = _agent_beat_out(node)
+    if str(out.get("url") or out.get("frame") or out.get("text") or "").strip():
+        return True
+    return bool(str(node.get("url") or "").strip())
+
+
 def _agent_beat_text(node):
     """文本节点的正文（当前版本）。"""
     out = _agent_beat_out(node)
@@ -40285,6 +42734,11 @@ def _agent_beat_mark_run(canvas_id, node_id, settings=None, settings_kind="image
             if settings and isinstance(gen.get("params"), dict):
                 # 用户在待生成卡片里选的模型 / 参数随标记一起交给画布：画布开跑前先套用，避免被本地旧副本覆盖回默认模型
                 run["params"] = dict(gen["params"])
+            # 已经有结果：不在原节点追加版本，交给画布在右侧新建同类型节点重新生成（原结果 / 版本 / 连线都不动）。
+            # 审查自动重跑（review_rerun）保持原地——它按 node_id 回读结果，服务端也已强制剔除自产物。
+            if not review_rerun and _agent_beat_has_result(node):
+                run["regenAsNew"] = True
+                state["regen_as_new"] = True
             data["agentRun"] = run
         _agent_regen_record(node, record, review_rerun=review_rerun)
         state["node"] = node
@@ -40312,6 +42766,11 @@ def _agent_beat_mark_run(canvas_id, node_id, settings=None, settings_kind="image
         return {"node_id": node_id, "title": _agent_beat_title(node), "status": "ready_to_generate",
                 "kind": str(node.get("kind") or ""), "generation_units": 0, "prompt": _agent_beat_prompt(node)[:160],
                 "message": f"「{_agent_beat_title(node) or node_id}」已准备好重新生成，等用户在待生成卡片里确认模型和参数后执行"}
+    if state.get("regen_as_new"):
+        return {"node_id": node_id, "title": _agent_beat_title(node), "status": "queued_on_canvas", "generation_units": 1,
+                "regen_as_new": True, "prompt": _agent_beat_prompt(node)[:160],
+                "message": (f"「{_agent_beat_title(node) or node_id}」已经有结果，这次不覆盖它："
+                            "已让画布在右边新建一个节点重新生成，原结果、版本和连线都保留；新节点会自己开跑")}
     return {"node_id": node_id, "title": _agent_beat_title(node), "status": "queued_on_canvas", "generation_units": 1,
             "prompt": _agent_beat_prompt(node)[:160],
             "message": f"已让画布重新运行「{_agent_beat_title(node) or node_id}」，结果会作为新版本出现在节点上"}
@@ -48983,13 +51442,20 @@ _CANVAS_ACTION_LOCAL = ("group", "stack", "rotate", "crop", "split", "upscale", 
 _CANVAS_ACTION_MODEL = ("angle", "relight", "whitemodel", "enhance", "outpaint", "erase", "redraw")
 # 视频 AI 编辑（与视频工具栏 videoTools.ts 同一套提示词）：落成「视频编辑 / 视频延长」方式的视频节点，走正常生成
 _CANVAS_ACTION_VIDEO = ("video_replace", "video_remove", "video_extend", "video_retake")
+# 解析分镜：把视频拆成分镜表（和视频工具条「解析」同一个接口 /api/canvas-analyze-media + 模板），服务端直接落表
+_CANVAS_ACTION_PARSE = ("parse_storyboard",)
+_CANVAS_ACTION_PARSE_TEMPLATES = {"storyboard": "storyboard", "完整": "storyboard", "完整分镜": "storyboard", "影视": "storyboard",
+                                  "ecom": "ecom", "电商": "ecom", "电商短视频": "ecom", "lite": "lite", "精简": "lite"}
+_CANVAS_ACTION_PARSE_TITLE = "解析 · 分镜表"      # 与前端 parseMedia.ts 的 TABLE_TITLE 一致
+_CANVAS_ACTION_PARSE_SIZE = (1240, 360)          # 与前端 TABLE_W / TABLE_H 一致
 _CANVAS_ACTION_VIDEO_MODE = {"video_replace": "video_edit", "video_remove": "video_edit",
                              "video_extend": "video_extend", "video_retake": "video_edit"}
 _CANVAS_ACTION_LABEL = {"group": "分组", "stack": "堆叠", "rotate": "旋转", "crop": "裁剪", "split": "切分",
                         "upscale": "高清放大", "cutout": "抠图", "adjust": "调色", "angle": "多角度",
                         "relight": "重打光", "whitemodel": "白膜", "enhance": "AI 增强", "outpaint": "扩图",
                         "erase": "擦除", "redraw": "局部重绘", "video_replace": "视频替换",
-                        "video_remove": "视频移除", "video_extend": "视频续写", "video_retake": "视频重拍"}
+                        "video_remove": "视频移除", "video_extend": "视频续写", "video_retake": "视频重拍",
+                        "parse_storyboard": "解析分镜"}
 _CANVAS_ACTION_ADJUST_KEYS = ("brightness", "contrast", "saturation", "warmth", "sharpness")
 _CANVAS_ACTION_OUTPAINT_MAX_SIDE = 2048     # 补完透明边后的长边上限（太大的图先缩，和前端 EDIT_MAX 同量级）
 _CANVAS_ACTION_ROTATE = {"cw": "向右旋转", "ccw": "向左旋转", "flip_h": "水平翻转", "flip_v": "垂直翻转"}
@@ -49023,9 +51489,9 @@ def _canvas_action_light_dir(direction):
 def _agent_tool_canvas_action_validate(args):
     args = dict(args or {})
     action = str(args.get("action") or "").strip().lower()
-    if action not in _CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL + _CANVAS_ACTION_VIDEO:
+    if action not in _CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL + _CANVAS_ACTION_VIDEO + _CANVAS_ACTION_PARSE:
         raise AgentToolError("action 只能是：" + " / ".join(_CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL
-                                                          + _CANVAS_ACTION_VIDEO),
+                                                          + _CANVAS_ACTION_VIDEO + _CANVAS_ACTION_PARSE),
                              code="invalid_args")
     canvas_id = str(args.get("canvas_id") or "").strip() or str(_AGENT_RUN_CANVAS_ID.get() or "").strip()
     if not canvas_id:
@@ -49163,6 +51629,13 @@ def _agent_tool_canvas_action_validate(args):
         note = text("note", "prompt")
         if note:
             clean["note"] = note
+    elif action in _CANVAS_ACTION_PARSE:
+        raw = str(params.get("template") or "storyboard").strip()
+        tpl = _CANVAS_ACTION_PARSE_TEMPLATES.get(raw.lower()) or _CANVAS_ACTION_PARSE_TEMPLATES.get(raw)
+        if not tpl:
+            raise AgentToolError("parse_storyboard 的 template 只能是 storyboard（完整分镜）/ ecom（电商短视频）/ lite（精简）",
+                                 code="invalid_args")
+        clean["template"] = tpl
     elif action == "whitemodel":
         tier = str(params.get("tier") or "blockout").strip().lower()
         tier = {"product": "blockout", "产品": "blockout", "person": "mannequin", "人物": "mannequin",
@@ -49550,7 +52023,58 @@ async def _canvas_action_video(args):
     return result
 
 
+async def _canvas_action_parse(args):
+    """解析分镜：视频节点 → 右边一张「解析 · 分镜表」（每镜首帧、起止、镜头语言），并从视频连线过来。
+    走和视频工具条「解析」同一个接口与模板；表的口径照前端 parseMedia.ts（起止列不当生成输入、带首帧默认卡片视图）。"""
+    canvas = load_canvas(args["canvas_id"])
+    source = _agent_find_node(canvas, args["node_id"])
+    if source is None:
+        raise AgentToolError(f"节点 {args['node_id']} 不存在", code="node_not_found", status_code=404)
+    url = _agent_beat_url(source)
+    if str(source.get("kind") or "") != "video" or not url:
+        raise AgentToolError(f"{_agent_node_ref(source)} 不是有结果的视频节点：解析分镜只处理视频", code="invalid_args")
+    template = (args.get("params") or {}).get("template") or "storyboard"
+    try:
+        res = await canvas_analyze_media(CanvasAnalyzeMediaRequest(kind="video", video_url=url, template=template,
+                                                                   table_only=True))
+    except HTTPException as exc:
+        raise AgentToolError(f"解析失败：{exc.detail}", code="upstream_error")
+    table = res.get("table") if isinstance(res, dict) else None
+    if not isinstance(table, dict) or not table.get("columns") or not table.get("rows"):
+        raise AgentToolError("模型没有返回分镜表，换一个视觉模型（设置 › 反推设置）再试", code="upstream_error")
+    columns = [str(c) for c in table["columns"]]
+    w, h = _CANVAS_ACTION_PARSE_SIZE
+    state = {}
+
+    def _mutate(canvas):
+        if _agent_find_node(canvas, args["node_id"]) is None:
+            raise AgentToolError(f"节点 {args['node_id']} 不存在", code="node_not_found", status_code=404)
+        x, y = _agent_beat_place(canvas, [args["node_id"]], w, h)
+        node = _agent_beat_new_table_node(args.get("title") or _CANVAS_ACTION_PARSE_TITLE, columns, table["rows"], x, y)
+        node["w"], node["h"] = w, h
+        data_table = node["data"]["table"]
+        if "起止" in columns:
+            data_table["roles"] = ["skip" if c == "起止" else "" for c in columns]
+        if "首帧" in columns:
+            data_table["view"] = "card"
+        canvas.setdefault("nodes", []).append(node)
+        canvas.setdefault("connections", []).append(_agent_beat_edge(args["node_id"], node["id"]))
+        state["node"] = node
+        return None
+
+    _agent_mutate_canvas(args["canvas_id"], _mutate)
+    node = state["node"]
+    shots = len(node["data"]["table"]["rows"])
+    return {"node_id": node["id"], "title": node["data"]["table"]["title"], "status": "done", "kind": "table",
+            "action": "parse_storyboard", "source_node_id": args["node_id"], "template": res.get("template") or template,
+            "shots": shots, "columns": columns, "generation_units": 0,
+            "message": f"已把「{_agent_beat_title(source) or args['node_id']}」拆成 {shots} 个镜头的分镜表「{node['data']['table']['title']}」，"
+                       "放在视频右边并连好线；整表出片可以把产品图连到表上再用分镜出片"}
+
+
 async def _agent_tool_canvas_action_run(args):
+    if args["action"] in _CANVAS_ACTION_PARSE:
+        return await _canvas_action_parse(args)
     if args["action"] in _CANVAS_ACTION_VIDEO:
         return await _canvas_action_video(args)
     if args["action"] in ("group", "stack"):
@@ -49564,6 +52088,8 @@ def _agent_tool_canvas_action_preview(args, canvas=None):
     label = _CANVAS_ACTION_LABEL.get(args.get("action"), args.get("action"))
     if args.get("action") in ("group", "stack"):
         return {"summary": f"把 {len(args.get('node_ids') or [])} 个节点收成{label}"}
+    if args.get("action") in _CANVAS_ACTION_PARSE:
+        return {"summary": f"把视频节点 {args.get('node_id')} 解析成分镜表", "generation": False}
     return {"summary": f"对节点 {args.get('node_id')} 做{label}",
             "generation": args.get("action") in _CANVAS_ACTION_MODEL + _CANVAS_ACTION_VIDEO}
 
@@ -49587,6 +52113,10 @@ AGENT_TOOLS["canvas_action"] = {
         "换掉什么 + replacement 换成什么）/ video_remove（params.target）/ video_extend（续写，params.direction=after 往后接 / "
         "before 补开头，note 写接下来拍什么）/ video_retake（换机位重拍，params.camera=推近特写/拉远全景/环绕运镜/俯拍/仰拍/"
         "侧面机位/跟拍/手持晃动）。可选 params.duration 1–15。\n"
+        "· 解析分镜（node_id 是视频节点，用视觉模型看片，不花生成额度）：parse_storyboard 把整条视频拆成分镜表"
+        "（每镜首帧、起止、时长、画面、景别、机位、运镜…），表放在视频右边并连线。params.template=storyboard 完整分镜（默认）/ "
+        "ecom 电商短视频（多卖点、字幕、口播）/ lite 精简。用户说「拆一下这条视频 / 解析成分镜 / 拉个分镜表」就用它，"
+        "不要用 analyze_video 再手写表格。\n"
         "什么时候用：同一商品要多个机位→angle（每个角度一次），不要用 generate_image 硬写「换个角度」；"
         "换背景 / 换品前先 whitemodel(tier=clear) 清掉旧商品；画面里局部换一件商品→redraw+ref_node_id；"
         "横图改竖版 / 竖图改横版→outpaint(ratio)；九宫格分镜图拆开当参考→split；"
@@ -49594,7 +52124,8 @@ AGENT_TOOLS["canvas_action"] = {
         "first_frame_url / last_frame_url，再 create_node(type=image, url=…)。"),
     "schema": {"type": "object", "properties": {
         "canvas_id": {"type": "string", "description": "不填就用当前画布"},
-        "action": {"type": "string", "enum": list(_CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL + _CANVAS_ACTION_VIDEO)},
+        "action": {"type": "string", "enum": list(_CANVAS_ACTION_LOCAL + _CANVAS_ACTION_MODEL + _CANVAS_ACTION_VIDEO
+                                                  + _CANVAS_ACTION_PARSE)},
         "node_id": {"type": "string", "description": "要处理的图片节点 id（group / stack 不用填）"},
         "node_ids": {"type": "array", "items": {"type": "string"}, "description": "group / stack：要收进去的节点 id"},
         "params": {"type": "object", "description": "该 action 的参数，见上面说明"},

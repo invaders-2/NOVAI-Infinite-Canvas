@@ -6,7 +6,7 @@
  *   · 声音走 WebAudio：每段一个增益（音量 0–2 + 转场淡入淡出），预览接扬声器，导出接录制流
  *   · 时间以墙上时钟为准；元素落后/超前超过 0.25s 就校正
  */
-import { activeAt, colorFilter, duckGain, duckOf, fadeOf, lenOf, OVERLAP_TRANS, place, speedOf, srcTime, tfAt, totalOf, transOf, voiceSpans, volOf, type Clip, type Placed, type Track, type TransKind } from "./timelineModel";
+import { activeAt, colorFilter, duckGain, duckOf, fadeOf, lenOf, OVERLAP_TRANS, place, speedOf, srcTime, tfAt, totalOf, transOf, voiceSpans, volOf, type Clip, type MediaSize, type Placed, type Track, type TransKind } from "./timelineModel";
 
 /** 图片片段用 <img>，其余用 <video>/<audio>；isMedia 区分两类 */
 type Slot = { clip: Clip; url: string; el: HTMLMediaElement; img: HTMLImageElement | null; gain: GainNode | null; ready: Promise<boolean> };
@@ -95,6 +95,16 @@ export class TimelinePlayer {
   durations(): Record<string, number> {
     const out: Record<string, number> = {};
     for (const [id, s] of this.slots) if (!s.img && Number.isFinite(s.el.duration) && s.el.duration > 0) out[id] = Math.round(s.el.duration * 1000) / 1000;
+    return out;
+  }
+  /** 已加载素材的真实像素尺寸，按片段 id（视频取 videoWidth，图片取 naturalWidth） */
+  mediaSizes(): Record<string, MediaSize> {
+    const out: Record<string, MediaSize> = {};
+    for (const [id, s] of this.slots) {
+      const w = s.img ? s.img.naturalWidth : (s.el as HTMLVideoElement).videoWidth;
+      const h = s.img ? s.img.naturalHeight : (s.el as HTMLVideoElement).videoHeight;
+      if (w > 0 && h > 0) out[id] = { w, h };
+    }
     return out;
   }
 

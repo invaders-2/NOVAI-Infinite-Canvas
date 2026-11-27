@@ -10,6 +10,7 @@ import { useCtl } from "../ui/ctx";
 import { ICON_PATHS, type IconName } from "../ui/Icon";
 import { resolveMediaUrl } from "../ui/useAsset";
 import { setChipThumb } from "../ui/thumb";
+import { parseMessageClipHtml, type MsgClipRef } from "./messageClipboard";
 
 export type MentionKind = "node" | "ref" | "app" | "skill";
 export type MentionChip = { kind: MentionKind; id: string; title: string; src?: string; icon?: IconName; badge?: string };
@@ -42,9 +43,16 @@ export type MentionInputProps = {
   onRemove?: (kind: MentionKind, id: string) => void;
   /** 剪贴板里是文件（图片 / 其它）：交给上层判断并变成附件（纯文本粘贴仍然走原来的路） */
   onPasteFiles?: (files: File[]) => void;
+  /** 粘回来的是一条「带画布节点 / 技能」的消息：记号已经落成胶囊，把节点并进本次对话的引用、技能交给上层生效 */
+  onPasteRefs?: (refs: MsgClipRef[], skills: string[]) => void;
+  /** 剪贴板里是画布上 ⌘C 复制的节点标记（不该当文字贴进来）：交给上层还原成引用 */
+  onPasteCanvasNodes?: (marker: string) => void;
   /** 悬停胶囊（chip 为 null 表示移开）；rect 是胶囊的屏幕矩形，用来定位预览卡 */
   onChipHover?: (chip: { kind: MentionKind; id: string } | null, rect?: DOMRect) => void;
 };
+
+/** 画布节点标记（actions.copySelection 复制节点时写进剪贴板的那一行）：粘进输入框时不能当文字 */
+const CANVAS_NODES_MARK_RE = /^(novai-canvas-nodes|openarc-canvas-nodes):/;
 
 /** 记号：@{节点id}（和 mentions.ts 一致） / @ref{素材id} / @app{工具名} / @skill{技能名} */
 const TOKEN_RE = /@(ref|app|skill)?\{([^}\n]+)\}/g;
@@ -338,6 +346,14 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(fu
     }
     if (e.key === "Escape") propsRef.current.onEscape?.();
   };
+  /** 粘贴一段含 @{…} 记号的文本：先用占位符记住光标位置，paint 整段（胶囊 + 文字），再回到末尾 */
+  const insertTokenText = (text: string) => {
+    const s = getSelection(); if (!s || !s.rangeCount) return;
+    const r = s.getRangeAt(0); r.deleteContents();
+    const mark = document.createTextNode("\u2063"); r.insertNode(mark);
+    const all = serialize(ref.current!); const parts = all.split("\u2063");
+    paint(parts[0] + text + (parts[1] || "")); caretToEnd(); emit();
+  };
   const handlePaste = (e: React.ClipboardEvent) => {
     const dt = e.clipboardData;
     const files: File[] = [];
@@ -351,11 +367,27 @@ export const MentionInput = forwardRef<MentionInputHandle, MentionInputProps>(fu
       propsRef.current.onPasteFiles(files);
       return;
     }
+    // 消息载荷：html 里是可读文本 + 注释里的节点清单。按「含记号」那条路落成胶囊，再把节点并进本轮引用
+    const clip = parseMessageClipHtml(dt.getData("text/html"));
+    if (clip) {
+      e.preventDefault(); e.stopPropagation();
+      insertTokenText(clip.text);
+      propsRef.current.onPasteRefs?.(clip.refs, clip.skills || []);
+      return;
+    }
+    // 画布节点标记（actions.copySelection 写的）：交给上层还原成引用，别把这一行标记当文字贴进来
+    const raw = dt.getData("text/plain");
+    const marker = String(raw || "").trim();
+    if (CANVAS_NODES_MARK_RE.test(marker)) {
+      e.preventDefault(); e.stopPropagation();
+      propsRef.current.onPasteCanvasNodes?.(marker);
+      return;
+    }
     e.preventDefault(); e.stopPropagation();
-    const text = dt.getData("text/plain"); if (!text) return;
+    const text = raw; if (!text) return;
+    if (new RegExp(TOKEN_SRC).test(text)) { insertTokenText(text); return; }
     const s = getSelection(); if (!s || !s.rangeCount) return;
     const r = s.getRangeAt(0); r.deleteContents();
-    if (new RegExp(TOKEN_SRC).test(text)) { const mark = document.createTextNode("\u2063"); r.insertNode(mark); const all = serialize(ref.current!); const parts = all.split("\u2063"); paint(parts[0] + text + (parts[1] || "")); caretToEnd(); emit(); return; }
     const tn = document.createTextNode(text); r.insertNode(tn); placeAfter(tn); emit();
   };
   /** 胶囊悬停：交给上层弹预览卡（划过不闪、移开延迟关） */

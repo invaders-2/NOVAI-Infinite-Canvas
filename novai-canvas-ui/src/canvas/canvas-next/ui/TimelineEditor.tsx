@@ -47,7 +47,7 @@ import { mentionToken } from "../mentions";
 import { addFiles } from "../actions";
 import { clipable, clipFromNode, syncTimelineEdges } from "../playlist";
 import { closePop, openModal, openPop } from "./overlay";
-import { baseTf, EXPORT_PRESETS, type ExportPreset, isFree, keyAt, needsCompositor, nextOf, prevOf, rollEdit, slideEdit, slipEdit, TRANS_LABEL, tfAt, upsertKey, type Tf, duplicate, fadeOf, fmt, fmtTC, frameSec, frameSize, IMAGE_LEN, lenOf, MIN_LEN, moveGroupTo, normalize, place, RATIOS, renderPlan, RESES, shiftSub, snapPoints, snapTo, speedOf, SPEEDS, splitAt, tickStep, toSrt, totalOf, trackOf, transOf, trimEdge, volOf, type Clip, type ClipMedia, type Placed, type Track, type TransKind } from "../timelineModel";
+import { autoRes, baseTf, EXPORT_PRESETS, type ExportPreset, isFree, keyAt, needsCompositor, nextOf, prevOf, rollEdit, slideEdit, slipEdit, TRANS_LABEL, tfAt, upsertKey, type Tf, duplicate, fadeOf, fmt, fmtTC, frameSec, frameSize, IMAGE_LEN, lenOf, MIN_LEN, moveGroupTo, normalize, place, RATIOS, renderPlan, RESES, shiftSub, snapPoints, snapTo, speedOf, SPEEDS, splitAt, tickStep, toSrt, totalOf, trackOf, transOf, trimEdge, volOf, type Clip, type ClipMedia, type MediaSize, type Placed, type Track, type TransKind } from "../timelineModel";
 import { grabThumb, recordWebM, TimelinePlayer, type SubStyle } from "../timelinePlayer";
 import { exportMp4Browser } from "../timelineExportMp4";
 import { exportProjectZip } from "../timelineInterchange";
@@ -201,7 +201,7 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
   const clips = useMemo(() => (node.clips || []) as Clip[], [node.clips]);
   const meta = ((node.data as TlData | undefined) || {}) as TlData;
   const ratio = (RATIOS as readonly string[]).includes(String(node.ratio)) ? String(node.ratio) : "16:9";
-  const res = (RESES as readonly string[]).includes(String(meta.tlRes)) ? String(meta.tlRes) : "720p";
+  const explicitRes = (RESES as readonly string[]).includes(String(meta.tlRes)) ? String(meta.tlRes) : "";
   const subStyle: SubStyle = { size: meta.tlSub?.size || "m", pos: meta.tlSub?.pos || "bottom" };
   const snapOn = meta.tlSnap !== false;
   const fit = meta.tlFit === "cover" ? "cover" : "contain";
@@ -231,6 +231,8 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
   const pend = useMemo(() => sugs.filter((s) => s.state === "pending"), [sugs]);
   const isLocked = (c: Clip) => !!locked[trackOf(c)];
   const screen = useRef<HTMLCanvasElement>(null); const player = useRef<TimelinePlayer | null>(null);
+  /** 播放器里已加载素材的真实像素尺寸（按片段 id）：导出清晰度默认按它定档 */
+  const [mediaSizes, setMediaSizes] = useState<Record<string, MediaSize>>({});
   const lanes = useRef<HTMLDivElement>(null); const root = useRef<HTMLDivElement>(null); const mon = useRef<HTMLDivElement>(null);
   const focus = () => root.current?.focus({ preventScroll: true });
 
@@ -246,6 +248,18 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
   const visRaw = useMemo(() => shown.filter((c) => !hidden[trackOf(c)]), [shown, hideKey]);
   // 「原声」轨静音 = 画面里视频自带的声音都不出（预览 / 导出一致）；界面上的片段仍按原音量显示
   const visible = useMemo(() => (hidden.vaudio ? visRaw.map((c) => (c.mediaKind === "video" && (trackOf(c) === "video" || trackOf(c) === "overlay") ? { ...c, volume: 0 } : c)) : visRaw), [visRaw, hideKey]);
+  // 参与导出的画面素材尺寸：优先播放器实测到的自然尺寸，素材没加载出来时退回源节点输出的 w/h
+  const mediaList = useMemo(() => visible.flatMap((c): MediaSize[] => {
+    if (c.type === "subtitle" || c.mediaKind === "audio" || !c.url) return [];
+    const got = mediaSizes[c.id];
+    if (got && got.w > 0 && got.h > 0) return [got];
+    const src = c.sourceNodeId ? store.node(c.sourceNodeId) : null;
+    const o = src ? outOf(src) : null;
+    const w = Number(o?.w); const h = Number(o?.h);
+    return w > 0 && h > 0 ? [{ w, h }] : [];
+  }), [visible, mediaSizes, doc, store]);
+  const res = explicitRes || autoRes(mediaList);
+  const autoOut = useMemo(() => frameSize(ratio, autoRes(mediaList)), [ratio, mediaList]);
   const total = totalOf(visible);
   const selClips = useMemo(() => visRaw.filter((c) => sel.has(c.id)), [visRaw, sel]);
   const selOne = selClips.length === 1 ? selClips[0] : null;
@@ -312,6 +326,7 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
     const p = player.current; if (!p) return; let alive = true;
     void p.setClips(visible).then(() => {
       if (!alive) return;
+      setMediaSizes(p.mediaSizes());
       if (!p.playing) void p.seek(Math.min(tRef.current, totalOf(visible)));
       // 素材真实时长补进片段（只补缺的 / 超出的，不记历史）
       const fix = p.durations(); const patch = visible.filter((c) => fix[c.id] && !c.pad && (!c.srcDur || c.outPoint > fix[c.id] + 0.05));
@@ -664,19 +679,23 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
   const trackTops = useRef<Map<string, number> | null>(null);
   useLayoutEffect(() => {
     const el = lanes.current; if (!el) return;
-    const scale = el.offsetWidth ? el.getBoundingClientRect().width / el.offsetWidth : 1;
     const now = new Map<string, number>();
     el.querySelectorAll<HTMLElement>(".tle-track[data-track]").forEach((t) => {
-      const k = t.dataset.track; if (k && k !== "sug") now.set(k, t.getBoundingClientRect().top);
+      // 用 offsetTop（布局坐标）而不是 rect.top：rect 会被入场动画和正在飞的 FLIP 自身带偏，
+      // 播放时每帧重渲染就会量到动画中间值，再起新动画越飞越远
+      const k = t.dataset.track; if (k && k !== "sug") now.set(k, t.offsetTop);
     });
     const prev = trackTops.current; trackTops.current = now;
-    if (!prev || !scale || !now.size) return;
+    if (!prev || !now.size) return;
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     now.forEach((top, k) => {
       const before = prev.get(k); if (before == null) return;
-      const dy = (before - top) / scale;
+      const dy = before - top;
       if (Math.abs(dy) < 0.5) return;
-      el.querySelector<HTMLElement>('.tle-track[data-track="' + k + '"]')?.animate([{ transform: `translateY(${dy}px)` }, { transform: "translateY(0)" }], { duration: 160, easing: "cubic-bezier(.2,0,0,1)" });
+      const t = el.querySelector<HTMLElement>('.tle-track[data-track="' + k + '"]'); if (!t) return;
+      // 上一条 FLIP 没跑完就换新的会叠加，先取消这条轨自己的（只作用该轨）
+      t.getAnimations().forEach((a) => a.cancel());
+      t.animate([{ transform: `translateY(${dy}px)` }, { transform: "translateY(0)" }], { duration: 160, easing: "cubic-bezier(.2,0,0,1)" });
     });
   });
   const resolveSug = async (s: Sug, accept: boolean) => {
@@ -1383,7 +1402,7 @@ export function TimelineEditor({ node, full, onFull }: { node: CanvasNode; full?
       <span className="grow" />
       {busy ? <span className="tle-busy" data-tl-busy><i className="tle-spin" />{busy}</span> : null}
       <select className="tle-sel" data-tl="ratio" value={ratio} onChange={(e) => setMeta({ ratio: e.target.value })} title="画幅">{RATIOS.map((r) => <option key={r} value={r}>{r}</option>)}</select>
-      <select className="tle-sel" data-tl="res" value={res} onChange={(e) => setMeta({ tlRes: e.target.value })} title="导出清晰度">{RESES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
+      <select className="tle-sel" data-tl="res" value={explicitRes || "auto"} onChange={(e) => setMeta({ tlRes: e.target.value === "auto" ? undefined : e.target.value })} title={explicitRes ? "导出清晰度" : `导出清晰度（跟随素材：${autoOut.width}×${autoOut.height}）`}><option value="auto">跟随素材</option>{RESES.map((r) => <option key={r} value={r}>{r}</option>)}</select>
       <button className="pill" data-tl="export" disabled={!total || !!busy} onClick={exportMenu}><Icon name="download" size="xs" />导出<Icon name="down" size="xs" className="tle-caret" /></button>
       <button className="pill strong" data-tl="tocanvas" disabled={!total || !!busy} title="合成成片，作为新视频节点放到画布上" onClick={() => void exportToCanvas()}>导出到画布</button>
       {onFull ? <button className="ib tipB" data-tl="fullmode" data-tip={full ? "回到画布（Esc）" : "全屏剪辑"} onClick={() => onFull(!full)}><Icon name={full ? "x" : "expand"} size="s" /></button> : null}

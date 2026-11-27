@@ -102,6 +102,23 @@ export function copySelection(store: CanvasStore, quiet = false, toSystem = true
   }
   if (!quiet) store.toast(`已复制 ${nodes.length} 个节点`);
 }
+/**
+ * 输入框粘到「画布节点标记」时用：内存里上一次复制的节点 id（只读；剪贴板写入格式不变）。
+ * 分组 / 堆叠的成员也在复制集合里时只留容器本身（整组引用一次就够），已删除的节点跳过。
+ * 别的窗口复制的标记没有内存记录，返回空数组，由调用方给提示。
+ */
+export function copiedNodeIds(store: CanvasStore): string[] {
+  if (!clip) return [];
+  const ids = new Set(clip.nodes.map((n) => n.id));
+  const members = new Set<string>();
+  for (const n of clip.nodes) for (const c of n.children || []) if (ids.has(c)) members.add(c);
+  const out: string[] = []; const seen = new Set<string>();
+  for (const n of clip.nodes) {
+    if (members.has(n.id) || seen.has(n.id) || !store.node(n.id)) continue;
+    seen.add(n.id); out.push(n.id);
+  }
+  return out;
+}
 /** 系统粘贴事件（无文件时）：判断该贴节点还是把外部文字贴成文本节点 */
 export function pasteFromSystem(store: CanvasStore, text: string, at: { x: number; y: number }) {
   const t = text.trim();
@@ -176,54 +193,115 @@ async function addDocument(store: CanvasStore, f: File, at: { x: number; y: numb
   return n.id;
 }
 
-export async function addFiles(store: CanvasStore, files: File[], at: { x: number; y: number }, opts: { target?: string; linkTo?: string; replace?: string } = {}) {
+/** 大文件改走 multipart 原始字节上传的阈值：base64 会把体积撑大约 1/3，整段字符串还要进内存；
+ *  8MB 以下继续走 data URL（桌面版 bridge / mock 预览只有那条路，旧桥也只认 data URL）。 */
+export const MULTIPART_UPLOAD_MIN = 8 * 1024 * 1024;
+
+const sizeLabel = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+
+/** 超过单文件上限的统一文案：文件名 / 实际大小 / 上限 / 怎么办 */
+export const tooLargeText = (f: { name: string; size: number }) => `${f.name}（${sizeLabel(f.size)}）超过单文件 ${sizeLabel(MEDIA_UPLOAD_LIMIT)} 上限，未添加：请先压缩 / 裁短 / 转码到 ${sizeLabel(MEDIA_UPLOAD_LIMIT)} 以内再拖进来`;
+
+/** 上传失败 → 用户能照着做的文案：413 / 415 / 404 按 HTTP 状态给原因，其它带上服务端 detail（不静默吞） */
+export function uploadFailureText(f: { name: string; size: number }, error: unknown): string {
+  const name = f.name || "文件";
+  const size = sizeLabel(Number(f.size) || 0);
+  const err = (error || {}) as { code?: unknown; message?: unknown };
+  const status = /^HTTP_(\d+)$/.exec(String(err.code || ""))?.[1] || "";
+  const detail = String(err.message || "").trim();
+  if (status === "413") return detail ? `${name}（${size}）未上传：${detail}` : `${name}（${size}）超过服务端单文件上限，未添加：请先压缩 / 裁短 / 转码后再试`;
+  if (status === "415") return `${name}（${size}）未上传：${detail || "格式暂不支持"}（另存为 PNG / JPG / WebP 后重试）`;
+  if (status === "404") return `${name} 未上传：当前后端没有上传接口，更新到最新安装包后再试`;
+  return `${name}（${size}）上传失败：${detail || "网络中断或后端写入失败"}，可稍后重试`;
+}
+
+/** data URL → Blob：convert 档已经转好 PNG，大图要按原始字节走 multipart（不再回读一次文件） */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(",");
+  const head = dataUrl.slice(5, comma < 0 ? undefined : comma);
+  const mime = head.split(";")[0] || "application/octet-stream";
+  const body = comma < 0 ? "" : dataUrl.slice(comma + 1);
+  if (!/;base64/i.test(head)) return new Blob([decodeURIComponent(body)], { type: mime });
+  const bin = atob(body); const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+/** 量图片尺寸用 objectURL：不必先把整张图读成 base64 */
+function imageSize(src: string): Promise<[number, number]> {
+  return new Promise((r) => { const im = new Image(); im.onload = () => r([im.naturalWidth, im.naturalHeight]); im.onerror = () => r([1, 1]); im.src = src; });
+}
+
+export async function addFiles(store: CanvasStore, files: File[], at: { x: number; y: number }, opts: { target?: string; linkTo?: string | string[]; replace?: string } = {}) {
   let dx = 0; const made: string[] = [];
+  // linkTo 可以是多个目标（多选加号的「上传文件」）：新节点逐个连成它们的输入
+  const linkIds = (opts.linkTo ? (Array.isArray(opts.linkTo) ? opts.linkTo : [opts.linkTo]) : []).filter((id) => !!store.node(id));
   for (const f of files) {
-    const kind: GenKind | null = f.type.startsWith("image/") ? "image" : f.type.startsWith("video/") ? "video" : f.type.startsWith("audio/") ? "audio" : null;
-    if (!kind && isDocument(f)) { const id = await addDocument(store, f, { x: at.x + dx, y: at.y }); if (id) { made.push(id); dx += 360; if (opts.linkTo && store.node(opts.linkTo)) connect(store, id, opts.linkTo, { quiet: true, select: false }); } continue; }
-    if (!kind) { store.toast(/\.pdf$/i.test(f.name) ? `${f.name}：暂不能读取 PDF 正文，请另存为 docx 或文本后上传` : `不支持的文件：${f.name}`, 5000); continue; }
-    // 目标节点只收同类型媒体：往视频节点塞图片、往图片节点塞音频都会把节点写坏，直接跳过并说清原因。
-    // 只作用在 target 分支上（替换 / 连成输入 / 空白处新建各走各的路，不受影响）。
-    const dst = opts.target ? store.node(opts.target) : undefined;
-    if (dst && isGenKind(dst.kind) && dst.kind !== kind) { store.toast(`「${f.name}」放不进${TYPE_LABEL[dst.kind]}节点：这里只收${TYPE_LABEL[dst.kind]}`, 5000); continue; }
-    if (f.size > MEDIA_UPLOAD_LIMIT) { store.toast(`${f.name} 超过 200MB，未添加`); continue; }
-    // 图片先过一遍格式判定：直接传 / 浏览器转 PNG / 明确拒绝（三档规则见 imageUpload.ts）
-    const plan = kind === "image" ? planImageUpload(f) : null;
-    if (plan?.mode === "reject") { store.toast(`暂不支持 ${plan.format} 格式：${f.name}，请另存为 PNG/JPG 后上传`, 6000); continue; }
-    let dataUrl = "";
-    let uploadName = f.name;
-    if (plan?.mode === "convert") {
-      const png = await convertImageToPng(f);
-      if (!png) { store.toast(`${f.name} 转成 PNG 失败，请另存为 PNG/JPG 后上传`, 6000); continue; }
-      dataUrl = png.dataUrl; uploadName = plan.name;
-    } else {
-      dataUrl = await new Promise<string>((r, j) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result)); fr.onerror = () => j(fr.error); fr.readAsDataURL(f); }).catch(() => "");
+    // 逐文件兜住：一个文件 413 / 断网 / 磁盘写不进，不能让同批其它文件跟着无声无息地消失
+    try {
+      const kind: GenKind | null = f.type.startsWith("image/") ? "image" : f.type.startsWith("video/") ? "video" : f.type.startsWith("audio/") ? "audio" : null;
+      if (!kind && isDocument(f)) { const id = await addDocument(store, f, { x: at.x + dx, y: at.y }); if (id) { made.push(id); dx += 360; linkIds.forEach((t) => connect(store, id, t, { quiet: true, select: false })); } continue; }
+      if (!kind) { store.toast(/\.pdf$/i.test(f.name) ? `${f.name}：暂不能读取 PDF 正文，请另存为 docx 或文本后上传` : `不支持的文件：${f.name}`, 5000); continue; }
+      // 目标节点只收同类型媒体：往视频节点塞图片、往图片节点塞音频都会把节点写坏，直接跳过并说清原因。
+      // 只作用在 target 分支上（替换 / 连成输入 / 空白处新建各走各的路，不受影响）。
+      const dst = opts.target ? store.node(opts.target) : undefined;
+      if (dst && isGenKind(dst.kind) && dst.kind !== kind) { store.toast(`「${f.name}」放不进${TYPE_LABEL[dst.kind]}节点：这里只收${TYPE_LABEL[dst.kind]}`, 5000); continue; }
+      if (f.size > MEDIA_UPLOAD_LIMIT) { store.toast(tooLargeText(f), 7000); continue; }
+      // 图片先过一遍格式判定：直接传 / 浏览器转 PNG / 明确拒绝（三档规则见 imageUpload.ts）
+      const plan = kind === "image" ? planImageUpload(f) : null;
+      if (plan?.mode === "reject") { store.toast(`暂不支持 ${plan.format} 格式：${f.name}，请另存为 PNG/JPG 后上传`, 6000); continue; }
+      let dataUrl = "";
+      let uploadName = f.name;
+      // 实际要上传的字节：convert 档是转好的 PNG，其余是原文件（大文件按字节走 multipart，小文件再读 data URL）
+      let uploadBlob: Blob = f;
+      if (plan?.mode === "convert") {
+        const png = await convertImageToPng(f);
+        if (!png) { store.toast(`${f.name} 转成 PNG 失败，请另存为 PNG/JPG 后上传`, 6000); continue; }
+        dataUrl = png.dataUrl; uploadName = plan.name; uploadBlob = dataUrlToBlob(png.dataUrl);
+      }
+      // 视频 / 音频读一下元数据：时长（使用区间、切镜要用）和视频宽高；尺寸 / 时长都从 objectURL 读，
+      // 不再先把整个文件读成 base64（几十 MB 的视频会整段进内存）
+      const probeUrl = URL.createObjectURL(uploadBlob);
+      const meta = kind === "image" ? null : await mediaMeta(probeUrl, kind);
+      const wh = kind === "image" ? await imageSize(probeUrl) : meta?.w && meta.h ? [meta.w, meta.h] : [16, 9];
+      URL.revokeObjectURL(probeUrl);
+      const dur = meta?.dur ? Math.round(meta.dur * 100) / 100 : undefined;
+      const useMultipart = uploadBlob.size > MULTIPART_UPLOAD_MIN && typeof store.backend.importAssetFile === "function";
+      let url: string;
+      try {
+        if (useMultipart) {
+          url = await store.backend.importAssetFile!(store.state.canvasId, uploadBlob, uploadName);
+        } else {
+          if (!dataUrl) dataUrl = await new Promise<string>((r, j) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result)); fr.onerror = () => j(fr.error); fr.readAsDataURL(f); }).catch(() => "");
+          if (!dataUrl) { store.toast("读取失败：" + f.name); continue; }
+          url = await store.backend.importAsset(store.state.canvasId, dataUrl, uploadName);
+        }
+      } catch (error) {
+        store.toast(uploadFailureText(f, error), 9000);
+        continue;
+      }
+      // 桌面版存资源库失败时不把整段 data URL 写进画布文档（几十上百 MB 会拖垮保存与本机备份），只放行小图
+      if (store.backend.kind === "bridge" && url.startsWith("data:") && url.length > INLINE_FALLBACK_MAX) { store.toast(`${f.name} 存入资源库失败，未添加（文件较大，不能内嵌进画布）`); continue; }
+      const name = uploadName.replace(/\.[^.]+$/, "").slice(0, 24);
+      // 「替换」：只换当前版本，节点本身不动（位置/尺寸/连线/提示词保留）
+      if (opts.replace && store.node(opts.replace)) { replaceNodeMedia(store, opts.replace, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }, kind); continue; }
+      if (opts.target && store.node(opts.target)) {
+        const t = store.node(opts.target)!; const g = genOf(t);
+        const box = kind === "image" ? refitNodeBox(t, wh[0], wh[1]) : null;
+        store.updateNode(t.id, (n) => withGen({ ...n, ...(box ? { w: box.w, h: box.h } : {}) }, { hist: [...g.hist, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], hi: g.hist.length, uploaded: true }), { history: true });
+        made.push(t.id); opts = { ...opts, target: undefined }; continue;
+      }
+      const box = kind === "image" ? fitSourceBox(wh[0], wh[1]) : kind === "video" && meta?.w && meta.h ? fitSourceBox(meta.w, meta.h, { baseW: 320 }) : null;
+      const w = box?.w || (kind === "image" ? 240 : 320);
+      const h = box?.h || (kind === "video" ? 180 : NODE_DEFAULT_SIZE.audio.h);
+      const n = store.newNode(kind, at.x + dx - w / 2, at.y - h / 2, { title: name, uploaded: true, hist: [{ url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], w, h });
+      store.addNodes([n]); made.push(n.id); dx += w + 30;
+      linkIds.forEach((t) => connect(store, n.id, t, { quiet: true, select: false }));
+    } catch (error) {
+      store.toast(`${f.name} 处理失败：${error instanceof Error ? error.message : "未知错误"}`, 9000);
     }
-    if (!dataUrl) { store.toast("读取失败：" + f.name); continue; }
-    // 视频 / 音频读一下元数据：时长（使用区间、切镜要用）和视频宽高
-    const meta = kind === "image" ? null : await mediaMeta(dataUrl, kind);
-    const wh = kind === "image" ? await new Promise<[number, number]>((r) => { const im = new Image(); im.onload = () => r([im.naturalWidth, im.naturalHeight]); im.onerror = () => r([1, 1]); im.src = dataUrl; }) : meta?.w && meta.h ? [meta.w, meta.h] : [16, 9];
-    const dur = meta?.dur ? Math.round(meta.dur * 100) / 100 : undefined;
-    const url = await store.backend.importAsset(store.state.canvasId, dataUrl, uploadName);
-    // 桌面版存资源库失败时不把整段 data URL 写进画布文档（几十上百 MB 会拖垮保存与本机备份），只放行小图
-    if (store.backend.kind === "bridge" && url.startsWith("data:") && url.length > INLINE_FALLBACK_MAX) { store.toast(`${f.name} 存入资源库失败，未添加（文件较大，不能内嵌进画布）`); continue; }
-    const name = uploadName.replace(/\.[^.]+$/, "").slice(0, 24);
-    // 「替换」：只换当前版本，节点本身不动（位置/尺寸/连线/提示词保留）
-    if (opts.replace && store.node(opts.replace)) { replaceNodeMedia(store, opts.replace, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }, kind); continue; }
-    if (opts.target && store.node(opts.target)) {
-      const t = store.node(opts.target)!; const g = genOf(t);
-      const box = kind === "image" ? refitNodeBox(t, wh[0], wh[1]) : null;
-      store.updateNode(t.id, (n) => withGen({ ...n, ...(box ? { w: box.w, h: box.h } : {}) }, { hist: [...g.hist, { url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], hi: g.hist.length, uploaded: true }), { history: true });
-      made.push(t.id); opts = { ...opts, target: undefined }; continue;
-    }
-    const box = kind === "image" ? fitSourceBox(wh[0], wh[1]) : kind === "video" && meta?.w && meta.h ? fitSourceBox(meta.w, meta.h, { baseW: 320 }) : null;
-    const w = box?.w || (kind === "image" ? 240 : 320);
-    const h = box?.h || (kind === "video" ? 180 : NODE_DEFAULT_SIZE.audio.h);
-    const n = store.newNode(kind, at.x + dx - w / 2, at.y - h / 2, { title: name, uploaded: true, hist: [{ url, w: wh[0], h: wh[1], ...(dur ? { dur } : {}) }], w, h });
-    store.addNodes([n]); made.push(n.id); dx += w + 30;
-    if (opts.linkTo && store.node(opts.linkTo)) connect(store, n.id, opts.linkTo, { quiet: true, select: false });
   }
-  if (opts.linkTo && store.node(opts.linkTo)) { store.setUI({ sel: new Set([opts.linkTo]) }); store.toast("已上传并连成输入"); return; }
+  if (linkIds.length) { store.setUI({ sel: new Set(linkIds) }); store.toast(linkIds.length > 1 ? "已上传并连成 " + linkIds.length + " 个节点的输入" : "已上传并连成输入"); return; }
   if (made.length) { store.setUI({ sel: new Set(made) }); store.toast(`已添加 ${made.length} 个文件`); }
 }
 

@@ -7,7 +7,7 @@
  *   · 每个节点跑完写 data.agentDone = { at, ok, url?, dur?, err?, node_id? }：助手那一轮在等它，读到就知道结果接着做
  */
 import { genOf, inputsOf, isGenKind, outOf, type GenKind } from "../model";
-import { runNode, runTableBatch } from "../engine";
+import { regenAsNew, runNode, runTableBatch } from "../engine";
 import { excludeSelfRefsFlag } from "./selfRefs";
 import { runQueueSequentially, type QueueItem } from "./runQueue";
 import { pendingCountQueueNodeIds, takeCountQueue } from "./countQueue";
@@ -19,7 +19,7 @@ import type { CanvasStore } from "../store";
 import { exportTimelineNode } from "../timelineAuto";
 
 const running = new WeakMap<CanvasStore, Set<string>>();
-type Flag = { at?: number; export?: boolean; params?: Record<string, unknown>; /** 这次生成不拿节点自己的产物当参考图 */ excludeSelfRefs?: boolean; /** 「在这张基础上改」：后端指定要带上的参考图地址 */ referenceImages?: unknown };
+type Flag = { at?: number; export?: boolean; params?: Record<string, unknown>; /** 这次生成不拿节点自己的产物当参考图 */ excludeSelfRefs?: boolean; /** 「在这张基础上改」：后端指定要带上的参考图地址 */ referenceImages?: unknown; /** 节点已有结果：右侧新建节点再跑，不在原节点追加版本（审查自动重跑不带它） */ regenAsNew?: boolean };
 const flagOf = (n: { data?: unknown }) => (n.data && typeof n.data === "object" ? (n.data as { agentRun?: Flag }).agentRun : undefined);
 /**
  * 画布助手「在这张基础上改」的参考图（后端契约，名字固定）：
@@ -95,6 +95,8 @@ export function runAgentQueued(store: CanvasStore): number {
   const queues = new Map<string, QueueItem[]>();
   /** 助手「在这张基础上改」的参考图：清标记前先读下来，跑的时候当额外参考图输入 */
   const references = new Map<string, string[]>();
+  /** 助手重跑已有结果的节点：改成右侧新建节点再跑（后端契约 agentRun.regenAsNew），清标记前先读下来 */
+  const regenNew = new Set<string>();
   // 先清标记（不进撤销历史），避免保存 / 刷新后被重复执行；
   // agentPendingExcludeSelfRefs 也在这里一起清掉，避免残留影响之后的手动重跑
   for (const n of queued) {
@@ -102,6 +104,7 @@ export function runAgentQueued(store: CanvasStore): number {
     const flag = flagOf(n);
     excludeSelf.set(n.id, flag?.excludeSelfRefs === true || excludeSelfRefsFlag(n.data));
     references.set(n.id, referenceImagesOf(n.data));
+    if (flag?.regenAsNew === true) regenNew.add(n.id);
     // 内存队列优先（approve 时放的，刷新不会丢）；没有就回落到节点 data.agentRunQueue
     const memory = takeCountQueue(store.state.canvasId, n.id);
     if (memory && memory.length) queues.set(n.id, memory);
@@ -210,6 +213,23 @@ export function runAgentQueued(store: CanvasStore): number {
             }
             markDone(store, id, { ok: true, node_id: first.nodeId, url: out.url, dur: out.dur });
             return true;
+          }
+          // 助手重跑一个已经有结果的节点：不在原节点追加版本（会把这一版当参考越改越偏），
+          // 改成「右侧新建同类型节点 + 复制提示词 / 参数 / 输入」再跑，旧节点原样保留。
+          // 输入等价于用户点「再来一张」的 fresh 语义：只复制来源节点的输入，绝不连旧节点、不把旧结果当参考。
+          // 只走单节点路径：表格逐行批量 / 时间线 / 同节点多组 / 组件编辑都在上面各自分支处理，行为不变。
+          const cur = store.node(id);
+          if (regenNew.has(id) && cur && isGenKind(cur.kind) && outOf(cur)) {
+            const fresh = regenAsNew(store, cur, undefined, { linkSelf: false, fresh: true, quiet: true });
+            const okFresh = await runNode(store, fresh.id, { inPlace: true, chain: true, excludeSelfRefs: excludeSelf.get(id) === true, referenceImages: references.get(id) || [] });
+            const fn = store.node(fresh.id); const fg = fn ? genOf(fn) : null; const fo = fn ? outOf(fn) : null;
+            const good = !!okFresh && !!fn && !fg?.err && !!(fo?.url || fo?.text);
+            const reason = good ? "" : (fg?.err || "画布没有拿到生成结果");
+            // 助手等的是「它点的那个节点」：agentDone 写在旧节点上并带上新节点 id，新节点也留一份
+            markDone(store, id, good ? { ok: true, url: fo?.url, node_id: fresh.id, dur: fo?.dur } : { ok: false, err: reason, node_id: fresh.id });
+            markDone(store, fresh.id, good ? { ok: true, url: fo?.url, dur: fo?.dur } : { ok: false, err: reason });
+            autorunLog({ stage: "regen-new-node", from: id, to: fresh.id, ok: good });
+            return good;
           }
           const ok = await runNode(store, id, { inPlace: true, chain: true, excludeSelfRefs: excludeSelf.get(id) === true, referenceImages: references.get(id) || [] });
           autorunLog({ stage: "single-done", nodeId: id, ok, err: store.node(id)?.data ? (genOf(store.node(id)!).err || "") : "" });

@@ -78,6 +78,14 @@ const size = M.frameSize('9:16', '1080p');
 assert.strictEqual(size.width, 1080); assert.strictEqual(size.height, 1920);
 assert.ok(M.frameSize('21:9', '720p').width % 2 === 0);
 
+// 自动清晰度：取最短边最大的那条素材定档，混进 720p 不会被拉低；一条可用尺寸都没有时默认 1080p
+assert.strictEqual(M.autoRes([{ w: 1920, h: 1080 }, { w: 1280, h: 720 }]), '1080p', '1080p + 720p 跟 1080p');
+assert.strictEqual(M.autoRes([{ w: 1280, h: 720 }, { w: 960, h: 720 }]), '720p', '全 720p 还是 720p');
+assert.strictEqual(M.autoRes([]), '1080p', '空数组默认 1080p');
+assert.strictEqual(M.autoRes([{ w: 0, h: 0 }, { w: NaN, h: 1080 }, { w: 1920, h: 0 }]), '1080p', '非法 / 0 值忽略');
+assert.strictEqual(M.autoRes([{ w: 3840, h: 2160 }]), '4K', '2160p 走 4K');
+assert.strictEqual(M.autoRes([{ w: 2560, h: 1440 }]), '2K', '1440p 走 2K');
+
 // 画中画轨：自由摆放，长度按使用区间 / 速度；不影响主轨排位
 const main1 = clip('m1', { inPoint: 0, outPoint: 4 });
 const ov = clip('o1', { layer: 'overlay', start: 1.5, inPoint: 1, outPoint: 3 });

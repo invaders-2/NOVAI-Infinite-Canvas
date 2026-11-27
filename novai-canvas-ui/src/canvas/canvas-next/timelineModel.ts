@@ -368,6 +368,21 @@ export function frameSize(ratio: string, res: string): { width: number; height: 
   return a >= b ? { width: even((short * a) / b), height: short } : { width: short, height: even((short * b) / a) };
 }
 
+export type MediaSize = { w: number; h: number };
+/** 素材真实尺寸 → 导出档位：按最短边最大的那条定档，混进低分辨率素材时不会被它拉低 */
+export function autoRes(sizes: MediaSize[]): Res {
+  let short = 0;
+  for (const s of sizes) {
+    const v = Math.min(Number(s?.w), Number(s?.h));
+    if (Number.isFinite(v) && v > short) short = v;
+  }
+  if (!short) return "1080p";
+  if (short <= 720) return "720p";
+  if (short <= 1080) return "1080p";
+  if (short <= 1440) return "2K";
+  return "4K";
+}
+
 const srtTime = (s: number) => {
   const ms = Math.max(0, Math.round(s * 1000)); const p = (n: number, w = 2) => String(n).padStart(w, "0");
   return `${p(Math.floor(ms / 3600000))}:${p(Math.floor(ms / 60000) % 60)}:${p(Math.floor(ms / 1000) % 60)},${p(ms % 1000, 3)}`;

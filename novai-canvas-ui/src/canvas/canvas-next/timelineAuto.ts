@@ -6,10 +6,10 @@
  */
 import { novaiTimelineAvailable, renderTimelineNovai } from "../react-canvas/timelineExportBackend";
 import { addFiles } from "./actions";
-import { newNode } from "./model";
+import { newNode, outOf } from "./model";
 import type { CanvasStore } from "./store";
 import { exportMp4Browser } from "./timelineExportMp4";
-import { frameSize, needsCompositor, normalize, RATIOS, RESES, renderPlan, toSrt, totalOf, trackOf, type Clip } from "./timelineModel";
+import { autoRes, frameSize, needsCompositor, normalize, RATIOS, RESES, renderPlan, toSrt, totalOf, trackOf, type Clip, type MediaSize } from "./timelineModel";
 import { recordWebM, type SubStyle } from "./timelinePlayer";
 import { resolveMediaUrl } from "./ui/useAsset";
 
@@ -25,7 +25,14 @@ export async function exportTimelineNode(store: CanvasStore, id: string): Promis
   if (!totalOf(clips) || !clips.some((c) => c.type !== "subtitle" && c.mediaKind !== "audio" && c.url)) return { ok: false, err: "时间线上还没有画面片段" };
   const data = (node.data || {}) as { tlRes?: string; tlSub?: SubStyle; tlFit?: "contain" | "cover" };
   const ratio = (RATIOS as readonly string[]).includes(String(node.ratio)) ? String(node.ratio) : "16:9";
-  const res = (RESES as readonly string[]).includes(String(data.tlRes)) ? String(data.tlRes) : "1080p";
+  // 没手选清晰度时按素材真实尺寸定档（与时间线编辑器同一套规则），不再写死 1080p / 720p
+  const res = (RESES as readonly string[]).includes(String(data.tlRes)) ? String(data.tlRes) : autoRes(clips.flatMap((c): MediaSize[] => {
+    if (c.type === "subtitle" || c.mediaKind === "audio" || !c.url) return [];
+    const src = c.sourceNodeId ? store.node(c.sourceNodeId) : null;
+    const o = src ? outOf(src) : null;
+    const w = Number(o?.w); const h = Number(o?.h);
+    return w > 0 && h > 0 ? [{ w, h }] : [];
+  }));
   const size = frameSize(ratio, res); const title = (node.text || "剪辑时间线") + " · 成片";
   const at = { x: node.x + node.w + 120, y: node.y };
   const resolve = (u: string) => resolveMediaUrl(store.backend, u);

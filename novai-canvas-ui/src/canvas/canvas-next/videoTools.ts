@@ -15,8 +15,8 @@ import type { CanvasNode } from "../react-canvas/reactCanvasStore";
 import type { VideoSegment } from "./backend/types";
 import { connect } from "./actions";
 import { timelineFromOrdered } from "./playlist";
-import { regenAsNew, runNode } from "./engine";
-import { clampTrim, defaultParams, genOf, outOf, resRange, trimIsFull, uid, type ModelSpec, type VideoMode, type VideoParams } from "./model";
+import { freeSpotRight, regenAsNew, runNode } from "./engine";
+import { clampTrim, defaultParams, genOf, newNode, outOf, resRange, trimIsFull, uid, type ModelSpec, type VideoMode, type VideoParams } from "./model";
 import type { CanvasStore } from "./store";
 import { keyHint } from "./ui/shortcuts";
 
@@ -152,7 +152,27 @@ export async function aiVideoEdit(store: CanvasStore, n: CanvasNode, op: VideoAi
   return store.node(node.id)!;
 }
 
-/** 草稿出成片：在右边新建节点，关掉草稿、清晰度拉到最高，沿用提示词和全部输入 */
+/**
+ * 草稿出成片（Seedance 两段式）：新建一个成片节点，请求只带草稿任务 id + 目标档位。
+ * 不重发提示词 / 参考素材 / 时长 / 比例（后端会忽略，上游同值也 400）；原草稿保留，同一草稿可多次出片。
+ */
+export async function draftToFinalTask(store: CanvasStore, n: CanvasNode, draftTaskId: string, resolution: string): Promise<CanvasNode | null> {
+  const m = store.modelOf(n);
+  const task = String(draftTaskId || "").trim();
+  const target = String(resolution || "").trim().toLowerCase();
+  if (!m || !task || !target) { store.toast("草稿任务 id 或目标档位缺失，无法出成片"); return null; }
+  const base = genOf(n).title.replace(/ · \d+$/, "");
+  const source = genOf(n).params as VideoParams;
+  const params: VideoParams = { ...JSON.parse(JSON.stringify(source)), model: m.id, draft: false, draftTaskId: task, res: target };
+  const { x, y } = freeSpotRight(store.state.doc, n);
+  const fresh = newNode("video", x, y, { title: `${base} · ${target} 成片`, prompt: genOf(n).prompt, params, w: n.w, h: n.h }, m);
+  store.addNodes([fresh], [], { select: true });
+  store.toast(`成片生成中（${target}）：复用草稿任务，不再重发提示词 / 参考素材；原草稿保留，可多次出片`, 5200);
+  await runNode(store, fresh.id);
+  return store.node(fresh.id) || null;
+}
+
+/** 旧版草稿（没有草稿任务 id / 模型没有 caps.draft）：在右边新建节点，关掉草稿、清晰度拉到最高，沿用提示词和全部输入 */
 export async function draftToFinal(store: CanvasStore, n: CanvasNode): Promise<CanvasNode | null> {
   const m = store.modelOf(n); const r = resRange(m);
   const fresh = regenAsNew(store, n);

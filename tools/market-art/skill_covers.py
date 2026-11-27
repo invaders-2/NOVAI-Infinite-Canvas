@@ -33,6 +33,8 @@ PROMPTS = {
  'shot-composition': 'View through a camera viewfinder with a rule-of-thirds grid overlay framing a lone person on a vast pale salt flat under a soft sky',
  'fashion-editorial': 'Fashion editorial shot on 35mm analog film: a model in a cream linen slip dress leaning against a sunlit white stucco wall, long cast shadows and dappled leaf shadows, hand-enlarged silver gelatin print feel, honest skin texture',
  'text-to-image-prompt-optimizer': 'A vintage cream typewriter on a wooden desk whose paper sheet unfurls into a vivid painted landscape flowing out of it, imaginative concept',
+ 'photoshop-recipes': 'A retouching workbench against a sand-colored plaster wall with a neat row of printed photo cards pinned up: a portrait before-and-after pair, a teal-and-orange graded cinematic still, a clean white-background product shot, a hand reaching in to choose one print, color swatch chips and a stylus laid beside them',
+ 'photoshop-remove-background': 'A single matte cream ceramic cup standing alone on a warm sand-colored seamless paper backdrop while the backdrop sheet is peeled up and torn away around the cup, the lifted torn paper edge curling up behind it, the cup cleanly isolated and sharp with a soft contact shadow, a small amber glass token resting on the bare surface beside it',
 }
 
 def key():

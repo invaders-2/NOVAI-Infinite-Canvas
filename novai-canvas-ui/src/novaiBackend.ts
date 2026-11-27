@@ -1,10 +1,10 @@
 import { hostRoot } from "./novaiBridgeRoot";
 import type { CanvasBackend, CanvasTask, ChatMessage, DepthModelStatus, EditRequest, GenEvent, GenRequest, GenResult, LoadedDoc, MattingModelStatus, SavedDoc, UpscaleResult, UpscaleRuntimeStatus } from "./canvas/canvas-next/backend/types";
 import { GenError } from "./canvas/canvas-next/backend/types";
-import { defaultParams, gifFrameFieldsForRequest, outputFormatForRequest, qualityForRequest, ratioWH, specFor, thinkingForRequest, withGen, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./canvas/canvas-next/model";
+import { defaultParams, draftActive, draftFinalActive, draftFinalResolution, draftRes, gifFrameFieldsForRequest, mjVideoAnimateMode, mjVideoBatch, mjVideoInputError, mjVideoMotion, mjVideoSpec, mjVideoTier, mjVideoType, outputFormatForRequest, qualityForRequest, ratioWH, specFor, thinkingForRequest, withGen, type GenOutput, type ImageParams, type ModelSpec, type TextParams, type VideoParams } from "./canvas/canvas-next/model";
 import { emptyDoc, hasContent, readDoc, sanitizeDoc, type CanvasDoc, type CanvasNode, type NodeKind } from "./canvas/react-canvas/reactCanvasStore";
 import { queueLocalMirror } from "./canvas/canvas-next/localMirror";
-import { clampImageSize, indexModelCaps, mergeCapsReferenceCapability, modelCapsKey, modelCapsUi, type ModelCapsItem } from "./canvas/canvas-next/modelCaps";
+import { clampImageSize, clampMaiSize, indexModelCaps, mergeCapsReferenceCapability, modelCapsKey, modelCapsUi, type ModelCapsItem } from "./canvas/canvas-next/modelCaps";
 import { midjourneyPrompt } from "./canvas/canvas-next/midjourney";
 import { readExtraModels } from "./canvas/canvas-next/modelExtras";
 
@@ -69,6 +69,41 @@ async function request(path: string, init?: RequestInit): Promise<any> {
 
 function jsonBody(body: unknown): RequestInit {
   return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+}
+
+/** 成片步 schema 必填的占位提示词（后端不会转给上游；文档允许前端传占位文本） */
+const DRAFT_FINAL_PROMPT = "草稿出成片";
+
+/** 草稿步失败：说清是草稿这一步，并带上有效期口径 */
+function draftStageError(error: unknown): unknown {
+  if (!(error instanceof GenError)) return error;
+  return new GenError(error.code, `草稿生成失败：${error.message}（草稿 3 天内可出成片；失败不扣费，可重试）`);
+}
+
+/** 成片步失败：过期 / 不存在给明确改法；4K 通道不支持时引导改 1080p（不用重新出草稿） */
+function draftFinalError(error: unknown): unknown {
+  if (!(error instanceof GenError)) return error;
+  const message = String(error.message || "");
+  if (/4k|4096/i.test(message) && /不支持|not\s*support|unsupported|invalid|不允许|not available/i.test(message)) {
+    return new GenError(error.code, "该通道不支持 4K 成片，改用 1080p 重试（草稿仍有效，不用重新出草稿）");
+  }
+  if (error.code === "HTTP_400" || /draft|草稿|过期|expired|not found|不存在/i.test(message)) {
+    return new GenError(error.code || "DRAFT_EXPIRED", "草稿不存在或已过期（草稿 3 天内有效），请重新生成草稿");
+  }
+  return error;
+}
+
+/** MJ 图生视频的上游 400：按契约 §8.7 的失败原因翻成能直接照做的改法（不吞原始文案） */
+function mjVideoError(error: unknown): unknown {
+  if (!(error instanceof GenError)) return error;
+  const message = String(error.message || "");
+  if (/task_id|task not found|not exist|不存在|过期|expired/i.test(message)) return new GenError(error.code, "复用 MJ 任务图失败：要传上游出图任务的 task_id（不是画布任务 id）；也可以改成直接传首帧图");
+  if (/video_type|video type/i.test(message)) return new GenError(error.code, "视频规格只有 480p / 720p 两档（没有 1080p / 4k）：换成 480p 或 720p 重试");
+  if (/animate_mode|animate mode/i.test(message)) return new GenError(error.code, "自动模式必须复用 MJ 任务并指明第 0–3 张候选；没有 task_id 时只能手动");
+  if (/motion/i.test(message)) return new GenError(error.code, "运动幅度只有 low / high 两档");
+  if (/batch/i.test(message)) return new GenError(error.code, "批次只有 1 / 2 / 4");
+  if (/首帧|first.frame|image_urls/i.test(message)) return new GenError(error.code, "MJ 图生视频需要一张首帧图（文档不支持文生视频），且只收 1 张");
+  return new GenError(error.code, "MJ 图生视频失败：" + message);
 }
 
 function splitModel(id: string): { provider: string; model: string } {
@@ -286,13 +321,29 @@ export function outputsFromTaskResult(kind: "image" | "video", taskId: string, r
   return rows.map((row: any) => ({ url: urlOf(row), frame: row?.poster || row?.thumbnail || undefined, dur: Number(row?.duration) || meta.dur, res: meta.res, meta: { model: meta.model || "", at, runId: taskId } })).filter((output: GenOutput) => output.url);
 }
 
-async function createImageTask(req: GenRequest | EditRequest, prompt: string, params: ImageParams, references: Row[], signal: AbortSignal, onEvent: (event: GenEvent) => void, sizeOverride?: string): Promise<GenOutput[]> {
+async function createImageTask(req: GenRequest | EditRequest, prompt: string, params: ImageParams, references: Row[], signal: AbortSignal, onEvent: (event: GenEvent) => void, sizeOverride?: string, countOverride?: number, caps?: ModelCapsItem): Promise<GenOutput[]> {
   const selected = splitModel(req.model?.id || "");
   // 质量档 / 先思考：只有用户在面板上明确选了才下发；不传 = 跟随上游默认
   const quality = qualityForRequest(params.quality);
   const thinking = thinkingForRequest(params.thinking);
   // 透明背景：只有用户明确开了才下发（服务端会把 output_format 强制成 png，这边也不再发 GIF / SVG 的格式与帧参数）
   const transparent = params.background === "transparent";
+  // 长图用途 / 篇幅 / 系列张数 / 上游背景枚举：只按该模型 caps 的声明下发，别的模型一个字段都不带
+  const capStrings = (value: unknown) => (Array.isArray(value) ? value : []).map((item) => String(item ?? "").trim().toLowerCase()).filter(Boolean);
+  const skills = capStrings(caps?.skill);
+  const skillWanted = String(params.skill || "").trim().toLowerCase();
+  const skill = skills.length ? (skills.includes(skillWanted) ? skillWanted : skills[0]) : "";
+  const lengths = capStrings(caps?.length);
+  const lengthWanted = String(params.length || "").trim().toLowerCase();
+  const length = skill === "ecommerce" && lengths.length ? (lengths.includes(lengthWanted) ? lengthWanted : "medium") : "";
+  const series = caps && caps.series && typeof caps.series === "object" ? caps.series as { min?: unknown; max?: unknown } : null;
+  const seriesMin = Math.max(2, Math.floor(Number(series?.min)) || 2);
+  const seriesMax = Math.floor(Number(series?.max)) || 0;
+  const seriesWanted = Math.floor(Number(params.seriesImages)) || 0;
+  const seriesImages = seriesMax >= seriesMin && seriesWanted >= seriesMin && seriesWanted <= seriesMax ? seriesWanted : 0;
+  const backgrounds = capStrings(caps?.background);
+  const backgroundWanted = String(params.background || "").trim().toLowerCase();
+  const modelBackground = !transparent && backgroundWanted !== "auto" && backgrounds.includes(backgroundWanted) ? backgroundWanted : "";
   const outputFormat = transparent ? "" : outputFormatForRequest(params.outputFormat);
   // GIF 帧参数只在 outputFormat=gif 时下发（后端 0/缺省 = 9 帧 / 200ms；这里先按 caps 夹成合法值）
   const gifFrameFields = transparent ? {} : gifFrameFieldsForRequest(params, req.model);
@@ -313,12 +364,17 @@ async function createImageTask(req: GenRequest | EditRequest, prompt: string, pa
     size: sizeOverride || imageSize(params),
     // 原图比例：把 auto 一起告诉后端 —— size 发成 auto 时它按参考图算；发成显式像素时它也不用再猜
     ...(/auto|自适应|source/i.test(params.ratio) ? { ratio: "auto" } : {}),
-    n: Math.max(1, Math.min(4, Number(params.count) || 1)),
+    // 张数上限由调用方按 caps 的 n_max 收（见 requestImageCount）；这里只兜底脏值，不再硬钳 4。
+    // 系列模式生效时上游要求 n 必须为 1（n>1 直接 400），张数由 series_images 决定
+    n: seriesImages ? 1 : Math.max(1, Math.floor(countOverride ?? (Number(params.count) || 1))),
     reference_images: references,
+    ...(skill ? { skill } : {}),
+    ...(length ? { length } : {}),
+    ...(seriesImages ? { series_images: seriesImages } : {}),
     ...(quality ? { quality } : {}),
     ...(thinking === undefined ? {} : { thinking_mode: thinking }),
     ...(outputFormat ? { output_format: outputFormat } : {}),
-    ...(transparent ? { background: "transparent" } : {}),
+    ...(transparent ? { background: "transparent" } : modelBackground ? { background: modelBackground } : {}),
     ...gifFrameFields,
     ...(mjVersion ? { midjourney_version: mjVersion } : {}),
     ...(mjHd ? { midjourney_hd: true } : {}),
@@ -483,6 +539,18 @@ export function createNovaiBackend(): CanvasBackend {
     return url;
   };
 
+  /** 大文件走 multipart 原始字节（后端 /api/ai/upload 按类型分档 200MB，图片 50~200MB 会自动压缩） */
+  const uploadAssetFile = async (file: Blob, name: string): Promise<string> => {
+    const form = new FormData();
+    form.append("files", file, name);
+    const response = await fetch("/api/ai/upload", { method: "POST", body: form });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new GenError(`HTTP_${response.status}`, errorText(data, `上传失败（${response.status}）`));
+    const url = urlOf(data.files?.[0]);
+    if (!url) throw new GenError("ASSET_IMPORT_FAILED", "素材上传失败");
+    return url;
+  };
+
   const isLocalMediaUrl = (path: string) => /^\/(output|assets)\//.test(path);
 
   /**
@@ -639,8 +707,23 @@ export function createNovaiBackend(): CanvasBackend {
     const selected = splitModel(model.id);
     const item = await capsItemFor(selected.provider, selected.model);
     if (!item) return size;
+    // mai 是另一套口径（无长边上限、两边 ≥min_side、向下取 size_step 的倍数），不能套 GPT-Image 的 clampImageSize
+    if (item.min_side || item.size_step) {
+      return clampMaiSize(size, { minSide: Number(item.min_side) || 0, sizeStep: Number(item.size_step) || 0, maxPixels: Number(item.max_pixels) || 0 }).size || size;
+    }
     const out = clampImageSize(size, { maxLongEdge: Number(item.max_long_edge) || 0, maxPixels: Number(item.max_pixels) || 0, minPixels: Number(item.min_pixels) || 0 });
     return out.size || size;
+  };
+  /**
+   * 请求张数收进模型上限（/api/model-caps 的 n_max）：能力表声明 1–9 就发 9，不再硬钳 4。
+   * 拿不到 caps 时退回旧的保守上限 4（没声明上限 ≠ 能发任意张）。
+   */
+  const requestImageCount = async (model: ModelSpec | undefined, count: number): Promise<number> => {
+    const want = Math.max(1, Math.floor(Number(count) || 1));
+    const selected = splitModel(model?.id || "");
+    const item = model ? await capsItemFor(selected.provider, selected.model) : undefined;
+    const nMax = Math.floor(Number(item?.n_max));
+    return Number.isFinite(nMax) && nMax >= 1 ? Math.min(want, nMax) : Math.min(4, want);
   };
   /** Midjourney 只收单行纯文本：markdown / 换行 / `--` 会被当成参数解析（后端 adapter 也清一遍） */
   const isMidjourney = (model: ModelSpec) => /midjourney|\bmj\b/i.test(model.name || "");
@@ -823,37 +906,104 @@ export function createNovaiBackend(): CanvasBackend {
         const text = await chat({ canvasId: req.canvasId, configId: req.model.id, thinkLevel: (req.params as TextParams).think, messages: [{ role: "user", content: (context ? context + "\n\n" : "") + (req.resolvedPrompt || "请整理上面的输入") }], images: req.model.vision ? req.inputs.filter((input) => input.kind === "image" && input.url).map((input) => input.url!) : [] }, (full) => onEvent({ type: "text", text: full }), signal);
         return { outputs: [{ text, meta: { model: req.model.name, at: Date.now() } }] };
       }
-      const refs = await Promise.all(req.inputs.filter((input) => input.url).map(async (input) => ({ url: await uploadAsset(input.url!, input.title), name: input.title, role: input.role, kind: input.kind })));
+      // 成片步只发草稿任务 id + 目标档位：输入素材一个都不上传（后端也会清空这些字段，UI 不制造"它们生效"的错觉）
+      const videoParams = req.kind === "video" ? req.params as VideoParams : null;
+      const draftFinal = !!videoParams && draftFinalActive(videoParams, req.model);
+      const refs = draftFinal ? [] : await Promise.all(req.inputs.filter((input) => input.url).map(async (input) => ({ url: await uploadAsset(input.url!, input.title), name: input.title, role: input.role, kind: input.kind })));
       if (req.kind === "image") {
         const prompt = promptForModel(req.model, req.resolvedPrompt);
+        const selected = splitModel(req.model.id);
+        const capsItem = await capsItemFor(selected.provider, selected.model);
         const size = await requestImageSize(req.model, imageSize(req.params as ImageParams));
-        return { outputs: await createImageTask(req, prompt, req.params as ImageParams, refs.filter((ref) => ref.kind === "image"), signal, onEvent, size) };
+        const n = await requestImageCount(req.model, (req.params as ImageParams).count);
+        return { outputs: await createImageTask(req, prompt, req.params as ImageParams, refs.filter((ref) => ref.kind === "image"), signal, onEvent, size, n, capsItem) };
       }
       if (req.kind === "video") {
         const selected = splitModel(req.model.id);
         const params = req.params as VideoParams;
+        // 草稿两段式只对 caps 声明 draft 的模型生效；其它模型上残留的旧值不发字段、也不改清晰度
+        const draftStage = draftActive(params, req.model);
         // caps 声明没有分辨率档位（如 Context-IR）：不要硬塞默认 720p
         const declaresResolution = (req.model.res || []).length > 0;
-        const body = {
+        // MJ 图生视频：独立端点与独立请求体，字段只在这个模型上出现（其它模型一个都不带）。
+        // 上游只收「首帧图」或「复用 MJ 任务的某张候选」二选一，外加 end_url / motion / video_type /
+        // batch_size / animate_mode；duration、aspect_ratio、seed、音频这些上游没有的字段一律不发。
+        const mjVideo = mjVideoSpec(req.model);
+        const mjFirst = refs.find((ref) => ref.kind === "image" && ref.role === "first_frame");
+        const mjLast = refs.find((ref) => ref.kind === "image" && ref.role === "last_frame");
+        const mjInputError = mjVideo ? mjVideoInputError(req.model, params, !!mjFirst) : null;
+        if (mjInputError) throw new GenError("MJ_VIDEO_INPUT", mjInputError);
+        const mjTaskId = String(params.mjTaskId || "").trim();
+        const mjIndexRaw = params.mjIndex;
+        const mjHasIndex = mjIndexRaw !== undefined && mjIndexRaw !== null && String(mjIndexRaw).trim() !== "";
+        // 档位先收进 caps 的 480p/720p（1080p/4k 这类残留值不原样发出去）；
+        // caps 给了档位映射才发 video_type，没给就发 resolution，由后端按档位推导
+        const mjTier = mjVideo ? mjVideoTier(req.model, params.res) : "";
+        const mjVideoTypeValue = mjVideo ? mjVideoType(req.model, mjTier, !!mjLast) : "";
+        const body = mjVideo ? {
+          prompt: req.resolvedPrompt,
+          provider_id: selected.provider,
+          model: selected.model,
+          // 上游只有图生视频，没有文生视频 / 其它方式
+          mode: "image_to_video",
+          ...(mjFirst ? { images: [{ url: mjFirst.url, name: mjFirst.name, role: "first_frame" }] } : {}),
+          ...(mjLast ? { end_image: { url: mjLast.url } } : {}),
+          motion: mjVideoMotion(req.model, params.motion),
+          mj_batch: mjVideoBatch(req.model, params.mjBatch),
+          ...(mjVideoTypeValue ? { video_type: mjVideoTypeValue } : mjTier ? { resolution: mjTier } : {}),
+          ...(mjTaskId ? { mj_task_id: mjTaskId } : {}),
+          ...(mjTaskId && mjHasIndex ? { mj_index: Math.floor(Number(mjIndexRaw)) } : {}),
+          animate_mode: mjVideoAnimateMode(req.model, params),
+          // 任务和画布节点绑定：离开画布回来按 node_id 接上
+          ...(req.canvasId ? { canvas_id: req.canvasId } : {}),
+          ...(req.nodeId ? { node_id: req.nodeId } : {}),
+        } : draftFinal ? {
+          // schema 必填；后端不会把它发给上游（成片只认草稿任务 id + 目标档位）
+          prompt: DRAFT_FINAL_PROMPT,
+          provider_id: selected.provider,
+          model: selected.model,
+          draft_task_id: String(params.draftTaskId || "").trim(),
+          resolution: draftFinalResolution(params, req.model),
+          // 任务和画布节点绑定：离开画布回来按 node_id 接上
+          ...(req.canvasId ? { canvas_id: req.canvasId } : {}),
+          ...(req.nodeId ? { node_id: req.nodeId } : {}),
+        } : {
           prompt: req.resolvedPrompt,
           provider_id: selected.provider,
           model: selected.model,
           duration: params.dur,
           aspect_ratio: params.ratio,
-          ...(declaresResolution ? { resolution: params.res } : {}),
+          ...(declaresResolution ? { resolution: draftStage ? draftRes(params, req.model) : params.res } : {}),
           images: refs.filter((ref) => ref.kind === "image"),
           videos: refs.filter((ref) => ref.kind === "video").map((ref) => ({ url: ref.url, role: ref.role })),
           audios: refs.filter((ref) => ref.kind === "audio").map((ref) => ref.url),
           generate_audio: !!params.sound,
+          // 内容审核（magi-2 这类声明了 caps 布尔位的模型）：只有用户显式打开才发，
+          // 默认 / 其它模型 / 关闭时一个字段都不带（上游 false/省略 = 不审核、不产生审核成本）
+          ...(req.model.nsfw === true && params.nsfw === true ? { nsfw_check: true } : {}),
+          // 草稿步：正常请求 + draft:true（resolution 固定草稿档，别的模型不带这个字段）
+          ...(draftStage ? { draft: true } : {}),
           // 任务和画布节点绑定：离开画布回来按 node_id 接上
           ...(req.canvasId ? { canvas_id: req.canvasId } : {}),
           ...(req.nodeId ? { node_id: req.nodeId } : {}),
         };
-        const task = await request("/api/canvas-video?async=1", { ...jsonBody(body), signal });
-        if (!task.task_id) throw new GenError("NO_TASK", "视频任务没有返回任务 ID");
-        onEvent({ type: "started", runId: String(task.task_id) });
-        const result = await pollTask(String(task.task_id), "video", signal, onEvent, req.model.secs || 120);
-        const outputs = outputsFromTaskResult("video", String(task.task_id), result, { model: req.model.name, dur: params.dur, res: params.res });
+        let task: Row;
+        let result: Row;
+        try {
+          task = await request("/api/canvas-video?async=1", { ...jsonBody(body), signal });
+          if (!task.task_id) throw new GenError("NO_TASK", "视频任务没有返回任务 ID");
+          onEvent({ type: "started", runId: String(task.task_id) });
+          result = await pollTask(String(task.task_id), "video", signal, onEvent, req.model.secs || 120);
+        } catch (error) {
+          if (mjVideo) throw mjVideoError(error);
+          if (draftFinal) throw draftFinalError(error);
+          if (draftStage) throw draftStageError(error);
+          throw error;
+        }
+        const outputs = outputsFromTaskResult("video", String(task.task_id), result, { model: req.model.name, dur: params.dur, res: draftStage ? draftRes(params, req.model) : params.res });
+        // 草稿任务 id 只认后端返回体的 task_id（不是画布任务 id）；出成片时原样发回
+        const draftTaskId = draftStage ? String(result?.task_id || "").trim() : "";
+        const withDraft = draftTaskId ? outputs.map((output) => ({ ...output, draftTaskId })) : outputs;
         if (!outputs.length) {
           // 只出提示词的模型（如 Context-IR）：后端把结构化提示词放在 result.prompt，没有视频。
           // 明确报错并带上提示词，节点不会卡在「生成中」，用户也能把结果喂回 H3。
@@ -863,7 +1013,7 @@ export function createNovaiBackend(): CanvasBackend {
           }
           throw new GenError("NO_OUTPUT", "生成结果缺少视频地址");
         }
-        return { outputs, runId: String(task.task_id) };
+        return { outputs: withDraft, runId: String(task.task_id) };
       }
       const selected = splitModel(req.model.id);
       const params = req.params as any;
@@ -1025,6 +1175,7 @@ export function createNovaiBackend(): CanvasBackend {
       await request("/api/agent/default-model", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: id || "" }) });
     },
     async importAsset(_canvasId, dataUrl, name) { return uploadAsset(dataUrl, name); },
+    async importAssetFile(_canvasId, file, name) { return uploadAssetFile(file, name); },
     async importRemote(_canvasId, url) { return url; },
     async resolveAsset(ref) { return ref || null; },
     async mattingModelStatus(): Promise<MattingModelStatus> {

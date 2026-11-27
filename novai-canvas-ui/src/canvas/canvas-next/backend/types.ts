@@ -245,6 +245,12 @@ export interface CanvasBackend {
   regenerateAgentResults?(req: AgentRegenerateRequest): Promise<{ ok: boolean; taskId?: string; status?: string; error?: string }>;
   /** 本地文件 / data URL 存进资源库，返回画布里可保存的地址（novai-asset:… 或原地址） */
   importAsset(canvasId: string, dataUrl: string, name: string): Promise<string>;
+  /**
+   * 大文件上传：把原始字节按 multipart 直接发给后端（NOVAI 适配器 → POST /api/ai/upload），
+   * 不读成 base64 —— 省掉约 1/3 的体积膨胀，也不用把整段字符串塞进内存。
+   * 只有 NOVAI 适配器实现；bridge / mock 不实现，调用方（addFiles）自动回落 importAsset 的 data URL 路径。
+   */
+  importAssetFile?(canvasId: string, file: Blob, name: string): Promise<string>;
   /** 模型返回的远程结果（https）下载进资源库，返回 novai-asset 引用；失败时原样返回 url */
   importRemote?(canvasId: string, url: string, name: string): Promise<string>;
   /** novai-asset:… → 可显示的地址 */
