@@ -6,7 +6,7 @@ import { Markdown, TextSkeleton } from "./markdown";
 import { GroupBody, GroupTools, Model3DBody, NoteBody, Scene3DBody, TimelineBody } from "./LegacyNodes";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CanvasNode } from "../../react-canvas/reactCanvasStore";
-import { bgColor, clampTrim, formatClock, genOf, isGenKind, outOf, tagColor, TYPE_ICON, TYPE_LABEL, videoResLabel, type GenOutput, type VideoParams, type VideoTrim } from "../model";
+import { bgColor, clampTrim, formatClock, genOf, isGenKind, outOf, resTierLabel, tagColor, TYPE_ICON, TYPE_LABEL, videoResLabel, type GenOutput, type VideoParams, type VideoTrim } from "../model";
 import type { RunState } from "../store";
 import { Icon } from "./Icon";
 import { TableNodeBody } from "./TableNode";
@@ -27,6 +27,10 @@ import { retryBlockedReason } from "../errorText";
 export type NodeViewProps = {
   node: CanvasNode;
   sel: boolean;
+  /** 指针正按着它、选中态还没显示：只给一层轻量按压反馈 */
+  pressing?: boolean;
+  /** 选中态外观开关（框选拖动期间为 false）：白框 / 端口 / 缩放手柄等选中外观都等松手再出 */
+  chrome?: boolean;
   run?: RunState;
   editing: boolean;
   drop: boolean;
@@ -62,7 +66,7 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
   // 「解析」中的节点：纯界面态（store.ui.parsing），只借文本生成中的骨架 / 脉冲点，不动运行时
   const parsing = useS((s) => s.ui.parsing.has(node.id));
   useEffect(() => { const t = setTimeout(() => { enterRef.current = false; setEntering(false); }, 200); return () => clearTimeout(t); }, []);
-  const cls = ["node", entering ? "enter" : "", p.sel ? "sel" : "", run ? "running" : "", p.drop ? "drop" : "", p.noconn ? "noconn" : "", p.hl ? "hl" : "", p.queued && !run ? "queued" : ""].filter(Boolean).join(" ");
+  const cls = ["node", entering ? "enter" : "", p.sel ? "sel" : "", p.chrome ? "chrome" : "", p.pressing ? "pressing" : "", run ? "running" : "", p.drop ? "drop" : "", p.noconn ? "noconn" : "", p.hl ? "hl" : "", p.queued && !run ? "queued" : ""].filter(Boolean).join(" ");
   const style = { left: node.x, top: node.y, width: node.w };
   const flyOut = useFlyOut(node.id, node.x, node.y, node.w, node.h);
   const rootEl = useRef<HTMLDivElement | null>(null);
@@ -93,7 +97,7 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
   );
   if (isStack(node)) return (
     <div className={cls + " snode" + (node.text && node.text !== "堆叠" ? " named" : "")} data-id={node.id} style={style}>
-      <div className="nhead"><Icon name="layers" size="xs" /><span className="t">{node.text && node.text !== "堆叠" ? node.text : "堆叠"}</span><span className="st tnum" data-stack-count>{(node.children || []).length}</span></div>
+      <div className="nhead"><span className="nhead-in"><Icon name="layers" size="xs" /><span className="t">{node.text && node.text !== "堆叠" ? node.text : "堆叠"}</span><span className="st tnum" data-stack-count>{(node.children || []).length}</span></span></div>
       <div className="nbody sbody" style={{ height: node.h }}><StackBody node={node} /></div>
       <Ports h={node.h} only="out" />
     </div>
@@ -101,8 +105,8 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
   if (node.kind === "group") {
     return (
       <div ref={ref} className={cls + " gnode"} data-id={node.id} style={style}>
-        <div className="nhead"><Icon name="layers" size="xs" /><span className="t">{node.text && node.text !== "分组" ? node.text : "分组"}</span></div>
-        <GroupTools node={node} show={p.sel} />
+        <div className="nhead"><span className="nhead-in"><Icon name="layers" size="xs" /><span className="t">{node.text && node.text !== "分组" ? node.text : "分组"}</span></span></div>
+        <GroupTools node={node} show={p.sel && !!p.chrome} />
         {/* 组框不再画虚线（描边不表达层级）：只用一层 90% 透明的底色标区域，选中时底色加深；
             项目里 .node.sel .nbody 的通用选中描边也一并关掉，组的选中只靠底色 */}
         <div className="nbody gbody" style={{ height: node.h, border: "none", outline: "none", background: groupBackground(node, p.sel) }}><GroupBody node={node} /></div>
@@ -116,7 +120,7 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
       : <div className="ph"><Icon name="layers" /><span>旧版「{legacyLabel[node.kind] || node.kind}」节点，新画布里只显示</span></div>;
     return (
       <div ref={ref} className={cls + " lgnode lg-" + node.kind} data-id={node.id} style={style}>
-        <div className="nhead"><Icon name={node.kind === "model3d" || node.kind === "scene3d" ? "cube" : node.kind === "timeline" ? "video" : node.kind === "note" ? "pencil" : "layers"} size="xs" /><span className="t">{legacyLabel[node.kind] || node.kind}</span></div>
+        <div className="nhead"><span className="nhead-in"><Icon name={node.kind === "model3d" || node.kind === "scene3d" ? "cube" : node.kind === "timeline" ? "video" : node.kind === "note" ? "pencil" : "layers"} size="xs" /><span className="t">{legacyLabel[node.kind] || node.kind}</span></span></div>
         <div className="nbody" style={{ height: node.h }}>{body}</div>
         <div className="rz" data-rz title="拖动调整大小" />
         {node.kind === "model3d" || node.kind === "timeline" ? <Ports h={node.h} /> : null}
@@ -136,13 +140,15 @@ export const NodeView = memo(function NodeView(p: NodeViewProps) {
   return (
     <div ref={ref} className={cls} data-id={node.id} style={style}>
       <div className="nhead">
-        <Icon name={TYPE_ICON[node.kind]} size="xs" /><span className="t">{g.title}</span>
-        {node.kind === "video" ? <span className="kindtag" data-kindtag>视频</span> : null}
-        {g.tag || g.pinned ? <i className="tagdot" title="颜色标记" style={{ background: tagColor(g.tag || "red")! }} /> : null}{g.agent ? <span className="pinmark">Agent</span> : null}
-        {running ? <span className="st tnum" style={{ color: "var(--fg2)" }}>{run!.batch ? `${run!.batch.done}/${run!.batch.total}` : <i className="runsig" role="status" aria-label="生成中" />}</span>
-          : parsing ? <span className="st tnum" style={{ color: "var(--fg2)" }}><i className="runsig" role="status" aria-label="解析中" /></span>
-          : g.err ? <span className="st" style={{ color: "var(--bad)" }}><Icon name="alert" size="xs" /></span>
-          : out ? <span className="st" style={{ color: "var(--fg3)" }}><Icon name="check" size="xs" /></span> : null}
+        <span className="nhead-in">
+          <Icon name={TYPE_ICON[node.kind]} size="xs" /><span className="t">{g.title}</span>
+          {node.kind === "video" ? <span className="kindtag" data-kindtag>视频</span> : null}
+          {g.tag || g.pinned ? <i className="tagdot" title="颜色标记" style={{ background: tagColor(g.tag || "red")! }} /> : null}{g.agent ? <span className="pinmark">Agent</span> : null}
+          {running ? <span className="st tnum" style={{ color: "var(--fg2)" }}>{run!.batch ? `${run!.batch.done}/${run!.batch.total}` : <i className="runsig" role="status" aria-label="生成中" />}</span>
+            : parsing ? <span className="st tnum" style={{ color: "var(--fg2)" }}><i className="runsig" role="status" aria-label="解析中" /></span>
+            : g.err ? <span className="st" style={{ color: "var(--bad)" }}><Icon name="alert" size="xs" /></span>
+            : out ? <span className="st" style={{ color: "var(--fg3)" }}><Icon name="check" size="xs" /></span> : null}
+        </span>
       </div>
       <div className={"nbody" + (g.bg ? " tinted" : "")} style={{ height: node.h, ...(g.bg ? { ["--tint" as string]: bgColor(g.bg)! } : {}) }}
         onPointerEnter={node.kind === "image" || node.kind === "video" ? () => setHoverNode(true) : undefined}
@@ -210,7 +216,7 @@ function Body(p: NodeViewProps & { out: GenOutput | null; running: boolean; pars
     return <div className="ph" data-short={node.h < PH_SHORT_H ? "" : undefined}><Icon name="text" /><span>双击直接书写，或在下方写指令让模型生成</span></div>;
   }
   if (node.kind === "video") {
-    if (out && (out.frame || out.url)) return <VideoBody node={node} out={out} res={(genOf(node).params as VideoParams).res || out.res} hover={p.hover} />;
+    if (out && (out.frame || out.url)) return <VideoBody node={node} out={out} res={resTierLabel(out.w, out.h) || out.res || (genOf(node).params as VideoParams).res} hover={p.hover} />;
     // 片段重拍节点还没出片：正文直接播来源视频（SegRetake.tsx）
     if (segRetakeOf(node)) return <SegRetakeSource node={node} />;
     return <div className="ph" data-short={node.h < PH_SHORT_H ? "" : undefined}><Icon name="video" /><span>连入图片作为首帧 / 尾帧 / 参考，或直接写提示词</span></div>;
@@ -301,6 +307,17 @@ function VideoBody({ node, out, res, hover }: { node: CanvasNode; out: GenOutput
     fittedKey.current = key;
     store.updateNode(node.id, (n) => ({ ...n, h: Math.max(80, Math.round(node.w / want)) }), { history: false });
   };
+  // 老文档的当前版本没存真实宽高时补一次（已有的 w/h 一律不覆盖）：角标和剪辑导出的自动档都靠它，只补不记历史
+  const sizeSaved = useRef("");
+  const learnSize = (el: HTMLVideoElement) => {
+    const w = el.videoWidth; const h = el.videoHeight;
+    if (!(w > 0) || !(h > 0)) return;
+    if (Number(out.w) > 0 && Number(out.h) > 0) return;
+    const key = (out.url || "") + ":" + w + "x" + h;
+    if (sizeSaved.current === key) return;
+    sizeSaved.current = key;
+    store.patchGen(node.id, (g) => ({ hist: g.hist.map((v, i) => (i === g.hi && v.url === out.url ? { ...v, w, h } : v)) }), { history: false });
+  };
   const resText = res ? videoResLabel(res) : "";
   // 没设过区间也要显示（整段），拖过之后按版本存；dur 未知时按 10s 兜底
   const trim = clampTrim(out.dur, out.trim);
@@ -364,7 +381,7 @@ function VideoBody({ node, out, res, hover }: { node: CanvasNode; out: GenOutput
   </>;
   return <>
     {mounted && url ? <video ref={vref} src={url} poster={cover || undefined} playsInline muted={muted} preload="metadata" loop={!pinned}
-      onLoadedMetadata={(e) => { learnDur(e.currentTarget); fitToMedia(e.currentTarget.videoWidth, e.currentTarget.videoHeight); }}
+      onLoadedMetadata={(e) => { learnDur(e.currentTarget); learnSize(e.currentTarget); fitToMedia(e.currentTarget.videoWidth, e.currentTarget.videoHeight); }}
       onPlay={() => setPaused(false)} onPause={() => setPaused(true)}
       onEnded={() => { setPaused(true); setNow(length); }}
       onError={() => media.onError()}

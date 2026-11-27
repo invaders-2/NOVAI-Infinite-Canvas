@@ -133,4 +133,15 @@ for (const [rel, label] of [
     assert(src.includes('cloneParams'), label + ' 入口要深拷贝 params');
 }
 
-console.log('[PASS] 节点参数独立（新建 / 模板 / 复制粘贴 / 版本铺开 / 批量 / 导入 / 记住默认模型不串台）');
+// 8) 视频角标档位按真实像素算（最短边定档，和视频档位同一套写法）；拿不到有效宽高返回空串
+assert.strictEqual(model.resTierLabel(1920, 1080), '1080p');
+assert.strictEqual(model.resTierLabel(2160, 3840), '4K', '竖版 4K 也按最短边算');
+assert.strictEqual(model.resTierLabel(1280, 720), '720p');
+assert.strictEqual(model.resTierLabel(496, 864), '480p', '竖版小片按短边落 480p');
+assert.strictEqual(model.resTierLabel(2560, 1440), '2K');
+assert.strictEqual(model.resTierLabel(0, 1080), '', '0 不算有效尺寸');
+assert.strictEqual(model.resTierLabel(undefined, 1080), '', '缺失不算有效尺寸');
+assert.strictEqual(model.resTierLabel(1920, NaN), '', 'NaN 不算有效尺寸');
+assert.strictEqual(model.resTierLabel('1920', '1080'), '1080p', '数字字符串也认');
+
+console.log('[PASS] 节点参数独立（新建 / 模板 / 复制粘贴 / 版本铺开 / 批量 / 导入 / 记住默认模型不串台）+ 分辨率角标按真实像素定档');
