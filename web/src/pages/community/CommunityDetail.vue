@@ -6,7 +6,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import CommunityCanvasPreview from './CommunityCanvasPreview.vue';
 import LikeBurst from '../../components/community/LikeBurst.vue';
-import { ago, avatarImage, avatarText, authorInitial, communityApi, coverUrl, fmtCount, fmtSize, kindMeta } from '../../lib/community.js';
+import { ago, avatarImage, avatarText, authorInitial, communityApi, coverUrl, describeCloneResult, fmtCount, fmtSize, kindMeta } from '../../lib/community.js';
 import { bumpCommunity, openCommunityAuthor, state, toast } from '../../lib/store.js';
 import { navigate, openCanvasUrl } from '../../lib/bridge.js';
 
@@ -21,6 +21,8 @@ const liked = ref(false);
 const favorited = ref(false);
 const moreOpen = ref(false);
 const reportOpen = ref(false);
+// 素材没打进包时，克隆前先问一句：克隆过去同样是缺图的
+const cloneConfirm = ref(false);
 
 const REPORT_REASONS = ['与描述不符', '内容不适合局域网', '疑似抄袭', '包含隐私信息', '其它'];
 
@@ -59,6 +61,47 @@ const facts = computed(() => {
     }
     return rows;
 });
+// 整包有没有素材：media 是包里实际文件数，media_refs 是这一版 payload 的媒体引用数。
+// 纯文本 / 提示词画布两个都是 0，不能算「作者没带素材」。
+const packedMedia = computed(() => {
+    const meta = (item.value && item.value.meta) || {};
+    const sum = summary.value || {};
+    return Number(sum.media != null ? sum.media : (meta.media || 0)) || 0;
+});
+// 旧后端没有 media_refs 时返回 null，退回看 payload 里有没有媒体节点
+const mediaRefs = computed(() => {
+    const meta = (item.value && item.value.meta) || {};
+    const sum = summary.value || {};
+    const value = sum.media_refs != null ? sum.media_refs : meta.media_refs;
+    return value == null ? null : Math.max(0, Number(value) || 0);
+});
+const nodeHasMedia = n => {
+    if (!n) return false;
+    if (['image', 'video', 'audio'].includes(String(n.kind || ''))) return true;
+    if (typeof n.url === 'string' && n.url) return true;
+    if (Array.isArray(n.variants) && n.variants.some(v => typeof v === 'string' && v)) return true;
+    const hist = n.data && n.data.gen && Array.isArray(n.data.gen.hist) ? n.data.gen.hist : [];
+    return hist.some(entry => entry && (entry.url || entry.frame));
+};
+const payloadHasMedia = computed(() => {
+    const list = payload.value && Array.isArray(payload.value.nodes) ? payload.value.nodes : [];
+    return list.some(nodeHasMedia);
+});
+const mediaMissing = computed(() => {
+    if (kind.value !== 'canvas') return false;
+    const meta = (item.value && item.value.meta) || {};
+    const sum = summary.value || {};
+    // 详情接口明确说缺（后端以后加也行），优先信
+    const missing = Number(sum.media_missing != null ? sum.media_missing : meta.media_missing);
+    if (Number.isFinite(missing) && missing > 0) return true;
+    const refs = mediaRefs.value;
+    if (refs != null) return refs > 0 && packedMedia.value < refs;
+    // 旧后端：只能从 payload 判断「本来有图但一个都没进包」，纯文本画布一律不提示
+    return payloadHasMedia.value && packedMedia.value === 0;
+});
+const mediaMissingText = computed(() => (packedMedia.value > 0
+    ? '作者发布时只带上了部分素材，缺的那部分这里看不到，克隆后同样缺图'
+    : '作者发布时没带上素材，这里只能看工作流结构和提示词，克隆后同样缺图'));
 const skillBody = computed(() => {
     const body = payload.value || {};
     return {
@@ -82,6 +125,7 @@ const canClone = computed(() => !!(item.value && item.value.allow_clone !== fals
 async function load() {
     loading.value = true;
     failed.value = '';
+    cloneConfirm.value = false;
     try {
         const body = await communityApi('/items/' + encodeURIComponent(props.itemId));
         data.value = body;
@@ -134,11 +178,10 @@ async function doClone() {
         const body = await communityApi('/items/' + encodeURIComponent(props.itemId) + '/clone', { method: 'POST' });
         bumpCommunity();
         if (body.kind === 'canvas') {
-            const failed = Number(body.failed) || 0;
-            const canvasUrl = '/static/canvas.html?id=' + encodeURIComponent(body.target_id) + '&project=default';
+            const described = describeCloneResult(body);
             emit('close');
-            openCanvasUrl(canvasUrl);
-            toast('已克隆到我的画布' + (failed ? '（' + failed + ' 个素材没取到，已标注）' : ''));
+            openCanvasUrl(described.canvasUrl);
+            toast(described.text);
         } else if (body.kind === 'skill') {
             const skillId = String(body.target_id || '');
             toast(body.message || '技能已导入，默认停用，去设置里确认后启用', {
@@ -157,6 +200,16 @@ async function doClone() {
         toast(e.message || '克隆失败', { danger: true });
     } finally { busy.value = ''; }
 }
+function requestClone() {
+    if (busy.value) return;
+    if (mediaMissing.value) { cloneConfirm.value = true; return; }
+    doClone();
+}
+function confirmClone() {
+    cloneConfirm.value = false;
+    doClone();
+}
+function cancelClone() { cloneConfirm.value = false; }
 async function report(reason) {
     reportOpen.value = false;
     moreOpen.value = false;
@@ -188,9 +241,14 @@ function openAuthor() {
     navigate('me');
     emit('close');
 }
-function onKey(event) { if (event.key === 'Escape') emit('close'); }
+function onKey(event) {
+    if (event.key !== 'Escape') return;
+    if (cloneConfirm.value) { cloneConfirm.value = false; return; }
+    emit('close');
+}
 function onDocDown(event) {
     if (!event.target.closest || !event.target.closest('.cd-more')) moreOpen.value = false;
+    if (!event.target.closest || !event.target.closest('.cd-confirm, .cd-clone')) cloneConfirm.value = false;
 }
 onMounted(() => {
     document.addEventListener('keydown', onKey);
@@ -216,31 +274,37 @@ watch(() => props.itemId, load);
                     <span>{{ failed }}</span>
                 </div>
                 <template v-else>
-                    <CommunityCanvasPreview v-if="kind === 'canvas'" :payload="payload" />
-                    <div v-else class="cd-text">
-                        <template v-if="kind === 'skill'">
-                            <span class="lab mono"><NvIcon name="wand2" />技能</span>
-                            <h3>{{ skillBody.name }}</h3>
-                            <p v-if="skillBody.description" class="lead">{{ skillBody.description }}</p>
-                            <template v-if="skillBody.instruction">
-                                <h4>怎么用</h4>
-                                <p class="body">{{ skillBody.instruction }}</p>
+                    <div v-if="kind === 'canvas' && mediaMissing" class="cd-warn" role="note">
+                        <span class="ic"><NvIcon name="alert" /></span>
+                        <p>{{ mediaMissingText }}</p>
+                    </div>
+                    <div class="cd-preview">
+                        <CommunityCanvasPreview v-if="kind === 'canvas'" :payload="payload" />
+                        <div v-else class="cd-text">
+                            <template v-if="kind === 'skill'">
+                                <span class="lab mono"><NvIcon name="wand2" />技能</span>
+                                <h3>{{ skillBody.name }}</h3>
+                                <p v-if="skillBody.description" class="lead">{{ skillBody.description }}</p>
+                                <template v-if="skillBody.instruction">
+                                    <h4>怎么用</h4>
+                                    <p class="body">{{ skillBody.instruction }}</p>
+                                </template>
+                                <template v-if="skillBody.prompt">
+                                    <h4>技能提示词</h4>
+                                    <p class="body">{{ skillBody.prompt }}</p>
+                                </template>
                             </template>
-                            <template v-if="skillBody.prompt">
-                                <h4>技能提示词</h4>
-                                <p class="body">{{ skillBody.prompt }}</p>
+                            <template v-else>
+                                <span class="lab mono"><NvIcon name="type" />提示词</span>
+                                <h3>{{ promptBody.name }}</h3>
+                                <h4>正向</h4>
+                                <p class="body">{{ promptBody.positive }}</p>
+                                <template v-if="promptBody.negative">
+                                    <h4>负向</h4>
+                                    <p class="body">{{ promptBody.negative }}</p>
+                                </template>
                             </template>
-                        </template>
-                        <template v-else>
-                            <span class="lab mono"><NvIcon name="type" />提示词</span>
-                            <h3>{{ promptBody.name }}</h3>
-                            <h4>正向</h4>
-                            <p class="body">{{ promptBody.positive }}</p>
-                            <template v-if="promptBody.negative">
-                                <h4>负向</h4>
-                                <p class="body">{{ promptBody.negative }}</p>
-                            </template>
-                        </template>
+                        </div>
                     </div>
                 </template>
             </div>
@@ -274,6 +338,16 @@ watch(() => props.itemId, load);
                 </div>
                 <p class="cd-note"><NvIcon name="info" /><span>克隆后成为你自己的画布，图片和视频会复制到本机，不再依赖作者在线。模型按你的 API 设置自动选择。</span></p>
                 <div class="cd-acts">
+                    <Transition name="cd-pop">
+                        <div v-if="cloneConfirm" class="cd-confirm" role="alertdialog" aria-label="克隆确认">
+                            <b>克隆后还是缺图</b>
+                            <p>作者没把素材打全，克隆只带走工作流结构和提示词，缺的图片、视频、音频仍然没有。</p>
+                            <div class="acts">
+                                <button type="button" class="nv-btn sm" @click="cancelClone">先不克隆</button>
+                                <button type="button" class="nv-btn sm primary" @click="confirmClone">还是克隆</button>
+                            </div>
+                        </div>
+                    </Transition>
                     <LikeBurst :liked="liked" :count="Number(stats.likes) || 0" :disabled="!online && !mine" @toggle="toggleLike" />
                     <button type="button" class="cd-ib" :class="{ on: favorited }" :aria-pressed="favorited" :title="favorited ? '取消收藏' : '收藏'" @click="toggleFavorite"><NvIcon name="star" /></button>
                     <div class="cd-more">
@@ -291,7 +365,7 @@ watch(() => props.itemId, load);
                         </Transition>
                     </div>
                     <span class="sp"></span>
-                    <button type="button" class="cd-clone" :disabled="!canClone || !!busy" :title="canClone ? '克隆到我的画布' : '作者没有开放克隆'" @click="doClone">
+                    <button type="button" class="cd-clone" :disabled="!canClone || !!busy" :title="canClone ? '克隆到我的画布' : '作者没有开放克隆'" @click="requestClone">
                         <NvIcon :name="kind === 'canvas' ? 'copy' : kind === 'skill' ? 'wand2' : 'type'" />
                         {{ busy === 'clone' ? '克隆中…' : (kind === 'canvas' ? '克隆到我的画布' : kind === 'skill' ? '克隆这个技能' : '克隆这条提示词') }}
                     </button>
@@ -308,11 +382,19 @@ watch(() => props.itemId, load);
     display: flex; border-radius: 20px; overflow: hidden; background: var(--solid); box-shadow: var(--shadow-dialog); color: var(--ink); font-family: var(--font-sans); animation: cdIn .24s var(--ease-out); }
 @keyframes cdIn { from { opacity: 0; transform: translate(-50%, -48%) scale(.99); } }
 @keyframes cdFade { from { opacity: 0; } }
-.cd-left { position: relative; flex: 1; min-width: 0; background: var(--canvas); overflow: hidden; }
-.cd-loading, .cd-fail { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--ink-3); font: 400 12.5px/18px var(--font-sans); }
+.cd-left { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--canvas); overflow: hidden; }
+.cd-preview { position: relative; flex: 1; min-height: 0; }
+.cd-loading, .cd-fail { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--ink-3); font: 400 12.5px/18px var(--font-sans); }
 .cd-fail .nv-i { width: 22px; height: 22px; }
 .cd-fail b { font: 500 14px/20px var(--font-sans); color: var(--ink); }
 .cd-text { height: 100%; overflow-y: auto; padding: 30px 34px 40px; background: var(--solid); }
+/* 素材缺失常驻说明：加厚磨砂底 + 柔和投影，不描边 */
+.cd-warn { position: relative; z-index: 3; flex: none; display: flex; align-items: flex-start; gap: 8px; margin: 12px 14px 0; padding: 9px 12px; border-radius: 12px;
+    background: color-mix(in srgb, var(--solid) 96%, transparent); backdrop-filter: blur(44px) saturate(190%); -webkit-backdrop-filter: blur(44px) saturate(190%);
+    box-shadow: 0 12px 32px -18px rgba(0, 0, 0, .28); color: var(--ink-2); font: 400 12px/18px var(--font-sans); }
+.cd-warn .ic { width: 20px; height: 20px; flex: none; border-radius: 10px; background: var(--fill-2); color: var(--ink-2); display: inline-flex; align-items: center; justify-content: center; }
+.cd-warn .ic .nv-i { width: 12px; height: 12px; }
+.cd-warn p { margin: 1px 0 0; }
 .cd-text .lab { display: inline-flex; align-items: center; gap: 5px; font: 400 10.5px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
 .cd-text .lab .nv-i { width: 12px; height: 12px; }
 .cd-text h3 { margin: 10px 0 6px; font: 600 19px/26px var(--font-sans); letter-spacing: -.01em; }
@@ -349,8 +431,16 @@ watch(() => props.itemId, load);
 .cd-stats b { font: 500 12px/1 var(--font-mono); color: var(--ink); }
 .cd-note { display: flex; gap: 7px; margin: 14px 0 0; font: 400 11px/17px var(--font-sans); color: var(--ink-3); }
 .cd-note .nv-i { width: 13px; height: 13px; flex: none; margin-top: 2px; }
-.cd-acts { display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 16px; }
+.cd-acts { position: relative; display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 16px; }
 .cd-acts .sp { flex: 1; }
+.cd-confirm { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 6; padding: 12px; border-radius: 14px; text-align: left;
+    background: color-mix(in srgb, var(--solid) 96%, transparent); backdrop-filter: blur(44px) saturate(190%); -webkit-backdrop-filter: blur(44px) saturate(190%);
+    box-shadow: var(--shadow-pop); }
+.cd-confirm b { display: block; font: 600 12.5px/18px var(--font-sans); color: var(--ink); }
+.cd-confirm p { margin: 3px 0 10px; font: 400 12px/18px var(--font-sans); color: var(--ink-2); }
+.cd-confirm .acts { display: flex; justify-content: flex-end; gap: 6px; }
+.cd-confirm .nv-btn { height: 30px; border-radius: 15px; padding: 0 12px; }
+.cd-confirm .nv-btn .nv-i { width: 13px; height: 13px; }
 .cd-ib { width: 34px; height: 34px; border: 0; border-radius: 17px; background: var(--fill-1); color: var(--ink-2); display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .cd-ib:hover:not(:disabled) { background: var(--fill-2); color: var(--ink); }
 .cd-ib.on { background: var(--fill-3); color: var(--ink); }

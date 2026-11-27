@@ -121,3 +121,8 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def test_community_cover_suite():
+    """pytest 入口：脚本里那套 check() 断言原样跑一遍（python tests/xxx.py 也照旧可用）。"""
+    assert main() == 0

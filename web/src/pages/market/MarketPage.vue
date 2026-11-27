@@ -8,7 +8,7 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
 import NvIcon from '../../components/NvIcon.vue';
 import MarketDetail from './MarketDetail.vue';
 import CoverMedia from './CoverMedia.vue';
-import RecommendedPlugins from './RecommendedPlugins.vue';
+import { useRecommendedPlugins } from './recommendedPlugins.js';
 import { fetchCatalog } from './storeData.js';
 import { SHOWCASE } from './showcase.js';
 import { navigate } from '../../lib/bridge.js';
@@ -31,6 +31,20 @@ const web = ref(null);
 const mcp = ref([]);
 const mcpBusy = ref('');
 const detail = ref(null);   // { source: 'store' | 'builtin', item }
+
+// 推荐插件（目录里的 Photoshop 精修）：状态 / 轮询在 composable 里，卡片和联网搜索同构
+const {
+    visible: recommendedPlugins,
+    enabling: recEnabling,
+    install: recInstall,
+    enable: recEnable,
+    countOf: recCount,
+    missing: recMissing,
+    iconOf: recIcon,
+    installing: recInstalling,
+} = useRecommendedPlugins({ servers: mcp, onInstalled: loadPlugins });
+// 左侧小字：未安装 / 安装中…（带进度）/ N 个工具
+const recFoot = it => (recInstalling(it) ? '安装中…' + (it.step ? ' · ' + it.step : '') : it.state === 'installed' ? recCount(it) + ' 个工具' : '未安装');
 
 async function load() {
     loading.value = true; failed.value = false;
@@ -62,6 +76,8 @@ const skillList = computed(() => byAvail(storeSkills.value.filter(it => (!cat.va
 const appList = computed(() => byAvail(storeApps.value.filter(hitStore)));
 const connList = computed(() => connectors.value.filter(hitStore));
 const pluginList = computed(() => mcp.value.filter(s => hit(s.name + ' ' + (s.description || ''))));
+// 「推荐」只看前 2 个 MCP 服务，「插件」看全部（搜索时按关键词过滤）
+const pluginCards = computed(() => (tab.value === 'rec' ? mcp.value.slice(0, 2) : pluginList.value));
 const installedStore = computed(() => visible.value.filter(it => it.installed));
 const installedCount = computed(() => installedStore.value.length + (web.value ? 1 : 0) + mcp.value.filter(s => s.enabled).length);
 const searching = computed(() => !!q.value.trim());
@@ -141,9 +157,9 @@ onBeforeUnmount(() => { window.removeEventListener('novai-page-focus', onFocus);
             <div v-else-if="failed" class="mk-empty"><b>应用市场加载失败</b><span>请确认 NOVAI 服务正在运行</span><button type="button" class="nv-btn sm" @click="load">重试</button></div>
 
             <template v-else>
-                <!-- 推荐 -->
-                <template v-if="tab === 'rec' && !searching">
-                    <section v-if="SHOWCASE.length" class="mk-sec">
+                <!-- 推荐 / 插件：两页共用同一块插件区，卡片只写一份 -->
+                <template v-if="tab === 'plugin' || (tab === 'rec' && !searching)">
+                    <section v-if="tab === 'rec' && SHOWCASE.length" class="mk-sec">
                         <div class="mk-sh"><h2>最新模型</h2>
                             <div class="ar"><button type="button" class="flip" aria-label="上一张" @click="cfGo(cf - 1); autoplay()"><NvIcon name="chevr" /></button><button type="button" aria-label="下一张" @click="cfGo(cf + 1); autoplay()"><NvIcon name="chevr" /></button></div>
                         </div>
@@ -167,7 +183,7 @@ onBeforeUnmount(() => { window.removeEventListener('novai-page-focus', onFocus);
                         </div>
                     </section>
 
-                    <section v-if="storeSkills.length" class="mk-sec">
+                    <section v-if="tab === 'rec' && storeSkills.length" class="mk-sec">
                         <div class="mk-sh"><h2>精选技能</h2><button type="button" class="more" @click="setTab('skill')">查看全部<NvIcon name="chevr" /></button></div>
                         <div class="sk-grid">
                             <button v-for="it in byAvail(storeSkills).slice(0, 8)" :key="it.name" type="button" class="sk" @mouseenter="playCover" @mouseleave="pauseCover" @click="openStore(it)">
@@ -178,16 +194,35 @@ onBeforeUnmount(() => { window.removeEventListener('novai-page-focus', onFocus);
                     </section>
 
                     <section class="mk-sec">
-                        <div class="mk-sh"><h2>插件</h2><button type="button" class="more" @click="setTab('plugin')">查看全部<NvIcon name="chevr" /></button></div>
-                        <RecommendedPlugins @installed="loadPlugins" />
+                        <div class="mk-sh"><h2>插件</h2>
+                            <button v-if="tab === 'rec'" type="button" class="more" @click="setTab('plugin')">查看全部<NvIcon name="chevr" /></button>
+                            <button v-else type="button" class="more" @click="openSettings('mcp')">在设置里管理<NvIcon name="chevr" /></button>
+                        </div>
+                        <p v-if="tab !== 'rec'" class="lead">插件就是 MCP 服务，启用后画布助手能调用它们提供的工具。</p>
                         <div class="pl-grid">
-                            <div class="pl">
+                            <div v-if="hit('联网搜索 网页')" class="pl">
                                 <div class="top"><span class="ico"><NvIcon name="globe" /></span><div class="nm"><b>联网搜索</b><span class="by">NOVAI 内置</span></div></div>
                                 <p>让画布助手搜索公开网页、读取网页正文，查资料、找参考时用。</p>
                                 <div class="ft"><span class="tools">2 个工具</span><button type="button" class="nv-btn sm" :class="{ primary: !web }" :disabled="web === null" @click="toggleWeb"><NvIcon v-if="web" name="check" />{{ web ? '已开启' : '开启' }}</button></div>
                             </div>
-                            <div v-for="s in mcp.slice(0, 2)" :key="s.name" class="pl">
-                                <div class="top"><span class="ico"><NvIcon name="plug" /></span><div class="nm"><b>{{ s.name }}</b><span class="by">MCP 服务</span></div></div>
+                            <template v-if="!searching">
+                                <div v-for="it in recommendedPlugins" :key="'rec-' + it.id" class="pl">
+                                    <div class="top"><span class="ico"><NvIcon :name="recIcon(it)" /></span><div class="nm"><b>{{ it.name || it.server_name || '插件' }}</b><span class="by">MCP 服务{{ it.size_hint ? ' · ' + it.size_hint : '' }}</span></div></div>
+                                    <p>{{ it.summary || it.description }}</p>
+                                    <p v-if="recMissing(it).length" class="need"><NvIcon name="alert" />{{ recMissing(it).join(' · ') }}</p>
+                                    <p v-if="it.state === 'failed' && it.error" class="err">{{ it.error }}</p>
+                                    <div class="ft">
+                                        <span class="tools">{{ recFoot(it) }}</span>
+                                        <button v-if="recInstalling(it)" type="button" class="nv-btn sm primary" disabled>安装中…</button>
+                                        <template v-else-if="it.state === 'installed'">
+                                            <button v-if="it.enabled === false" type="button" class="nv-btn sm primary" :disabled="recEnabling === it.id" @click="recEnable(it)">{{ recEnabling === it.id ? '启用中…' : '启用' }}</button>
+                                        </template>
+                                        <button v-else type="button" class="nv-btn sm primary" @click="recInstall(it)">{{ it.state === 'failed' ? '重试' : '安装' }}</button>
+                                    </div>
+                                </div>
+                            </template>
+                            <div v-for="s in pluginCards" :key="s.name" class="pl">
+                                <div class="top"><span class="ico"><NvIcon name="plug" /></span><div class="nm"><b>{{ s.name }}</b><span class="by">MCP 服务{{ s.transport ? ' · ' + s.transport : '' }}</span></div></div>
                                 <p>{{ s.description || (s.enabled ? '已接入画布助手，可以直接调用它的工具。' : '还没启用，启用后画布助手才能调用。') }}</p>
                                 <div class="ft"><span class="tools">{{ s.enabled ? (s.tool_count || 0) + ' 个工具' : '未启用' }}</span><button type="button" class="nv-btn sm" :class="{ primary: !s.enabled }" :disabled="mcpBusy === s.name" @click="toggleMcp(s)">{{ s.enabled ? '停用' : '启用' }}</button></div>
                             </div>
@@ -197,7 +232,7 @@ onBeforeUnmount(() => { window.removeEventListener('novai-page-focus', onFocus);
                         </div>
                     </section>
 
-                    <section v-if="storeApps.length" class="mk-sec">
+                    <section v-if="tab === 'rec' && storeApps.length" class="mk-sec">
                         <div class="mk-sh"><h2>应用</h2><button type="button" class="more" @click="setTab('app')">查看全部<NvIcon name="chevr" /></button></div>
                         <div class="ap-grid">
                             <button v-for="it in byAvail(storeApps).slice(0, 4)" :key="it.name" type="button" class="app" @mouseenter="playCover" @mouseleave="pauseCover" @click="openStore(it)">
@@ -225,30 +260,6 @@ onBeforeUnmount(() => { window.removeEventListener('novai-page-focus', onFocus);
                             </div>
                         </template>
                         <div v-if="!skillList.length" class="mk-empty"><b>没有找到相关技能</b><span>换个关键词试试</span></div>
-                    </section>
-                </template>
-
-                <!-- 插件 -->
-                <template v-else-if="tab === 'plugin'">
-                    <section class="mk-sec">
-                        <div class="mk-sh"><h2>插件</h2><button type="button" class="more" @click="openSettings('mcp')">在设置里管理<NvIcon name="chevr" /></button></div>
-                        <p class="lead">插件就是 MCP 服务，启用后画布助手能调用它们提供的工具。</p>
-                        <RecommendedPlugins v-if="!searching" @installed="loadPlugins" />
-                        <div class="pl-grid">
-                            <div v-if="hit('联网搜索 网页')" class="pl">
-                                <div class="top"><span class="ico"><NvIcon name="globe" /></span><div class="nm"><b>联网搜索</b><span class="by">NOVAI 内置</span></div></div>
-                                <p>让画布助手搜索公开网页、读取网页正文，查资料、找参考时用。</p>
-                                <div class="ft"><span class="tools">2 个工具</span><button type="button" class="nv-btn sm" :class="{ primary: !web }" :disabled="web === null" @click="toggleWeb"><NvIcon v-if="web" name="check" />{{ web ? '已开启' : '开启' }}</button></div>
-                            </div>
-                            <div v-for="s in pluginList" :key="s.name" class="pl">
-                                <div class="top"><span class="ico"><NvIcon name="plug" /></span><div class="nm"><b>{{ s.name }}</b><span class="by">MCP 服务{{ s.transport ? ' · ' + s.transport : '' }}</span></div></div>
-                                <p>{{ s.description || (s.enabled ? '已接入画布助手，可以直接调用它的工具。' : '还没启用，启用后画布助手才能调用。') }}</p>
-                                <div class="ft"><span class="tools">{{ s.enabled ? (s.tool_count || 0) + ' 个工具' : '未启用' }}</span><button type="button" class="nv-btn sm" :class="{ primary: !s.enabled }" :disabled="mcpBusy === s.name" @click="toggleMcp(s)">{{ s.enabled ? '停用' : '启用' }}</button></div>
-                            </div>
-                            <button type="button" class="pl add" @click="openSettings('mcp')">
-                                <span class="ico"><NvIcon name="plus" /></span><b>添加 MCP 服务</b><p>接入本机或远程的 MCP 服务，给画布助手更多工具</p>
-                            </button>
-                        </div>
                     </section>
                 </template>
 
@@ -392,7 +403,12 @@ onBeforeUnmount(() => { window.removeEventListener('novai-page-focus', onFocus);
 .pl .by { font: 400 11px/14px var(--font-sans); color: var(--ink-4); display: block; margin-top: 2px; }
 .pl p { margin: 0; font: 400 12px/18px var(--font-sans); color: var(--ink-3); flex: 1; }
 .pl .ft { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.pl .tools { font: 400 11px/1 var(--font-sans); color: var(--ink-4); }
+.pl .ft .nv-btn { flex: none; }
+.pl .tools { font: 400 11px/1 var(--font-sans); color: var(--ink-4); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 推荐插件卡：缺依赖 / 安装失败只用一行小字说明，不加线框 */
+.pl .need { display: flex; align-items: center; gap: 4px; flex: none; margin-top: -4px; font: 400 11px/15px var(--font-sans); color: var(--ink-3); }
+.pl .need .nv-i { width: 12px; height: 12px; color: var(--ink-4); }
+.pl .err { flex: none; margin-top: -4px; font: 400 11px/15px var(--font-sans); color: var(--danger); word-break: break-word; }
 .pl.add { cursor: pointer; background: var(--fill-1); box-shadow: none; justify-content: center; }
 .pl.add:hover { background: var(--fill-2); }
 .pl.add .ico { background: var(--solid); }

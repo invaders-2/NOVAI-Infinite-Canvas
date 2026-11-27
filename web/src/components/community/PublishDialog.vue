@@ -19,6 +19,9 @@ const editMode = computed(() => !!itemId.value);
 const loading = ref(false);
 const saving = ref(false);
 const error = ref('');
+// 422：后端说素材打不进包。等用户自己选一种发法，绝不自动重发
+const blocked = ref(null);
+const blockRef = ref(null);
 const visible = ref(true);
 const source = ref(null);
 const form = reactive({
@@ -86,6 +89,8 @@ function chooseSource(it) {
     kind.value = it.kind;
     sourceId.value = it.id;
     step.value = 'form';
+    // 从「选来源」进来时也得读一次来源，否则节点数 / 可打包素材数一直是 0
+    loadSource();
 }
 watch(() => pick.kind, loadPicker);
 
@@ -177,7 +182,12 @@ async function onCoverFile(event) {
 }
 
 /* ───────── 提交 ───────── */
-async function submit() {
+function missingFromDetail(text) {
+    const match = String(text || '').match(/(\d+)\s*个/);
+    return match ? Number(match[1]) : 0;
+}
+
+async function send(overrides) {
     if (saving.value) return;
     if (!form.title.trim()) { toast('给作品起个名字', { danger: true }); return; }
     saving.value = true;
@@ -193,6 +203,7 @@ async function submit() {
             cover: form.cover === '@package' ? '' : form.cover,
             allow_clone: form.allow_clone,
             include_media: form.include_media,
+            ...overrides,
         };
         if (editMode.value) {
             const data = await communityApi('/mine/' + encodeURIComponent(itemId.value), { method: 'PATCH', body });
@@ -204,11 +215,38 @@ async function submit() {
             toast('已发布到社区');
             emit('done', data.item || null);
         }
+        blocked.value = null;
     } catch (e) {
-        error.value = e.message || '发布失败';
+        if (e.status === 422) {
+            // detail 是后端写好的中文说明，原样展示；缺几个优先用后端数字，其次从说明里读
+            blocked.value = { detail: e.message || '有素材打不进发布包', missing: missingFromDetail(e.message) || mediaMissing.value };
+            error.value = '';
+            nextTick(() => {
+                if (blockRef.value && blockRef.value.scrollIntoView) blockRef.value.scrollIntoView({ block: 'nearest' });
+            });
+        } else {
+            error.value = e.message || '发布失败';
+        }
     } finally {
         saving.value = false;
     }
+}
+function submit() { send({}); }
+function publishStructure() {
+    if (saving.value) return;
+    form.include_media = false;
+    blocked.value = null;
+    send({ include_media: false });
+}
+function publishPartial() {
+    if (saving.value) return;
+    blocked.value = null;
+    send({ allow_partial: true, include_media: true });
+}
+function toggleIncludeMedia() {
+    if (!hasMedia.value) return;
+    form.include_media = !form.include_media;
+    blocked.value = null;
 }
 
 function onKey(event) { if (event.key === 'Escape') emit('close'); }
@@ -220,20 +258,40 @@ function onDocDown(event) {
 }
 
 const kindLabel = computed(() => kindMeta(kind.value).label);
-// 空画布不能发布；没有生成结果时「包含生成结果」没有意义
+// 空画布不能发布；没有引用素材时「包含生成结果」没有意义
 const canvasNodes = computed(() => (kind.value === 'canvas' ? Number((source.value && source.value.nodes) || 0) : 0));
-const hasMedia = computed(() => Number((source.value && source.value.media) || 0) > 0);
+const mediaRefs = computed(() => Number((source.value && source.value.media) || 0));
+// 能打进包的数只有后端给了 media_ready 才知道；没上线时退回引用数，界面不报错
+const mediaReadyKnown = computed(() => ((source.value || {}).media_ready) != null);
+const mediaReady = computed(() => {
+    const s = source.value || {};
+    return s.media_ready == null ? mediaRefs.value : Math.max(0, Number(s.media_ready) || 0);
+});
+const mediaMissing = computed(() => {
+    const s = source.value || {};
+    if (s.media_missing != null) return Math.max(0, Number(s.media_missing) || 0);
+    return Math.max(0, mediaRefs.value - mediaReady.value);
+});
+const hasMedia = computed(() => mediaRefs.value > 0);
 const isEmptyCanvas = computed(() => kind.value === 'canvas' && !loading.value && !!source.value && canvasNodes.value === 0);
 const mediaSummary = computed(() => {
     if (!hasMedia.value) return '这张画布没有生成结果';
+    if (!form.include_media) return '只发工作流结构，图片和视频不会进发布包';
+    if (mediaMissing.value > 0) return '可打包 ' + mediaReady.value + ' / 引用 ' + mediaRefs.value + '，有 ' + mediaMissing.value + ' 个素材打不进包';
     return '把图片和视频一起放进发布包（约 ' + fmtSize((source.value && source.value.size_bytes) || 0) + '）';
 });
 const mediaText = computed(() => {
     const s = source.value || {};
     if (kind.value !== 'canvas') return '';
     const nodes = Number(s.nodes) || 0;
-    const media = Number(s.media) || 0;
-    return kindLabel.value + ' · ' + nodes + ' 个节点 · ' + media + ' 张生成结果';
+    const pack = mediaReadyKnown.value
+        ? '可打包 ' + mediaReady.value + ' / 引用 ' + mediaRefs.value
+        : mediaRefs.value + ' 张生成结果';
+    return kindLabel.value + ' · ' + nodes + ' 个节点 · ' + pack;
+});
+const partialLabel = computed(() => {
+    const missing = blocked.value ? Number(blocked.value.missing) || 0 : 0;
+    return missing > 0 ? '仍然发布（缺 ' + missing + ' 个素材）' : '仍然发布（缺素材）';
 });
 
 onMounted(() => {
@@ -299,6 +357,10 @@ onBeforeUnmount(() => {
                     </div>
 
                     <div v-if="isEmptyCanvas" class="pd-hint"><NvIcon name="info" />这张画布还是空的，先做点东西再发布</div>
+                    <div v-if="kind === 'canvas' && mediaMissing > 0 && !blocked" class="pd-warn" role="note">
+                        <NvIcon name="alert" />
+                        <span>有 {{ mediaMissing }} 个素材打不进发布包：远程链接、内嵌图片这类素材复制不过来，包里只会有 {{ mediaReady }} 个。</span>
+                    </div>
 
                     <div v-if="kind === 'canvas'" class="pd-row">
                         <span class="pd-label">封面</span>
@@ -357,7 +419,7 @@ onBeforeUnmount(() => {
                         </div>
                         <div v-if="kind === 'canvas'" class="pd-opt" :class="{ off: !hasMedia }">
                             <div><b>包含生成结果</b><small>{{ mediaSummary }}</small></div>
-                            <button type="button" class="nv-switch" :class="{ 'is-on': form.include_media && hasMedia }" :disabled="!hasMedia" :aria-pressed="form.include_media && hasMedia" :aria-label="hasMedia ? '包含生成结果' : '这张画布没有生成结果'" @click="hasMedia && (form.include_media = !form.include_media)"></button>
+                            <button type="button" class="nv-switch" :class="{ 'is-on': form.include_media && hasMedia }" :disabled="!hasMedia" :aria-pressed="form.include_media && hasMedia" :aria-label="hasMedia ? '包含生成结果' : '这张画布没有生成结果'" @click="toggleIncludeMedia"></button>
                         </div>
                     </div>
 
@@ -368,6 +430,19 @@ onBeforeUnmount(() => {
                         <button type="button" class="nv-btn sm" @click="toggleVisible">{{ '开启' }}</button>
                     </div>
 
+                    <div v-if="blocked" ref="blockRef" class="pd-block" role="alert">
+                        <div class="bl">
+                            <span class="ic"><NvIcon name="alert" /></span>
+                            <div class="tx">
+                                <b>{{ editMode ? '这次更新没带上素材' : '这个发布包缺素材，没有发出去' }}</b>
+                                <p>{{ blocked.detail }}</p>
+                            </div>
+                        </div>
+                        <div class="acts">
+                            <button type="button" class="nv-btn sm" :disabled="saving" @click="publishStructure"><NvIcon name="doc" />只发工作流结构（不含素材）</button>
+                            <button type="button" class="nv-btn sm primary" :disabled="saving" @click="publishPartial"><NvIcon name="upload" />{{ partialLabel }}</button>
+                        </div>
+                    </div>
                     <div v-if="error" class="pd-err" role="alert">{{ error }}</div>
                 </template>
             </div>
@@ -376,7 +451,7 @@ onBeforeUnmount(() => {
                 <button v-if="step === 'form' && !props.request.sourceId" type="button" class="nv-btn" @click="step = 'pick'">返回</button>
                 <span class="sp"></span>
                 <button type="button" class="nv-btn" @click="emit('close')">取消</button>
-                <button v-if="step === 'form'" type="button" class="nv-btn primary" :disabled="saving || loading || isEmptyCanvas" :title="isEmptyCanvas ? '这张画布还是空的，先做点东西再发布' : ''" @click="submit">{{ saving ? '发布中…' : (editMode ? '保存' : '发布') }}</button>
+                <button v-if="step === 'form'" type="button" class="nv-btn primary" :disabled="saving || loading || isEmptyCanvas || !!blocked" :title="isEmptyCanvas ? '这张画布还是空的，先做点东西再发布' : (blocked ? '先在上面选一种发布方式' : '')" @click="submit">{{ saving ? '发布中…' : (editMode ? '保存' : '发布') }}</button>
             </footer>
         </div>
     </Teleport>
@@ -479,6 +554,23 @@ html.theme-dark .pd { background: color-mix(in srgb, #1a1a1a 90%, transparent); 
 .pd-opt.off { opacity: .62; }
 .pd-hint { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 10px; background: var(--fill-1); color: var(--ink-2); font: 400 12px/18px var(--font-sans); }
 .pd-hint .nv-i { width: 13px; height: 13px; flex: none; color: var(--ink-3); }
+/* 缺素材提示：加厚磨砂底 + 柔和投影，靠留白分层，不描边 */
+.pd-warn { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: 12px; color: var(--ink-2); font: 400 12px/18px var(--font-sans);
+    background: color-mix(in srgb, var(--solid) 96%, transparent); backdrop-filter: blur(44px) saturate(190%); -webkit-backdrop-filter: blur(44px) saturate(190%);
+    box-shadow: 0 10px 28px -18px rgba(0, 0, 0, .22); }
+.pd-warn .nv-i { width: 14px; height: 14px; flex: none; margin-top: 2px; color: var(--ink-3); }
+.pd-block { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 14px;
+    background: color-mix(in srgb, var(--solid) 96%, transparent); backdrop-filter: blur(44px) saturate(190%); -webkit-backdrop-filter: blur(44px) saturate(190%);
+    box-shadow: var(--shadow-pop); animation: pdPop .18s var(--ease-out) both; }
+.pd-block .bl { display: flex; align-items: flex-start; gap: 10px; }
+.pd-block .ic { width: 28px; height: 28px; flex: none; border-radius: 14px; background: var(--danger-fill); color: var(--danger); display: inline-flex; align-items: center; justify-content: center; }
+.pd-block .ic .nv-i { width: 15px; height: 15px; }
+.pd-block .tx { min-width: 0; }
+.pd-block b { display: block; font: 600 12.5px/18px var(--font-sans); color: var(--ink); }
+.pd-block p { margin: 3px 0 0; font: 400 12px/18px var(--font-sans); color: var(--ink-2); }
+.pd-block .acts { display: flex; flex-wrap: wrap; gap: 8px; padding-left: 38px; }
+.pd-block .nv-btn { height: 30px; border-radius: 15px; padding: 0 12px; }
+.pd-block .nv-btn .nv-i { width: 13px; height: 13px; }
 .pd-err { padding: 8px 12px; border-radius: 10px; background: var(--danger-fill); color: var(--danger); font: 400 12px/18px var(--font-sans); }
 .pd-empty { padding: 28px 0; text-align: center; color: var(--ink-4); font: 400 12px/18px var(--font-sans); }
 .pd-pop-enter-active, .pd-pop-leave-active { transition: opacity .14s ease, transform .14s ease; }

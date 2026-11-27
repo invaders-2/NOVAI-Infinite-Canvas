@@ -157,6 +157,38 @@ def _new_item_id(account_code: str) -> str:
     return "%s-%s" % (code, secrets.token_hex(3))
 
 
+MAX_MEDIA_REPORT_ITEMS = 100
+
+
+def _normalize_media_report(raw: Any) -> Dict[str, Any]:
+    """发布包的素材打包明细：白名单取值，挡掉对端塞进来的超大 items。"""
+    source = raw if isinstance(raw, dict) else {}
+    items: List[Dict[str, str]] = []
+    for entry in source.get("items") or []:
+        if not isinstance(entry, dict):
+            continue
+        items.append({
+            "url": str(entry.get("url") or "")[:200],
+            "reason": str(entry.get("reason") or "")[:120],
+            "code": str(entry.get("code") or "")[:40],
+            "kind": str(entry.get("kind") or "other")[:12],
+        })
+        if len(items) >= MAX_MEDIA_REPORT_ITEMS:
+            break
+    kinds = source.get("kinds") if isinstance(source.get("kinds"), dict) else {}
+    codes = source.get("codes") if isinstance(source.get("codes"), dict) else {}
+    return {
+        "packaged": max(0, int(source.get("packaged") or 0)),
+        "missing": max(0, int(source.get("missing") or 0)),
+        "total": max(0, int(source.get("total") or 0)),
+        "include_media": bool(source.get("include_media", True)),
+        "truncated": bool(source.get("truncated", False)),
+        "items": items,
+        "kinds": {str(key)[:12]: max(0, int(value or 0)) for key, value in list(kinds.items())[:8]},
+        "codes": {str(key)[:40]: max(0, int(value or 0)) for key, value in list(codes.items())[:16]},
+    }
+
+
 def _normalize_item(raw: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(raw, dict):
         return None
@@ -173,6 +205,7 @@ def _normalize_item(raw: Any) -> Optional[Dict[str, Any]]:
     reasons = raw.get("report_reasons") if isinstance(raw.get("report_reasons"), list) else []
     liked_by = raw.get("liked_by") if isinstance(raw.get("liked_by"), list) else []
     cloned_by = raw.get("cloned_by") if isinstance(raw.get("cloned_by"), list) else []
+    media_report = raw.get("media_report") if isinstance(raw.get("media_report"), dict) else {}
     status = str(raw.get("status") or "published")
     if status not in STATUSES:
         status = "published"
@@ -203,6 +236,8 @@ def _normalize_item(raw: Any) -> Optional[Dict[str, Any]]:
             "media": int(meta.get("media") or 0),
             "size_bytes": int(meta.get("size_bytes") or 0),
         },
+        # 发布时素材打包明细（packaged / missing / 缺失原因）；允许部分发布才有 missing>0
+        "media_report": _normalize_media_report(media_report),
         "stats": {
             "likes": max(0, int(stats.get("likes") or 0)),
             "clones": max(0, int(stats.get("clones") or 0)),

@@ -598,11 +598,13 @@ async def prefetch_media(item_id: str, filenames: List[str]) -> int:
 
 
 def media_names_from_payload(package: Dict[str, Any], item_id: str) -> List[str]:
-    """从 package / payload 里找出「这个作品自己的媒体文件」名字。"""
+    """从 package / payload 里找出「这个作品自己的媒体文件」名字（data: / blob: 不是远端文件，跳过）。"""
     names: List[str] = []
     seen = set()
     for url in packager.collect_canvas_media((package or {}).get("payload") or {}):
         text = str(url or "")
+        if text.lower().startswith(("data:", "blob:")):
+            continue
         name = packager.media_filename_of(text, item_id)
         if name and store.valid_file_name(name) and name not in seen:
             seen.add(name)

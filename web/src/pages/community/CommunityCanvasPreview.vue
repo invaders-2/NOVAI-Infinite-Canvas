@@ -74,9 +74,12 @@ function mediaKindOf(n) {
     if (isAudioUrl(url)) return 'audio';
     if (isVideoUrl(url)) return 'video';
     if (url) return 'image';
+    // 图片/视频/音频节点一个地址都没有（发布时素材被清空）：也要走「素材缺失」，别退回普通占位
+    if (kind === 'image' || kind === 'video' || kind === 'audio') return kind;
     return '';
 }
-const isViewable = n => ['image', 'video'].includes(mediaKindOf(n));
+// 没有可加载地址的节点不进大图查看，免得点开放大是一片空白
+const isViewable = n => ['image', 'video'].includes(mediaKindOf(n)) && !!mediaSrc(n);
 // 媒体按需从作者节点现拉，偶发失败先自动重试一次，仍失败就退成节点占位，别露破图
 const mediaBroken = ref(new Set());
 const mediaRetried = ref(new Set());
@@ -96,6 +99,11 @@ function mediaError(n) {
     if (mediaRetried.value.has(n.id)) { mediaBroken.value.add(n.id); return; }
     setTimeout(() => mediaRetried.value.add(n.id), 4000);
 }
+// 重试也失败（或节点压根没带地址）就别再留空白：给一块能看出原因的「素材缺失」占位
+const isMediaBroken = n => !!(n && n.id && mediaBroken.value.has(n.id));
+const mediaReason = n => (mediaOf(n)
+    ? '素材加载失败，作者可能没打包，或文件已经不在了'
+    : '作者发布时没打包这个素材');
 
 const titleOf = n => {
     const gen = (n && n.data && n.data.gen) || {};
@@ -321,6 +329,8 @@ const lbIsVideo = computed(() => (lbNode.value ? mediaKindOf(lbNode.value) === '
 function openLB(n) {
     const index = mediaNodes.value.findIndex(item => item.id === (n && n.id));
     if (index < 0) return;
+    // 素材缺失的节点不打开空的大图查看器，免得用户以为又加载失败了一次
+    if (!mediaSrc(mediaNodes.value[index])) return;
     pauseVideos();
     pauseAudio();
     lbIndex.value = index;
@@ -488,7 +498,13 @@ watch(() => props.payload, () => {
                 </template>
 
                 <template v-else-if="mediaKindOf(n) === 'video'">
-                    <div v-if="!videoSrc(n)" class="im"><div class="ph"><NvIcon name="video" /><span>{{ titleOf(n) }}</span></div></div>
+                    <div v-if="!videoSrc(n)" class="im miss">
+                        <div class="miss-in">
+                            <NvIcon name="video" />
+                            <b>素材缺失</b>
+                            <span>{{ mediaReason(n) }}</span>
+                        </div>
+                    </div>
                     <div v-else class="im">
                         <video :src="videoSrc(n)" :ref="el => setVideo(n.id, el)" muted loop playsinline preload="metadata"
                                @loadedmetadata="onVideoMeta(n.id, $event)" @durationchange="onVideoMeta(n.id, $event)"
@@ -509,7 +525,14 @@ watch(() => props.payload, () => {
                 </template>
 
                 <template v-else-if="mediaKindOf(n) === 'audio'">
-                    <div class="im au cpr-audio">
+                    <div v-if="isMediaBroken(n) || !mediaOf(n)" class="im miss">
+                        <div class="miss-in">
+                            <NvIcon name="music" />
+                            <b>素材缺失</b>
+                            <span>{{ mediaReason(n) }}</span>
+                        </div>
+                    </div>
+                    <div v-else class="im au cpr-audio">
                         <div class="ah"><span class="ai"><NvIcon name="music" /></span><b>{{ titleOf(n) }}</b></div>
                         <span class="fn mono">{{ fileNameOf(n) }}</span>
                         <div class="cpr-audio-bar" :class="{ on: audioId === n.id }" @pointerdown.stop>
@@ -521,15 +544,21 @@ watch(() => props.payload, () => {
                             <span class="trk"><i :style="{ width: (audioId === n.id ? apct : 0) + '%' }"></i></span>
                             <span class="t">{{ audioId === n.id ? adur : '' }}</span>
                         </div>
-                        <audio v-if="audioId === n.id" ref="audioEl" :src="mediaOf(n)" preload="metadata"
+                        <audio v-if="audioId === n.id" ref="audioEl" :src="mediaSrc(n)" preload="metadata"
                                @loadedmetadata="onAudioMeta" @durationchange="onAudioMeta" @timeupdate="onAudioTime"
-                               @play="onAudioState" @pause="onAudioState" @ended="onAudioState"></audio>
+                               @play="onAudioState" @pause="onAudioState" @ended="onAudioState" @error="mediaError(n)"></audio>
                     </div>
                 </template>
 
                 <template v-else-if="mediaKindOf(n) === 'image'">
                     <div v-if="mediaSrc(n)" class="im"><img :src="mediaSrc(n)" alt="" draggable="false" loading="lazy" @error="mediaError(n)" /></div>
-                    <div v-else class="im"><div class="ph"><NvIcon :name="kindIcon(n)" /><span>{{ promptOf(n) || titleOf(n) }}</span></div></div>
+                    <div v-else class="im miss">
+                        <div class="miss-in">
+                            <NvIcon name="image" />
+                            <b>素材缺失</b>
+                            <span>{{ mediaReason(n) }}</span>
+                        </div>
+                    </div>
                 </template>
 
                 <template v-else>
@@ -613,6 +642,14 @@ watch(() => props.payload, () => {
 .cpr-node .ph { height: 100%; padding: 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; color: var(--ink-3); }
 .cpr-node .ph .nv-i { width: 18px; height: 18px; flex: none; }
 .cpr-node .ph span { font: 400 11.5px/1.6 var(--font-sans); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; }
+/* 素材缺失占位：加厚磨砂小卡 + 柔和投影，不用描边，文案说清是没打包还是加载失败 */
+.cpr-node .im.miss { display: flex; align-items: center; justify-content: center; padding: 12px; }
+.cpr-node .miss-in { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; max-width: 100%; padding: 14px 16px; border-radius: 12px; text-align: center; color: var(--ink-3);
+    background: color-mix(in srgb, var(--solid) 96%, transparent); backdrop-filter: blur(20px) saturate(160%); -webkit-backdrop-filter: blur(20px) saturate(160%);
+    box-shadow: 0 10px 26px -18px rgba(0, 0, 0, .28); }
+.cpr-node .miss-in .nv-i { width: 20px; height: 20px; flex: none; color: var(--ink-4); }
+.cpr-node .miss-in b { font: 600 12px/16px var(--font-sans); color: var(--ink-2); }
+.cpr-node .miss-in span { font: 400 11px/15px var(--font-sans); color: var(--ink-3); overflow-wrap: anywhere; }
 
 .cpr-node .tl { padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; color: var(--ink-3); }
 .cpr-node .tl .nv-i { width: 20px; height: 20px; color: var(--ink-4); flex: none; }

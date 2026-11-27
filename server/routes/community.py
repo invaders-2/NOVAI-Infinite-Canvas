@@ -283,27 +283,17 @@ async def featured(request: Request, refresh: bool = False) -> Dict[str, Any]:
 # ---------------------------------------------------------------- 详情
 
 def _local_media_urls(payload: Dict[str, Any], item_id: str) -> Dict[str, Any]:
-    """把包里的 /api/community/public/media/<id>/<file> 换成本机 /api/community/media/<id>/<file>。"""
+    """把包里的 /api/community/public/media/<id>/<file> 换成本机 /api/community/media/<id>/<file>。
+
+    收集口径直接复用 packager.collect_canvas_media（和发布 / 克隆同一套字段 + 改写），
+    避免「发布时改了地址、详情时没改」这类两套口径漂移。
+    """
     prefix = packager.MEDIA_URL_PREFIX + item_id + "/"
-    local = "/api/community/media/" + item_id + "/"
+    local = packager.MEDIA_LOCAL_PREFIX + item_id + "/"
     mapping: Dict[str, str] = {}
-
-    def walk(value: Any) -> None:
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if key in packager.MEDIA_KEYS and isinstance(item, str) and item.startswith(prefix):
-                    mapping[item] = local + item[len(prefix):]
-                elif key == "variants" and isinstance(item, list):
-                    for entry in item:
-                        if isinstance(entry, str) and entry.startswith(prefix):
-                            mapping[entry] = local + entry[len(prefix):]
-                else:
-                    walk(item)
-        elif isinstance(value, list):
-            for entry in value:
-                walk(entry)
-
-    walk(payload)
+    for url in packager.collect_canvas_media(payload):
+        if url.startswith(prefix):
+            mapping[url] = local + url[len(prefix):]
     return packager._rewrite_strings(payload, mapping) if mapping else payload
 
 
@@ -405,12 +395,23 @@ async def item_detail(item_id: str, request: Request) -> Dict[str, Any]:
     }
 
 
+def _media_ref_count(payload: Dict[str, Any]) -> int:
+    """这一版 payload 里有多少个媒体引用（不管打没打进包）。算不出来就退 0，不许把详情接口打挂。"""
+    try:
+        return len(packager.collect_canvas_media(payload if isinstance(payload, dict) else {}))
+    except Exception:
+        return 0
+
+
 def _payload_summary(item: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
     meta = item.get("meta") or {}
     kind = str(item.get("kind") or "canvas")
     if kind == "canvas":
         nodes = payload.get("nodes") if isinstance(payload.get("nodes"), list) else []
+        # media = 包里实际打进去的文件数；media_refs = 画布里的媒体引用数。
+        # 前端据此区分「作者有图但一个都没打进包」和「本来就是纯文本画布」，不会误报。
         return {"nodes": int(meta.get("nodes") or len(nodes)), "media": int(meta.get("media") or 0),
+                "media_refs": _media_ref_count(payload),
                 "size_bytes": int(meta.get("size_bytes") or 0), "type_label": "画布"}
     if kind == "skill":
         return {"nodes": 0, "media": 0, "size_bytes": int(meta.get("size_bytes") or 0), "type_label": "技能"}
@@ -508,6 +509,8 @@ class PublishRequest(BaseModel):
     cover: str = ""
     allow_clone: bool = True
     include_media: bool = True
+    # 有素材打不进包时是否允许「仍然发布」（前端在收到 422 后让用户二选一，选了才带 true 重发）
+    allow_partial: bool = False
     visible: Optional[bool] = None
 
 
@@ -519,6 +522,7 @@ class MinePatchRequest(BaseModel):
     cover: Optional[str] = None
     allow_clone: Optional[bool] = None
     include_media: Optional[bool] = None
+    allow_partial: Optional[bool] = None
     republish: bool = False
 
 
@@ -591,13 +595,18 @@ def _canvas_media_urls(canvas: Dict[str, Any]) -> List[str]:
 
 
 def _source_preview(kind: str, source_id: str) -> Dict[str, Any]:
-    """发布弹窗用：来源名称、节点数、生成结果数、可选的封面候选。"""
+    """发布弹窗用：来源名称、节点数、生成结果数、可选的封面候选。
+
+    media 是「引用总数」（原语义不变）；media_ready / media_missing 才是「这次真能打进包的 /
+    打不进包的」——发布弹窗据此提示，作者才不会以为 168 个节点的画布已经带上素材了。
+    """
     if kind == "canvas":
         canvas = _load_canvas(source_id)
         nodes = canvas.get("nodes") if isinstance(canvas.get("nodes"), list) else []
         media = _canvas_media_urls(canvas)
-        covers = [url for url in media
-                  if os.path.splitext(str(url).split("?")[0])[1].lower() in IMAGE_EXTS][:4]
+        plans = [(url, packager.media_plan(url)) for url in media]
+        covers = [url for url, plan in plans
+                  if (not plan.get("code")) and os.path.splitext(str(url).split("?")[0])[1].lower() in IMAGE_EXTS][:4]
         size = 0
         for url in media:
             path = packager.local_path_for_url(url)
@@ -606,10 +615,15 @@ def _source_preview(kind: str, source_id: str) -> Dict[str, Any]:
                     size += os.path.getsize(path)
                 except OSError:
                     pass
+        missing = [{"url": packager.display_media_url(url), "code": str(plan.get("code") or ""),
+                    "reason": str(plan.get("reason") or ""), "kind": str(plan.get("kind") or "other")}
+                   for url, plan in plans if plan.get("code")]
         return {
             "kind": "canvas", "source_id": source_id,
             "title": str(canvas.get("title") or "未命名画布"),
             "nodes": len(nodes), "media": len(media), "size_bytes": size,
+            "media_ready": len(media) - len(missing), "media_missing": len(missing),
+            "media_missing_items": missing[:10],
             "covers": covers, "icon": str(canvas.get("icon") or ""),
         }
     if kind == "skill":
@@ -671,13 +685,18 @@ async def publish(payload: PublishRequest, request: Request) -> Dict[str, Any]:
         "cover": str(payload.cover or ""),
         "allow_clone": bool(payload.allow_clone),
         "include_media": bool(payload.include_media),
+        "allow_partial": bool(payload.allow_partial),
         "author": author,
         "version": 1,
         "created_at": store.now_ms(),
         "updated_at": store.now_ms(),
     }
     try:
-        package = packager.build_package(item_id, kind, source, options)
+        # build_package 是同步函数（要读盘 / 下载 / 解码 data:），丢到线程里跑，别堵事件循环
+        package = await asyncio.to_thread(packager.build_package, item_id, kind, source, options)
+    except packager.MediaIncomplete as exc:
+        # 包是在临时目录里建的，抛错时 packager 自己清掉，不会留下半成品
+        raise HTTPException(status_code=422, detail=exc.detail) from exc
     except packager.PackageTooLarge as exc:
         raise HTTPException(status_code=413, detail=str(exc)) from exc
     now = store.now_ms()
@@ -699,6 +718,7 @@ async def publish(payload: PublishRequest, request: Request) -> Dict[str, Any]:
         "include_media": options["include_media"],
         "status": "published",
         "meta": package.get("meta") or {},
+        "media_report": package.get("media") or {},
         "stats": {"likes": 0, "clones": 0, "views": 0, "reports": 0},
         "report_reasons": [],
         "liked_by": [],
@@ -711,7 +731,9 @@ async def publish(payload: PublishRequest, request: Request) -> Dict[str, Any]:
         store.set_visible(True)
     transport.clear_feed_cache()
     saved = store.find_item(store.load_items(), item_id) or item
+    report = dict(package.get("media") or {})
     return {"item": store.item_public(saved, online=True), "visible": store.visible(),
+            "media": report, "media_incomplete": bool(int(report.get("missing") or 0)),
             "guidance": "已开启「在局域网社区中可见」"}
 
 
@@ -736,6 +758,8 @@ def _item_with_changes(item: Dict[str, Any]) -> Dict[str, Any]:
     public["source_id"] = str(item.get("source_id") or "")
     public["has_changes"] = False
     public["changed_nodes"] = 0
+    # 只给作者自己看（/mine）：这次包里到底打进了多少素材、缺了哪些
+    public["media_report"] = dict(item.get("media_report") or {})
     try:
         if str(item.get("kind") or "") == "canvas":
             canvas = _load_canvas(str(item.get("source_id") or ""))
@@ -795,17 +819,23 @@ async def patch_mine(item_id: str, payload: MinePatchRequest) -> Dict[str, Any]:
             "cover": str(payload.cover or item.get("cover") or ""),
             "allow_clone": bool(target.get("allow_clone")),
             "include_media": bool(target.get("include_media")),
+            "allow_partial": bool(payload.allow_partial),
             "author": _author(),
             "version": target["version"],
             "created_at": int(target.get("created_at") or store.now_ms()),
             "updated_at": store.now_ms(),
         }
         try:
-            package = packager.build_package(item_id, str(target.get("kind") or ""), source, options)
+            package = await asyncio.to_thread(packager.build_package, item_id,
+                                              str(target.get("kind") or ""), source, options)
+        except packager.MediaIncomplete as exc:
+            # 重新发布不动老包（老包还好好的），只把 422 说清楚
+            raise HTTPException(status_code=422, detail=exc.detail) from exc
         except packager.PackageTooLarge as exc:
             raise HTTPException(status_code=413, detail=str(exc)) from exc
         target["cover"] = str(package.get("cover") or target.get("cover") or "")
         target["meta"] = package.get("meta") or target.get("meta") or {}
+        target["media_report"] = package.get("media") or {}
         target["package_updated_at"] = store.now_ms()
         target["updated_at"] = store.now_ms()
     elif payload.cover is not None and payload.cover and payload.cover != item.get("cover"):
@@ -897,6 +927,43 @@ async def _media_path(item_id: str, filename: str) -> Tuple[Optional[str], str]:
     return path, transport.media_content_type(filename)
 
 
+def _mark_clone_missing_media(nodes: Any, failed_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """克隆时没下来的素材标到节点 data.mediaMissing（收集口径跟发布一致：站内 / 社区地址也算）。
+
+    只写提示信息、不动 URL；清空死链在 _clone_canvas 里单独做。
+    """
+    wanted: Dict[str, Dict[str, Any]] = {}
+    for entry in failed_items or []:
+        url = str(entry.get("url") or "")
+        if url:
+            wanted[url] = entry
+    marked: List[Dict[str, Any]] = []
+    if not isinstance(nodes, list):
+        return marked
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        hits: List[Dict[str, str]] = []
+        for url in packager.collect_canvas_media(node):
+            info = wanted.get(url)
+            if info:
+                hits.append({"url": url, "error": str(info.get("error") or "")})
+        if not hits:
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else None
+        if data is None:
+            node["data"] = {"mediaMissing": hits}
+            data = node["data"]
+        else:
+            data["mediaMissing"] = hits
+        marked.append({
+            "node_id": str(node.get("id") or ""),
+            "node_title": str(((data or {}).get("gen") or {}).get("title") or node.get("title") or "")[:40],
+            "items": hits,
+        })
+    return marked
+
+
 async def _clone_canvas(item: Dict[str, Any], package: Dict[str, Any], payload: Dict[str, Any],
                         owner_id: Optional[int] = None) -> Dict[str, Any]:
     from server.routes.canvas_share import _store_media_file
@@ -918,7 +985,9 @@ async def _clone_canvas(item: Dict[str, Any], package: Dict[str, Any], payload: 
             return text, local, ""
         return text, "", error or "本机落盘失败"
 
-    urls = [str(url or "") for url in packager.collect_canvas_media(payload)]
+    # data: URL 自带的素材跟着 payload 走，本来就能显示（也不能当文件下载），原样留着
+    urls = [str(url or "") for url in packager.collect_canvas_media(payload)
+            if not str(url or "").lower().startswith("data:")]
     results = await asyncio.gather(*[one(text) for text in urls], return_exceptions=True)
     for text, result in zip(urls, results):
         if isinstance(result, BaseException):
@@ -971,18 +1040,22 @@ async def _clone_canvas(item: Dict[str, Any], package: Dict[str, Any], payload: 
         "author": dict(item.get("author") or {}),
     }
     if failed:
-        from server.routes.canvas_share import _mark_missing_media
-        marked = _mark_missing_media(new_canvas.get("nodes"), failed)
+        # 先按原地址标「素材缺失」（地址还在才能对上节点），再把死链清空
+        marked = _mark_clone_missing_media(new_canvas.get("nodes"), failed)
         if marked:
             new_canvas["media_missing"] = marked
-        new_canvas["nodes"] = new_canvas.get("nodes") or []
+        # 清空而不是留着：/api/community/public/media/<作者作品>/… 在本机一定 404，
+        # 留着就等于把作者机器上的死链写进我的画布，下次再发布又是「媒体 0 张」。
+        cleared = packager._rewrite_strings(new_canvas.get("nodes") or [],
+                                           {str(entry.get("url") or ""): "" for entry in failed})
+        new_canvas["nodes"] = cleared if isinstance(cleared, list) else (new_canvas.get("nodes") or [])
     saver = deps.get("SAVE_CANVAS")
     if not callable(saver):
         raise HTTPException(status_code=500, detail="画布服务未就绪")
     saver(new_canvas)
     return {"kind": "canvas", "target_id": str(new_canvas.get("id") or ""),
             "title": new_canvas.get("title"), "copied": copied, "failed": len(failed),
-            "failed_items": failed[:5]}
+            "missing": len(failed), "failed_items": failed[:5]}
 
 
 def _clone_skill(item: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
